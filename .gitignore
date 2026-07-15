@@ -1,4 +1,62 @@
+# 환경변수·비밀정보
+.env
+.env.*
+!.env.example
+application-secret.yml
+application-local.yml
+secrets/
+*.pem
+*.key
 
+# Python 가상환경
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# AI 모델·데이터셋
+*.pt
+*.pth
+*.onnx
+*.engine
+datasets/
+data/
+runs/
+weights/
+
+# 업로드 및 생성 파일
+uploads/
+outputs/
+results/
+temp/
+tmp/
+*.log
+
+# 로컬 DB
+*.sqlite3
+*.db
+
+# 프론트엔드
+node_modules/
+dist/
+.env.local
+.env.development.local
+.env.production.local
+
+# 백엔드 빌드 파일
+build/
+target/
+.gradle/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 운영체제
+.DS_Store
+Thumbs.db
+desktop.ini
 
 
 # Created by https://www.toptal.com/developers/gitignore/api/intellij+all,python,java,visualstudiocode,react,jupyternotebooks,windows,linux
