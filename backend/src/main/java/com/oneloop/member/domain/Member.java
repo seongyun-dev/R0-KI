@@ -4,6 +4,7 @@ import com.oneloop.apartment.domain.ApartmentComplex;
 import com.oneloop.global.common.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Getter
 @Entity
@@ -35,21 +36,36 @@ public class Member extends BaseEntity {
     @Column(name = "member_status", nullable = false, length = 20)
     private MemberStatus status = MemberStatus.ACTIVE;
 
-    public Member(
+    private Member(
             ApartmentComplex apartmentComplex,
             String username,
-            String password,
+            String encodedPassword,
             String name,
             String phoneNumber) {
         this.apartmentComplex = apartmentComplex;
         this.username = username;
-        this.password = password;
+        this.password = encodedPassword;
         this.name = name;
         this.phoneNumber = phoneNumber;
     }
 
-    public void changePassword(String encodedPassword) {
-        this.password = encodedPassword;
+    public static Member create(
+            ApartmentComplex apartmentComplex,
+            String username,
+            String rawPassword,
+            String name,
+            String phoneNumber,
+            PasswordEncoder passwordEncoder) {
+        return new Member(
+                apartmentComplex,
+                username,
+                passwordEncoder.encode(rawPassword),
+                name,
+                phoneNumber);
+    }
+
+    public void changePassword(String rawPassword, PasswordEncoder passwordEncoder) {
+        this.password = passwordEncoder.encode(rawPassword);
     }
 
     public void suspend() {
