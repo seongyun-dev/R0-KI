@@ -44,7 +44,7 @@ ai/dev    ─┤
 infra/dev ─┘
 ```
 
-The Jetson and AI model artifacts are not auto-deployed. Model conversion and Jetson installation remain a deliberate device-side operation.
+The Jetson and AI model artifacts are not auto-deployed yet. The approved target is a pull-based updater: a tagged or manually approved CI job publishes a versioned robot/AI bundle, then the Jetson checks it at boot, validates compatibility and checksums, and falls back to the last healthy version when the update or network is unavailable. This is planned, not implemented. See [HANDOFF.md](HANDOFF.md).
 
 The project runner uses the `aiot-ec2` tag, Shell executor, one concurrent job, and a 30-minute maximum job timeout. Because Docker group access is equivalent to host root access, keep the runner locked to this project, keep untagged jobs disabled, protect release branches, and require infrastructure review for `.gitlab-ci.yml` and `infra/**`.
 

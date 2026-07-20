@@ -2,7 +2,7 @@
 
 This directory contains the single-EC2 runtime and GitLab CI/CD skeleton.
 
-See [OPERATIONS.md](OPERATIONS.md) for deployment state, routine commands, migration, backup, and certificate procedures.
+Start with [HANDOFF.md](HANDOFF.md) for the exact completion state, remaining work, branch prerequisites, and the planned Jetson pull-update design. See [OPERATIONS.md](OPERATIONS.md) for routine deployment, migration, backup, and certificate procedures.
 
 ## Runtime
 
@@ -23,7 +23,7 @@ infra/dev ─┘
 ```
 
 Part branches run CI. `develop` deploys automatically. `master` deployment is manual.
-Robot and AI artifacts are never deployed automatically to Jetson.
+Robot and AI artifacts are not currently deployed automatically to Jetson. The planned next step is an approved-release Pull OTA flow: CI publishes only a tagged/manual Jetson bundle, and the Jetson checks and installs it at boot with offline fallback and rollback. See [HANDOFF.md](HANDOFF.md).
 
 ## Secrets
 
