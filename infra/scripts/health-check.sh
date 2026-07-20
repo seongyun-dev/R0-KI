@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-runtime_env=/srv/aiot/secrets/runtime.env
-current_env=/srv/aiot/deploy/current.env
+runtime_env="${RUNTIME_ENV:-/srv/aiot/secrets/runtime.env}"
+current_env="${CURRENT_ENV:-/srv/aiot/deploy/current.env}"
 mode="${1:-infrastructure}"
+shift || true
+requested_components=("$@")
+http_attempts="${HEALTH_HTTP_ATTEMPTS:-30}"
+retry_delay="${HEALTH_RETRY_DELAY_SECONDS:-5}"
+
+if [[ ! "${http_attempts}" =~ ^[1-9][0-9]*$ ]] || \
+   [[ ! "${retry_delay}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "health retry settings must be positive integers" >&2
+  exit 1
+fi
 
 if [ "${mode}" != infrastructure ] && [ "${mode}" != application ]; then
-  echo "usage: health-check.sh [infrastructure|application]" >&2
+  echo "usage: health-check.sh [infrastructure|application] [frontend] [backend]" >&2
   exit 1
 fi
 
@@ -31,7 +41,7 @@ wait_for_container_health() {
     if [ "${status}" = "${expected_status}" ]; then
       return 0
     fi
-    sleep 5
+    sleep "${retry_delay}"
   done
 
   echo "${container_name} did not reach ${expected_status}" >&2
@@ -43,11 +53,11 @@ wait_for_http() {
   local service_name="$1"
   local url="$2"
 
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 "${http_attempts}"); do
     if curl --fail --silent --show-error --max-time 10 "${url}" >/dev/null; then
       return 0
     fi
-    sleep 5
+    sleep "${retry_delay}"
   done
 
   echo "${service_name} readiness check failed: ${url}" >&2
@@ -77,6 +87,26 @@ mqtt_round_trip() {
     '
 }
 
+add_component() {
+  local candidate="$1"
+  local existing
+
+  case "${candidate}" in
+    frontend|backend) ;;
+    *)
+      echo "unknown application component: ${candidate}" >&2
+      exit 1
+      ;;
+  esac
+
+  for existing in "${components[@]:-}"; do
+    if [ "${existing}" = "${candidate}" ]; then
+      return
+    fi
+  done
+  components+=("${candidate}")
+}
+
 wait_for_container_health aiot-mysql healthy 36
 wait_for_container_health aiot-mosquitto running 12
 
@@ -85,7 +115,7 @@ for _ in $(seq 1 6); do
     mqtt_ready=true
     break
   fi
-  sleep 5
+  sleep "${retry_delay}"
 done
 if [ "${mqtt_ready:-false}" != true ]; then
   echo "MQTT authenticated publish/subscribe check failed" >&2
@@ -100,10 +130,40 @@ if [ -r /srv/aiot/certs/mqtt/fullchain.pem ]; then
 fi
 
 if [ "${mode}" = application ]; then
-  wait_for_container_health aiot-backend running 12
-  wait_for_container_health aiot-frontend running 12
-  wait_for_http backend "${BACKEND_HEALTH_URL:-http://127.0.0.1:8080/swagger-ui.html}"
-  wait_for_http frontend "${FRONTEND_HEALTH_URL:-http://127.0.0.1:3000/}"
+  components=()
+  if [ "${#requested_components[@]}" -gt 0 ]; then
+    for component in "${requested_components[@]}"; do
+      add_component "${component}"
+    done
+  else
+    if [ "${FRONTEND_ENABLED:-false}" = true ]; then
+      add_component frontend
+    fi
+    if [ "${BACKEND_ENABLED:-false}" = true ]; then
+      add_component backend
+    fi
+  fi
+
+  if [ "${#components[@]}" -eq 0 ]; then
+    echo "No application components are enabled; infrastructure checks passed"
+    exit 0
+  fi
+
+  for component in "${components[@]}"; do
+    case "${component}" in
+      frontend)
+        wait_for_container_health aiot-frontend running 12
+        wait_for_http frontend "${FRONTEND_HEALTH_URL:-http://127.0.0.1:3000/}"
+        ;;
+      backend)
+        wait_for_container_health aiot-backend running 12
+        wait_for_http backend "${BACKEND_HEALTH_URL:-http://127.0.0.1:8080/swagger-ui.html}"
+        ;;
+    esac
+  done
+
+  echo "application health checks passed: ${components[*]}"
+  exit 0
 fi
 
-echo "${mode} health checks passed"
+echo "infrastructure health checks passed"

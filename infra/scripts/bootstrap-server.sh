@@ -33,6 +33,11 @@ install -d -m 2770 -o root -g aiot \
   /srv/aiot/logs \
   /srv/aiot/backups/runtime
 
+install -d -m 2775 -o root -g aiot \
+  /srv/aiot/releases \
+  /srv/aiot/releases/jetson \
+  /srv/aiot/releases/jetson/stable
+
 install -d -m 0750 -o 1883 -g 1883 /srv/aiot/certs/mqtt
 
 install -m 0640 -o root -g aiot \
@@ -55,6 +60,7 @@ for script_name in \
   health-check.sh \
   initialize-secrets.sh \
   install-nginx.sh \
+  monitor-health.sh \
   rollback.sh \
   sync-certificates.sh; do
   install -m 0750 -o root -g aiot \
@@ -99,8 +105,34 @@ RandomizedDelaySec=15m
 WantedBy=timers.target
 EOF
 
+cat >/etc/systemd/system/aiot-monitor.service <<'EOF'
+[Unit]
+Description=AIoT runtime health monitor
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/srv/aiot/deploy/monitor-health.sh
+SuccessExitStatus=1
+EOF
+
+cat >/etc/systemd/system/aiot-monitor.timer <<'EOF'
+[Unit]
+Description=Run AIoT health monitor every 15 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=15m
+Persistent=true
+RandomizedDelaySec=1m
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
-systemctl enable --now aiot-backup.timer
+systemctl enable --now aiot-backup.timer aiot-monitor.timer
 
 if systemctl is-active --quiet gitlab-runner; then
   systemctl restart gitlab-runner

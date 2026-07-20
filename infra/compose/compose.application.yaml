@@ -27,6 +27,8 @@ services:
     volumes:
       - /srv/aiot/data/uploads:/app/data/uploads
       - /srv/aiot/data/maps:/app/data/maps
+    group_add:
+      - "${AIOT_HOST_GID:-987}"
     logging:
       driver: json-file
       options:

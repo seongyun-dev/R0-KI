@@ -1,7 +1,10 @@
 stages:
   - validate
   - test
+  - build
+  - package
   - deploy
+  - verify
 
 default:
   tags:
@@ -12,6 +15,7 @@ default:
 
 workflow:
   rules:
+    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
     - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
@@ -37,8 +41,36 @@ infra_validate:
         - infra/**/*.yml
   script:
     - find infra -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+    - bash infra/scripts/validate-contracts.sh
     - docker compose --env-file .env.example -f infra/compose/compose.infrastructure.yaml config --quiet
     - docker compose --env-file .env.example -f infra/compose/compose.application.yaml config --quiet
+    - docker compose -f infra/smoke/compose.smoke.yaml config --quiet
+
+contract_validate:
+  stage: validate
+  script:
+    - bash infra/scripts/validate-contracts.sh
+
+jetson_validate:
+  stage: validate
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - changes:
+        - infra/jetson/**/*
+        - infra/scripts/package-jetson-release.sh
+        - infra/scripts/validate-jetson-manifest.py
+        - .gitlab-ci.yml
+  script:
+    - python3 -m py_compile infra/scripts/validate-jetson-manifest.py
+    - python3 -c 'import json; json.load(open("infra/jetson/manifest.schema.json", encoding="utf-8"))'
+    - |
+      ota_root="$(mktemp -d /tmp/aiot-ota-offline.XXXXXX)"
+      cleanup_ota_test() {
+        find "${ota_root}" -depth -delete
+      }
+      trap cleanup_ota_test EXIT
+      output="$(AIOT_ROOT="${ota_root}" bash infra/jetson/aiot-update.sh)"
+      printf '%s\n' "${output}" | grep -q 'phase=config result=missing'
 
 frontend_ci:
   stage: test
@@ -106,6 +138,13 @@ backend_ci:
 iot_ci:
   stage: test
   rules:
+    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+      exists:
+        - robot/**/*.py
+        - robot/**/package.xml
+        - robot/**/CMakeLists.txt
+        - robot/pyproject.toml
+        - robot/requirements.txt
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - robot/**/*.py
@@ -133,6 +172,11 @@ iot_ci:
 ai_ci:
   stage: test
   rules:
+    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+      exists:
+        - ai/**/*.py
+        - ai/pyproject.toml
+        - ai/requirements.txt
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - ai/**/*.py
@@ -153,6 +197,234 @@ ai_ci:
   script:
     - find ai -type f -name '*.py' -print0 | xargs -0 -r python3 -m py_compile
 
+gpu_environment:
+  stage: test
+  tags:
+    - ai-gpu-device3
+  interruptible: false
+  resource_group: ai-gpu-device3
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|infra\/dev|develop|master)$/'
+      when: manual
+      allow_failure: true
+    - when: never
+  script:
+    - export CUDA_VISIBLE_DEVICES="${AI_GPU_SELECTOR:-3}"
+    - nvidia-smi -L
+    - nvidia-smi --id="${AI_GPU_SELECTOR:-3}" --query-gpu=index,uuid,name,driver_version,memory.total --format=csv,noheader
+    - |
+      python3 - <<'PY'
+      import importlib.util
+      import platform
+
+      print("python", platform.python_version())
+      if importlib.util.find_spec("torch"):
+          import torch
+          print("torch", torch.__version__)
+          print("cuda", torch.version.cuda)
+          print("available", torch.cuda.is_available())
+          print("visible_devices", torch.cuda.device_count())
+      else:
+          print("torch not installed")
+      PY
+
+ai_train:
+  stage: build
+  tags:
+    - ai-gpu-device3
+  interruptible: false
+  timeout: 6h
+  resource_group: ai-gpu-device3
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|develop|master)$/'
+      exists:
+        - ai/scripts/train.sh
+      when: manual
+      allow_failure: false
+    - when: never
+  script:
+    - export CUDA_VISIBLE_DEVICES="${AI_GPU_SELECTOR:-3}"
+    - nvidia-smi --id="${AI_GPU_SELECTOR:-3}" --query-gpu=index,uuid,name,driver_version --format=csv,noheader
+    - bash ai/scripts/train.sh
+    - test -d ai/artifacts/training
+  artifacts:
+    name: "ai-training-${CI_COMMIT_SHA}"
+    paths:
+      - ai/artifacts/training/
+    expire_in: 7 days
+
+ai_convert:
+  stage: package
+  tags:
+    - ai-gpu-device3
+  interruptible: false
+  timeout: 3h
+  resource_group: ai-gpu-device3
+  needs:
+    - job: ai_train
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|develop|master)$/'
+      exists:
+        - ai/scripts/convert.sh
+        - ai/scripts/train.sh
+      when: manual
+      allow_failure: false
+    - when: never
+  script:
+    - export CUDA_VISIBLE_DEVICES="${AI_GPU_SELECTOR:-3}"
+    - bash ai/scripts/convert.sh
+    - test -d ai/artifacts/converted
+    - find ai/artifacts/converted -maxdepth 2 -type f -print0 | xargs -0 -r sha256sum
+  artifacts:
+    name: "ai-converted-${CI_COMMIT_SHA}"
+    paths:
+      - ai/artifacts/converted/
+    expire_in: 14 days
+
+platform_smoke:
+  stage: build
+  rules:
+    - changes:
+        - infra/smoke/**/*
+        - infra/scripts/validate-contracts.sh
+        - .gitlab-ci.yml
+  variables:
+    SMOKE_FRONTEND_PORT: "13000"
+    SMOKE_BACKEND_PORT: "18080"
+  script:
+    - export SMOKE_PROJECT="aiot-smoke-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - |
+      cleanup() {
+        docker compose -p "${SMOKE_PROJECT}" \
+          -f infra/smoke/compose.smoke.yaml down --volumes --remove-orphans >/dev/null 2>&1 || true
+      }
+      show_failure_logs() {
+        docker compose -p "${SMOKE_PROJECT}" \
+          -f infra/smoke/compose.smoke.yaml logs --no-color || true
+      }
+      trap show_failure_logs ERR
+      trap cleanup EXIT
+
+      docker compose -p "${SMOKE_PROJECT}" \
+        -f infra/smoke/compose.smoke.yaml build --pull
+      docker compose -p "${SMOKE_PROJECT}" \
+        -f infra/smoke/compose.smoke.yaml up -d --wait --wait-timeout 90
+
+      curl --fail --silent --show-error \
+        "http://127.0.0.1:${SMOKE_FRONTEND_PORT}/" | grep -q 'frontend smoke ok'
+      curl --fail --silent --show-error \
+        "http://127.0.0.1:${SMOKE_BACKEND_PORT}/actuator/health" | grep -q '"status":"UP"'
+      docker compose -p "${SMOKE_PROJECT}" \
+        -f infra/smoke/compose.smoke.yaml ps
+
+frontend_image:
+  stage: build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+      exists:
+        - frontend/Dockerfile
+      changes:
+        - frontend/**/*
+        - infra/compose/compose.application.yaml
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      exists:
+        - frontend/Dockerfile
+      changes:
+        - frontend/**/*
+        - infra/compose/compose.application.yaml
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - test -f frontend/package.json
+    - test -f frontend/package-lock.json
+    - docker build --pull -t "aiot-frontend:${CI_COMMIT_SHA:0:12}" frontend
+
+backend_image:
+  stage: build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+      exists:
+        - backend/Dockerfile
+      changes:
+        - backend/**/*
+        - infra/compose/compose.application.yaml
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      exists:
+        - backend/Dockerfile
+      changes:
+        - backend/**/*
+        - infra/compose/compose.application.yaml
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - test -f backend/gradlew
+    - docker build --pull -t "aiot-backend:${CI_COMMIT_SHA:0:12}" backend
+
+jetson_package:
+  stage: package
+  interruptible: false
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+      exists:
+        - robot/**/*.py
+        - robot/**/package.xml
+        - robot/**/CMakeLists.txt
+        - ai/**/*.py
+        - ai/pyproject.toml
+        - ai/requirements.txt
+    - when: never
+  script:
+    - export JETSON_ARCHIVE="aiot-${CI_COMMIT_TAG}.tar.gz"
+    - export JETSON_ARTIFACT_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-jetson/${CI_COMMIT_TAG}/${JETSON_ARCHIVE}"
+    - export ROBOT_COMMIT="${CI_COMMIT_SHA}"
+    - export AI_COMMIT="${CI_COMMIT_SHA}"
+    - bash infra/scripts/package-jetson-release.sh "${CI_COMMIT_TAG}" build/jetson
+  artifacts:
+    name: "${CI_COMMIT_TAG}"
+    paths:
+      - build/jetson/*.tar.gz
+      - build/jetson/*.manifest.json
+    expire_in: 14 days
+
+jetson_publish:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-jetson-stable
+  needs:
+    - job: jetson_package
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+      exists:
+        - robot/**/*.py
+        - robot/**/package.xml
+        - robot/**/CMakeLists.txt
+        - ai/**/*.py
+        - ai/pyproject.toml
+        - ai/requirements.txt
+      when: manual
+      allow_failure: false
+    - when: never
+  script:
+    - export JETSON_ARCHIVE="build/jetson/aiot-${CI_COMMIT_TAG}.tar.gz"
+    - export JETSON_MANIFEST="${JETSON_ARCHIVE}.manifest.json"
+    - export JETSON_PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-jetson/${CI_COMMIT_TAG}/aiot-${CI_COMMIT_TAG}.tar.gz"
+    - test -s "${JETSON_ARCHIVE}"
+    - test -s "${JETSON_MANIFEST}"
+    - python3 infra/scripts/validate-jetson-manifest.py "${JETSON_MANIFEST}" infra/jetson/manifest.schema.json
+    - curl --fail --silent --show-error --header "JOB-TOKEN:${CI_JOB_TOKEN}" --upload-file "${JETSON_ARCHIVE}" "${JETSON_PACKAGE_URL}"
+    - test -d /srv/aiot/releases/jetson/stable
+    - export STABLE_TMP="/srv/aiot/releases/jetson/stable/.manifest.${CI_PIPELINE_ID}.${CI_JOB_ID}.tmp"
+    - install -m 0644 "${JETSON_MANIFEST}" "${STABLE_TMP}"
+    - mv -f "${STABLE_TMP}" /srv/aiot/releases/jetson/stable/manifest.json
+    - python3 infra/scripts/validate-jetson-manifest.py /srv/aiot/releases/jetson/stable/manifest.json infra/jetson/manifest.schema.json
+  environment:
+    name: jetson-stable
+    url: https://i15e103.p.ssafy.io/jetson/releases/stable/manifest.json
+
 deploy_develop:
   stage: deploy
   interruptible: false
@@ -167,7 +439,7 @@ deploy_develop:
         - .gitlab-ci.yml
     - when: never
   script:
-    - bash infra/scripts/deploy.sh develop "$CI_COMMIT_SHA"
+    - bash infra/scripts/deploy.sh develop "$CI_COMMIT_SHA" auto
   environment:
     name: aiot-ec2
     url: https://i15e103.p.ssafy.io
@@ -183,7 +455,24 @@ deploy_master:
       allow_failure: false
     - when: never
   script:
-    - bash infra/scripts/deploy.sh master "$CI_COMMIT_SHA"
+    - bash infra/scripts/deploy.sh master "$CI_COMMIT_SHA" auto
+  environment:
+    name: aiot-ec2
+    url: https://i15e103.p.ssafy.io
+
+verify_develop:
+  stage: verify
+  interruptible: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
+      changes:
+        - frontend/**/*
+        - backend/**/*
+        - infra/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - bash infra/scripts/health-check.sh application
   environment:
     name: aiot-ec2
     url: https://i15e103.p.ssafy.io

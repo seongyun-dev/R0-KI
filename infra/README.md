@@ -23,7 +23,11 @@ infra/dev ─┘
 ```
 
 Part branches run CI. `develop` deploys automatically. `master` deployment is manual.
-Robot and AI artifacts are not currently deployed automatically to Jetson. The planned next step is an approved-release Pull OTA flow: CI publishes only a tagged/manual Jetson bundle, and the Jetson checks and installs it at boot with offline fallback and rollback. See [HANDOFF.md](HANDOFF.md).
+Robot and AI artifacts use an approved-release Pull OTA flow. CI packages only a
+`jetson-vX.Y.Z` tag, and a protected manual job publishes the immutable archive
+plus stable manifest. The Jetson validates compatibility and checksum before an
+atomic switch, with offline fallback and rollback. See [jetson/](jetson/) and
+[GPU_RUNNER.md](GPU_RUNNER.md).
 
 ## Secrets
 

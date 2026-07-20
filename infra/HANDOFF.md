@@ -3,35 +3,56 @@
 이 문서는 다음 인프라 담당자가 현재 상태에서 바로 작업을 이어가기 위한 기준 문서다.
 완료된 항목과 설계만 존재하는 항목을 반드시 구분해서 읽는다.
 
-- 기준일: 2026-07-20 (Asia/Seoul)
+- 기준일: 2026-07-21 (Asia/Seoul)
 - 저장소: `https://lab.ssafy.com/s15-webmobile3-sub1/S15P11E103.git`
 - 인프라 작업 브랜치: `infra/dev`
-- 기준 인프라 커밋: `d00a09d chore(infra): bootstrap single-EC2 CI/CD`
+- 작업 시작 기준 커밋: `34bfdf2 docs(infra): add handoff and Jetson OTA plan`
+- 이 문서를 포함한 구현 커밋: `feat(infra): initial infra settings`
+- 현재 구현: `infra/dev`에만 반영한다. `develop` 병합과 각 파트 브랜치 동기화는 다음 작업이다.
 - EC2 접속 호스트: `ubuntu@i15e103.p.ssafy.io`
 - SSH 개인 키: `I15E103T.pem`을 별도 전달받아 사용하며 저장소에 넣지 않는다.
 - GPU 서버: `http://70.12.130.103`, 계정 `i15e103`, 할당 장치 `Device3`
 
 ## 1. 한눈에 보는 현재 상태
 
-현재 단계는 **단일 EC2의 CI/CD 실행 기반과 MySQL/MQTT 운영 기반까지 완료**된 상태다.
-Frontend와 Backend의 실제 애플리케이션 배포, 앱용 HTTPS 라우팅, Jetson 부팅형 Pull OTA는 아직 완료되지 않았다.
+현재 `infra/dev`는 **EC2 기반, component-aware Frontend/Backend CD, GPU 수동 job,
+Jetson Pull OTA, 운영 모니터링 코드와 격리 검증까지 완료**된 상태다. 새 CI/CD
+정의의 실제 GitLab Pipeline 실행, `develop` 통합, 실제 앱 배포와 장비 설치는
+아직 남아 있다.
 
 | 항목 | 상태 | 비고 |
 | --- | --- | --- |
 | GitLab Runner | 완료 | Project Runner `#1934`, Online, Shell executor |
-| CI 인프라 검증 | 완료 | Pipeline `#154891` 최종 Passed |
+| 기존 CI 인프라 검증 | 완료 | 초기 Pipeline `#154891` Passed |
+| 이번 통합 Pipeline | 구현·로컬 검증 완료, 실실행 대기 | `infra/dev` push 후 결과 확인 필요 |
 | MySQL 8.4 | 완료 | `aiot-mysql`, healthy, 호스트 포트 미공개 |
 | 보안 MQTT | 완료 | `aiot-mosquitto`, 인증 필수, 외부 TLS 8883 |
-| 일일 로컬 백업 | 완료 | `aiot-backup.timer`, 매일 03:30 KST |
-| Frontend 컨테이너 | 미완료 | `frontend/Dockerfile` 필요 |
-| Backend 컨테이너 | 미완료 | `backend/Dockerfile`과 health endpoint 필요 |
-| 앱용 Nginx HTTPS | 미완료 | 템플릿만 설치됨. 현재 443 listener 없음 |
+| 일일 로컬 백업 | 가동 중 | 기존 `aiot-backup.timer`; 개선된 원자적 백업 코드는 서버 재설치 대기 |
+| Frontend 컨테이너 | 계약·검증 완료, 실배포 대기 | React 실제 코드가 아직 없음 |
+| Backend 컨테이너 | build 검증 완료, 실배포 대기 | `back/dev` 테스트와 Java 21 image build 통과 |
+| 앱용 Nginx HTTPS | 템플릿 검증 완료, 활성화 대기 | 실제 앱 배포 후 설치 |
 | Jetson TLS 8883 전환 | 미완료 | 기존 익명 1883 broker를 병행 유지 중 |
-| Jetson Pull OTA | 설계 반영, 미구현 | 승인된 버전을 부팅 시 확인·설치하도록 추가 예정 |
+| Jetson Pull OTA | 구현·격리 E2E 완료, 장비 설치 대기 | 정상/동일/offline/checksum/rollback 통과 |
+| GPU Device3 CI | 파이프라인·가이드 완료, Runner 설치 대기 | GPU SSH·sudo 접근 필요 |
+| 운영 모니터링 | 구현·읽기 전용 검증 완료, 설치 대기 | systemd timer 15분 주기 |
 | 외부 백업 | 미완료 | 현재 백업은 같은 EC2 디스크에만 존재 |
 
-중요: 현재 `develop` 자동 배포 job은 두 애플리케이션 Dockerfile이 없으면 성공 코드로 종료한다.
-따라서 현재 Pipeline 성공은 웹/WAS가 실제 배포됐다는 뜻이 아니다.
+중요: `develop` 자동 배포는 준비된 component만 독립 배포하고 준비되지 않은
+component는 skip한다. 따라서 코드가 없는 파트의 Pipeline 성공은 해당 앱이
+실제 배포됐다는 뜻이 아니다.
+
+### 1.1 다음 작업자가 시작할 정확한 위치
+
+1. GitLab에서 이 `infra/dev` push의 Pipeline 결과를 확인한다.
+2. 성공하면 `infra/dev -> develop` MR을 생성하고 검증 후 병합한다.
+3. `develop -> back/dev`를 먼저 동기화해 Backend CI를 확인한다.
+4. Backend 첫 배포 전 MySQL runtime backup을 수동 실행한다.
+5. `back/dev -> develop` MR을 병합해 첫 자동 배포를 실행한다.
+6. 배포 성공 후 앱용 Nginx를 한 번 설치하고 외부 HTTPS `/api/`를 검증한다.
+
+`develop -> 각 파트 dev` 동기화만으로 EC2 배포되지는 않는다. 파트 브랜치에서는
+CI만 실행하며, EC2 자동 배포는 해당 코드를 다시 `develop`에 병합한 push에서만
+실행한다.
 
 ## 2. 프로젝트와 인프라 원칙
 
@@ -72,7 +93,9 @@ GPU 서버 Device3
 ```
 
 현재는 위 구조 중 Runner, MySQL, Mosquitto만 실제 가동 중이다.
-Nginx는 기존 기본 사이트의 80 포트를 유지하며 앱용 443 설정은 아직 활성화하지 않았다.
+2026-07-21 재확인 기준 `aiot-frontend`, `aiot-backend` 컨테이너와 3000/8080
+listener는 없다. Nginx는 기존 기본 사이트의 80 포트를 유지하며 앱용 443
+설정은 아직 활성화하지 않았다.
 
 ## 4. EC2에 실제 배포된 구성
 
@@ -97,6 +120,9 @@ Nginx는 기존 기본 사이트의 80 포트를 유지하며 앱용 443 설정�
 
 모든 신규 애플리케이션 컨테이너는 외부 Docker network `aiot-network`를 사용한다.
 MySQL은 절대로 호스트의 3306 포트로 publish하지 않는다.
+UFW에는 8080 허용 규칙이 남아 있지만 현재 listener는 없으며, 애플리케이션
+Compose는 3000/8080을 `127.0.0.1`에만 bind한다. AWS Security Group은 별도로
+확인해야 한다.
 
 ### 4.3 서버 경로
 
@@ -172,10 +198,15 @@ Runner 패키지는 GitLab 서버와 같은 18.11 계열로 고정했으며 `git
 | `backend_ci` | Java 21에서 Gradle/Maven test |
 | `iot_ci` | `robot/**` Python compile 검사 |
 | `ai_ci` | `ai/**` Python compile 검사 |
+| `platform_smoke` | 격리된 React/Nginx와 Backend health image build·기동 검사 |
+| `gpu_environment`, `ai_train`, `ai_convert` | Device3 환경 확인과 protected manual 학습·변환 |
+| `jetson_validate`, `jetson_package`, `jetson_publish` | OTA 검증·bundle·승인 publish |
 | `deploy_develop` | `develop` 자동 EC2 앱 배포 |
 | `deploy_master` | `master` 수동 EC2 앱 배포 |
 
-IoT/AI의 현재 검사는 문법 수준이다. 의존성 설치, 단위 테스트, Jetson 하드웨어 테스트는 아직 추가되지 않았다.
+IoT/AI 기본 CI는 코드가 없을 때 문법 수준이며, 파트가 표준 script를 제공하면
+GPU/Jetson job이 실제 학습·변환·release smoke를 수행한다. Jetson 하드웨어 E2E는
+장비 접근 후 남아 있다.
 
 ### 6.3 EC2 애플리케이션 배포 방식
 
@@ -195,6 +226,32 @@ develop 반영
 
 동시 배포는 GitLab `resource_group`과 EC2의 `flock`으로 이중 차단한다.
 Backend 기본 readiness fallback은 `/swagger-ui.html`이다. Spring Actuator 추가 후 `/actuator/health`로 바꾼다.
+
+### 6.4 이번 구현의 검증 범위
+
+완료한 검증:
+
+- 모든 Infra shell script의 `bash -n`
+- 계약 검사, 두 운영 Compose와 smoke Compose 렌더링
+- `.gitlab-ci.yml` YAML lint와 `git diff --check`
+- 실제 `origin/back/dev`의 Java 21 Gradle test 및 Docker image build
+- 격리된 Frontend/Backend build, 기동, health check
+- 첫 배포, 이전 조합 복구, 의도적으로 실패한 배포의 자동 rollback
+- Jetson bundle/manifest 생성과 정상 설치, 동일 버전 skip, offline fallback,
+  checksum 거부, post-activation rollback
+- Nginx 설정 문법, systemd unit 문법, 임시 대상 backup/monitor 실행
+
+아직 완료하지 않은 검증:
+
+- 이번 `.gitlab-ci.yml`을 사용한 실제 GitLab Pipeline
+- 실제 Backend의 운영 MySQL Flyway migration 및 상시 컨테이너 배포
+- 실제 Frontend의 빌드·배포
+- 외부 HTTPS `/`, `/api/`, `/infra-health`
+- GPU 서버 Device3 Runner와 실제 학습·변환
+- Jetson 실장비 MQTT TLS 및 Pull OTA
+
+EC2에서 실제 Backend Gradle test와 image build는 통과했지만 테스트 자원은
+정리했다. 따라서 현재 `aiot-backend`가 실행 중이라고 해석하면 안 된다.
 
 ## 7. 브랜치 운영 방식과 현재 주의점
 
@@ -220,20 +277,23 @@ Git은 소유 경로를 강제하지 않는다. 팀 규칙, protected branch, CO
 
 ### 7.1 현재 원격 브랜치 상태
 
-- `infra/dev`: 인프라와 `.gitlab-ci.yml`이 존재한다.
-- `back/dev`: Spring 초기 프로젝트가 존재한다.
-- `front/dev`, `iot/dev`, `ai/dev`, `develop`, `master`: 아직 인프라 CI 파일이 없다.
+- `infra/dev`: 이번 인프라 구현과 `.gitlab-ci.yml`을 push하는 대상이다.
+- `back/dev`: Spring 초기 프로젝트가 존재하며 EC2에서 test/image build를 검증했다.
+- `front/dev`, `iot/dev`, `ai/dev`, `develop`, `master`: 브랜치는 존재하지만 아직 이번 인프라 CI 파일이 없다.
 - `front/master`, `back/master`, `iot/master`, `ai/master`: 현재 CI/CD 흐름에서 사용하지 않는다.
 
-따라서 `.gitlab-ci.yml`이 있는 현재 브랜치는 `infra/dev`뿐이며, 다른 파트 브랜치에서는 아직 CI가 실행되지 않는다.
+따라서 이 커밋 push 직후에도 새 `.gitlab-ci.yml`이 있는 원격 브랜치는
+`infra/dev`뿐이다. 다른 파트 브랜치 CI는 `infra/dev -> develop` 병합과
+`develop -> 각 파트 dev` 동기화 이후부터 동작한다.
 
 ### 7.2 다음 작업자가 가장 먼저 할 브랜치 작업
 
 1. `infra/dev -> develop` MR을 만들고 병합한다.
 2. `develop -> front/dev`, `develop -> back/dev`, `develop -> iot/dev`, `develop -> ai/dev`를 한 번씩 동기화한다.
-3. 기존 feature branch는 최신 파트 dev를 merge/rebase한 뒤 MR한다.
-4. 이후 기능 branch는 최신 `파트/dev`에서 생성한다.
-5. 파트 dev와 develop/master의 direct push를 막고 MR을 사용한다.
+3. `back/dev` Pipeline의 test/image build가 통과하는지 먼저 확인한다.
+4. 기존 feature branch는 최신 파트 dev를 merge/rebase한 뒤 MR한다.
+5. 이후 기능 branch는 최신 `파트/dev`에서 생성한다.
+6. 파트 dev와 develop/master의 direct push를 막고 MR을 사용한다.
 
 위 동기화 전에는 다른 파트가 코드를 push해도 현재 CI 설정이 자동으로 나타나지 않는다.
 
@@ -301,12 +361,14 @@ TensorRT engine은 JetPack/TensorRT/장치 호환성이 강하므로 manifest의
 - AWS Security Group 확인
 - Jetson release packaging과 Pull OTA 골자 관리
 
-## 9. Jetson Pull OTA 계획
+## 9. Jetson Pull OTA
 
 ### 9.1 현재 상태
 
-Jetson 자동 업데이트는 아직 구현되지 않았다.
-현재 `.gitlab-ci.yml`은 AI/IoT 코드를 검사할 뿐 package 생성, registry publish, Jetson 설치를 수행하지 않는다.
+Pull updater, JSON Schema, package script, systemd unit, Generic Package Registry
+publish job을 구현했다. 임시 HTTPS 환경에서 정상 설치, 동일 버전 skip, offline
+fallback, checksum 거부, post-activation rollback을 검증했다. 실제 Jetson 설치와
+MQTT TLS E2E는 장비 주소·계정 접근 후 수행한다.
 
 목표는 merge마다 Jetson에 push하는 방식이 아니라 **승인된 release만 Jetson이 부팅할 때 가져오는 Pull 방식**이다.
 
@@ -378,10 +440,9 @@ aiot-jetson-vX.Y.Z.tar.gz
   bin/aiot-update
 ```
 
-예정 systemd unit:
+구현된 systemd unit:
 
 - `aiot-update.service`: boot 시 한 번 실행하는 updater
-- `aiot-update.timer`: 필요할 때만 사용하는 선택적 주기 검사
 - `aiot-robot.service`: updater 이후 ROS2/AI 실행
 
 권장 dependency:
@@ -404,55 +465,61 @@ network-online.target
 - 업데이트는 순찰 중이 아니라 부팅 또는 명시적인 maintenance 상태에서만 수행한다.
 - 다운로드 중 전원이 꺼져도 `current` symlink가 손상되지 않도록 임시 경로와 atomic rename을 사용한다.
 
-### 9.6 OTA 구현을 위해 추가할 파일과 CI
+### 9.6 구현 파일과 CI
 
-예정 파일:
+구현 파일:
 
 ```text
 infra/jetson/aiot-update.sh
 infra/jetson/aiot-update.service
 infra/jetson/aiot-robot.service
 infra/jetson/manifest.schema.json
+infra/jetson/install.sh
 infra/scripts/package-jetson-release.sh
+infra/scripts/validate-jetson-manifest.py
 ```
 
-예정 CI job:
+구현 CI job:
 
 - `jetson_validate`: 의존성·manifest·smoke test
 - `jetson_package`: release bundle과 checksum 생성
 - `jetson_publish`: `jetson-v*` tag 또는 manual 승인 시 registry publish
 
-실제 AI/IoT 코드, 설치 명령, 모델 위치와 실행 entrypoint가 올라온 뒤 위 파일을 최종 구현한다.
+실제 AI/IoT 코드가 계약 경로에 들어오면 release bundle을 생성할 수 있다.
 
 ## 10. 다음 작업 우선순위
 
 ### P0 — 즉시 해야 함
 
-1. `infra/dev -> develop` 병합
-2. `develop`을 각 파트 dev에 동기화
-3. protected branch와 MR 규칙 적용
-4. 각 파트가 실제 코드와 실행 계약을 push
-5. `.gitlab-ci.yml`을 실제 버전·빌드 명령에 맞게 조정
+1. 이번 `infra/dev` Pipeline 결과 확인
+2. `infra/dev -> develop` MR 검증·병합
+3. `develop`을 각 파트 dev에 동기화하고 각 파트 CI 확인
+4. protected branch와 MR 규칙 적용
+5. Backend를 제외한 각 파트가 실제 코드와 실행 계약을 push
+6. 실제 파트 코드가 계약과 다르면 `.gitlab-ci.yml`과 Dockerfile 조정
 
 ### P1 — EC2 앱 배포 완성
 
-1. Frontend/Backend Dockerfile 확보
-2. Backend health endpoint 확보
-3. `develop` 첫 실제 자동배포
-4. 3000/8080이 loopback에만 bind됐는지 확인
-5. `/srv/aiot/deploy/install-nginx.sh` 실행
-6. HTTPS `/infra-health`, `/`, `/api/` 확인
-7. 실패 배포와 rollback 시험
+1. Backend 첫 배포 직전 runtime backup 수동 실행 및 완료 marker 확인
+2. `back/dev -> develop` MR로 Backend를 통합하고 첫 자동 배포
+3. Flyway `V1` 적용 결과, Backend 로그, `/swagger-ui.html` readiness 확인
+4. Frontend 실제 React 코드가 준비되면 같은 흐름으로 통합·배포
+5. Backend Actuator health endpoint 추가 또는 현재 Swagger fallback 승인
+6. 3000/8080이 loopback에만 bind됐는지 확인
+7. 저장소 최신 bootstrap을 EC2에 재적용해 monitor/backup 스크립트 갱신
+8. `/srv/aiot/deploy/install-nginx.sh` 실행
+9. HTTPS `/infra-health`, `/`, `/api/` 확인
+10. 실제 애플리케이션으로 실패 배포와 rollback 재시험
 
 ### P2 — Jetson 통신과 Pull OTA
 
 1. Jetson에서 새 MQTT 계정과 TLS 8883 연결
 2. command/status/reconnect/heartbeat 시험
 3. HTTP 사진·JSON 업로드 E2E 시험
-4. Jetson release 형식과 manifest 확정
-5. GitLab Package Registry publish CI 추가
-6. Jetson updater와 systemd unit 설치
-7. 최신/동일/오프라인/손상 artifact/rollback 시나리오 시험
+4. GPU 서버에 project-locked `ai-gpu-device3` Runner 설치
+5. GitLab read-only Deploy Token 생성
+6. 구현된 updater와 systemd unit을 Jetson에 설치
+7. 격리 검증된 최신/동일/offline/손상/rollback 시나리오를 실장비에서 재검증
 8. 성공 후 기존 `hanbakwi-mosquitto` 중지 및 외부 1883 제거
 
 ### P3 — 운영 보완
@@ -460,7 +527,7 @@ infra/scripts/package-jetson-release.sh
 1. AWS Security Group에서 22, 443, 8883 source 범위 확인
 2. 3306, 3000, 8080 외부 차단 확인
 3. 외부 암호화 백업 대상 추가
-4. 로그·디스크·인증서 만료 모니터링
+4. 구현된 `aiot-monitor.timer`를 서버 bootstrap으로 설치하고 journal 확인
 5. wildcard 인증서 수동 갱신 또는 DNS API 자동화
 
 ## 11. 인증서와 네트워크 주의사항
