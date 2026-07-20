@@ -1,0 +1,41 @@
+name: aiot-app
+
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE:-aiot-frontend:pending}
+    container_name: aiot-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:80"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    networks:
+      - aiot-network
+
+  backend:
+    image: ${BACKEND_IMAGE:-aiot-backend:pending}
+    container_name: aiot-backend
+    restart: unless-stopped
+    env_file:
+      - path: /srv/aiot/secrets/backend.env
+        required: false
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /srv/aiot/data/uploads:/app/data/uploads
+      - /srv/aiot/data/maps:/app/data/maps
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+    networks:
+      - aiot-network
+
+networks:
+  aiot-network:
+    external: true
+    name: aiot-network

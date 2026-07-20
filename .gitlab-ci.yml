@@ -1,0 +1,189 @@
+stages:
+  - validate
+  - test
+  - deploy
+
+default:
+  tags:
+    - aiot-ec2
+  interruptible: true
+  before_script:
+    - set -euo pipefail
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
+    - when: never
+
+runner_smoke:
+  stage: validate
+  script:
+    - hostname
+    - git --version
+    - test -x /usr/lib/jvm/java-21-openjdk-amd64/bin/java
+    - /usr/lib/jvm/java-21-openjdk-amd64/bin/java -version
+    - node --version
+    - docker info >/dev/null
+    - docker compose version
+
+infra_validate:
+  stage: validate
+  rules:
+    - exists:
+        - infra/**/*.sh
+        - infra/**/*.yaml
+        - infra/**/*.yml
+  script:
+    - find infra -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+    - docker compose --env-file .env.example -f infra/compose/compose.infrastructure.yaml config --quiet
+    - docker compose --env-file .env.example -f infra/compose/compose.application.yaml config --quiet
+
+frontend_ci:
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+      exists:
+        - frontend/package.json
+      changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      exists:
+        - frontend/package.json
+      changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - cd frontend
+    - if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+    - npm run lint --if-present
+    - CI=true npm run test --if-present
+    - npm run build --if-present
+
+backend_ci:
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+      exists:
+        - backend/build.gradle
+        - backend/build.gradle.kts
+        - backend/pom.xml
+      changes:
+        - backend/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      exists:
+        - backend/build.gradle
+        - backend/build.gradle.kts
+        - backend/pom.xml
+      changes:
+        - backend/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - cd backend
+    - export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+    - export PATH="${JAVA_HOME}/bin:${PATH}"
+    - |
+      if [ -f gradlew ]; then
+        chmod +x gradlew
+        ./gradlew --no-daemon clean test
+      elif [ -f mvnw ]; then
+        chmod +x mvnw
+        ./mvnw -B test
+      elif [ -f pom.xml ] && command -v mvn >/dev/null; then
+        mvn -B test
+      elif command -v gradle >/dev/null; then
+        gradle --no-daemon clean test
+      else
+        echo "A Gradle or Maven wrapper is required."
+        exit 1
+      fi
+
+iot_ci:
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+      exists:
+        - robot/**/*.py
+        - robot/**/package.xml
+        - robot/**/CMakeLists.txt
+        - robot/pyproject.toml
+        - robot/requirements.txt
+      changes:
+        - robot/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == "iot/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      exists:
+        - robot/**/*.py
+        - robot/**/package.xml
+        - robot/**/CMakeLists.txt
+        - robot/pyproject.toml
+        - robot/requirements.txt
+      changes:
+        - robot/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - find robot -type f -name '*.py' -print0 | xargs -0 -r python3 -m py_compile
+
+ai_ci:
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+      exists:
+        - ai/**/*.py
+        - ai/pyproject.toml
+        - ai/requirements.txt
+      changes:
+        - ai/**/*
+        - .gitlab-ci.yml
+    - if: '$CI_COMMIT_BRANCH == "ai/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      exists:
+        - ai/**/*.py
+        - ai/pyproject.toml
+        - ai/requirements.txt
+      changes:
+        - ai/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - find ai -type f -name '*.py' -print0 | xargs -0 -r python3 -m py_compile
+
+deploy_develop:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  timeout: 20m
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
+      changes:
+        - frontend/**/*
+        - backend/**/*
+        - infra/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - bash infra/scripts/deploy.sh develop "$CI_COMMIT_SHA"
+  environment:
+    name: aiot-ec2
+    url: https://i15e103.p.ssafy.io
+
+deploy_master:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  timeout: 20m
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+      when: manual
+      allow_failure: false
+    - when: never
+  script:
+    - bash infra/scripts/deploy.sh master "$CI_COMMIT_SHA"
+  environment:
+    name: aiot-ec2
+    url: https://i15e103.p.ssafy.io
