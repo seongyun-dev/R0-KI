@@ -2,11 +2,23 @@ package com.oneloop.robot.service;
 
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
+import com.oneloop.global.response.PageResponse;
+import com.oneloop.map.domain.Checkpoint;
+import com.oneloop.map.domain.CheckpointType;
+import com.oneloop.map.repository.CheckpointRepository;
+import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.member.domain.Member;
+import com.oneloop.member.repository.MemberRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.dto.request.RobotRegisterRequest;
+import com.oneloop.robot.dto.response.RobotListResponse;
 import com.oneloop.robot.dto.response.RobotResponse;
 import com.oneloop.robot.repository.PatrolRobotRepository;
+import java.math.BigDecimal;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,22 +28,88 @@ import org.springframework.transaction.annotation.Transactional;
 public class RobotService {
 
     private final PatrolRobotRepository patrolRobotRepository;
+    private final MemberRepository memberRepository;
+    private final PatrolMapRepository patrolMapRepository;
+    private final CheckpointRepository checkpointRepository;
 
     /**
-     * 새로운 순찰로봇을 등록한다.
+     * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다.
      *
+     * @param memberId 로그인한 관리자 식별자
      * @param request 로봇 이름과 시리얼 번호
      * @return 등록된 로봇 정보
-     * @throws BusinessException 시리얼 번호가 이미 등록되어 있는 경우
+     * @throws BusinessException 관리자가 존재하지 않거나, 시리얼 번호가 이미 등록되어 있는 경우
      */
     @Transactional
-    public RobotResponse register(RobotRegisterRequest request) {
-        // 이미 등록된 로봇일 경우, 예외처리
+    public RobotResponse register(Long memberId, RobotRegisterRequest request) {
+        // 시리얼 번호 중복 시 등록 거부
         if (patrolRobotRepository.findBySerialNumber(request.getSerialNumber()).isPresent()) {
             throw new BusinessException(ErrorCode.ROBOT_SERIAL_NUMBER_DUPLICATE);
         }
 
-        PatrolRobot robot = new PatrolRobot(request.getName(), request.getSerialNumber());
+        Member member = getMember(memberId);
+        PatrolRobot robot =
+                new PatrolRobot(
+                        member.getApartmentComplex(), request.getName(), request.getSerialNumber());
         return RobotResponse.from(patrolRobotRepository.save(robot));
+    }
+
+    /**
+     * 로그인한 관리자의 소속 단지에 등록된 순찰로봇 목록을 조회한다. 각 로봇의 현재 좌표가 속한 체크포인트 유형을 함께 반환한다.
+     *
+     * @param memberId 로그인한 관리자 식별자
+     * @param pageable 페이지 정보
+     * @return 순찰로봇 페이지 목록
+     * @throws BusinessException 관리자가 존재하지 않는 경우
+     */
+    public PageResponse<RobotListResponse> findAll(Long memberId, Pageable pageable) {
+        Long apartmentComplexId = getMember(memberId).getApartmentComplex().getId();
+
+        // 로그인한 관리자의 단지에 속한 로봇만 페이지 조회
+        Page<PatrolRobot> robots =
+                patrolRobotRepository.findAllByApartmentComplexId(apartmentComplexId, pageable);
+
+        // 단지의 맵과 체크포인트를 한 번만 조회해 모든 로봇에 재사용
+        List<Checkpoint> checkpoints =
+                patrolMapRepository
+                        .findByApartmentComplexId(apartmentComplexId)
+                        .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
+                        .orElseGet(List::of);
+
+        Page<RobotListResponse> responses =
+                robots.map(
+                        robot ->
+                                RobotListResponse.of(robot, matchCheckpointType(robot, checkpoints)));
+        return PageResponse.from(responses);
+    }
+
+    // memberId로 회원을 조회한다. 토큰은 유효해도 회원이 삭제된 경우를 방어한다.
+    private Member getMember(Long memberId) {
+        return memberRepository
+                .findById(memberId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+    }
+
+    // 로봇 좌표가 속한 체크포인트의 유형을 찾는다. 좌표가 없거나 어느 구역에도 속하지 않으면 null.
+    private CheckpointType matchCheckpointType(PatrolRobot robot, List<Checkpoint> checkpoints) {
+        BigDecimal x = robot.getXCoordinate();
+        BigDecimal y = robot.getYCoordinate();
+        if (x == null || y == null) {
+            return null;
+        }
+
+        return checkpoints.stream()
+                .filter(checkpoint -> contains(checkpoint, x, y))
+                .findFirst()
+                .map(Checkpoint::getType)
+                .orElse(null);
+    }
+
+    // 좌표(x, y)가 체크포인트의 사각 영역(minX~maxX, minY~maxY) 안에 있는지 판별한다.
+    private boolean contains(Checkpoint checkpoint, BigDecimal x, BigDecimal y) {
+        return x.compareTo(checkpoint.getMinX()) >= 0
+                && x.compareTo(checkpoint.getMaxX()) <= 0
+                && y.compareTo(checkpoint.getMinY()) >= 0
+                && y.compareTo(checkpoint.getMaxY()) <= 0;
     }
 }
