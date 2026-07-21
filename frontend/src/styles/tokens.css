@@ -50,7 +50,11 @@
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
   /* ---- 레이아웃 ---- */
-  --shell: 88rem;   /* 페이지 최대폭 */
+  --shell: 88rem;        /* 페이지 최대폭 */
+  /* 랜딩 전용 — 넓은 모니터에서 좌우 여백이 과하게 남지 않도록.
+     rem만 쓰면 브레이크포인트마다 rem이 리셋돼 여백이 들쭉날쭉해지므로
+     vw를 함께 걸어 어느 폭에서든 좌우 여백을 2%로 일정하게 유지한다. */
+  --shell-wide: min(130rem, 96vw);
 
   /* ---- 그림자 ---- */
   --shadow-sm: 0 1px 2px rgba(17,17,17,.06);

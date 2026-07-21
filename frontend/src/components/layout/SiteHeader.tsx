@@ -1,6 +1,5 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { BrandMark, MenuIcon } from '../icons'
-import { Button } from '../ui/Button'
 import { cn } from '../../lib/cn'
 import './siteHeader.css'
 
@@ -26,7 +25,6 @@ export type SiteHeaderProps = {
  * 스위치가 아닌 링크 두 개로 만들고 현재 위치를 aria-current로 알린다.
  */
 export function SiteHeader({ shown, clock, plain, onScrollTo, onMenuOpen }: SiteHeaderProps) {
-  const navigate = useNavigate()
   const { pathname } = useLocation()
   // 회원가입처럼 둘 다 아닌 화면에서는 어느 쪽도 켜지 않는다(현재 위치를 잘못 말하지 않도록)
   const isOn = pathname.startsWith('/login')
@@ -72,14 +70,6 @@ export function SiteHeader({ shown, clock, plain, onScrollTo, onMenuOpen }: Site
             <span className="lbl">관제 시각</span>
             <span className="time font-mono tabular">{clock}</span>
           </div>
-          <Button
-            variant="accent"
-            withArrow="up-right"
-            className="header-cta"
-            onClick={() => navigate('/signup/onboarding')}
-          >
-            회원가입하기
-          </Button>
           {onMenuOpen && (
             <button type="button" className="menu-btn" onClick={onMenuOpen} aria-label="메뉴 열기">
               <span className="hv">

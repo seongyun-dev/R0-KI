@@ -10,7 +10,9 @@
 @media (max-width: 1024px) { html.landing-grid { font-size: 1.5625vw } }
 @media (max-width: 640px)  { html.landing-grid { font-size: 4.166666vw } }
 
-.landing .shell { max-width: var(--shell); margin-inline: auto }
+/* 랜딩은 넓은 모니터를 채우도록 본문보다 넓은 shell을 쓴다.
+   .site-header .shell보다 뒤에 실려 헤더도 같은 폭으로 맞춰진다(정렬 유지). */
+.landing .shell { max-width: var(--shell-wide); margin-inline: auto }
 .landing .skip { position: fixed; left: 1rem; top: 1rem; z-index: 60; border-radius: .875rem; background: var(--ink); padding: .5rem 1rem; font-size: .875rem; color: #fff; transform: translateY(-200%) }
 .landing .skip:focus { transform: none }
 
@@ -106,39 +108,44 @@
 .hero-grid { position: relative; z-index: 20; display: flex; flex-direction: column; justify-content: flex-start; min-height: 100lvh; padding: 6.5rem 1.25rem 6rem }
 @media (min-width: 640px) { .hero-grid { padding-left: 2rem; padding-right: 2rem } }
 @media (min-width: 1024px) { .hero-grid { justify-content: center; padding: 9.5rem 2rem 7rem } }
-.hero-left { display: flex; flex-direction: column; gap: 1.6rem; max-width: 46rem }
+/* 폭 제한은 제목이 마크업대로 두 줄을 유지할 만큼 넉넉해야 한다(글자를 키우면 46rem으로는 넘친다) */
+.hero-left { display: flex; flex-direction: column; gap: 2.4rem; max-width: 56rem }
 .hero-eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .85rem; font-weight: 600; color: rgba(17,17,17,.7) }
 .hero-eyebrow .dot { width: .4rem; height: .4rem; background: var(--accent); border-radius: 9999px }
 /* 한글은 어절(띄어쓰기) 단위로만 줄바꿈 — keep-all이 없으면 "시간에/도"처럼 낱글자가 끊긴다.
    ch 단위는 숫자 폭 기준이라 전각 한글에 맞지 않으므로 폭 제한은 부모(.hero-left)에 맡긴다. */
-.hero-h1 { font-size: 2.1rem; font-weight: 700; line-height: 1.1; letter-spacing: -.03em; word-break: keep-all }
+.hero-h1 { font-size: 2.1rem; font-weight: 700; line-height: 1.15; letter-spacing: -.03em; word-break: keep-all }
 @media (min-width: 640px) { .hero-h1 { font-size: 2.9rem } }
 @media (min-width: 768px) { .hero-h1 { font-size: 3.4rem } }
-@media (min-width: 1280px) { .hero-h1 { font-size: 3.9rem } }
+@media (min-width: 1280px) { .hero-h1 { font-size: 3.95rem } }
+/* 두 줄이 서로 다른 문장이라 줄 사이를 띄운다.
+   line-height 대신 줄 블록 사이 여백으로 줘야, 좁은 화면에서 한 줄이 접혔을 때
+   그 안쪽 줄간격까지 같이 벌어지지 않는다. */
+.hero-h1 .line + .line { margin-top: .18em }
 .hero-h1 .accent { color: var(--accent) }
-.hero-sub { max-width: 34ch; font-size: 1.02rem; line-height: 1.6; color: rgba(17,17,17,.62) }
-.cta-row { display: flex; flex-wrap: wrap; gap: .75rem }
-.hero-stats { display: flex; flex-wrap: wrap; gap: 2.2rem; margin-top: .5rem }
-.hero-stat .n { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em }
+.hero-sub { max-width: 60ch; font-size: 1.04rem; line-height: 1.75; color: rgba(17,17,17,.62) }
+.cta-row { display: flex; flex-wrap: wrap; gap: .9rem }
+.hero-stats { display: flex; flex-wrap: wrap; gap: 3rem; margin-top: .75rem }
+.hero-stat .n { font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em }
 .hero-stat .n b { color: var(--accent); font-weight: 700 }
-.hero-stat .l { margin-top: .15rem; font-size: .8rem; color: rgba(17,17,17,.5) }
+.hero-stat .l { margin-top: .3rem; font-size: .82rem; color: rgba(17,17,17,.5) }
 
 /* floating product chips */
-.robot-chip { position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: .5rem; border-radius: 9999px; background: rgba(13,13,16,.82); color: #fff; backdrop-filter: blur(8px); padding: .45rem .85rem; font-size: .72rem; font-weight: 600; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5) }
-.robot-chip .live { width: .42rem; height: .42rem; border-radius: 9999px; background: #3ddc84; box-shadow: 0 0 0 3px rgba(61,220,132,.25) }
+.robot-chip { position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: .5rem; border-radius: 9999px; background: rgba(13,13,16,.82); color: #fff; backdrop-filter: blur(8px); padding: .6rem 1.1rem; font-size: .95rem; font-weight: 600; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5) }
+.robot-chip .live { width: .5rem; height: .5rem; border-radius: 9999px; background: #3ddc84; box-shadow: 0 0 0 3px rgba(61,220,132,.25) }
 .robot-chip--status { top: 6.5rem; right: 2rem }
 .robot-chip--event { bottom: 7rem; right: 2rem; background: rgba(255,255,255,.92); color: #111; box-shadow: 0 10px 30px -12px rgba(0,0,0,.25) }
-.robot-chip--event .k { width: 1.6rem; height: 1.6rem; display: grid; place-items: center; border-radius: 9999px; background: var(--accent-soft); color: var(--accent-deep) }
+.robot-chip--event .k { width: 1.9rem; height: 1.9rem; display: grid; place-items: center; border-radius: 9999px; background: var(--accent-soft); color: var(--accent-deep) }
 .robot-chip--event .t { font-weight: 700 }
-.robot-chip--event .s { font-weight: 500; color: var(--muted); font-size: .66rem }
-.robot-hint { position: absolute; z-index: 20; bottom: 4.5rem; right: 2rem; font-size: .7rem; color: rgba(17,17,17,.5); font-weight: 600; letter-spacing: .02em; transition: opacity .4s }
+.robot-chip--event .s { font-weight: 500; color: var(--muted); font-size: .85rem }
+.robot-hint { position: absolute; z-index: 20; bottom: 4.5rem; right: 2rem; font-size: .9rem; color: rgba(17,17,17,.7); font-weight: 600; letter-spacing: .02em; transition: opacity .4s }
 @media (max-width: 1023px) {
   .robot-chip--status { top: 5rem; right: 1.25rem }
   .robot-chip--event { display: none }
   .robot-hint { left: 1.25rem; right: auto; bottom: 4.2rem }
 }
 
-.hero-status { position: absolute; inset-inline: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-inline: auto; max-width: var(--shell); border-top: 1px solid rgba(17,17,17,.12); padding: 1.2rem 1.25rem; font-size: .74rem; font-weight: 600; letter-spacing: .02em; color: rgba(17,17,17,.6) }
+.hero-status { position: absolute; inset-inline: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-inline: auto; max-width: var(--shell-wide); border-top: 1px solid rgba(17,17,17,.12); padding: 1.2rem 1.25rem; font-size: .74rem; font-weight: 600; letter-spacing: .02em; color: rgba(17,17,17,.6) }
 @media (min-width: 640px) { .hero-status { padding-left: 2rem; padding-right: 2rem } }
 .hero-status .mid { display: none }
 @media (min-width: 640px) { .hero-status .mid { display: inline } }
@@ -155,16 +162,18 @@
 
 /* ===== problem (해결하는 문제 — 카피는 landing_1p.html) ===== */
 #problem { background: #fff }
-.prob-sub { max-width: 44ch; font-size: .95rem; line-height: 1.6; color: rgba(17,17,17,.55) }
+.prob-sub { max-width: 44ch; font-size: .95rem; line-height: 1.6; color: rgba(17,17,17,.55); word-break: keep-all }
 .prob-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 3rem; list-style: none; padding: 0 }
 @media (min-width: 640px) { .prob-grid { grid-template-columns: 1fr 1fr } }
 @media (min-width: 1024px) { .prob-grid { grid-template-columns: repeat(4, 1fr) } }
 .prob-card { height: 100%; display: flex; flex-direction: column; gap: .8rem; border-radius: 1.25rem; background: var(--surface); padding: 1.75rem;
   transition: transform .45s var(--ease-snap), background .45s var(--ease-snap), box-shadow .45s var(--ease-snap), opacity .45s var(--ease-snap) }
 @media (hover:hover) and (pointer:fine) { .prob-card:hover { transform: translateY(-6px); background: var(--surface-2) } }
-.prob-tag { font-size: .72rem; font-weight: 700; letter-spacing: .08em; color: var(--accent) }
-.prob-card h3 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em }
-.prob-card p { font-size: .88rem; line-height: 1.6; color: rgba(17,17,17,.55) }
+/* 분류명이 길어 자간이 넓으면 카드 폭을 넘긴다. 트래킹만 좁혀 한 줄로 버티는 구간을 넓히고,
+   접히더라도 keep-all로 어절 단위로만 끊는다("교대근/무"처럼 낱글자가 갈리지 않게) */
+.prob-tag { font-size: .72rem; font-weight: 700; letter-spacing: .02em; color: var(--accent); word-break: keep-all }
+.prob-card h3 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; word-break: keep-all }
+.prob-card p { font-size: .88rem; line-height: 1.6; color: rgba(17,17,17,.55); word-break: keep-all }
 
 /* ---- 문제 해결 서사 (로봇이 하나씩 처리) ---- */
 /* 처리 전에는 가라앉아 있다가, 출동 대상이 되면 떠오르고, 해결되면 초록으로 확정된다 */
@@ -219,20 +228,24 @@
 .journey-eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .22em; color: var(--accent) }
 .journey-lead-in h2 { margin-top: .9rem; font-size: 2.4rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
 /* 이 기능이 어떤 문제를 되받는지 — 두 섹션을 잇는 고리 */
-.journey-answers { margin-top: 1rem; display: flex; align-items: center; gap: .5rem; font-size: .78rem; font-weight: 600 }
+/* 문제 이름이 길면 알약이 라벨 옆에 다 못 들어간다. 줄을 내려 알약이 한 줄로 유지되게 한다
+   (알약은 pill 라운드라 두 줄이 되면 모양이 깨진다) */
+.journey-answers { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .78rem; font-weight: 600 }
 .journey-answers__label { color: rgba(255,255,255,.45) }
 .journey-answers .font-mono { color: var(--accent-light); padding: .2rem .55rem; border-radius: 9999px;
   background: rgba(255,106,61,.14); box-shadow: inset 0 0 0 1px rgba(255,106,61,.3) }
 
-/* 기능 카드 — 체크포인트 도달 시 열린다. 좌우 번갈아, 원근 기울기 */
-.journey-card { position: absolute; z-index: 2; top: 50%; left: 4vw; width: min(27rem, 40vw);
+/* 기능 카드 — 체크포인트 도달 시 열린다. 네 모서리를 차례로(우상→좌상→좌하→우하), 원근 기울기 */
+.journey-card { position: absolute; z-index: 2; top: 7vh; left: 4vw; width: min(27rem, 40vw);
   border-radius: 1.75rem; background: var(--card); color: #fff; padding: 2rem;
   box-shadow: 0 24px 60px -24px rgba(17,17,17,.5), inset 0 0 0 1px rgba(255,255,255,.06);
   opacity: 0; visibility: hidden;
-  transform: translateY(-42%) translateX(-2.5rem) perspective(1200px) rotateY(9deg);
+  transform: translateX(-2.5rem) perspective(1200px) rotateY(9deg);
   transition: opacity .55s var(--ease-out), transform .55s var(--ease-out), visibility .55s }
-.journey-card.is-right { left: auto; right: 4vw; transform: translateY(-42%) translateX(2.5rem) perspective(1200px) rotateY(-9deg) }
-.journey-card.is-on { opacity: 1; visibility: visible; transform: translateY(-50%) translateX(0) perspective(1200px) rotateY(0deg) }
+.journey-card.is-right { left: auto; right: 4vw; transform: translateX(2.5rem) perspective(1200px) rotateY(-9deg) }
+/* 하단 모서리 — 진행 레일(bottom 2.5rem + 높이 2.5rem)에 닿지 않게 띄운다 */
+.journey-card.is-bottom { top: auto; bottom: 7rem }
+.journey-card.is-on { opacity: 1; visibility: visible; transform: translateX(0) perspective(1200px) rotateY(0deg) }
 .journey-no { font-size: .74rem; font-weight: 700; letter-spacing: .12em; color: var(--accent-light) }
 .journey-card h3 { margin-top: .7rem; font-size: 1.65rem; font-weight: 700; letter-spacing: -.02em; word-break: keep-all }
 .journey-card p { margin-top: .8rem; font-size: .92rem; line-height: 1.65; color: rgba(255,255,255,.62); word-break: keep-all }

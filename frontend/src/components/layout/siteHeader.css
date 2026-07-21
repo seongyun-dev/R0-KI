@@ -14,8 +14,10 @@
 .header__row { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 1.15rem 1.25rem }
 @media (min-width: 640px) { .header__row { padding: 1.4rem 2rem } }
 
-.brand { display: flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 700 }
-.brand .mk { width: 1.5rem; height: 1.5rem; color: var(--accent) }
+/* 주 사용자가 고령의 경비원이라 상단바는 크기·대비를 넉넉히 잡는다.
+   본문 최소 16px, 보조 문구도 흐린 회색(대비 3:1 미만)을 쓰지 않는다. */
+.brand { display: flex; align-items: center; gap: .6rem; font-size: 1.15rem; font-weight: 700 }
+.brand .mk { width: 1.55rem; height: 1.55rem; color: var(--accent) }
 
 /* ---- 순찰 ON/OFF 토글 — 캡슐 안에서 현재 위치만 딥 블랙 알약으로 ---- */
 .patrol-switch { display: none; align-items: center; gap: .25rem; padding: .3rem;
@@ -23,8 +25,8 @@
   box-shadow: 0 10px 26px -16px rgba(17,17,17,.45), inset 0 0 0 1px rgba(230,229,226,.9) }
 @media (min-width: 1024px) { .patrol-switch { display: flex } }
 .patrol-switch__seg { display: inline-flex; align-items: center; gap: .5rem; white-space: nowrap;
-  padding: .55rem 1.15rem; border-radius: 9999px; font-size: .85rem; font-weight: 600;
-  color: rgba(17,17,17,.55);
+  padding: .65rem 1.4rem; border-radius: 9999px; font-size: 1rem; font-weight: 600;
+  color: rgba(17,17,17,.72);
   transition: background .35s var(--ease-snap), color .35s var(--ease-snap), box-shadow .35s var(--ease-snap) }
 @media (hover: hover) and (pointer: fine) {
   .patrol-switch__seg:not(.is-on):hover { background: rgba(17,17,17,.05); color: rgba(17,17,17,.8) }
@@ -39,15 +41,15 @@
 
 /* ---- 우측 묶음 ---- */
 .header__right { display: flex; align-items: center; gap: .75rem }
-.clock-chip { display: none; align-items: center; gap: .6rem; border: 1px solid rgba(230,229,226,.9); background: rgba(255,255,255,.45); backdrop-filter: blur(6px); border-radius: .875rem; padding: .5rem .8rem; font-size: .72rem; color: rgba(17,17,17,.7) }
+.clock-chip { display: none; align-items: center; gap: .6rem; border: 1px solid rgba(230,229,226,.9); background: rgba(255,255,255,.45); backdrop-filter: blur(6px); border-radius: .875rem; padding: .65rem 1rem; font-size: 1rem; color: rgba(17,17,17,.78) }
 @media (min-width: 768px) { .clock-chip { display: flex } }
-.clock-chip .lbl { color: rgba(17,17,17,.45) }
-.clock-chip .time { min-width: 4.6rem; font-weight: 600; color: #111 }
-.clock-chip .live { width: .4rem; height: .4rem; border-radius: 9999px; background: var(--online); box-shadow: 0 0 0 3px rgba(34,197,94,.18) }
+.clock-chip .lbl { color: rgba(17,17,17,.68) }
+.clock-chip .time { min-width: 5.4rem; font-weight: 700; color: #111 }
+.clock-chip .live { width: .5rem; height: .5rem; border-radius: 9999px; background: var(--online); box-shadow: 0 0 0 3px rgba(34,197,94,.18) }
 
 .menu-btn { border: 1px solid rgba(230,229,226,.9); background: rgba(255,255,255,.45); backdrop-filter: blur(6px); border-radius: .875rem; transition: background .25s }
 @media (hover:hover) and (pointer:fine) { .menu-btn:hover { background: rgba(255,255,255,.75) } }
-.menu-btn .hv { display: inline-flex; align-items: center; gap: .5rem; padding: .55rem 1rem; font-size: .78rem; font-weight: 600; letter-spacing: .02em; transition: transform .35s cubic-bezier(.2,.8,.2,1) }
+.menu-btn .hv { display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.25rem; font-size: 1rem; font-weight: 600; letter-spacing: .02em; transition: transform .35s cubic-bezier(.2,.8,.2,1) }
 @media (hover:hover) and (pointer:fine) { .menu-btn:hover .hv { transform: scale(1.05) } }
 
 .header-cta { display: none }
