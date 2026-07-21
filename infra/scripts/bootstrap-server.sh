@@ -68,6 +68,11 @@ for script_name in \
     "/srv/aiot/deploy/${script_name}"
 done
 
+# The official MySQL image runs as UID/GID 999. Keep the shared aiot group so
+# operators can inspect the bind mount without taking write access from MySQL.
+chown 999:aiot /srv/aiot/data/mysql
+chmod 2770 /srv/aiot/data/mysql
+
 # The Eclipse Mosquitto image runs as UID/GID 1883.
 chown 1883:aiot /srv/aiot/data/mosquitto
 chmod 2770 /srv/aiot/data/mosquitto
