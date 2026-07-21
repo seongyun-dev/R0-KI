@@ -1,0 +1,94 @@
+{
+  "version": "2.0",
+  "lastUpdated": "2026-07-20T22:44:38.204Z",
+  "activeFeatures": [
+    "aiot-infrastructure"
+  ],
+  "primaryFeature": "aiot-infrastructure",
+  "features": {
+    "aiot-infrastructure": {
+      "phase": "check",
+      "matchRate": 78,
+      "iterationCount": 1,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-20T12:43:19.236Z",
+          "completedAt": "2026-07-20T12:45:24.915Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-20T12:43:19.236Z",
+          "completedAt": "2026-07-20T12:59:47.544Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-20T12:43:19.236Z",
+          "completedAt": "2026-07-20T22:44:38.204Z"
+        },
+        {
+          "phase": "check",
+          "status": "active",
+          "createdAt": "2026-07-20T12:43:19.236Z"
+        },
+        {
+          "phase": "report",
+          "status": "pending",
+          "createdAt": "2026-07-20T12:43:19.236Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-20T12:43:19.237Z",
+        "lastUpdated": "2026-07-20T22:44:38.204Z"
+      }
+    }
+  },
+  "pipeline": {
+    "currentPhase": 1,
+    "level": "Starter",
+    "phaseHistory": []
+  },
+  "session": {
+    "startedAt": "2026-07-20T12:43:19.234Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-07-20T22:44:38.204Z"
+  },
+  "history": [
+    {
+      "feature": "aiot-infrastructure",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-20T12:45:24.914Z"
+    },
+    {
+      "feature": "aiot-infrastructure",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-20T12:45:24.914Z"
+    },
+    {
+      "feature": "aiot-infrastructure",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-20T12:54:50.865Z"
+    },
+    {
+      "feature": "aiot-infrastructure",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-20T12:59:47.542Z"
+    },
+    {
+      "feature": "aiot-infrastructure",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-20T12:59:47.543Z"
+    }
+  ]
+}
