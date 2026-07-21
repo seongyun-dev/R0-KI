@@ -3,7 +3,6 @@ import { SiteHeader } from '../components/layout/SiteHeader'
 import { SiteFooter } from '../components/layout/SiteFooter'
 import { HowSection } from '../features/landing/HowSection'
 import { PatrolStage } from '../features/landing/PatrolStage'
-import { ImpactSection } from '../features/landing/ImpactSection'
 import { Loader } from '../features/landing/Loader'
 import { NavMenu } from '../features/landing/NavMenu'
 import { useClock } from '../features/landing/useClock'
@@ -77,7 +76,6 @@ export default function Landing() {
       <main id="main">
         <PatrolStage ready={ready} />
         <HowSection />
-        <ImpactSection />
       </main>
 
       <SiteFooter />

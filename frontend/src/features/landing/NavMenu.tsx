@@ -13,7 +13,6 @@ const items: { label: string; target?: string; to?: string }[] = [
   { label: '홈', target: 'home' },
   { label: '기능', target: 'features' },
   { label: '작동방식', target: 'how' },
-  { label: '도입효과', target: 'impact' },
   { label: '로그인', to: '/login' },
   { label: '회원가입', to: '/signup/onboarding' },
 ]
