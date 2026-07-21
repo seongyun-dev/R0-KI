@@ -1,0 +1,54 @@
+/* ============================================================
+   Site header — 랜딩과 로그인이 함께 쓰는 상단바.
+   랜딩에서는 히어로 위에 겹쳐 뜨고(absolute + 로더 종료 후 진입),
+   히어로가 없는 화면에서는 문서 흐름에 놓인다(.is-plain).
+   ============================================================ */
+
+.site-header { position: absolute; inset-inline: 0; top: 0; z-index: 50; opacity: 0; transform: translateY(-14px);
+  transition: opacity .7s var(--ease-out), transform .7s var(--ease-out) }
+.site-header.in { opacity: 1; transform: none }
+.site-header.is-plain { position: relative; opacity: 1; transform: none }
+
+/* .shell은 랜딩 전용 규칙이라 헤더 안에서는 따로 잡아준다 (로그인 화면에서도 폭이 맞도록) */
+.site-header .shell { max-width: var(--shell); margin-inline: auto }
+.header__row { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 1.15rem 1.25rem }
+@media (min-width: 640px) { .header__row { padding: 1.4rem 2rem } }
+
+.brand { display: flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 700 }
+.brand .mk { width: 1.5rem; height: 1.5rem; color: var(--accent) }
+
+/* ---- 순찰 ON/OFF 토글 — 캡슐 안에서 현재 위치만 딥 블랙 알약으로 ---- */
+.patrol-switch { display: none; align-items: center; gap: .25rem; padding: .3rem;
+  border-radius: 9999px; background: rgba(255,255,255,.72); backdrop-filter: blur(8px);
+  box-shadow: 0 10px 26px -16px rgba(17,17,17,.45), inset 0 0 0 1px rgba(230,229,226,.9) }
+@media (min-width: 1024px) { .patrol-switch { display: flex } }
+.patrol-switch__seg { display: inline-flex; align-items: center; gap: .5rem; white-space: nowrap;
+  padding: .55rem 1.15rem; border-radius: 9999px; font-size: .85rem; font-weight: 600;
+  color: rgba(17,17,17,.55);
+  transition: background .35s var(--ease-snap), color .35s var(--ease-snap), box-shadow .35s var(--ease-snap) }
+@media (hover: hover) and (pointer: fine) {
+  .patrol-switch__seg:not(.is-on):hover { background: rgba(17,17,17,.05); color: rgba(17,17,17,.8) }
+}
+.patrol-switch__seg.is-on { background: var(--ink); color: #fff; box-shadow: 0 8px 18px -10px rgba(17,17,17,.65) }
+/* 상태 점 — OFF는 꺼진 회색, ON은 살아있는 초록 */
+.patrol-switch__dot { width: .45rem; height: .45rem; flex: none; border-radius: 9999px;
+  background: currentColor; opacity: .4; transition: opacity .35s var(--ease-snap) }
+.patrol-switch__seg.is-on .patrol-switch__dot { opacity: .85 }
+.patrol-switch__dot--live { background: var(--online); opacity: 1 }
+.patrol-switch__seg.is-on .patrol-switch__dot--live { opacity: 1; box-shadow: 0 0 0 3px rgba(34,197,94,.22) }
+
+/* ---- 우측 묶음 ---- */
+.header__right { display: flex; align-items: center; gap: .75rem }
+.clock-chip { display: none; align-items: center; gap: .6rem; border: 1px solid rgba(230,229,226,.9); background: rgba(255,255,255,.45); backdrop-filter: blur(6px); border-radius: .875rem; padding: .5rem .8rem; font-size: .72rem; color: rgba(17,17,17,.7) }
+@media (min-width: 768px) { .clock-chip { display: flex } }
+.clock-chip .lbl { color: rgba(17,17,17,.45) }
+.clock-chip .time { min-width: 4.6rem; font-weight: 600; color: #111 }
+.clock-chip .live { width: .4rem; height: .4rem; border-radius: 9999px; background: var(--online); box-shadow: 0 0 0 3px rgba(34,197,94,.18) }
+
+.menu-btn { border: 1px solid rgba(230,229,226,.9); background: rgba(255,255,255,.45); backdrop-filter: blur(6px); border-radius: .875rem; transition: background .25s }
+@media (hover:hover) and (pointer:fine) { .menu-btn:hover { background: rgba(255,255,255,.75) } }
+.menu-btn .hv { display: inline-flex; align-items: center; gap: .5rem; padding: .55rem 1rem; font-size: .78rem; font-weight: 600; letter-spacing: .02em; transition: transform .35s cubic-bezier(.2,.8,.2,1) }
+@media (hover:hover) and (pointer:fine) { .menu-btn:hover .hv { transform: scale(1.05) } }
+
+.header-cta { display: none }
+@media (min-width: 1024px) { .header-cta { display: inline-flex } }

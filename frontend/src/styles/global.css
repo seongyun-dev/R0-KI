@@ -1,0 +1,24 @@
+/* Pretendard (한국어 웹폰트) */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+
+/* 디자인 토큰 (CSS 변수) — Tailwind보다 먼저 */
+@import './tokens.css';
+
+/* Tailwind v3 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    letter-spacing: -0.01em;
+    overflow-x: hidden;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* 숫자/수치는 tabular */
+  .tabular { font-variant-numeric: tabular-nums; }
+}
