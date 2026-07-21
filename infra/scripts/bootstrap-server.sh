@@ -62,7 +62,8 @@ for script_name in \
   install-nginx.sh \
   monitor-health.sh \
   rollback.sh \
-  sync-certificates.sh; do
+  sync-certificates.sh \
+  sync-runtime.sh; do
   install -m 0750 -o root -g aiot \
     "${source_root}/infra/scripts/${script_name}" \
     "/srv/aiot/deploy/${script_name}"
