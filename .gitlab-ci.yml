@@ -323,14 +323,14 @@ frontend_image:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
-        - frontend/Dockerfile
+        - frontend/package.json
       changes:
         - frontend/**/*
         - infra/compose/compose.application.yaml
         - .gitlab-ci.yml
     - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
-        - frontend/Dockerfile
+        - frontend/package.json
       changes:
         - frontend/**/*
         - infra/compose/compose.application.yaml
@@ -346,14 +346,14 @@ backend_image:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
-        - backend/Dockerfile
+        - backend/gradlew
       changes:
         - backend/**/*
         - infra/compose/compose.application.yaml
         - .gitlab-ci.yml
     - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
-        - backend/Dockerfile
+        - backend/gradlew
       changes:
         - backend/**/*
         - infra/compose/compose.application.yaml
