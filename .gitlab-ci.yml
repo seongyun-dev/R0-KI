@@ -3,6 +3,7 @@ stages:
   - test
   - build
   - package
+  - sync
   - deploy
   - verify
 
@@ -425,6 +426,21 @@ jetson_publish:
     name: jetson-stable
     url: https://i15e103.p.ssafy.io/jetson/releases/stable/manifest.json
 
+sync_runtime:
+  stage: sync
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
+      changes:
+        - frontend/**/*
+        - backend/**/*
+        - infra/**/*
+        - .gitlab-ci.yml
+    - when: never
+  script:
+    - bash infra/scripts/sync-runtime.sh
+
 deploy_develop:
   stage: deploy
   interruptible: false
@@ -455,6 +471,7 @@ deploy_master:
       allow_failure: false
     - when: never
   script:
+    - bash infra/scripts/sync-runtime.sh
     - bash infra/scripts/deploy.sh master "$CI_COMMIT_SHA" auto
   environment:
     name: aiot-ec2
