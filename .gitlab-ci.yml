@@ -397,7 +397,7 @@ jetson_publish:
     - job: jetson_package
       artifacts: true
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
