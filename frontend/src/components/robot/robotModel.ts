@@ -22,6 +22,26 @@ function glowTexture() {
   return new THREE.CanvasTexture(c)
 }
 
+/** 이마(바이저 위)에 얹는 R0-Ki 각인 */
+function logoTexture() {
+  const c = document.createElement('canvas')
+  c.width = 512
+  c.height = 160
+  const g = c.getContext('2d')!
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  // 캔버스 폭을 최대한 채워야 같은 평면에서도 글자가 크게 보인다
+  g.font = 'bold 132px Pretendard, system-ui, sans-serif'
+  const target = 470
+  const w = g.measureText('R0-Ki').width
+  if (w > target) g.font = `bold ${Math.floor((132 * target) / w)}px Pretendard, system-ui, sans-serif`
+  g.fillStyle = '#f2f1ef'
+  g.fillText('R0-Ki', 256, 84)
+  const t = new THREE.CanvasTexture(c)
+  t.anisotropy = 4
+  return t
+}
+
 export function buildRobot() {
   // ---- materials ----
   const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0x0c0c10, metalness: 0.55, roughness: 0.32, clearcoat: 0.9, clearcoatRoughness: 0.28, envMapIntensity: 1.0 })
@@ -58,6 +78,17 @@ export function buildRobot() {
   glow2.material.opacity = 0.5
   glow2.position.set(0, -0.02, 1.12)
   head.add(glow2)
+
+  // ---- forehead brand mark ----
+  // 이마는 face 박스가 아니라 skull 돔이 앞으로 더 나와 있다(y=0.36에서 돔 앞면 z≈1.20).
+  // 돔보다 살짝 앞(1.215)에 두고, 그 지점의 법선 기울기(약 18°)만큼 눕혀 표면에 붙은 것처럼 보이게 한다.
+  const logo = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.72, 0.225),
+    new THREE.MeshBasicMaterial({ map: logoTexture(), transparent: true, depthWrite: false }),
+  )
+  logo.position.set(0, 0.36, 1.215)
+  logo.rotation.x = -0.31
+  head.add(logo)
 
   // ---- side sensor pod ----
   const podArm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.18, 24), trimMat)

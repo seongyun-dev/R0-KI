@@ -37,29 +37,26 @@ export function Hero({ hintHidden }: HeroProps) {
             <span className="dot" />자율 순찰 · AI 비전 · 관제 대시보드
           </span>
           <h1 className="hero-h1" data-reveal="line" data-gate="ready" data-delay="250" data-line-stagger="110">
-            <span className="line"><span className="inner">사람이 못 보는 시간에도</span></span>
-            <span className="line"><span className="inner"><span className="accent">단지는 계속 순찰됩니다</span></span></span>
+            <span className="line"><span className="inner">로봇과 경비원이 함께 만드는</span></span>
+            <span className="line"><span className="inner"><span className="accent">더 효율적인 단지 순찰</span></span></span>
           </h1>
           <p className="hero-sub" data-reveal="up" data-gate="ready" data-delay="450" style={{ '--ry': '10px' } as React.CSSProperties}>
-            로봇이 정해진 구역을 스스로 돌며 이상 상황을 판별하고, 위치·시각·현장 스냅샷을 관리실 화면에 바로 띄웁니다. 순찰이 끝나면 일지는 자동으로 남습니다.
+            로봇이 지정된 구역을 순찰하며 현장 정보를 관리실로 전달합니다.
+            <br />
+            경비원은 관제 화면에서 순찰 상황을 확인하고, 필요한 상황에 집중해 대응할 수 있습니다.
           </p>
-          <div className="cta-row" data-reveal="up" data-gate="ready" data-delay="600" style={{ '--ry': '10px' } as React.CSSProperties}>
+          <div className="hero-stats" data-reveal="up" data-gate="ready" data-delay="600" style={{ '--ry': '10px' } as React.CSSProperties}>
+            <div className="hero-stat"><div className="n"><b>로봇</b></div><div className="l">구역별 반복 순찰</div></div>
+            <div className="hero-stat"><div className="n"><b>실시간</b></div><div className="l">관리실 현장 확인</div></div>
+            <div className="hero-stat"><div className="n"><b>자동</b></div><div className="l">순찰 기록 관리</div></div>
+          </div>
+          <div className="cta-row" data-reveal="up" data-gate="ready" data-delay="750" style={{ '--ry': '10px' } as React.CSSProperties}>
             <Button variant="accent" withArrow="right" onClick={() => navigate('/signup/onboarding')}>회원가입하기</Button>
             <Button variant="outline" onClick={() => navigate('/login')}>관리자 로그인 →</Button>
-          </div>
-          <div className="hero-stats" data-reveal="up" data-gate="ready" data-delay="750" style={{ '--ry': '10px' } as React.CSSProperties}>
-            <div className="hero-stat"><div className="n"><b>24</b>h</div><div className="l">무인 자율 순찰</div></div>
-            <div className="hero-stat"><div className="n"><b>4</b>종</div><div className="l">이상 상황 감지</div></div>
-            <div className="hero-stat"><div className="n"><b>100%</b></div><div className="l">순찰 일지 자동 작성</div></div>
           </div>
         </div>
       </div>
 
-      <div className="shell hero-status" data-reveal="fade" data-gate="ready" data-delay="900">
-        <span>2014년부터 자율 주행 기술 개발</span>
-        <span className="mid">전국 어디서나 원격 관제</span>
-        <span className="end">아래로 스크롤 <span aria-hidden="true">↓</span></span>
-      </div>
     </section>
   )
 }

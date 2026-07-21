@@ -7,31 +7,31 @@ import { cn } from '../../lib/cn'
 const problems = [
   {
     no: '01',
-    tag: '감지 지연',
-    title: '순찰과 순찰 사이가 비어 있습니다',
-    desc: '사람이 도는 몇 차례 회차 사이에 일어난 일은, 누군가 신고할 때까지 아무도 모릅니다.',
-    solvedBy: '24시간 자율 순찰로 공백을 없앱니다',
+    tag: '예기치 못한 상황 대응 지연',
+    title: '긴급 상황 발생 시 즉각 대응이 어렵습니다',
+    desc: '상황을 발견해도 어떻게 대응할지 판단하고 확인하는 시간이 더해져, 실제 조치로 이어지기까지 늦어집니다.',
+    solvedBy: '실시간 맵 관제',
   },
   {
     no: '02',
-    tag: '기록 휘발',
-    title: '수기 일지에는 요약만 남습니다',
-    desc: '누가 언제 어디를 돌았는지가 기억과 필체에 의존하고, 며칠만 지나도 확인할 방법이 없습니다.',
-    solvedBy: '회차별 경로와 시각이 자동으로 남습니다',
+    tag: '즉각 해결의 부재',
+    title: '이상 상황을 즉시 확인하고 해결하기 어렵습니다',
+    desc: '불법 주차나 무단 투기를 발견해도 관리실에 알리고 조치하기까지 시간이 걸려, 상황이 그대로 남습니다.',
+    solvedBy: '실시간 알림',
   },
   {
     no: '03',
-    tag: '증거 부재',
-    title: '사고 뒤에야 영상을 되감습니다',
-    desc: '고정 CCTV는 찍힌 곳만 남기고, 필요한 장면을 찾는 일은 사람이 몇 시간씩 돌려봐야 합니다.',
-    solvedBy: '탐지 순간의 스냅샷이 바로 붙습니다',
+    tag: '순찰일지 수기 작성의 번거로움',
+    title: '매번 순찰일지를 수기로 작성해야 합니다',
+    desc: '순찰을 마칠 때마다 시간과 구역, 특이사항을 손으로 적어야 하고, 쌓인 일지를 다시 찾아보기도 번거롭습니다.',
+    solvedBy: '자동 보고서 · AI 인사이트',
   },
   {
     no: '04',
-    tag: '반복 노동',
-    title: '같은 경로, 같은 양식이 매일 반복됩니다',
-    desc: '정해진 길을 걷고 정해진 칸을 채우는 시간이, 정작 사람이 판단해야 할 일을 밀어냅니다.',
-    solvedBy: '스케줄 순찰과 자동 작성이 대신합니다',
+    tag: '번거로운 교대근무',
+    title: '여러 사람이 교대로 순찰해야 하는 번거로움이 있습니다',
+    desc: '밤낮없이 이어지는 순찰을 사람이 번갈아 맡다 보니, 근무 조율과 인력 배치에 매번 손이 갑니다.',
+    solvedBy: '로봇 자율 순찰',
   },
 ]
 
@@ -54,15 +54,15 @@ export function ProblemSection({ active = -1, solved = -1 }: ProblemSectionProps
       <div className="shell sec-pad">
         <div className="center-head">
           <span data-reveal="up" style={{ '--ry': '10px' } as CSSProperties}>
-            <Eyebrow bordered>해결하는 문제</Eyebrow>
+            <Eyebrow bordered>경비원들이 겪고 있는 문제</Eyebrow>
           </span>
           <h2 className="sec-h2" data-reveal="line" data-delay="120">
-            <span className="line"><span className="inner">지금 단지 순찰은 사람의 시간에 묶여 있습니다</span></span>
+            <span className="line"><span className="inner">반복 순찰과 현장 대응이 경비원에게 큰 부담이 됩니다</span></span>
           </h2>
           <p className="prob-sub" data-reveal="up" data-delay="240" style={{ '--ry': '10px' } as CSSProperties}>
             {narrative
-              ? '로봇이 네 곳의 문제 지점을 차례로 처리합니다.'
-              : '순찰이 도는 동안만 단지가 보이고, 남는 기록은 사람이 기억한 만큼입니다.'}
+              ? '순찰 로봇 R0-Ki가 반복 순찰부터 실시간 관제와 기록 관리까지 네 가지 업무 부담을 줄입니다.'
+              : '교대 순찰과 현장 대응, 일지 작성까지 경비 업무의 부담이 곳곳에 쌓여 있습니다.'}
           </p>
         </div>
 
@@ -86,8 +86,10 @@ export function ProblemSection({ active = -1, solved = -1 }: ProblemSectionProps
                     isSolved && 'is-solved',
                   )}
                 >
+                  {/* 대괄호는 앞뒤 낱말에 붙여둔다(nbsp) — 좁은 폭에서 줄이 접힐 때
+                      여는/닫는 괄호만 다음 줄로 떨어져 깨져 보이는 것을 막는다 */}
                   <span className="prob-tag font-mono">
-                    [ {p.no} · {p.tag} ]
+                    [&nbsp;{p.no} · {p.tag}&nbsp;]
                   </span>
                   <h3>{p.title}</h3>
                   <p>{p.desc}</p>

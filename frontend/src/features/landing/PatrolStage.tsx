@@ -3,7 +3,6 @@ import type { ProblemPhase, ScreenAnchor } from '../../components/robot/PatrolRo
 import { Tag } from '../../components/ui'
 import { cn } from '../../lib/cn'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
-import { BridgeSection } from './BridgeSection'
 import { FeaturesSection } from './FeaturesSection'
 import { Hero } from './Hero'
 import { JOURNEY_STEPS } from './journeySteps'
@@ -80,14 +79,14 @@ function NarrativeStage({ ready }: { ready: boolean }) {
       const jp = jTotal > 0 ? Math.min(1, Math.max(0, -jr.top / jTotal)) : 0
       // 기능 구간에 한 번 들어서면 계속 유지한다. bottom 조건을 걸면 구간을 지나쳤을 때
       // 다시 문제 모드로 잡혀 로봇이 화면 밖 카드로 되돌아간다.
-      // 선행 구간을 짧게 잡아야(0.15) 앞의 전환 섹션이 제 몫의 시간을 갖는다.
+      // 진입 문턱을 짧게 잡아야(0.15) 문제 구간과 기능 구간 사이에 쉬는 박자가 남는다.
       const inJourney = jr.top <= vh * 0.15
 
       // ── 문제 구간 ──
       const pr = prob.getBoundingClientRect()
       const pTotal = pr.height - vh
       const pp = pTotal > 0 ? Math.min(1, Math.max(0, -pr.top / pTotal)) : 0
-      // 문제 구간을 지나면(전환 섹션) 커서 추적으로 돌아가 한 박자 쉰다
+      // 문제 구간을 지나 기능 구간에 들어서기 전까지는 커서 추적으로 돌아가 한 박자 쉰다
       const pastProblem = pr.bottom <= vh * 0.5
       const inProblem = !inJourney && !pastProblem && pr.top <= vh * 0.5
 
@@ -180,21 +179,23 @@ function NarrativeStage({ ready }: { ready: boolean }) {
         </div>
       </div>
 
-      {/* 문제 → 기능 전환 — 대응 관계를 정리하고 넘어간다 */}
-      <BridgeSection />
-
       {/* 기능 — 처리했던 지점들을 다시 돌며 설명 */}
       <div ref={jrnRef} id="features" className="journey-track">
         <div className="journey-pin">
           <div className={cn('journey-lead-in', ui.step >= 0 && 'is-out')}>
             <p className="journey-eyebrow font-mono">[ 기능 ]</p>
-            <h2>방금 그 네 곳을, 로봇이 매일 돕니다</h2>
+            <h2>이제 순찰은 R0-Ki가 맡습니다</h2>
           </div>
 
           {JOURNEY_STEPS.map((s, i) => (
             <article
               key={s.no}
-              className={cn('journey-card', s.side === 'right' && 'is-right', ui.step === i && 'is-on')}
+              className={cn(
+                'journey-card',
+                s.side === 'right' && 'is-right',
+                s.vert === 'bottom' && 'is-bottom',
+                ui.step === i && 'is-on',
+              )}
               aria-hidden={ui.step !== i}
             >
               <span className="journey-no font-mono tabular">[ {s.no} ]</span>
