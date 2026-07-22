@@ -1,5 +1,7 @@
 package com.oneloop.robot.service;
 
+import com.oneloop.apartment.domain.ApartmentComplex;
+import com.oneloop.apartment.repository.ApartmentComplexRepository;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.response.PageResponse;
@@ -7,8 +9,6 @@ import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.CheckpointType;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
-import com.oneloop.member.domain.Member;
-import com.oneloop.member.repository.MemberRepository;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.dto.response.PatrolSummaryResponse;
 import com.oneloop.patrol.repository.PatrolRepository;
@@ -39,7 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class RobotService {
 
     private final RobotRepository robotRepository;
-    private final MemberRepository memberRepository;
+    private final ApartmentComplexRepository apartmentComplexRepository;
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final PatrolRepository patrolRepository;
@@ -47,36 +47,32 @@ public class RobotService {
     /**
      * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다.
      *
-     * @param memberId 로그인한 관리자 식별자
+     * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @param request 로봇 이름과 시리얼 번호
      * @return 등록된 로봇 정보
-     * @throws BusinessException 관리자가 존재하지 않거나, 시리얼 번호가 이미 등록되어 있는 경우
+     * @throws BusinessException 시리얼 번호가 이미 등록되어 있는 경우
      */
     @Transactional
-    public RobotRegisterResponse register(Long memberId, RobotRegisterRequest request) {
+    public RobotRegisterResponse register(Long apartmentComplexId, RobotRegisterRequest request) {
         // 시리얼 번호 중복 시 등록 거부
         if (robotRepository.findBySerialNumber(request.getSerialNumber()).isPresent()) {
             throw new BusinessException(ErrorCode.ROBOT_SERIAL_NUMBER_DUPLICATE);
         }
 
-        Member member = getMember(memberId);
+        ApartmentComplex apartmentComplex = apartmentComplexRepository.getReferenceById(apartmentComplexId);
         PatrolRobot robot =
-                new PatrolRobot(
-                        member.getApartmentComplex(), request.getName(), request.getSerialNumber());
+                new PatrolRobot(apartmentComplex, request.getName(), request.getSerialNumber());
         return RobotRegisterResponse.from(robotRepository.save(robot));
     }
 
     /**
      * 로그인한 관리자의 소속 단지에 등록된 순찰로봇 목록을 조회한다. 각 로봇의 현재 좌표가 속한 체크포인트 유형을 함께 반환한다.
      *
-     * @param memberId 로그인한 관리자 식별자
+     * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @param pageable 페이지 정보
      * @return 순찰로봇 페이지 목록
-     * @throws BusinessException 관리자가 존재하지 않는 경우
      */
-    public PageResponse<RobotListResponse> findAll(Long memberId, Pageable pageable) {
-        Long apartmentComplexId = getMember(memberId).getApartmentComplex().getId();
-
+    public PageResponse<RobotListResponse> findAll(Long apartmentComplexId, Pageable pageable) {
         // 로그인한 관리자의 단지에 속한 로봇만 페이지 조회
         Page<PatrolRobot> robots =
                 robotRepository.findAllByApartmentComplexId(apartmentComplexId, pageable);
@@ -98,13 +94,10 @@ public class RobotService {
     /**
      * 로그인한 관리자의 소속 단지 순찰로봇 현황(전체/순찰중/대기·충전중 수)을 조회한다.
      *
-     * @param memberId 로그인한 관리자 식별자
+     * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @return 로봇 현황 통계
-     * @throws BusinessException 관리자가 존재하지 않는 경우
      */
-    public RobotStatsResponse getStats(Long memberId) {
-        Long apartmentComplexId = getMember(memberId).getApartmentComplex().getId();
-
+    public RobotStatsResponse getStats(Long apartmentComplexId) {
         long totalCount = robotRepository.countByApartmentComplexId(apartmentComplexId);
         long patrollingCount =
                 robotRepository.countByApartmentComplexIdAndStatusIn(
@@ -119,14 +112,12 @@ public class RobotService {
     /**
      * 로그인한 관리자의 소속 단지에 등록된 순찰로봇 하나를 상세 조회한다.
      *
-     * @param memberId 로그인한 관리자 식별자
+     * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @param robotId 조회할 로봇 식별자
      * @return 로봇 상세 정보
-     * @throws BusinessException 관리자가 존재하지 않거나, 해당 단지에 그 로봇이 없는 경우
+     * @throws BusinessException 해당 단지에 그 로봇이 없는 경우
      */
-    public RobotDetailResponse findById(Long memberId, Long robotId) {
-        Long apartmentComplexId = getMember(memberId).getApartmentComplex().getId();
-
+    public RobotDetailResponse findById(Long apartmentComplexId, Long robotId) {
         PatrolRobot robot =
                 robotRepository
                         .findByIdAndApartmentComplexId(robotId, apartmentComplexId)
@@ -167,13 +158,6 @@ public class RobotService {
             return patrol.getTotalDuration();
         }
         return Duration.between(patrol.getStartedAt(), now).getSeconds();
-    }
-
-    // memberId로 회원을 조회한다. 토큰은 유효해도 회원이 삭제된 경우를 방어한다.
-    private Member getMember(Long memberId) {
-        return memberRepository
-                .findById(memberId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
     }
 
     // 로봇 좌표가 속한 체크포인트의 유형을 찾는다. 좌표가 없거나 어느 구역에도 속하지 않으면 null.
