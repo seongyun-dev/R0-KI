@@ -9,15 +9,26 @@ import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.member.domain.Member;
 import com.oneloop.member.repository.MemberRepository;
+import com.oneloop.patrol.domain.Patrol;
+import com.oneloop.patrol.dto.response.PatrolSummaryResponse;
+import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.robot.domain.PatrolRobot;
+import com.oneloop.robot.domain.RobotStatus;
 import com.oneloop.robot.dto.request.RobotRegisterRequest;
+import com.oneloop.robot.dto.response.RobotDetailResponse;
 import com.oneloop.robot.dto.response.RobotListResponse;
-import com.oneloop.robot.dto.response.RobotResponse;
-import com.oneloop.robot.repository.PatrolRobotRepository;
+import com.oneloop.robot.dto.response.RobotRegisterResponse;
+import com.oneloop.robot.dto.response.RobotStatsResponse;
+import com.oneloop.robot.repository.RobotRepository;
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,10 +38,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class RobotService {
 
-    private final PatrolRobotRepository patrolRobotRepository;
+    private final RobotRepository robotRepository;
     private final MemberRepository memberRepository;
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
+    private final PatrolRepository patrolRepository;
 
     /**
      * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다.
@@ -41,9 +53,9 @@ public class RobotService {
      * @throws BusinessException 관리자가 존재하지 않거나, 시리얼 번호가 이미 등록되어 있는 경우
      */
     @Transactional
-    public RobotResponse register(Long memberId, RobotRegisterRequest request) {
+    public RobotRegisterResponse register(Long memberId, RobotRegisterRequest request) {
         // 시리얼 번호 중복 시 등록 거부
-        if (patrolRobotRepository.findBySerialNumber(request.getSerialNumber()).isPresent()) {
+        if (robotRepository.findBySerialNumber(request.getSerialNumber()).isPresent()) {
             throw new BusinessException(ErrorCode.ROBOT_SERIAL_NUMBER_DUPLICATE);
         }
 
@@ -51,7 +63,7 @@ public class RobotService {
         PatrolRobot robot =
                 new PatrolRobot(
                         member.getApartmentComplex(), request.getName(), request.getSerialNumber());
-        return RobotResponse.from(patrolRobotRepository.save(robot));
+        return RobotRegisterResponse.from(robotRepository.save(robot));
     }
 
     /**
@@ -67,7 +79,7 @@ public class RobotService {
 
         // 로그인한 관리자의 단지에 속한 로봇만 페이지 조회
         Page<PatrolRobot> robots =
-                patrolRobotRepository.findAllByApartmentComplexId(apartmentComplexId, pageable);
+                robotRepository.findAllByApartmentComplexId(apartmentComplexId, pageable);
 
         // 단지의 맵과 체크포인트를 한 번만 조회해 모든 로봇에 재사용
         List<Checkpoint> checkpoints =
@@ -81,6 +93,80 @@ public class RobotService {
                         robot ->
                                 RobotListResponse.of(robot, matchCheckpointType(robot, checkpoints)));
         return PageResponse.from(responses);
+    }
+
+    /**
+     * 로그인한 관리자의 소속 단지 순찰로봇 현황(전체/순찰중/대기·충전중 수)을 조회한다.
+     *
+     * @param memberId 로그인한 관리자 식별자
+     * @return 로봇 현황 통계
+     * @throws BusinessException 관리자가 존재하지 않는 경우
+     */
+    public RobotStatsResponse getStats(Long memberId) {
+        Long apartmentComplexId = getMember(memberId).getApartmentComplex().getId();
+
+        long totalCount = robotRepository.countByApartmentComplexId(apartmentComplexId);
+        long patrollingCount =
+                robotRepository.countByApartmentComplexIdAndStatusIn(
+                        apartmentComplexId, List.of(RobotStatus.PATROLLING));
+        long idleOrChargingCount =
+                robotRepository.countByApartmentComplexIdAndStatusIn(
+                        apartmentComplexId, List.of(RobotStatus.IDLE, RobotStatus.CHARGING));
+
+        return new RobotStatsResponse(totalCount, patrollingCount, idleOrChargingCount);
+    }
+
+    /**
+     * 로그인한 관리자의 소속 단지에 등록된 순찰로봇 하나를 상세 조회한다.
+     *
+     * @param memberId 로그인한 관리자 식별자
+     * @param robotId 조회할 로봇 식별자
+     * @return 로봇 상세 정보
+     * @throws BusinessException 관리자가 존재하지 않거나, 해당 단지에 그 로봇이 없는 경우
+     */
+    public RobotDetailResponse findById(Long memberId, Long robotId) {
+        Long apartmentComplexId = getMember(memberId).getApartmentComplex().getId();
+
+        PatrolRobot robot =
+                robotRepository
+                        .findByIdAndApartmentComplexId(robotId, apartmentComplexId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
+
+        // 최근 순찰 기록 미리보기 5건 (조정 가능)
+        List<PatrolSummaryResponse> recentPatrols =
+                patrolRepository
+                        .findAllByRobotIdOrderByStartedAtDesc(robotId, PageRequest.of(0, 5))
+                        .map(PatrolSummaryResponse::from)
+                        .getContent();
+
+        return RobotDetailResponse.from(robot, calculateWeeklyOperationRate(robotId), recentPatrols);
+    }
+
+    // 이번 주(월요일 0시)가 시작된 이후 지금까지 경과한 시간 대비, 그동안 순찰한 시간의 비율(%)을 계산한다.
+    private double calculateWeeklyOperationRate(Long robotId) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime weekStart =
+                now.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toLocalDate().atStartOfDay();
+
+        long elapsedSeconds = Duration.between(weekStart, now).getSeconds();
+        if (elapsedSeconds <= 0) {
+            return 0.0;
+        }
+
+        long activeSeconds =
+                patrolRepository.findAllByRobotIdAndStartedAtGreaterThanEqual(robotId, weekStart).stream()
+                        .mapToLong(patrol -> patrolActiveSeconds(patrol, now))
+                        .sum();
+
+        return Math.min(100.0, Math.round((activeSeconds * 1000.0 / elapsedSeconds)) / 10.0);
+    }
+
+    // 완료된 순찰은 저장된 총 소요시간을, 진행중인 순찰은 시작 시각부터 지금까지의 경과시간을 사용한다.
+    private long patrolActiveSeconds(Patrol patrol, LocalDateTime now) {
+        if (patrol.getTotalDuration() != null) {
+            return patrol.getTotalDuration();
+        }
+        return Duration.between(patrol.getStartedAt(), now).getSeconds();
     }
 
     // memberId로 회원을 조회한다. 토큰은 유효해도 회원이 삭제된 경우를 방어한다.

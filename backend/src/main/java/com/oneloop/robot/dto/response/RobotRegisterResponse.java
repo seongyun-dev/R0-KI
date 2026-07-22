@@ -8,11 +8,11 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-@Schema(description = "순찰로봇 응답")
+@Schema(description = "순찰로봇 등록 응답")
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class RobotResponse {
+public class RobotRegisterResponse {
 
     @Schema(description = "로봇 ID", example = "1")
     private Long robotId;
@@ -29,8 +29,8 @@ public class RobotResponse {
     @Schema(description = "등록일시")
     private LocalDateTime registeredAt;
 
-    public static RobotResponse from(PatrolRobot robot) {
-        return new RobotResponse(
+    public static RobotRegisterResponse from(PatrolRobot robot) {
+        return new RobotRegisterResponse(
                 robot.getId(),
                 robot.getName(),
                 robot.getSerialNumber(),
