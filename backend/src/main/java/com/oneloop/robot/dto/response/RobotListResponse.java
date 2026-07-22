@@ -6,6 +6,7 @@ import com.oneloop.robot.domain.RobotStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -13,6 +14,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class RobotListResponse {
 
     @Schema(description = "로봇 ID", example = "1")
@@ -31,11 +33,12 @@ public class RobotListResponse {
     private CheckpointType checkpointType;
 
     public static RobotListResponse of(PatrolRobot robot, CheckpointType checkpointType) {
-        return new RobotListResponse(
-                robot.getId(),
-                robot.getName(),
-                robot.getStatus(),
-                robot.getBatteryLevel(),
-                checkpointType);
+        return RobotListResponse.builder()
+                .robotId(robot.getId())
+                .robotName(robot.getName())
+                .robotStatus(robot.getStatus())
+                .batteryLevel(robot.getBatteryLevel())
+                .checkpointType(checkpointType)
+                .build();
     }
 }

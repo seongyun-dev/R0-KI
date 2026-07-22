@@ -78,4 +78,12 @@ public class PatrolRobot extends BaseEntity {
     public void changeStatus(RobotStatus status) {
         this.status = status;
     }
+
+    public void rename(String name) {
+        this.name = name;
+    }
+
+    public void delete() {
+        this.status = RobotStatus.DELETED;
+    }
 }

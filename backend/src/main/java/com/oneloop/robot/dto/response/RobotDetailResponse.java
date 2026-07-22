@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -16,6 +17,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class RobotDetailResponse {
 
     @Schema(description = "로봇 ID", example = "1")
@@ -62,17 +64,18 @@ public class RobotDetailResponse {
 
     public static RobotDetailResponse from(
             PatrolRobot robot, double weeklyOperationRate, List<PatrolSummaryResponse> recentPatrols) {
-        return new RobotDetailResponse(
-                robot.getId(),
-                robot.getName(),
-                robot.getSerialNumber(),
-                robot.getStatus(),
-                robot.getBatteryLevel(),
-                robot.getCameraStatus(),
-                robot.getLidarStatus(),
-                robot.getMotorStatus(),
-                robot.getCreatedAt(),
-                weeklyOperationRate,
-                recentPatrols);
+        return RobotDetailResponse.builder()
+                .robotId(robot.getId())
+                .robotName(robot.getName())
+                .robotSerialNumber(robot.getSerialNumber())
+                .robotStatus(robot.getStatus())
+                .batteryLevel(robot.getBatteryLevel())
+                .cameraStatus(robot.getCameraStatus())
+                .lidarStatus(robot.getLidarStatus())
+                .motorStatus(robot.getMotorStatus())
+                .registeredAt(robot.getCreatedAt())
+                .weeklyOperationRate(weeklyOperationRate)
+                .recentPatrols(recentPatrols)
+                .build();
     }
 }

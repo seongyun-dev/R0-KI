@@ -11,11 +11,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface RobotRepository extends JpaRepository<PatrolRobot, Long> {
     Optional<PatrolRobot> findBySerialNumber(String serialNumber);
 
-    Page<PatrolRobot> findAllByApartmentComplexId(Long apartmentComplexId, Pageable pageable);
+    Page<PatrolRobot> findAllByApartmentComplexIdAndStatusNot(
+            Long apartmentComplexId, RobotStatus excludedStatus, Pageable pageable);
 
-    Optional<PatrolRobot> findByIdAndApartmentComplexId(Long id, Long apartmentComplexId);
+    Optional<PatrolRobot> findByIdAndApartmentComplexIdAndStatusNot(
+            Long id, Long apartmentComplexId, RobotStatus excludedStatus);
 
-    long countByApartmentComplexId(Long apartmentComplexId);
+    long countByApartmentComplexIdAndStatusNot(Long apartmentComplexId, RobotStatus excludedStatus);
 
     long countByApartmentComplexIdAndStatusIn(
             Long apartmentComplexId, Collection<RobotStatus> statuses);
