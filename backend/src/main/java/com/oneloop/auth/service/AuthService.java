@@ -89,7 +89,8 @@ public class AuthService {
         }
 
         String accessToken =
-                jwtTokenProvider.createAccessToken(member.getId().toString(), List.of());
+                jwtTokenProvider.createAccessToken(
+                        member.getId().toString(), member.getApartmentComplex().getId(), List.of());
         return new SigninResponse(accessToken);
     }
 

@@ -1,5 +1,6 @@
 package com.oneloop.robot.domain;
 
+import com.oneloop.apartment.domain.ApartmentComplex;
 import com.oneloop.global.common.BaseEntity;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
@@ -15,6 +16,10 @@ public class PatrolRobot extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "robot_id")
     private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "apartment_complex_id", nullable = false)
+    private ApartmentComplex apartmentComplex;
 
     @Column(name = "robot_name", nullable = false, length = 100)
     private String name;
@@ -38,10 +43,26 @@ public class PatrolRobot extends BaseEntity {
     @Column(name = "battery_level", precision = 5, scale = 2)
     private BigDecimal batteryLevel;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "camera_status", length = 20)
+    private SensorStatus cameraStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "lidar_status", length = 20)
+    private SensorStatus lidarStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "motor_status", length = 20)
+    private SensorStatus motorStatus;
+
+    @Column(name = "status_reported_at")
+    private LocalDateTime statusReportedAt;
+
     @Column(name = "last_connected_at")
     private LocalDateTime lastConnectedAt;
 
-    public PatrolRobot(String name, String serialNumber) {
+    public PatrolRobot(ApartmentComplex apartmentComplex, String name, String serialNumber) {
+        this.apartmentComplex = apartmentComplex;
         this.name = name;
         this.serialNumber = serialNumber;
     }

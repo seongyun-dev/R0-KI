@@ -14,13 +14,13 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
 
 @Component
 public class JwtTokenProvider {
 
     private static final String ROLES_CLAIM = "roles";
+    private static final String APARTMENT_COMPLEX_ID_CLAIM = "apartmentComplexId";
 
     private final SecretKey secretKey;
     private final long accessTokenExpiration;
@@ -32,10 +32,12 @@ public class JwtTokenProvider {
         this.accessTokenExpiration = accessTokenExpiration;
     }
 
-    public String createAccessToken(String subject, Collection<String> roles) {
+    public String createAccessToken(
+            String subject, Long apartmentComplexId, Collection<String> roles) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(subject)
+                .claim(APARTMENT_COMPLEX_ID_CLAIM, apartmentComplexId)
                 .claim(ROLES_CLAIM, roles)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusMillis(accessTokenExpiration)))
@@ -55,7 +57,10 @@ public class JwtTokenProvider {
                                 .map(GrantedAuthority.class::cast)
                                 .toList();
 
-        User principal = new User(claims.getSubject(), "", authorities);
+        Long memberId = Long.valueOf(claims.getSubject());
+        Long apartmentComplexId = claims.get(APARTMENT_COMPLEX_ID_CLAIM, Long.class);
+        CustomUserDetails principal =
+                new CustomUserDetails(memberId, apartmentComplexId, authorities);
         return new UsernamePasswordAuthenticationToken(principal, token, authorities);
     }
 
