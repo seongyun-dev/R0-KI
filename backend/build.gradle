@@ -22,7 +22,6 @@ repositories {
 spotless {
 	java {
 		googleJavaFormat().aosp()
-		formatAnnotations()
 		removeUnusedImports()
 		trimTrailingWhitespace()
 		endWithNewline()
