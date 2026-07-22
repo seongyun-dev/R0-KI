@@ -1,5 +1,12 @@
 # AIoT operations runbook
 
+> This runbook describes the **currently installed develop-centric runtime**.
+> The approved part-master CI/CD migration has not been applied yet. Before
+> changing branch or deployment rules, follow
+> [CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md), which requires
+> candidate integration tests, release manifests, and component rollback to be
+> verified before `deploy_develop` is disabled.
+
 ## Deployed topology
 
 ```text

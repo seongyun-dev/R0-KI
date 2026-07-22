@@ -2,7 +2,12 @@
 
 This directory contains the single-EC2 runtime and GitLab CI/CD skeleton.
 
-Start with [HANDOFF.md](HANDOFF.md) for the exact completion state, remaining work, branch prerequisites, and the planned Jetson pull-update design. See [OPERATIONS.md](OPERATIONS.md) for routine deployment, migration, backup, and certificate procedures.
+Start with [HANDOFF.md](HANDOFF.md) for the implemented completion state and
+[CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md) for the 2026-07-22
+approved target design: part-master releases, candidate integration gates,
+component manifests, and component rollback. See [OPERATIONS.md](OPERATIONS.md)
+for the currently installed deployment, migration, backup, and certificate
+procedures.
 
 ## Runtime
 
@@ -22,7 +27,13 @@ ai/dev    ─┤
 infra/dev ─┘
 ```
 
-Part branches run CI. `develop` deploys automatically. `master` deployment is manual.
+The currently installed pipeline still has part branches running CI,
+`develop` deploying automatically, and root `master` deploying manually. This
+is the **current state, not the new target**. The approved migration changes CD
+to part-master releases and removes production auto-deploy from `develop` only
+after component deployment, integration testing, manifests, and rollback have
+been verified. Follow [CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md)
+instead of changing branch rules directly.
 Robot and AI artifacts use an approved-release Pull OTA flow. CI packages only a
 `jetson-vX.Y.Z` tag, and a protected manual job publishes the immutable archive
 plus stable manifest. The Jetson validates compatibility and checksum before an
