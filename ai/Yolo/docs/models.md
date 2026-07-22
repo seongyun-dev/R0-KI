@@ -38,16 +38,17 @@
 | 중복 집계 | 카테고리별 수는 “해당 클래스가 포함된 이미지 수”에 가깝다. **한 장에 여러 클래스가 있으면 중복 집계**될 수 있어, 단순 합 ≠ 고유 이미지 수일 수 있다. |
 | Val | Images 1,113 / Instances 2,275 |
 
-### 데이터셋 링크 (채울 것)
+### 데이터셋 링크
 
-| 데이터 | 용도 | 링크 |
-|--------|------|------|
-| COCO (person 등) | 사람 계열 | _(링크 추가)_ |
-| 누운 사람 증강 데이터 | lying | _(링크 추가)_ |
-| TACO | 쓰레기 | _(링크 추가)_ |
-| 번호판 데이터 | licence | _(링크 추가)_ |
-| 쓰레기통/봉투 등 | bin / bag | _(링크 추가)_ |
-| (기타) | | _(링크 추가)_ |
+| 데이터 | 예시 이미지 | 용도 | 링크 |
+|--------|:----------:|------|------|
+| TACO (archive) | ![TACO](../scr/images/dataset_samples/taco_small_trash.jpg) | small_trash | [Roboflow](https://universe.roboflow.com/divya-lzcld/taco-mqclx/dataset/3) |
+| sitting-standing-lyingv2 | ![sslv2](../scr/images/dataset_samples/sitting_standing_lyingv2.jpg) | standing, sitting, lying | [Roboflow](https://universe.roboflow.com/surgicaldataset-h8qpp/sitting-standing-lyingv2/dataset/4) |
+| stand-sit-fall | ![ssf](../scr/images/dataset_samples/stand_sit_fall.jpg) | standing, sitting, lying | [Roboflow](https://universe.roboflow.com/swook1015-ijop5/stand-sit-fall/dataset/3) |
+| Garbage overflowing | ![overflow](../scr/images/dataset_samples/garbage_overflowing.jpg) | bin_overflow, bag_outside | [Roboflow](https://universe.roboflow.com/trash-qdazj/garbage-overflowing/dataset/1) |
+| garbage bin | — | bin_overflow, bin_normal, bag_outside | [Roboflow](https://universe.roboflow.com/xiantan-oktzj/garbage-bin-l7frd/dataset/1) |
+| trash bin | ![trash_bin](../scr/images/dataset_samples/trash_bin.jpg) | bin_normal | [Roboflow](https://universe.roboflow.com/stairs-ttqqp/trash-bin-asn0s/dataset/1) |
+| Car Plate | ![licence](../scr/images/dataset_samples/car_plate.jpg) | licence | [Roboflow](https://universe.roboflow.com/lilin-y1lc6/car-plate-b4twg/dataset/2) |
 
 ---
 
