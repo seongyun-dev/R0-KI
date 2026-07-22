@@ -5,6 +5,7 @@ import com.oneloop.patrol.domain.PatrolStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -12,6 +13,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class PatrolSummaryResponse {
 
     @Schema(description = "순찰 ID", example = "1")
@@ -30,11 +32,12 @@ public class PatrolSummaryResponse {
     private int detectedEventCount;
 
     public static PatrolSummaryResponse from(Patrol patrol) {
-        return new PatrolSummaryResponse(
-                patrol.getId(),
-                patrol.getStatus(),
-                patrol.getStartedAt(),
-                patrol.getEndedAt(),
-                patrol.getDetectedEventCount());
+        return PatrolSummaryResponse.builder()
+                .patrolId(patrol.getId())
+                .patrolStatus(patrol.getStatus())
+                .startedAt(patrol.getStartedAt())
+                .endedAt(patrol.getEndedAt())
+                .detectedEventCount(patrol.getDetectedEventCount())
+                .build();
     }
 }

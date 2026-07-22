@@ -5,6 +5,7 @@ import com.oneloop.robot.domain.RobotStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -12,6 +13,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class RobotRegisterResponse {
 
     @Schema(description = "로봇 ID", example = "1")
@@ -30,11 +32,12 @@ public class RobotRegisterResponse {
     private LocalDateTime registeredAt;
 
     public static RobotRegisterResponse from(PatrolRobot robot) {
-        return new RobotRegisterResponse(
-                robot.getId(),
-                robot.getName(),
-                robot.getSerialNumber(),
-                robot.getStatus(),
-                robot.getCreatedAt());
+        return RobotRegisterResponse.builder()
+                .robotId(robot.getId())
+                .robotName(robot.getName())
+                .robotSerialNumber(robot.getSerialNumber())
+                .robotStatus(robot.getStatus())
+                .registeredAt(robot.getCreatedAt())
+                .build();
     }
 }

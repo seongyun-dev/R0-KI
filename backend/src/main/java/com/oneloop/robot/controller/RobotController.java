@@ -4,10 +4,13 @@ import com.oneloop.global.response.ApiResponse;
 import com.oneloop.global.response.PageResponse;
 import com.oneloop.global.security.CustomUserDetails;
 import com.oneloop.robot.dto.request.RobotRegisterRequest;
+import com.oneloop.robot.dto.request.RobotUpdateRequest;
+import com.oneloop.robot.dto.response.RobotDeleteResponse;
 import com.oneloop.robot.dto.response.RobotDetailResponse;
 import com.oneloop.robot.dto.response.RobotListResponse;
 import com.oneloop.robot.dto.response.RobotRegisterResponse;
 import com.oneloop.robot.dto.response.RobotStatsResponse;
+import com.oneloop.robot.dto.response.RobotUpdateResponse;
 import com.oneloop.robot.service.RobotService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -16,7 +19,9 @@ import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -61,5 +66,25 @@ public class RobotController {
     public ApiResponse<RobotDetailResponse> detail(
             @AuthenticationPrincipal CustomUserDetails principal, @PathVariable Long robotId) {
         return ApiResponse.success(robotService.findById(principal.getApartmentComplexId(), robotId));
+    }
+
+    @Operation(summary = "로봇 수정", description = "순찰로봇의 이름을 수정합니다.")
+    @PatchMapping("/{robotId}")
+    public ApiResponse<RobotUpdateResponse> update(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable Long robotId,
+            @Valid @RequestBody RobotUpdateRequest request) {
+        return ApiResponse.success(
+                "로봇 정보가 수정되었습니다.",
+                robotService.update(principal.getApartmentComplexId(), robotId, request));
+    }
+
+    @Operation(summary = "로봇 삭제", description = "순찰로봇을 삭제합니다.")
+    @DeleteMapping("/{robotId}")
+    public ApiResponse<RobotDeleteResponse> delete(
+            @AuthenticationPrincipal CustomUserDetails principal, @PathVariable Long robotId) {
+        return ApiResponse.success(
+                "로봇이 삭제되었습니다.",
+                robotService.delete(principal.getApartmentComplexId(), robotId));
     }
 }

@@ -15,10 +15,13 @@ import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
 import com.oneloop.robot.dto.request.RobotRegisterRequest;
+import com.oneloop.robot.dto.request.RobotUpdateRequest;
+import com.oneloop.robot.dto.response.RobotDeleteResponse;
 import com.oneloop.robot.dto.response.RobotDetailResponse;
 import com.oneloop.robot.dto.response.RobotListResponse;
 import com.oneloop.robot.dto.response.RobotRegisterResponse;
 import com.oneloop.robot.dto.response.RobotStatsResponse;
+import com.oneloop.robot.dto.response.RobotUpdateResponse;
 import com.oneloop.robot.repository.RobotRepository;
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
@@ -73,9 +76,10 @@ public class RobotService {
      * @return 순찰로봇 페이지 목록
      */
     public PageResponse<RobotListResponse> findAll(Long apartmentComplexId, Pageable pageable) {
-        // 로그인한 관리자의 단지에 속한 로봇만 페이지 조회
+        // 로그인한 관리자의 단지에 속한, 삭제되지 않은 로봇만 페이지 조회
         Page<PatrolRobot> robots =
-                robotRepository.findAllByApartmentComplexId(apartmentComplexId, pageable);
+                robotRepository.findAllByApartmentComplexIdAndStatusNot(
+                        apartmentComplexId, RobotStatus.DELETED, pageable);
 
         // 단지의 맵과 체크포인트를 한 번만 조회해 모든 로봇에 재사용
         List<Checkpoint> checkpoints =
@@ -98,7 +102,9 @@ public class RobotService {
      * @return 로봇 현황 통계
      */
     public RobotStatsResponse getStats(Long apartmentComplexId) {
-        long totalCount = robotRepository.countByApartmentComplexId(apartmentComplexId);
+        long totalCount =
+                robotRepository.countByApartmentComplexIdAndStatusNot(
+                        apartmentComplexId, RobotStatus.DELETED);
         long patrollingCount =
                 robotRepository.countByApartmentComplexIdAndStatusIn(
                         apartmentComplexId, List.of(RobotStatus.PATROLLING));
@@ -106,7 +112,11 @@ public class RobotService {
                 robotRepository.countByApartmentComplexIdAndStatusIn(
                         apartmentComplexId, List.of(RobotStatus.IDLE, RobotStatus.CHARGING));
 
-        return new RobotStatsResponse(totalCount, patrollingCount, idleOrChargingCount);
+        return RobotStatsResponse.builder()
+                .totalCount(totalCount)
+                .patrollingCount(patrollingCount)
+                .idleOrChargingCount(idleOrChargingCount)
+                .build();
     }
 
     /**
@@ -120,7 +130,8 @@ public class RobotService {
     public RobotDetailResponse findById(Long apartmentComplexId, Long robotId) {
         PatrolRobot robot =
                 robotRepository
-                        .findByIdAndApartmentComplexId(robotId, apartmentComplexId)
+                        .findByIdAndApartmentComplexIdAndStatusNot(
+                                robotId, apartmentComplexId, RobotStatus.DELETED)
                         .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
 
         // 최근 순찰 기록 미리보기 5건 (조정 가능)
@@ -131,6 +142,52 @@ public class RobotService {
                         .getContent();
 
         return RobotDetailResponse.from(robot, calculateWeeklyOperationRate(robotId), recentPatrols);
+    }
+
+    /**
+     * 로그인한 관리자의 소속 단지에 등록된 순찰로봇의 이름을 수정한다.
+     *
+     * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
+     * @param robotId 수정할 로봇 식별자
+     * @param request 새 로봇 이름
+     * @return 수정된 로봇 정보
+     * @throws BusinessException 해당 단지에 그 로봇이 없는 경우
+     */
+    @Transactional
+    public RobotUpdateResponse update(Long apartmentComplexId, Long robotId, RobotUpdateRequest request) {
+        PatrolRobot robot =
+                robotRepository
+                        .findByIdAndApartmentComplexIdAndStatusNot(
+                                robotId, apartmentComplexId, RobotStatus.DELETED)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
+
+        robot.rename(request.getName());
+        // updatedAt(@LastModifiedDate)은 flush 시점에 갱신되므로, 응답에 반영하려면 명시적으로 flush한다.
+        robotRepository.flush();
+        return RobotUpdateResponse.from(robot);
+    }
+
+    /**
+     * 로그인한 관리자의 소속 단지에 등록된 순찰로봇을 삭제(소프트 딜리트)한다. 순찰/탐지이벤트 기록과의 FK 무결성을 위해 실제 row는
+     * 지우지 않고 상태만 DELETED로 바꾸며, 이후 목록/통계/조회 API에서는 제외된다.
+     *
+     * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
+     * @param robotId 삭제할 로봇 식별자
+     * @return 삭제된 로봇 정보
+     * @throws BusinessException 해당 단지에 그 로봇이 없는 경우
+     */
+    @Transactional
+    public RobotDeleteResponse delete(Long apartmentComplexId, Long robotId) {
+        PatrolRobot robot =
+                robotRepository
+                        .findByIdAndApartmentComplexIdAndStatusNot(
+                                robotId, apartmentComplexId, RobotStatus.DELETED)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
+
+        robot.delete();
+        // updatedAt(@LastModifiedDate)은 flush 시점에 갱신되므로, 응답에 반영하려면 명시적으로 flush한다.
+        robotRepository.flush();
+        return RobotDeleteResponse.from(robot);
     }
 
     // 이번 주(월요일 0시)가 시작된 이후 지금까지 경과한 시간 대비, 그동안 순찰한 시간의 비율(%)을 계산한다.
