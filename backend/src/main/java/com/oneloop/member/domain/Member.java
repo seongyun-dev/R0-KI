@@ -57,11 +57,7 @@ public class Member extends BaseEntity {
             String phoneNumber,
             PasswordEncoder passwordEncoder) {
         return new Member(
-                apartmentComplex,
-                username,
-                passwordEncoder.encode(rawPassword),
-                name,
-                phoneNumber);
+                apartmentComplex, username, passwordEncoder.encode(rawPassword), name, phoneNumber);
     }
 
     public void changePassword(String rawPassword, PasswordEncoder passwordEncoder) {
