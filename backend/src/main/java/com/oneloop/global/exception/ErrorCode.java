@@ -13,7 +13,8 @@ public enum ErrorCode {
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "COMMON_003", "요청한 리소스를 찾을 수 없습니다."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_999", "서버 내부 오류가 발생했습니다."),
     ROBOT_NOT_FOUND(HttpStatus.NOT_FOUND, "ROBOT_001", "존재하지 않는 순찰로봇입니다."),
-    ROBOT_SERIAL_NUMBER_DUPLICATE(HttpStatus.CONFLICT, "ROBOT_002", "이미 등록된 시리얼 번호입니다.");
+    ROBOT_SERIAL_NUMBER_DUPLICATE(HttpStatus.CONFLICT, "ROBOT_002", "이미 등록된 시리얼 번호입니다."),
+    PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다.");
 
     private final HttpStatus status;
     private final String code;

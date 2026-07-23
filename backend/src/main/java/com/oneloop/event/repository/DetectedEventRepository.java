@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DetectedEventRepository extends JpaRepository<DetectedEvent, Long> {
     List<DetectedEvent> findAllByProcessingStatusOrderByOccurredAtDesc(ProcessingStatus status);
+
+    List<DetectedEvent> findAllByPatrolIdOrderByOccurredAt(Long patrolId);
 }
