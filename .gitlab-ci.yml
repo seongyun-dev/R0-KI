@@ -51,12 +51,27 @@ infra_validate:
     - python3 -m py_compile infra/scripts/release-manifest.py infra/scripts/test-release-manifest.py
     - python3 infra/scripts/test-release-manifest.py
     - bash infra/scripts/test-rollback.sh
+    - bash infra/scripts/test-notify-mattermost.sh
+    - bash infra/scripts/test-deploy-notification.sh
     - python3 -c 'import json; json.load(open("infra/release/release-manifest.schema.json", encoding="utf-8"))'
 
 contract_validate:
   stage: validate
   script:
     - bash infra/scripts/validate-contracts.sh
+
+mattermost_notification_smoke:
+  stage: validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "infra/dev"'
+      changes:
+        - infra/scripts/notify-mattermost.sh
+        - infra/scripts/test-notify-mattermost.sh
+        - infra/scripts/deploy-with-notification.sh
+        - infra/scripts/test-deploy-notification.sh
+    - when: never
+  script:
+    - MM_NOTIFY_STRICT=true MM_CHANGE_SUMMARY="알림 포맷 검증" bash infra/scripts/notify-mattermost.sh connection_test all "$(date +%s)"
 
 jetson_validate:
   stage: validate
@@ -404,6 +419,12 @@ frontend_candidate_integration:
     - export INTEGRATION_PROJECT="aiot-front-${CI_PIPELINE_ID}-${CI_JOB_ID}"
     - export INTEGRATION_PORT="$((20000 + CI_JOB_ID % 10000))"
     - bash infra/scripts/integration-test.sh
+  after_script:
+    - |
+      if [ "${CI_JOB_STATUS}" = failed ]; then
+        started_epoch="$(date -d "${CI_JOB_STARTED_AT}" +%s 2>/dev/null || date +%s)"
+        bash infra/scripts/notify-mattermost.sh integration_failed frontend "${started_epoch}" || true
+      fi
 
 backend_candidate_integration:
   stage: integration
@@ -427,6 +448,12 @@ backend_candidate_integration:
     - export INTEGRATION_PROJECT="aiot-back-${CI_PIPELINE_ID}-${CI_JOB_ID}"
     - export INTEGRATION_PORT="$((20000 + CI_JOB_ID % 10000))"
     - bash infra/scripts/integration-test.sh
+  after_script:
+    - |
+      if [ "${CI_JOB_STATUS}" = failed ]; then
+        started_epoch="$(date -d "${CI_JOB_STARTED_AT}" +%s 2>/dev/null || date +%s)"
+        bash infra/scripts/notify-mattermost.sh integration_failed backend "${started_epoch}" || true
+      fi
 
 jetson_package:
   stage: package
@@ -474,6 +501,7 @@ jetson_publish:
       allow_failure: false
     - when: never
   script:
+    - export MM_JOB_STARTED_EPOCH="$(date +%s)"
     - export JETSON_ARCHIVE="build/jetson/aiot-${CI_COMMIT_TAG}.tar.gz"
     - export JETSON_MANIFEST="${JETSON_ARCHIVE}.manifest.json"
     - export JETSON_PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-jetson/${CI_COMMIT_TAG}/aiot-${CI_COMMIT_TAG}.tar.gz"
@@ -486,43 +514,10 @@ jetson_publish:
     - install -m 0644 "${JETSON_MANIFEST}" "${STABLE_TMP}"
     - mv -f "${STABLE_TMP}" /srv/aiot/releases/jetson/stable/manifest.json
     - python3 infra/scripts/validate-jetson-manifest.py /srv/aiot/releases/jetson/stable/manifest.json infra/jetson/manifest.schema.json
+    - bash infra/scripts/notify-mattermost.sh jetson_published jetson "${MM_JOB_STARTED_EPOCH}" || true
   environment:
     name: jetson-stable
     url: https://i15e103.p.ssafy.io/jetson/releases/stable/manifest.json
-
-sync_runtime:
-  stage: sync
-  interruptible: false
-  resource_group: aiot-ec2-deploy
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
-      changes:
-        - frontend/**/*
-        - backend/**/*
-        - infra/**/*
-        - .gitlab-ci.yml
-    - when: never
-  script:
-    - bash infra/scripts/sync-runtime.sh
-
-deploy_develop:
-  stage: deploy
-  interruptible: false
-  resource_group: aiot-ec2-deploy
-  timeout: 20m
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
-      changes:
-        - frontend/**/*
-        - backend/**/*
-        - infra/**/*
-        - .gitlab-ci.yml
-    - when: never
-  script:
-    - bash infra/scripts/deploy.sh develop "$CI_COMMIT_SHA" auto
-  environment:
-    name: aiot-ec2
-    url: https://i15e103.p.ssafy.io
 
 deploy_frontend_master:
   stage: deploy
@@ -538,8 +533,7 @@ deploy_frontend_master:
         - frontend/package.json
     - when: never
   script:
-    - bash infra/scripts/sync-runtime.sh
-    - INTEGRATION_STATUS=passed bash infra/scripts/deploy.sh front/master "$CI_COMMIT_SHA" frontend
+    - INTEGRATION_STATUS=passed bash infra/scripts/deploy-with-notification.sh front/master "$CI_COMMIT_SHA" frontend
   environment:
     name: production/frontend
     url: https://i15e103.p.ssafy.io
@@ -558,8 +552,7 @@ deploy_backend_master:
         - backend/gradlew
     - when: never
   script:
-    - bash infra/scripts/sync-runtime.sh
-    - INTEGRATION_STATUS=passed bash infra/scripts/deploy.sh back/master "$CI_COMMIT_SHA" backend
+    - INTEGRATION_STATUS=passed bash infra/scripts/deploy-with-notification.sh back/master "$CI_COMMIT_SHA" backend
   environment:
     name: production/backend
     url: https://i15e103.p.ssafy.io
@@ -577,23 +570,6 @@ deploy_root_master:
   script:
     - bash infra/scripts/sync-runtime.sh
     - bash infra/scripts/deploy.sh master "$CI_COMMIT_SHA" auto
-  environment:
-    name: aiot-ec2
-    url: https://i15e103.p.ssafy.io
-
-verify_develop:
-  stage: verify
-  interruptible: false
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
-      changes:
-        - frontend/**/*
-        - backend/**/*
-        - infra/**/*
-        - .gitlab-ci.yml
-    - when: never
-  script:
-    - bash infra/scripts/health-check.sh application
   environment:
     name: aiot-ec2
     url: https://i15e103.p.ssafy.io

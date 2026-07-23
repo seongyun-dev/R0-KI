@@ -1,11 +1,9 @@
 # AIoT operations runbook
 
-> The EC2 runtime in this runbook is currently installed. The part-master
-> pipeline, real candidate integration tests, JSON release manifest, and
-> component rollback are implemented in `infra/cicd-v2`; follow
-> [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for activation and do not
-> disable `deploy_develop` until the first Front/Back master deploy and rollback
-> checks have passed.
+> The EC2 runtime in this runbook is installed. The part-master pipeline, real
+> candidate integration tests, JSON release manifest, and component rollback
+> are active. Follow [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for the
+> release process. `develop` no longer deploys production.
 
 ## Deployed topology
 
@@ -42,14 +40,14 @@ The Jetson connection file is `/srv/aiot/secrets/robot-mqtt.env`. Transfer it on
 
 ## CI/CD flow
 
-Part branches run validation and tests. Integration deployment comes only from `develop`; `master` deployment is manual.
+Part dev branches run CI only. Each part master deploys only its own component.
+`develop` records a verified multi-part combination without deploying it, and
+root `master` remains a manually approved final milestone.
 
 ```text
-front/dev ─┐
-back/dev  ─┼─> develop --automatic--> EC2
-iot/dev   ─┤       └──> master --manual--> EC2
-ai/dev    ─┤
-infra/dev ─┘
+front/dev -> front/master --automatic Front only--> EC2
+back/dev  -> back/master  --automatic Back only----> EC2
+verified part releases -> develop --no deployment--> root master --manual
 ```
 
 Jetson release publishing is intentionally separate from merge deployment. A
