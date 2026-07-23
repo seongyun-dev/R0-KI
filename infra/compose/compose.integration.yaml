@@ -1,0 +1,71 @@
+name: ${INTEGRATION_PROJECT:-aiot-integration}
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: aiot
+      MYSQL_USER: aiot_integration
+      MYSQL_PASSWORD: integration-only-password
+      MYSQL_ROOT_PASSWORD: integration-only-root-password
+      TZ: Asia/Seoul
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    tmpfs:
+      - /var/lib/mysql
+    networks:
+      - integration
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    command: ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+    volumes:
+      - ../integration/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - integration
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
+    networks:
+      - integration
+
+  backend:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/aiot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+      SPRING_DATASOURCE_USERNAME: aiot_integration
+      SPRING_DATASOURCE_PASSWORD: integration-only-password
+      APP_JWT_SECRET: integration-only-jwt-secret-that-is-at-least-thirty-two-bytes-long
+      APP_JWT_ACCESS_TOKEN_EXPIRATION: "3600000"
+      APP_CORS_ALLOWED_ORIGINS: http://127.0.0.1:${INTEGRATION_PORT:-19080}
+      MQTT_BROKER_URI: tcp://mosquitto:1883
+      MQTT_USERNAME: integration
+      MQTT_PASSWORD: integration
+      MAP_DIR: /app/data/maps
+      UPLOAD_DIR: /app/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    networks:
+      - integration
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "127.0.0.1:${INTEGRATION_PORT:-19080}:80"
+    volumes:
+      - ../integration/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - integration
+
+networks:
+  integration: {}

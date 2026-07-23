@@ -2,6 +2,7 @@ stages:
   - validate
   - test
   - build
+  - integration
   - package
   - sync
   - deploy
@@ -17,9 +18,9 @@ default:
 workflow:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
-    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^(front\/(dev|master)|back\/(dev|master)|iot\/(dev|master)|ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^(front\/(dev|master)|back\/(dev|master)|iot\/(dev|master)|ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(front\/(dev|master)|back\/(dev|master)|iot\/(dev|master)|ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
     - when: never
 
 runner_smoke:
@@ -45,7 +46,12 @@ infra_validate:
     - bash infra/scripts/validate-contracts.sh
     - docker compose --env-file .env.example -f infra/compose/compose.infrastructure.yaml config --quiet
     - docker compose --env-file .env.example -f infra/compose/compose.application.yaml config --quiet
+    - docker compose --env-file .env.example -f infra/compose/compose.integration.yaml config --quiet
     - docker compose -f infra/smoke/compose.smoke.yaml config --quiet
+    - python3 -m py_compile infra/scripts/release-manifest.py infra/scripts/test-release-manifest.py
+    - python3 infra/scripts/test-release-manifest.py
+    - bash infra/scripts/test-rollback.sh
+    - python3 -c 'import json; json.load(open("infra/release/release-manifest.schema.json", encoding="utf-8"))'
 
 contract_validate:
   stage: validate
@@ -76,13 +82,13 @@ jetson_validate:
 frontend_ci:
   stage: test
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - frontend/package.json
       changes:
         - frontend/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "front/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - frontend/package.json
       changes:
@@ -99,7 +105,7 @@ frontend_ci:
 backend_ci:
   stage: test
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - backend/build.gradle
         - backend/build.gradle.kts
@@ -107,7 +113,7 @@ backend_ci:
       changes:
         - backend/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "back/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - backend/build.gradle
         - backend/build.gradle.kts
@@ -146,7 +152,7 @@ iot_ci:
         - robot/**/CMakeLists.txt
         - robot/pyproject.toml
         - robot/requirements.txt
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
@@ -156,7 +162,7 @@ iot_ci:
       changes:
         - robot/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "iot/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "iot/dev" || $CI_COMMIT_BRANCH == "iot/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
@@ -178,7 +184,7 @@ ai_ci:
         - ai/**/*.py
         - ai/pyproject.toml
         - ai/requirements.txt
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - ai/**/*.py
         - ai/pyproject.toml
@@ -186,7 +192,7 @@ ai_ci:
       changes:
         - ai/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "ai/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "ai/dev" || $CI_COMMIT_BRANCH == "ai/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - ai/**/*.py
         - ai/pyproject.toml
@@ -205,7 +211,7 @@ gpu_environment:
   interruptible: false
   resource_group: ai-gpu-device3
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|infra\/dev|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
       when: manual
       allow_failure: true
     - when: never
@@ -237,7 +243,7 @@ ai_train:
   timeout: 6h
   resource_group: ai-gpu-device3
   rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|develop|master)$/'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/(dev|master)|develop|master)$/'
       exists:
         - ai/scripts/train.sh
       when: manual
@@ -265,7 +271,7 @@ ai_convert:
     - job: ai_train
       artifacts: true
   rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|develop|master)$/'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/(dev|master)|develop|master)$/'
       exists:
         - ai/scripts/convert.sh
         - ai/scripts/train.sh
@@ -283,7 +289,7 @@ ai_convert:
       - ai/artifacts/converted/
     expire_in: 14 days
 
-platform_smoke:
+infra_fixture_smoke:
   stage: build
   rules:
     - changes:
@@ -322,6 +328,12 @@ platform_smoke:
 frontend_image:
   stage: build
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/master"'
+      exists:
+        - frontend/package.json
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "front/master"'
+      exists:
+        - frontend/package.json
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - frontend/package.json
@@ -340,11 +352,17 @@ frontend_image:
   script:
     - test -f frontend/package.json
     - test -f frontend/package-lock.json
-    - docker build --pull -t "aiot-frontend:${CI_COMMIT_SHA:0:12}" frontend
+    - docker build --pull -f infra/docker/frontend.Dockerfile --build-arg VITE_API_BASE_URL= --build-arg VITE_USE_MOCKS=false -t "aiot-frontend:front-${CI_COMMIT_SHA:0:12}" frontend
 
 backend_image:
   stage: build
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/master"'
+      exists:
+        - backend/gradlew
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "back/master"'
+      exists:
+        - backend/gradlew
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - backend/gradlew
@@ -362,7 +380,53 @@ backend_image:
     - when: never
   script:
     - test -f backend/gradlew
-    - docker build --pull -t "aiot-backend:${CI_COMMIT_SHA:0:12}" backend
+    - docker build --pull -t "aiot-backend:back-${CI_COMMIT_SHA:0:12}" backend
+
+frontend_candidate_integration:
+  stage: integration
+  interruptible: false
+  needs:
+    - frontend_image
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/master"'
+      exists:
+        - frontend/package.json
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "front/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - frontend/package.json
+    - when: never
+  script:
+    - test -r /srv/aiot/deploy/current.env
+    - source /srv/aiot/deploy/current.env
+    - test "${BACKEND_ENABLED:-false}" = true
+    - export FRONTEND_IMAGE="aiot-frontend:front-${CI_COMMIT_SHA:0:12}"
+    - export BACKEND_IMAGE
+    - export INTEGRATION_PROJECT="aiot-front-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - export INTEGRATION_PORT="$((20000 + CI_JOB_ID % 10000))"
+    - bash infra/scripts/integration-test.sh
+
+backend_candidate_integration:
+  stage: integration
+  interruptible: false
+  needs:
+    - backend_image
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/master"'
+      exists:
+        - backend/gradlew
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "back/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - backend/gradlew
+    - when: never
+  script:
+    - test -r /srv/aiot/deploy/current.env
+    - source /srv/aiot/deploy/current.env
+    - test "${FRONTEND_ENABLED:-false}" = true
+    - export FRONTEND_IMAGE
+    - export BACKEND_IMAGE="aiot-backend:back-${CI_COMMIT_SHA:0:12}"
+    - export INTEGRATION_PROJECT="aiot-back-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - export INTEGRATION_PORT="$((20000 + CI_JOB_ID % 10000))"
+    - bash infra/scripts/integration-test.sh
 
 jetson_package:
   stage: package
@@ -460,7 +524,47 @@ deploy_develop:
     name: aiot-ec2
     url: https://i15e103.p.ssafy.io
 
-deploy_master:
+deploy_frontend_master:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  timeout: 20m
+  needs:
+    - frontend_image
+    - frontend_candidate_integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "front/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - frontend/package.json
+    - when: never
+  script:
+    - bash infra/scripts/sync-runtime.sh
+    - INTEGRATION_STATUS=passed bash infra/scripts/deploy.sh front/master "$CI_COMMIT_SHA" frontend
+  environment:
+    name: production/frontend
+    url: https://i15e103.p.ssafy.io
+
+deploy_backend_master:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  timeout: 20m
+  needs:
+    - backend_image
+    - backend_candidate_integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "back/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - backend/gradlew
+    - when: never
+  script:
+    - bash infra/scripts/sync-runtime.sh
+    - INTEGRATION_STATUS=passed bash infra/scripts/deploy.sh back/master "$CI_COMMIT_SHA" backend
+  environment:
+    name: production/backend
+    url: https://i15e103.p.ssafy.io
+
+deploy_root_master:
   stage: deploy
   interruptible: false
   resource_group: aiot-ec2-deploy
