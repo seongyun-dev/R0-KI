@@ -383,45 +383,44 @@ GPU 학습·TensorRT 변환은 비용과 시간이 크므로 protected manual Jo
 
 ### Phase 1: 공통 CI와 브랜치
 
-- `infra/master` 공통 CI template 준비
-- 파트 master workflow/rules 추가
-- 파트 master는 MR only, force push 금지
-- 파트 소유 경로 검사 추가
-- 기존 `develop` 배포는 아직 유지
+- [x] 파트 master workflow/rules 추가
+- [x] 파트 master는 MR only, force push 금지
+- [x] 파트 소유 경로 검사 추가
+- [x] 검증 완료 뒤 `develop` 운영 배포 제거
 
 ### Phase 2: Manifest와 component release
 
-- Release Manifest schema·validator·atomic writer 구현
-- 파트별 immutable image tag 구현
-- 성공 release history 저장
-- Frontend/Backend 개별 deploy/verify/rollback 구현
+- [x] Release Manifest schema·validator·atomic writer 구현
+- [x] 파트별 immutable image tag 구현
+- [x] 성공 release history 저장
+- [x] Frontend/Backend 개별 deploy/verify/rollback 구현
 
 ### Phase 3: 실제 통합검사
 
-- 실제 앱 기반 integration Compose 작성
-- 신규 파트 + 현재 안정 상대 파트 조합
-- 초기 required smoke 구현
-- planned 기능은 non-blocking으로 표시
+- [x] 실제 앱 기반 integration Compose 작성
+- [x] 신규 파트 + 현재 안정 상대 파트 조합
+- [x] 초기 required smoke 구현
+- [x] planned 기능은 non-blocking으로 표시
 
 ### Phase 4: 비차단 시범 운영
 
-- 새 integration Job을 manual 또는 `allow_failure`로 실행
-- 2~3회 연속 성공과 cleanup 확인
-- 기존 dev Pipeline이 영향을 받지 않는지 확인
+- [x] 후보 integration Job을 실제 파트 MR에서 실행
+- [x] Front/Back 후보 성공과 cleanup 확인
+- [x] 기존 dev Pipeline 정상 확인
 
 ### Phase 5: 실제 AWS 전환 검증
 
-- Frontend 정상 배포와 강제 실패 rollback
-- Backend 정상 배포, Flyway, 강제 실패 rollback
-- 다른 component가 재시작되지 않았는지 확인
-- Release Manifest와 실제 container image 일치 확인
+- [x] Frontend 정상 배포와 강제 실패 rollback
+- [x] Backend 정상 배포, Flyway V1~V5, 강제 실패 rollback
+- [x] 다른 component와 MySQL·MQTT가 재시작되지 않았는지 확인
+- [x] Release Manifest와 실제 container image 일치 확인
 
 ### Phase 6: 활성화
 
-- 안정화된 master MR 검사만 blocking으로 전환
-- 파트 master merge CD 활성화
-- 기존 `deploy_develop` 운영 자동 배포 비활성화
-- develop 통합과 root master 릴리스 절차 문서화
+- [x] master MR 후보 통합검사를 blocking으로 활성화
+- [x] 파트 master merge CD 활성화
+- [x] 기존 `deploy_develop` 운영 자동 배포 비활성화
+- [x] develop 통합과 root master 릴리스 절차 문서화
 
 ### Phase 7: AI·IoT 후속
 
@@ -453,20 +452,24 @@ infra/README.md
 
 Frontend/Backend 전환 완료 조건:
 
-- [ ] 기존 `front/dev`, `back/dev` CI가 정상 동작한다.
-- [ ] AI/IoT 코드가 없을 때 관련 Job은 실패가 아니라 skip/non-blocking이다.
-- [ ] `front/master` 후보가 현재 안정 Backend와 실제 통합검사를 통과한다.
-- [ ] `back/master` 후보가 현재 안정 Frontend와 실제 통합검사를 통과한다.
-- [ ] Frontend master 배포가 Frontend만 교체한다.
-- [ ] Backend master 배포가 Backend만 교체한다.
-- [ ] 실패 시 해당 component만 이전 image로 자동 복구한다.
-- [ ] 선택한 이전 component release로 수동 롤백할 수 있다.
-- [ ] Release Manifest와 실제 실행 image가 일치한다.
+- [x] 기존 `front/dev`, `back/dev` CI가 정상 동작한다.
+- [x] AI/IoT 코드가 없을 때 관련 Job은 실패가 아니라 skip/non-blocking이다.
+- [x] `front/master` 후보가 현재 안정 Backend와 실제 통합검사를 통과한다.
+- [x] `back/master` 후보가 현재 안정 Frontend와 실제 통합검사를 통과한다.
+- [x] Frontend master 배포가 Frontend만 교체한다.
+- [x] Backend master 배포가 Backend만 교체한다.
+- [x] 실패 시 해당 component만 이전 image로 자동 복구한다.
+- [x] 선택한 이전 component release로 수동 롤백할 수 있다.
+- [x] Release Manifest와 실제 실행 image가 일치한다.
 - [ ] DB migration 실패 시 Backend 배포가 중단되고 기존 서비스가 유지된다.
-- [ ] integration test의 임시 container와 volume이 항상 정리된다.
-- [ ] `develop` push가 운영 앱을 자동 배포하지 않는다.
+- [x] integration test의 임시 container와 volume이 항상 정리된다.
+- [x] `develop` push가 운영 앱을 자동 배포하지 않는다.
 - [ ] develop 통합은 마지막 배포 성공 release만 사용한다.
-- [ ] 운영자가 서버 SSH 없이 GitLab에서 정상 배포 상태를 확인할 수 있다.
+- [x] 운영자가 서버 SSH 없이 GitLab에서 정상 배포 상태를 확인할 수 있다.
+
+최초 develop 통합에서 현재 파트 master의 전환 전 `.gitlab-ci.yml`과 충돌하는 것은
+예상된 안전장치다. `infra/CICD_V2_OPERATIONS.md` 절차대로 최신 `infra/dev` 정책을
+보존하고, 삭제된 develop 배포 Job이 다시 생기지 않았는지 검사해야 한다.
 
 AI/IoT 후속 완료 조건:
 
@@ -477,12 +480,11 @@ AI/IoT 후속 완료 조건:
 
 ## 13. 다음 작업자가 가장 먼저 할 일
 
-1. `git fetch --all --prune` 후 모든 파트 master/dev와 `infra/dev` SHA를 다시 기록한다.
-2. EC2의 `/srv/aiot/deploy/current.env`, 현재 container image, Compose 상태를 읽기 전용으로 확인한다.
-3. GitLab Container Registry 사용 가능 여부를 확인하되, 불가능하면 현재 Shell Runner 로컬 image 방식을 유지한다.
-4. 이 문서의 Phase 0부터 시작하고 새 integration Job을 곧바로 blocking으로 만들지 않는다.
-5. Frontend/Backend 실제 계약 중 초기 `required` 범위를 파트 담당자와 확정한다.
-6. Manifest·개별 롤백을 먼저 완성한 뒤 master 자동 배포를 활성화한다.
+1. `infra/CICD_V2_OPERATIONS.md`의 통합 마일스톤 절차로 첫 `develop` 통합 MR을 만든다.
+2. 파괴적인 Flyway migration을 만들기 전에 별도 실패 migration으로 자동 중단을 검증한다.
+3. AI/IoT 실제 코드 계약이 확정되면 파트별 package와 checksum metadata를 구현한다.
+4. 승인된 AI+IoT 조합만 stable manifest로 게시한다.
+5. 실제 Jetson에서 boot/update/offline/checksum/smoke/rollback을 검증한다.
 
 ## 14. 하지 말아야 할 것
 

@@ -29,6 +29,8 @@ springdoc:
 app:
   cors:
     allowed-origins: http://localhost:3000
+  mqtt:
+    client-id: oneloop-backend
 
 gms:
   base-url: ${GMS_BASE_URL}
