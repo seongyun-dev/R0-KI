@@ -105,35 +105,35 @@ service_url="${MM_SERVICE_URL:-${CI_ENVIRONMENT_URL:-${default_service_url}}}"
 
 case "${event}" in
   success)
-    heading="🟢 ${component_label} 배포 완료"
+    heading=":small_green_circle: ${component_label} 배포 완료"
     time_label=완료
     description=
     mention=
     link_label="서비스 열기"
     ;;
   rolled_back)
-    heading="🟠 ${component_label} 배포 실패 · 자동 복구 완료"
+    heading=":small_orange_circle: ${component_label} 배포 실패 · 자동 복구 완료"
     time_label=발생
     description="이전 정상 버전으로 자동 복구했습니다."
     mention=
     link_label="서비스 확인"
     ;;
   rollback_failed)
-    heading="🔴 ${component_label} 배포 실패 · 자동 복구 실패"
+    heading=":small_red_circle: ${component_label} 배포 실패 · 자동 복구 실패"
     time_label=발생
     description="자동 복구에 실패했습니다. 즉시 서버 확인이 필요합니다."
     mention="@channel"$'\n\n'
     link_label="서비스 확인"
     ;;
   failed)
-    heading="🔴 ${component_label} 배포 실패"
+    heading=":small_red_circle: ${component_label} 배포 실패"
     time_label=발생
     description="배포가 완료되지 않았습니다. Job 로그를 확인해 주세요."
     mention="@channel"$'\n\n'
     link_label="서비스 확인"
     ;;
   integration_failed)
-    heading="🟡 ${component_label} 통합 검증 실패"
+    heading=":small_yellow_circle: ${component_label} 통합 검증 실패"
     time_label=발생
     description="후보 버전이 현재 운영 조합과 맞지 않아 배포하지 않았습니다."
     mention=
@@ -141,14 +141,14 @@ case "${event}" in
     service_url="${CI_JOB_URL:-${service_url}}"
     ;;
   jetson_published)
-    heading="🔵 Jetson 릴리스 게시 완료"
+    heading=":small_blue_circle: Jetson 릴리스 게시 완료"
     time_label=완료
     description="Jetson이 다음 부팅 또는 갱신 주기에 이 버전을 확인합니다."
     mention=
     link_label="Manifest 열기"
     ;;
   connection_test)
-    heading="⚪ Mattermost 알림 연결 확인"
+    heading="Mattermost 알림 연결 확인"
     time_label=확인
     description="CI/CD 배포 알림 연결이 정상입니다."
     mention=
