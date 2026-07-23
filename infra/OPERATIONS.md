@@ -1,11 +1,11 @@
 # AIoT operations runbook
 
-> This runbook describes the **currently installed develop-centric runtime**.
-> The approved part-master CI/CD migration has not been applied yet. Before
-> changing branch or deployment rules, follow
-> [CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md), which requires
-> candidate integration tests, release manifests, and component rollback to be
-> verified before `deploy_develop` is disabled.
+> The EC2 runtime in this runbook is currently installed. The part-master
+> pipeline, real candidate integration tests, JSON release manifest, and
+> component rollback are implemented in `infra/cicd-v2`; follow
+> [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for activation and do not
+> disable `deploy_develop` until the first Front/Back master deploy and rollback
+> checks have passed.
 
 ## Deployed topology
 

@@ -228,39 +228,37 @@ AI/IoT master merge는 Jetson stable channel을 즉시 갱신하지 않는다.
 운영 상태의 source of truth는 다음 파일이다.
 
 ```text
-/srv/aiot/deploy/release-manifest.yaml
-/srv/aiot/deploy/releases/<release-id>.yaml
+/srv/aiot/deploy/release-manifest.json
+/srv/aiot/deploy/releases/<release-id>.json
 ```
 
-목표 예시:
+구현 예시:
 
-```yaml
-schemaVersion: 1
-releaseId: release-20260722-01
-releasedAt: 2026-07-22T18:00:00+09:00
-
-frontend:
-  image: aiot-frontend:front-a82f910
-  commit: a82f910
-
-backend:
-  image: aiot-backend:back-b9412fc
-  commit: b9412fc
-  databaseSchema: 3
-
-ai:
-  version: pending
-  artifact: null
-
-iot:
-  version: pending
-  artifact: null
-
-infra:
-  commit: c913a10
-
-mqttSchema: 1
-integrationStatus: passed
+```json
+{
+  "schemaVersion": 1,
+  "releaseId": "release-20260722-01",
+  "releasedAt": "2026-07-22T09:00:00Z",
+  "integrationStatus": "passed",
+  "deployedComponents": ["frontend"],
+  "frontend": {
+    "enabled": true,
+    "image": "aiot-frontend:front-a82f910",
+    "commit": "a82f910",
+    "branch": "front/master"
+  },
+  "backend": {
+    "enabled": true,
+    "image": "aiot-backend:back-b9412fc",
+    "commit": "b9412fc",
+    "branch": "back/master",
+    "databaseSchema": "3"
+  },
+  "ai": {"status": "pending", "version": null, "artifact": null, "checksum": null},
+  "iot": {"status": "pending", "version": null, "artifact": null, "checksum": null},
+  "infra": {"commit": "c913a10", "pipelineId": "100", "jobId": "200"},
+  "mqttSchema": 1
+}
 ```
 
 요구사항:

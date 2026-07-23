@@ -2,12 +2,11 @@
 
 This directory contains the single-EC2 runtime and GitLab CI/CD skeleton.
 
-Start with [HANDOFF.md](HANDOFF.md) for the implemented completion state and
-[CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md) for the 2026-07-22
-approved target design: part-master releases, candidate integration gates,
-component manifests, and component rollback. See [OPERATIONS.md](OPERATIONS.md)
-for the currently installed deployment, migration, backup, and certificate
-procedures.
+Start with [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for the implemented
+part-master release flow, rollout order, candidate integration gates, release
+manifest, and component rollback. [CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md)
+preserves the approved design and [OPERATIONS.md](OPERATIONS.md) contains the
+single-EC2 runtime, backup, MQTT, and certificate procedures.
 
 ## Runtime
 
