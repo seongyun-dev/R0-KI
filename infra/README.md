@@ -52,13 +52,18 @@ configured by the Mattermost incoming webhook:
   or rollback also failed.
 - blue: a protected Jetson release was published.
 
+The headings use the Mattermost custom emoji names
+`:small_green_circle:`, `:small_orange_circle:`, `:small_red_circle:`,
+`:small_yellow_circle:`, and `:small_blue_circle:`.
+
 The card contains the triggering user, changed commit/file counts, completion
 time, elapsed time, and service link. Notification delivery is best effort:
 Mattermost downtime never changes an otherwise successful deployment result.
 `scripts/test-notify-mattermost.sh` validates the rendered payload without
 contacting Mattermost or exposing the webhook URL.
 When notification files change on `infra/dev`, the
-`mattermost_notification_smoke` job sends one strict connection-test card.
+`mattermost_notification_smoke` job is available as an optional manual
+connection test. It never posts automatically.
 
 ## Server bootstrap order
 
