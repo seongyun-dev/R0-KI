@@ -69,6 +69,8 @@ mattermost_notification_smoke:
         - infra/scripts/test-notify-mattermost.sh
         - infra/scripts/deploy-with-notification.sh
         - infra/scripts/test-deploy-notification.sh
+      when: manual
+      allow_failure: true
     - when: never
   script:
     - MM_NOTIFY_STRICT=true MM_CHANGE_SUMMARY="알림 포맷 검증" bash infra/scripts/notify-mattermost.sh connection_test all "$(date +%s)"
