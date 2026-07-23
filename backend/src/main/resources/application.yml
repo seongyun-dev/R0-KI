@@ -33,8 +33,8 @@ app:
     client-id: oneloop-backend
 
 gms:
-  base-url: ${GMS_BASE_URL}
-  api-key: ${GMS_KEY}
-  model: ${GMS_MODEL}
-  chat-completions-path: ${GMS_CHAT_COMPLETIONS_PATH}
-  timeout-seconds: ${GMS_TIMEOUT_SECONDS}
+  base-url: ${GMS_BASE_URL:https://gms.ssafy.io/gmsapi/api.openai.com/v1}
+  api-key: ${GMS_KEY:}
+  model: ${GMS_MODEL:gpt-5.4-mini}
+  chat-completions-path: ${GMS_CHAT_COMPLETIONS_PATH:/chat/completions}
+  timeout-seconds: ${GMS_TIMEOUT_SECONDS:30}
