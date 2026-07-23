@@ -103,10 +103,11 @@ aiot-jetson-vX.Y.Z.tar.gz
 ## Branch flow
 
 ```text
-feature -> part/dev -> develop -> master
+feature -> part/dev -> part/master -> develop -> root master
 ```
 
 - feature와 part/dev: 해당 파트 CI만 수행하고 배포하지 않는다.
-- develop: 변경 파트 통합 검증 후 Frontend/Backend를 EC2에 자동 배포한다.
-- master: 검증된 안정 조합을 같은 EC2에 수동 배포한다.
+- front/master와 back/master: 후보 통합검사 후 해당 파트만 EC2에 자동 배포한다.
+- develop: 이미 배포 성공한 파트 release 조합을 검증·기록하며 EC2를 변경하지 않는다.
+- root master: 검증된 최종 마일스톤을 같은 EC2에 수동 배포한다.
 - Jetson: 별도 tag/manual release만 Package Registry에 발행한다.
