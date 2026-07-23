@@ -1,0 +1,77 @@
+/* ============================================================
+   Design Tokens — 단일 진실원천 (CSS 변수)
+   landing.html 프로토타입에서 추출. Tailwind는 tailwind.config.js에서
+   동일 값을 매핑함(두 곳이 항상 같아야 함).
+   ============================================================ */
+:root {
+  /* ---- surfaces / ink ---- */
+  --bg: #ffffff;
+  --fg: #111111;
+  --ink: #0a0a0a;          /* deep black — 다크 카드/오버레이 */
+  --card: #0d0d10;         /* 대시보드 딥 카드 */
+  --surface: #f2f1ef;      /* 연한 채움 */
+  --surface-2: #e7e5e1;
+  --line: #e6e5e2;         /* 헤어라인 보더 */
+  --muted: #8a8a8a;
+  --subtle: #b6b6b6;
+  --hero-to: #eceae7;      /* 히어로 그라데이션 하단 */
+
+  /* ---- accent (오렌지 — 유일 브랜드 액센트) ---- */
+  --accent: #e0532a;
+  --accent-light: #ff6a3d;
+  --accent-deep: #b8431e;
+  --accent-soft: #f6d9cb;
+
+  /* ---- 상태색 (대시보드) ---- */
+  --success: #16a34a;   --success-soft: #dcfce7;   /* 완료·정상·순찰중(온라인) */
+  --info: #2563eb;      --info-soft: #dbeafe;      /* 진행중·확인중·경로/지도 */
+  --warning: #d97706;   --warning-soft: #fef3c7;   /* 미처리·점검필요·주의 */
+  --danger: #e5484d;    --danger-soft: #fde8e8;    /* 긴급·응급·침입 */
+  --online: #22c55e;                               /* 라이브 점(dot) */
+
+  /* ---- 차트 카테고리 색 (통계 1m) ----
+     상태색(success/warning/danger)은 "상태"를 뜻하므로 카테고리 구분용으로 쓰지 않는다.
+     아래 4색은 색각이상 포함 인접 대비 검증을 통과한 조합. */
+  --chart-1: #2563eb;   /* 주차 */
+  --chart-2: #0d9488;   /* 쓰레기 */
+  --chart-3: #e0532a;   /* 위험구역 (= accent) */
+  --chart-4: #7c5cd6;   /* 기타/4번째 구역 */
+
+  /* ---- 반경 ---- */
+  --radius-pill: 9999px;
+  --radius-card: 2rem;       /* 32px */
+  --radius-card-sm: 1.25rem; /* 20px */
+  --radius-control: 0.875rem;/* 14px — 입력/버튼/칩 */
+  --radius-md: 0.75rem;      /* 12px */
+  --radius-sm: 0.5rem;       /* 8px */
+
+  /* ---- 타이포 ---- */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ---- 레이아웃 ---- */
+  --shell: 88rem;        /* 페이지 최대폭 */
+  /* 랜딩 전용 — 넓은 모니터에서 좌우 여백이 과하게 남지 않도록.
+     rem만 쓰면 브레이크포인트마다 rem이 리셋돼 여백이 들쭉날쭉해지므로
+     vw를 함께 걸어 어느 폭에서든 좌우 여백을 2%로 일정하게 유지한다. */
+  --shell-wide: min(130rem, 96vw);
+
+  /* ---- 그림자 ---- */
+  --shadow-sm: 0 1px 2px rgba(17,17,17,.06);
+  --shadow-md: 0 8px 24px -12px rgba(17,17,17,.18);
+  --shadow-lg: 0 25px 50px -12px rgba(0,0,0,.25);
+  --ring-line: 0 0 0 1px var(--line);
+
+  /* ---- 모션 (프로토타입에서 사용한 이징) ---- */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);       /* 진입/hover 스프링 느낌 */
+  --ease-line: cubic-bezier(.215, .61, .355, 1);  /* 라인 리빌 */
+  --ease-word: cubic-bezier(.165, .84, .44, 1);   /* 워드 리빌 */
+  --ease-snap: cubic-bezier(.2, .8, .2, 1);       /* 스냅 hover */
+  --dur-fast: .35s;
+  --dur: .7s;
+  --dur-slow: .9s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

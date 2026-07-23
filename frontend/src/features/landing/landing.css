@@ -1,0 +1,433 @@
+/* ============================================================
+   랜딩 전용 스타일 — docs/reference/landing.html 프로토타입 포팅.
+   랜딩은 비주얼 진실원천(landing.html)을 그대로 재현하는 예외 영역.
+   색은 tokens.css 변수를 참조(accent-2 → accent-light).
+   ============================================================ */
+
+/* adaptive rem grid — 랜딩 라우트에서만 (html.landing-grid) */
+@media (max-width: 1920px) { html.landing-grid { font-size: 0.833333vw } }
+@media (max-width: 1440px) { html.landing-grid { font-size: 1.111111vw } }
+@media (max-width: 1024px) { html.landing-grid { font-size: 1.5625vw } }
+@media (max-width: 640px)  { html.landing-grid { font-size: 4.166666vw } }
+
+/* 랜딩은 넓은 모니터를 채우도록 본문보다 넓은 shell을 쓴다.
+   .site-header .shell보다 뒤에 실려 헤더도 같은 폭으로 맞춰진다(정렬 유지). */
+.landing .shell { max-width: var(--shell-wide); margin-inline: auto }
+.landing .skip { position: fixed; left: 1rem; top: 1rem; z-index: 60; border-radius: .875rem; background: var(--ink); padding: .5rem 1rem; font-size: .875rem; color: #fff; transform: translateY(-200%) }
+.landing .skip:focus { transform: none }
+
+/* ===== reveal engine ===== */
+.landing [data-reveal] { will-change: transform, opacity }
+.landing [data-reveal="fade"] { opacity: 0; transition: opacity .7s cubic-bezier(.22,1,.36,1) }
+.landing [data-reveal="up"] { opacity: 0; transform: translateY(var(--ry, 16px)); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1) }
+.landing [data-reveal="scale"] { opacity: 0; transform: translateY(var(--ry, 16px)) scale(.96); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1) }
+.landing [data-reveal].rv-in { opacity: 1; transform: none }
+.landing .line { display: block; overflow: hidden }
+.landing .line > .inner { display: block; transform: translateY(110%); opacity: 0; transition: transform .9s cubic-bezier(.215,.61,.355,1), opacity .9s cubic-bezier(.215,.61,.355,1) }
+.landing [data-reveal="line"].rv-in .inner { transform: none; opacity: 1 }
+
+/* ===== loader ===== */
+.loader { position: fixed; inset: 0; z-index: 120; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem; background: var(--ink); color: #fff; border-radius: 0 0 2rem 2rem; transform: translateY(0%); transition: transform .7s cubic-bezier(.22,1,.36,1) }
+.loader.exit { transform: translateY(-100%) }
+.loader__center { display: flex; flex-direction: column; align-items: center; gap: 1.1rem; text-align: center; transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1) }
+.loader.exit .loader__center { opacity: 0; transform: translateY(-12px) }
+.loader__brand { display: flex; align-items: center; gap: .6rem; font-weight: 700; font-size: 1.6rem }
+.loader__brand .mk { width: 2rem; height: 2rem; color: var(--accent-light) }
+.loader__tag { max-width: 26ch; font-size: .9rem; color: rgba(255,255,255,.55) }
+.loader__progress { width: min(22rem, 72vw); display: flex; flex-direction: column; gap: .75rem }
+.loader__track { height: 2px; width: 100%; background: rgba(255,255,255,.15); border-radius: 2px; overflow: hidden }
+.loader__fill { height: 100%; background: linear-gradient(90deg, var(--accent-light), var(--accent)); width: 0%; transition: width .1s ease-out }
+.loader__row { display: flex; justify-content: space-between; font-size: .72rem; font-weight: 600; letter-spacing: .1em; color: rgba(255,255,255,.45) }
+.loader__count { color: rgba(255,255,255,.85) }
+
+/* 상단바 스타일은 components/layout/siteHeader.css 로 분리
+   (랜딩 밖 — 로그인 화면 등 — 에서도 같은 헤더를 쓰기 때문) */
+
+/* ===== patrol stage — 히어로 + 해결하는 문제를 잇는 하나의 순찰 장면 ===== */
+/* overflow는 clip을 쓴다: hidden과 달리 스크롤 컨테이너를 만들지 않아 내부 sticky가 살아난다 */
+.patrol-stage { position: relative; isolation: isolate; overflow: clip; border-radius: 0 0 2rem 2rem;
+  background: linear-gradient(180deg, #ffffff 0%, var(--hero-to) 55%, #ffffff 100%) }
+/* 자식이 절대배치뿐이라 이 높이 선언이 유일한 높이 근거다.
+   lvh를 못 쓰는 환경에서 0이 되면 캔버스가 통째로 사라지므로 vh 폴백을 먼저 둔다. */
+.patrol-stage__scene { position: sticky; top: 0; z-index: 0; height: 100vh; height: 100lvh }
+.patrol-stage__scene canvas { display: block; width: 100%; height: 100% }
+/* sticky 캔버스 위로 콘텐츠를 올린다 */
+/* 무대 안의 섹션은 모두 투명해야 뒤의 3D 캔버스가 비친다.
+   #features/#problem에 걸린 흰 배경(정적 폴백용)이 그대로 먹으면 캔버스가 통째로 가려진다. */
+.patrol-stage #home,
+.patrol-stage #problem,
+.patrol-stage #features,
+.patrol-stage .journey-track,
+.patrol-stage .prob-track { position: relative; z-index: 1; background: transparent }
+/* 문제 4개를 처리하는 동안 카드가 화면에 머문다 (트랙 길이 = 문제 수 × 화면) */
+.prob-track { position: relative; z-index: 1; height: 400vh; height: 400lvh }
+.prob-pin { position: sticky; top: 0; height: 100vh; height: 100lvh; display: flex; align-items: center }
+.prob-pin #problem { width: 100%; min-height: 0 }
+/* 3D 위에 얹히지만 씬 자체가 밝아 옅은 스크림이면 충분하다.
+   너무 진하면 뒤에서 순찰하는 로봇이 씻겨나가므로 중앙부는 옅게 유지한다. */
+.prob-pin::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg,
+    rgba(255,255,255,.5) 0%, rgba(255,255,255,.4) 28%,
+    rgba(255,255,255,.1) 44%, rgba(255,255,255,.1) 74%,
+    rgba(255,255,255,.4) 100%) }
+/* 캔버스가 sticky로 첫 화면을 차지하므로 히어로는 그만큼 끌어올린다 */
+.patrol-stage #home { margin-top: -100lvh }
+
+/* ---- 문제 → 기능 전환 구간 ---- */
+/* 두 고정 스크롤 사이에서 한 박자 쉬어가며 대응 관계를 정리한다 */
+/* 두 고정 스크롤 사이에서 한 화면을 온전히 차지해야 '쉬어가는' 느낌이 난다 */
+.bridge { position: relative; z-index: 1; min-height: 100lvh; display: flex; align-items: center; padding: 5rem 1.25rem }
+@media (min-width: 640px) { .bridge { padding-left: 2rem; padding-right: 2rem } }
+.bridge .shell { width: 100% }
+/* 여기서도 로봇이 계속 비쳐야 흐름이 끊기지 않는다 — 행 자체가 배경을 가지므로 스크림은 옅게 */
+.bridge::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.35) 0%, rgba(255,255,255,.55) 30%, rgba(255,255,255,.55) 70%, rgba(255,255,255,.35) 100%) }
+.bridge-inner { display: flex; flex-direction: column; align-items: center; text-align: center }
+.bridge-eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .22em; color: var(--accent) }
+.bridge-h2 { margin-top: .9rem; font-size: 1.9rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
+@media (min-width: 640px) { .bridge-h2 { font-size: 2.4rem } }
+.bridge-rows { margin-top: 2.75rem; width: 100%; max-width: 46rem; display: flex; flex-direction: column; gap: .5rem; list-style: none; padding: 0 }
+.bridge-rows li { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 1rem;
+  border-radius: 1rem; background: var(--surface); padding: 1rem 1.4rem }
+.bridge-from { font-size: .8rem; font-weight: 700; color: var(--danger); text-align: right }
+.bridge-arrow { width: 1rem; height: 1rem; color: var(--muted); flex: none }
+.bridge-to { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; text-align: left; word-break: keep-all }
+
+/* ===== hero ===== */
+#home { position: relative; isolation: isolate; min-height: 100lvh }
+.hero-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    linear-gradient(100deg, rgba(247,246,244,.95) 0%, rgba(247,246,244,.74) 26%, rgba(247,246,244,.28) 46%, rgba(247,246,244,0) 64%),
+    linear-gradient(to bottom, rgba(247,246,244,.55) 0%, transparent 16%),
+    linear-gradient(to top, rgba(247,246,244,.8) 0%, transparent 22%) }
+@media (max-width: 1023px) {
+  .hero-vignette { background:
+    linear-gradient(to bottom, rgba(247,246,244,.98) 0%, rgba(247,246,244,.95) 42%, rgba(247,246,244,.55) 62%, rgba(247,246,244,.05) 80%),
+    linear-gradient(to top, rgba(247,246,244,.8) 0%, transparent 20%) }
+}
+.hero-grid { position: relative; z-index: 20; display: flex; flex-direction: column; justify-content: flex-start; min-height: 100lvh; padding: 6.5rem 1.25rem 6rem }
+@media (min-width: 640px) { .hero-grid { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .hero-grid { justify-content: center; padding: 9.5rem 2rem 7rem } }
+/* 폭 제한은 제목이 마크업대로 두 줄을 유지할 만큼 넉넉해야 한다(글자를 키우면 46rem으로는 넘친다) */
+.hero-left { display: flex; flex-direction: column; gap: 2.4rem; max-width: 56rem }
+.hero-eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .85rem; font-weight: 600; color: rgba(17,17,17,.7) }
+.hero-eyebrow .dot { width: .4rem; height: .4rem; background: var(--accent); border-radius: 9999px }
+/* 한글은 어절(띄어쓰기) 단위로만 줄바꿈 — keep-all이 없으면 "시간에/도"처럼 낱글자가 끊긴다.
+   ch 단위는 숫자 폭 기준이라 전각 한글에 맞지 않으므로 폭 제한은 부모(.hero-left)에 맡긴다. */
+.hero-h1 { font-size: 2.1rem; font-weight: 700; line-height: 1.15; letter-spacing: -.03em; word-break: keep-all }
+@media (min-width: 640px) { .hero-h1 { font-size: 2.9rem } }
+@media (min-width: 768px) { .hero-h1 { font-size: 3.4rem } }
+@media (min-width: 1280px) { .hero-h1 { font-size: 3.95rem } }
+/* 두 줄이 서로 다른 문장이라 줄 사이를 띄운다.
+   line-height 대신 줄 블록 사이 여백으로 줘야, 좁은 화면에서 한 줄이 접혔을 때
+   그 안쪽 줄간격까지 같이 벌어지지 않는다. */
+.hero-h1 .line + .line { margin-top: .18em }
+.hero-h1 .accent { color: var(--accent) }
+.hero-sub { max-width: 60ch; font-size: 1.04rem; line-height: 1.75; color: rgba(17,17,17,.62) }
+.cta-row { display: flex; flex-wrap: wrap; gap: .9rem }
+.hero-stats { display: flex; flex-wrap: wrap; gap: 3rem; margin-top: .75rem }
+.hero-stat .n { font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em }
+.hero-stat .n b { color: var(--accent); font-weight: 700 }
+.hero-stat .l { margin-top: .3rem; font-size: .82rem; color: rgba(17,17,17,.5) }
+
+/* floating product chips */
+.robot-chip { position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: .5rem; border-radius: 9999px; background: rgba(13,13,16,.82); color: #fff; backdrop-filter: blur(8px); padding: .6rem 1.1rem; font-size: .95rem; font-weight: 600; box-shadow: 0 8px 24px -10px rgba(0,0,0,.5) }
+.robot-chip .live { width: .5rem; height: .5rem; border-radius: 9999px; background: #3ddc84; box-shadow: 0 0 0 3px rgba(61,220,132,.25) }
+.robot-chip--status { top: 6.5rem; right: 2rem }
+.robot-chip--event { bottom: 7rem; right: 2rem; background: rgba(255,255,255,.92); color: #111; box-shadow: 0 10px 30px -12px rgba(0,0,0,.25) }
+.robot-chip--event .k { width: 1.9rem; height: 1.9rem; display: grid; place-items: center; border-radius: 9999px; background: var(--accent-soft); color: var(--accent-deep) }
+.robot-chip--event .t { font-weight: 700 }
+.robot-chip--event .s { font-weight: 500; color: var(--muted); font-size: .85rem }
+.robot-hint { position: absolute; z-index: 20; bottom: 4.5rem; right: 2rem; font-size: .9rem; color: rgba(17,17,17,.7); font-weight: 600; letter-spacing: .02em; transition: opacity .4s }
+@media (max-width: 1023px) {
+  .robot-chip--status { top: 5rem; right: 1.25rem }
+  .robot-chip--event { display: none }
+  .robot-hint { left: 1.25rem; right: auto; bottom: 4.2rem }
+}
+
+.hero-status { position: absolute; inset-inline: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-inline: auto; max-width: var(--shell-wide); border-top: 1px solid rgba(17,17,17,.12); padding: 1.2rem 1.25rem; font-size: .74rem; font-weight: 600; letter-spacing: .02em; color: rgba(17,17,17,.6) }
+@media (min-width: 640px) { .hero-status { padding-left: 2rem; padding-right: 2rem } }
+.hero-status .mid { display: none }
+@media (min-width: 640px) { .hero-status .mid { display: inline } }
+.hero-status .end { display: inline-flex; gap: .5rem }
+
+/* ===== sections common ===== */
+.landing .sec-pad { padding: 4.5rem 1.25rem }
+@media (min-width: 640px) { .landing .sec-pad { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .landing .sec-pad { padding-top: 7rem; padding-bottom: 7rem } }
+.landing .center-head { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem }
+/* 한글은 어절 단위로만 줄바꿈 (keep-all 없으면 "흘/러갑니다"처럼 낱글자가 끊긴다) */
+.landing .sec-h2 { font-size: 2rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
+@media (min-width: 640px) { .landing .sec-h2 { font-size: 2.7rem } }
+
+/* ===== problem (해결하는 문제 — 카피는 landing_1p.html) ===== */
+#problem { background: #fff }
+.prob-sub { max-width: 44ch; font-size: .95rem; line-height: 1.6; color: rgba(17,17,17,.55); word-break: keep-all }
+.prob-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 3rem; list-style: none; padding: 0 }
+@media (min-width: 640px) { .prob-grid { grid-template-columns: 1fr 1fr } }
+@media (min-width: 1024px) { .prob-grid { grid-template-columns: repeat(4, 1fr) } }
+.prob-card { height: 100%; display: flex; flex-direction: column; gap: .8rem; border-radius: 1.25rem; background: var(--surface); padding: 1.75rem;
+  transition: transform .45s var(--ease-snap), background .45s var(--ease-snap), box-shadow .45s var(--ease-snap), opacity .45s var(--ease-snap) }
+@media (hover:hover) and (pointer:fine) { .prob-card:hover { transform: translateY(-6px); background: var(--surface-2) } }
+/* 분류명이 길어 자간이 넓으면 카드 폭을 넘긴다. 트래킹만 좁혀 한 줄로 버티는 구간을 넓히고,
+   접히더라도 keep-all로 어절 단위로만 끊는다("교대근/무"처럼 낱글자가 갈리지 않게) */
+.prob-tag { font-size: .72rem; font-weight: 700; letter-spacing: .02em; color: var(--accent); word-break: keep-all }
+.prob-card h3 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; word-break: keep-all }
+.prob-card p { font-size: .88rem; line-height: 1.6; color: rgba(17,17,17,.55); word-break: keep-all }
+
+/* ---- 문제 해결 서사 (로봇이 하나씩 처리) ---- */
+/* 처리 전에는 가라앉아 있다가, 출동 대상이 되면 떠오르고, 해결되면 초록으로 확정된다 */
+.prob-card.is-narrative { background: rgba(255,255,255,.72); box-shadow: inset 0 0 0 1px var(--line);
+  opacity: .55; transform: translateY(6px) }
+.prob-card.is-narrative .prob-tag { color: var(--danger) }
+.prob-card.is-active { opacity: 1; transform: translateY(-4px); background: #fff;
+  box-shadow: inset 0 0 0 1px var(--danger), 0 18px 40px -22px rgba(229,72,77,.55) }
+.prob-card.is-solved { opacity: 1; transform: none; background: #fff;
+  box-shadow: inset 0 0 0 1px var(--success-soft), 0 14px 34px -24px rgba(22,163,74,.5) }
+.prob-card.is-solved .prob-tag { color: var(--success) }
+
+.prob-status { margin-top: auto; padding-top: .9rem; display: flex; align-items: center; gap: .4rem;
+  font-size: .8rem; font-weight: 600; line-height: 1.45; color: var(--success); word-break: keep-all }
+.prob-check { flex: none; width: .95rem; height: .95rem; color: var(--success) }
+.prob-pending { color: rgba(17,17,17,.35); font-weight: 600 }
+.prob-working { color: var(--danger); font-weight: 700 }
+.prob-working::after { content: ''; display: inline-block; width: .35rem; height: .35rem; margin-left: .4rem;
+  border-radius: 9999px; background: var(--danger); animation: prob-blink 1s steps(2, start) infinite; vertical-align: middle }
+@keyframes prob-blink { 0%, 100% { opacity: 1 } 50% { opacity: .2 } }
+
+/* ===== features ===== */
+#features { background: #fff }
+.feat-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 3rem }
+@media (min-width: 768px) { .feat-grid { grid-template-columns: 1fr 1fr } }
+.feat-card { position: relative; min-height: 19rem; overflow: hidden; border-radius: 2rem; background: var(--card); padding: 1.75rem; color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.05); transition: transform .4s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .feat-card { padding: 2.1rem } }
+@media (hover:hover) and (pointer:fine) { .feat-card:hover { transform: translateY(-8px) } }
+.feat-card .glow { position: absolute; right: -6rem; top: -6rem; width: 16rem; height: 16rem; border-radius: 9999px; background: radial-gradient(closest-side, rgba(224,83,42,.35), transparent 70%); pointer-events: none }
+.feat-top { display: flex; align-items: center; justify-content: space-between }
+.feat-ico { width: 3rem; height: 3rem; display: grid; place-items: center; border-radius: 1rem; background: rgba(255,255,255,.08); color: var(--accent-light); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1) }
+.feat-ico svg { width: 1.4rem; height: 1.4rem }
+.feat-no { font-size: .75rem; font-weight: 700; color: rgba(255,255,255,.35); letter-spacing: .1em }
+.feat-body { position: absolute; inset-inline: 1.75rem; bottom: 1.75rem }
+@media (min-width: 640px) { .feat-body { inset-inline: 2.1rem; bottom: 2.1rem } }
+.feat-body h3 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em }
+@media (min-width: 640px) { .feat-body h3 { font-size: 1.65rem } }
+.feat-body p { margin-top: .6rem; max-width: 32ch; font-size: .9rem; line-height: 1.55; color: rgba(255,255,255,.58) }
+.feat-body .tags { margin-top: 1.1rem; display: flex; flex-wrap: wrap; gap: .5rem }
+
+/* ===== 기능 구간 — 무대의 캔버스를 그대로 쓰고 카드만 얹는다 ===== */
+.journey-track { position: relative; z-index: 1; height: 400vh; height: 400lvh }
+.journey-pin { position: sticky; top: 0; height: 100vh; height: 100lvh }
+/* 문제 구간에서 기능 구간으로 넘어갈 때 배경이 끊기지 않게 아주 옅은 스크림만 */
+.journey-pin::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.4) 0%, rgba(255,255,255,.1) 24%, rgba(255,255,255,.1) 76%, rgba(255,255,255,.45) 100%) }
+
+/* 도입 문구 — 첫 카드가 열리기 전까지 */
+.journey-lead-in { position: absolute; left: 50%; top: 13%; z-index: 2; width: min(46rem, 86vw); transform: translateX(-50%); text-align: center;
+  transition: opacity .5s var(--ease-out), transform .5s var(--ease-out) }
+.journey-lead-in.is-out { opacity: 0; transform: translateX(-50%) translateY(-1.5rem); pointer-events: none }
+.journey-eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .22em; color: var(--accent) }
+.journey-lead-in h2 { margin-top: .9rem; font-size: 2.4rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
+/* 이 기능이 어떤 문제를 되받는지 — 두 섹션을 잇는 고리 */
+/* 문제 이름이 길면 알약이 라벨 옆에 다 못 들어간다. 줄을 내려 알약이 한 줄로 유지되게 한다
+   (알약은 pill 라운드라 두 줄이 되면 모양이 깨진다) */
+.journey-answers { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .78rem; font-weight: 600 }
+.journey-answers__label { color: rgba(255,255,255,.45) }
+.journey-answers .font-mono { color: var(--accent-light); padding: .2rem .55rem; border-radius: 9999px;
+  background: rgba(255,106,61,.14); box-shadow: inset 0 0 0 1px rgba(255,106,61,.3) }
+
+/* 기능 카드 — 체크포인트 도달 시 열린다. 네 모서리를 차례로(우상→좌상→좌하→우하), 원근 기울기 */
+.journey-card { position: absolute; z-index: 2; top: 7vh; left: 4vw; width: min(27rem, 40vw);
+  border-radius: 1.75rem; background: var(--card); color: #fff; padding: 2rem;
+  box-shadow: 0 24px 60px -24px rgba(17,17,17,.5), inset 0 0 0 1px rgba(255,255,255,.06);
+  opacity: 0; visibility: hidden;
+  transform: translateX(-2.5rem) perspective(1200px) rotateY(9deg);
+  transition: opacity .55s var(--ease-out), transform .55s var(--ease-out), visibility .55s }
+.journey-card.is-right { left: auto; right: 4vw; transform: translateX(2.5rem) perspective(1200px) rotateY(-9deg) }
+/* 하단 모서리 — 진행 레일(bottom 2.5rem + 높이 2.5rem)에 닿지 않게 띄운다 */
+.journey-card.is-bottom { top: auto; bottom: 7rem }
+.journey-card.is-on { opacity: 1; visibility: visible; transform: translateX(0) perspective(1200px) rotateY(0deg) }
+.journey-no { font-size: .74rem; font-weight: 700; letter-spacing: .12em; color: var(--accent-light) }
+.journey-card h3 { margin-top: .7rem; font-size: 1.65rem; font-weight: 700; letter-spacing: -.02em; word-break: keep-all }
+.journey-card p { margin-top: .8rem; font-size: .92rem; line-height: 1.65; color: rgba(255,255,255,.62); word-break: keep-all }
+.journey-tags { margin-top: 1.2rem; display: flex; flex-wrap: wrap; gap: .5rem }
+
+/* 진행 레일 */
+.journey-rail { position: absolute; z-index: 2; left: 50%; bottom: 2.5rem; transform: translateX(-50%);
+  display: flex; gap: .75rem; list-style: none; padding: 0; margin: 0 }
+.journey-rail li { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border-radius: 9999px;
+  background: rgba(255,255,255,.72); backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px var(--line);
+  font-size: .72rem; font-weight: 700; color: rgba(17,17,17,.45);
+  transition: background .35s var(--ease-snap), color .35s var(--ease-snap), box-shadow .35s var(--ease-snap), transform .35s var(--ease-snap) }
+.journey-rail li.is-done { color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft) }
+.journey-rail li.is-on { background: var(--accent); color: #fff; box-shadow: inset 0 0 0 1px var(--accent); transform: scale(1.12) }
+
+/* ===== how it works ===== */
+#how { background: #fff }
+.how-steps { position: relative; display: grid; grid-template-columns: 1fr; gap: 2.5rem; margin-top: 3rem; list-style: none; padding: 0 }
+@media (min-width: 640px) { .how-steps { grid-template-columns: 1fr 1fr; gap: 2.75rem 1.5rem } }
+@media (min-width: 1024px) { .how-steps { grid-template-columns: repeat(4, 1fr); gap: 0 } }
+.how-step { position: relative; padding: 0 1.25rem; text-align: center }
+/* 다음 스텝으로 잇는 점선. 스텝 '안'에 그려야 리빌 애니메이션(translateY)에도
+   원과 함께 움직여 항상 원 중심 높이(원 지름의 절반 = 1.65rem)에 붙는다.
+   좌우는 다음 원 중심(150%)까지 잇되 반지름+여백(2rem)만큼 비운다. */
+.how-step::before { content: ''; display: none; position: absolute; top: 1.65rem; left: calc(50% + 2rem); right: calc(-50% + 2rem); height: 1px; background: repeating-linear-gradient(90deg, var(--subtle) 0 6px, transparent 6px 12px); background-size: 12px 1px }
+/* 순찰이 "흘러가는" 방향으로 점선이 천천히 흐른다 */
+@media (min-width: 1024px) { .how-step:not(:last-child)::before { display: block; animation: how-flow 1.4s linear infinite } }
+@keyframes how-flow { to { background-position: 12px 0 } }
+
+.how-num { position: relative; z-index: 1; display: grid; place-items: center; width: 3.3rem; height: 3.3rem; margin: 0 auto 1.15rem; border-radius: 9999px; background: #fff; box-shadow: inset 0 0 0 1px var(--fg); font-size: .95rem; font-weight: 700;
+  transition: transform .3s var(--ease-snap), background-color .3s var(--ease-snap), color .3s var(--ease-snap), box-shadow .3s var(--ease-snap) }
+/* 03 알림 — 긴급 알림 단계라 danger 토큰으로 구분 (와이어프레임 1p) */
+.how-step--alert .how-num { box-shadow: inset 0 0 0 1px var(--danger); color: var(--danger) }
+/* 진입 — 원이 순서대로(--sd) 팝. fill-mode는 backwards여야 종료 후 hover transform이 살아난다 */
+@keyframes how-pop { from { transform: scale(.72); opacity: 0 } to { transform: none; opacity: 1 } }
+.how-step.rv-in .how-num { animation: how-pop .55s var(--ease-out) backwards; animation-delay: var(--sd, 0ms) }
+
+.how-step h3 { margin-bottom: .5rem; font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; transition: color .3s var(--ease-snap) }
+.how-step p { font-size: .88rem; line-height: 1.65; color: rgba(17,17,17,.55); word-break: keep-all }
+
+/* hover 스프링은 데스크톱만 */
+@media (hover: hover) and (pointer: fine) {
+  .how-step:hover .how-num { transform: scale(1.08); background: var(--ink); color: #fff; box-shadow: inset 0 0 0 1px var(--ink) }
+  .how-step--alert:hover .how-num { background: var(--danger); box-shadow: inset 0 0 0 1px var(--danger) }
+  .how-step--alert:hover h3 { color: var(--danger) }
+}
+
+/* ===== impact ===== */
+#impact { background: #fff }
+.impact-inner { padding: 0 1.25rem 4.5rem }
+@media (min-width: 640px) { .impact-inner { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .impact-inner { padding-bottom: 7rem } }
+.impact-panel { position: relative; overflow: hidden; border-radius: 2rem; background: var(--card); padding: 3rem 1.5rem; color: #fff }
+@media (min-width: 640px) { .impact-panel { padding: 4rem 2rem } }
+@media (min-width: 768px) { .impact-panel { padding-left: 4rem; padding-right: 4rem } }
+.impact-panel .glow { position: absolute; left: -8rem; bottom: -8rem; width: 24rem; height: 24rem; border-radius: 9999px; background: radial-gradient(closest-side, rgba(224,83,42,.28), transparent 70%); pointer-events: none }
+.impact-h2 { position: relative; margin-top: 1rem; max-width: 20ch; font-size: 1.8rem; font-weight: 700; letter-spacing: -.02em }
+@media (min-width: 768px) { .impact-h2 { font-size: 2.3rem } }
+.impact-grid { position: relative; margin-top: 3rem; display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 2rem; row-gap: 2.75rem; list-style: none; padding: 0 }
+@media (min-width: 1024px) { .impact-grid { grid-template-columns: repeat(4, 1fr) } }
+.impact-num { font-size: 2.8rem; font-weight: 700; letter-spacing: -.03em }
+@media (min-width: 640px) { .impact-num { font-size: 3.6rem } }
+.impact-num .suf { color: var(--accent-light) }
+.impact-lbl { margin-top: .6rem; font-size: .86rem; color: rgba(255,255,255,.55) }
+
+/* ===== footer ===== */
+/* 딥 블랙 배경을 걷고 페이지와 같은 밝은 톤으로 */
+.landing-footer { position: relative; overflow: hidden; background: transparent; color: var(--fg) }
+.footer-inner { position: relative; z-index: 10; padding: 4.5rem 1.25rem 2.5rem }
+@media (min-width: 640px) { .footer-inner { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .footer-inner { padding-top: 6rem } }
+/* 시작 CTA 하나만 가운데에 */
+.footer-start { position: relative; z-index: 10; display: flex; justify-content: center;
+  padding: 6rem 1.25rem 7rem }
+@media (min-width: 640px) { .footer-start { padding-left: 2rem; padding-right: 2rem } }
+/* ---- 밀어서 시작 ----
+   드래그 전에는 반투명 흰색, 끝까지 밀면 오렌지로 채워진다 */
+.slide-start { position: relative; display: flex; align-items: center; overflow: hidden;
+  width: min(26rem, 84vw); height: 4.6rem; padding: .375rem; border-radius: 9999px;
+  background: rgba(255,255,255,.55); backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(230,229,226,.95), 0 12px 30px -18px rgba(17,17,17,.4);
+  cursor: grab; touch-action: none; user-select: none;
+  transition: box-shadow .3s var(--ease-snap) }
+.slide-start.is-dragging { cursor: grabbing }
+.slide-start.is-done { cursor: default;
+  box-shadow: inset 0 0 0 1px var(--accent), 0 14px 32px -18px rgba(224,83,42,.6) }
+
+/* 진행률(--p)만큼 차오르는 오렌지 */
+.slide-start__fill { position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(120deg, var(--accent-light), var(--accent-deep));
+  transform: scaleX(var(--p, 0)); transform-origin: left center;
+  transition: transform .35s var(--ease-out) }
+.slide-start.is-dragging .slide-start__fill { transition: none }
+.slide-start.is-done .slide-start__fill { transform: none }
+
+.slide-start__label { position: relative; z-index: 1; flex: 1; text-align: center; padding-left: 3.4rem;
+  font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap;
+  color: rgba(17,17,17,.62); transition: color .3s var(--ease-snap) }
+/* 오렌지가 절반쯤 차오르면 글자를 흰색으로 뒤집는다 */
+.slide-start.is-done .slide-start__label { color: #fff; padding-left: 0; padding-right: 3.4rem }
+
+.slide-start__thumb { position: absolute; z-index: 2; left: .375rem; top: .375rem;
+  width: 3.85rem; height: 3.85rem; display: grid; place-items: center; border-radius: 9999px;
+  background: #fff; color: var(--ink);
+  box-shadow: 0 6px 16px -6px rgba(17,17,17,.45);
+  transform: translateX(calc(var(--p, 0) * (min(26rem, 84vw) - 4.6rem)));
+  transition: transform .35s var(--ease-out), color .3s var(--ease-snap) }
+.slide-start.is-dragging .slide-start__thumb { transition: color .3s var(--ease-snap) }
+.slide-start.is-done .slide-start__thumb { color: var(--accent) }
+.slide-start__thumb svg { width: 1.3rem; height: 1.3rem }
+
+.slide-start:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px }
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-start__fill, .slide-start__thumb { transition: none }
+}
+
+/* [순찰 시작하기] → 회원가입 / 로그인 두 갈래로 펼쳐질 때 */
+.footer-cta__choices { display: flex; flex-wrap: wrap; justify-content: center; gap: .75rem;
+  animation: footer-choices .35s var(--ease-out) both }
+@keyframes footer-choices { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+.footer-cols { display: grid; grid-template-columns: 1fr; gap: 2.5rem; padding-top: 3.5rem; padding-bottom: 3.5rem }
+@media (min-width: 768px) { .footer-cols { grid-template-columns: 1.4fr 1fr 1fr 1fr } }
+.fcol-brand .b { display: flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 700 }
+.fcol-brand .b .mk { width: 1.5rem; height: 1.5rem; color: var(--accent-light) }
+.fcol-brand p { max-width: 24rem; margin-top: 1rem; font-size: .88rem; line-height: 1.6; color: rgba(255,255,255,.5) }
+.fcol h4 { font-size: .75rem; letter-spacing: .05em; color: rgba(255,255,255,.4); margin-bottom: 1rem; font-weight: 600 }
+.fcol ul { list-style: none; padding: 0 }
+.fcol li { font-size: .9rem; margin-bottom: .7rem }
+.alink { display: inline-flex; color: inherit; text-decoration: none; background: none; border: 0; cursor: pointer; font: inherit; padding: 0 }
+.alink > span { display: inline-block; opacity: .7; transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s cubic-bezier(.2,.8,.2,1) }
+@media (hover:hover) and (pointer:fine) { .alink:hover > span { transform: translateX(4px); opacity: 1 } }
+.footer-legal { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid rgba(255,255,255,.1); padding-top: 2rem; font-size: .75rem; color: rgba(255,255,255,.45) }
+@media (min-width: 640px) { .footer-legal { flex-direction: row } }
+.footer-legal .lg-links { display: flex; gap: 1.5rem }
+
+/* ===== nav menu ===== */
+.navmenu { position: fixed; inset: 0; z-index: 115; display: flex; flex-direction: column; background: var(--ink); color: #fff; opacity: 0; pointer-events: none; transition: opacity .35s cubic-bezier(.22,1,.36,1) }
+.navmenu.open { opacity: 1; pointer-events: auto }
+.navmenu__top { display: flex; align-items: center; justify-content: space-between; padding: 1.15rem 1.25rem }
+@media (min-width: 640px) { .navmenu__top { padding: 1.4rem 2rem } }
+.navmenu__brand { display: flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 700 }
+.navmenu__brand .mk { width: 1.5rem; height: 1.5rem; color: var(--accent-light) }
+.nm-close { display: inline-flex; align-items: center; gap: .5rem; border: 1px solid rgba(255,255,255,.15); border-radius: .875rem; padding: .55rem 1rem; font-size: .75rem; font-weight: 600; letter-spacing: .02em; color: rgba(255,255,255,.7); transition: border-color .25s, color .25s; background: none; cursor: pointer }
+@media (hover:hover) and (pointer:fine) { .nm-close:hover { border-color: rgba(255,255,255,.4); color: #fff } }
+.navmenu__nav { flex: 1; display: flex; flex-direction: column; justify-content: center }
+.navmenu__nav ul { display: flex; flex-direction: column; gap: .25rem; list-style: none; padding: 0 }
+.nm-item { display: flex; align-items: baseline; gap: 1rem; padding: .5rem 0; text-align: left; font-size: 2rem; font-weight: 700; letter-spacing: -.02em; width: 100%; transform: translateY(1rem); opacity: 0; transition: transform .5s ease-out, opacity .5s ease-out; background: none; border: 0; cursor: pointer; color: inherit }
+@media (min-width: 640px) { .nm-item { font-size: 3.2rem } }
+.navmenu.open .nm-item { transform: none; opacity: 1 }
+.nm-item .n { font-size: 1rem; font-weight: 500; color: rgba(255,255,255,.3); transition: color .3s }
+.nm-item .l { color: rgba(255,255,255,.7); transition: color .3s }
+@media (hover:hover) and (pointer:fine) { .nm-item:hover .n { color: var(--accent-light) } .nm-item:hover .l { color: #fff } }
+.navmenu__bottom { display: flex; flex-direction: column; gap: .75rem; border-top: 1px solid rgba(255,255,255,.1); padding: 1.4rem 1.25rem; font-size: .75rem; letter-spacing: .02em; color: rgba(255,255,255,.45) }
+@media (min-width: 640px) { .navmenu__bottom { flex-direction: row; align-items: center; justify-content: space-between; padding-left: 2rem; padding-right: 2rem } }
+.nm-start { color: rgba(255,255,255,.7); transition: color .25s; background: none; border: 0; cursor: pointer; font: inherit }
+@media (hover:hover) and (pointer:fine) { .nm-start:hover { color: #fff; text-decoration: underline } }
+
+/* ===== contact modal ===== */
+.lmodal { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-end; justify-content: center; padding: 1rem; background: rgba(17,17,17,.3); backdrop-filter: blur(16px); opacity: 0; pointer-events: none; transition: opacity .35s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .lmodal { align-items: center } }
+.lmodal.open { opacity: 1; pointer-events: auto }
+.lmodal__panel { position: relative; width: 100%; max-width: 32rem; overflow: hidden; border-radius: 2rem; background: #fff; padding: 1.5rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,.25), 0 0 0 1px var(--line); transform: translateY(28px); opacity: 0; transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .lmodal__panel { padding: 2rem } }
+.lmodal.open .lmodal__panel { transform: none; opacity: 1 }
+.lmodal__close { position: absolute; right: 1rem; top: 1rem; width: 2.25rem; height: 2.25rem; display: grid; place-items: center; border-radius: 9999px; background: var(--surface); color: rgba(17,17,17,.6); transition: background .2s, color .2s; border: 0; cursor: pointer }
+@media (hover:hover) and (pointer:fine) { .lmodal__close:hover { background: var(--surface-2); color: #111 } }
+.lmodal__head { margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: .4rem }
+.lmodal__eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .85rem; font-weight: 600; color: rgba(17,17,17,.6) }
+.lmodal__eyebrow .dot { width: .4rem; height: .4rem; border-radius: 9999px; background: var(--accent) }
+.lmodal__head h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em }
+@media (min-width: 640px) { .lmodal__head h2 { font-size: 1.8rem } }
+.lmodal form { display: flex; flex-direction: column; gap: 1rem }
+.lmodal .field { display: flex; flex-direction: column; gap: .5rem }
+.lmodal .field .cap { font-size: .75rem; font-weight: 600; letter-spacing: .02em; color: rgba(17,17,17,.5) }
+.lmodal .field input, .lmodal .field textarea { width: 100%; border: 1px solid var(--line); background: rgba(242,241,239,.5); border-radius: .875rem; padding: .75rem 1rem; font-size: .9rem; outline: none; font-family: inherit; transition: border-color .2s, background .2s }
+.lmodal .field textarea { resize: none }
+.lmodal .field input:focus, .lmodal .field textarea:focus { border-color: rgba(17,17,17,.3); background: #fff }
+.lmodal__submit { margin-top: .5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem }
+.lmodal__note { font-size: .75rem; color: rgba(17,17,17,.45) }
+.lmodal__success { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem; padding: 2rem 0 }
+.lmodal__success .badge { width: 3.5rem; height: 3.5rem; display: grid; place-items: center; border-radius: 9999px; background: var(--ink); color: var(--accent-light) }
+.lmodal__success .badge .mk { width: 1.8rem; height: 1.8rem }
+.lmodal__success h2 { font-size: 1.5rem; font-weight: 700 }
+.lmodal__success p { max-width: 34ch; font-size: .9rem; color: rgba(17,17,17,.6) }
