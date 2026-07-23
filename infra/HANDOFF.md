@@ -1,5 +1,12 @@
 # AIoT infrastructure handoff
 
+> **2026-07-22 target-design notice:** This document primarily describes the
+> implemented `develop`-centric pipeline and its historical rollout. The next
+> approved migration is documented in
+> [CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md). Do not enable
+> part-master deployment by editing branch rules alone; candidate integration
+> tests, release manifests, and component rollback must be introduced first.
+
 이 문서는 다음 인프라 담당자가 현재 상태에서 바로 작업을 이어가기 위한 기준 문서다.
 완료된 항목과 설계만 존재하는 항목을 반드시 구분해서 읽는다.
 
