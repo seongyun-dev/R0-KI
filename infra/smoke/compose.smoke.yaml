@@ -1,0 +1,33 @@
+name: aiot-platform-smoke
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:${SMOKE_FRONTEND_PORT:-13000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/ >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "2"
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "127.0.0.1:${SMOKE_BACKEND_PORT:-18080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/actuator/health >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "2"
