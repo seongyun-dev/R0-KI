@@ -10,8 +10,11 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.util.StringUtils;
 
+// test 프로파일(contextLoads 등)에서는 실제 브로커가 없어 연결이 실패하므로 빈 자체를 안 만듦
+@Profile("!test")
 @Configuration
 public class MqttConfig {
 

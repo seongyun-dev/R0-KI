@@ -6,9 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+// MqttConfig의 IMqttClient 빈이 test 프로파일엔 없어서 이 빈도 같이 제외
 @Slf4j
+@Profile("!test")
 @Component
 @RequiredArgsConstructor
 public class MqttPublisher {
