@@ -170,18 +170,27 @@ Back 이미지 롤백은 DB down migration을 실행하지 않는다. Flyway 변
 5. 두 파트 CI와 후보 통합 테스트가 모두 통과한 뒤 `develop`에 merge한다.
 6. `develop` merge는 운영 EC2를 바꾸지 않는다. 검증된 조합과 통합 이력만 남긴다.
 
+현재 배포된 첫 파트 release에는 전환 전 공통 CI 파일이 포함되어 있어 최초 통합 때
+`.gitlab-ci.yml` 충돌이 발생하는 것이 정상이다. 충돌을 억지로 자동 해소하거나 파트
+master 쪽 파일 전체를 선택하지 않는다. 최신 `infra/dev`의 공통 CI를 기준으로
+해결하고, 아래 검사를 통과시킨 뒤에만 push한다.
+
 예시:
 
 ```bash
 git fetch origin --prune
 git switch -c release/integration-20260723 origin/develop
+git merge --no-ff origin/infra/dev
 git merge --no-ff 2c622b92f3304ace60c57bf7770093b9ab269583
 git merge --no-ff cc68cf846f3bbd0adc1e5e1075841f85d3b42ed7
+# 충돌 시 .gitlab-ci.yml은 최신 origin/infra/dev 정책을 보존해 수동 해결
+! grep -Eq '^(sync_runtime|deploy_develop|verify_develop):' .gitlab-ci.yml
 git push -u origin release/integration-20260723
 ```
 
 단순히 각 master 최신 HEAD를 무조건 develop에 넣지 않는다. Manifest에 기록된 배포
-성공 commit과 GitLab Environment의 성공 상태를 먼저 대조한다.
+성공 commit과 GitLab Environment의 성공 상태를 먼저 대조한다. 위 금지 Job 검사에
+실패하면 `develop` MR을 만들지 않는다.
 
 ## 8. 활성화 검증 결과
 

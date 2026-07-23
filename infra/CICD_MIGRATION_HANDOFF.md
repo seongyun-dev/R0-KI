@@ -467,6 +467,10 @@ Frontend/Backend 전환 완료 조건:
 - [ ] develop 통합은 마지막 배포 성공 release만 사용한다.
 - [x] 운영자가 서버 SSH 없이 GitLab에서 정상 배포 상태를 확인할 수 있다.
 
+최초 develop 통합에서 현재 파트 master의 전환 전 `.gitlab-ci.yml`과 충돌하는 것은
+예상된 안전장치다. `infra/CICD_V2_OPERATIONS.md` 절차대로 최신 `infra/dev` 정책을
+보존하고, 삭제된 develop 배포 Job이 다시 생기지 않았는지 검사해야 한다.
+
 AI/IoT 후속 완료 조건:
 
 - [ ] 파트별 version, checksum, compatibility metadata가 생성된다.
