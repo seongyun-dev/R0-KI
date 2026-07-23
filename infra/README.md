@@ -36,6 +36,29 @@ atomic switch, with offline fallback and rollback. See [jetson/](jetson/) and
 ## Secrets
 
 Real secrets live only under `/srv/aiot/secrets`. Never commit `.env`, certificates, runner tokens, or passwords.
+The Mattermost incoming webhook is stored only as the protected and masked
+GitLab CI/CD variable `MM_WEBHOOK_URL`.
+
+## Deployment notifications
+
+`front/master` and `back/master` deployments run through
+`scripts/deploy-with-notification.sh`. It posts a custom card to the channel
+configured by the Mattermost incoming webhook:
+
+- green: deployment and health verification completed;
+- yellow: candidate integration failed, so production was not changed;
+- orange: deployment failed but the previous component was restored;
+- red with `@channel`: deployment failed and either rollback was unavailable
+  or rollback also failed.
+- blue: a protected Jetson release was published.
+
+The card contains the triggering user, changed commit/file counts, completion
+time, elapsed time, and service link. Notification delivery is best effort:
+Mattermost downtime never changes an otherwise successful deployment result.
+`scripts/test-notify-mattermost.sh` validates the rendered payload without
+contacting Mattermost or exposing the webhook URL.
+When notification files change on `infra/dev`, the
+`mattermost_notification_smoke` job sends one strict connection-test card.
 
 ## Server bootstrap order
 
