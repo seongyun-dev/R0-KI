@@ -1,5 +1,12 @@
 # AIoT operations runbook
 
+> The EC2 runtime in this runbook is currently installed. The part-master
+> pipeline, real candidate integration tests, JSON release manifest, and
+> component rollback are implemented in `infra/cicd-v2`; follow
+> [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for activation and do not
+> disable `deploy_develop` until the first Front/Back master deploy and rollback
+> checks have passed.
+
 ## Deployed topology
 
 ```text
