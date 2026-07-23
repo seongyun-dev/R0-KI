@@ -2,9 +2,10 @@
 
 기준일: 2026-07-23 (Asia/Seoul)
 
-이 문서는 `infra/cicd-v2`에서 구현한 파트별 master 배포 방식의 기준 문서다.
-코드는 구현·격리 검증되었지만, 보호 브랜치에 MR로 병합되기 전까지 GitLab의 실제
-배포 규칙은 기존 `develop` 중심 방식이다.
+이 문서는 파트별 master 독립 배포 방식의 운영 기준 문서다. Front/Back 후보 통합,
+최초 독립 운영 배포, 선택 롤백과 강제 실패 자동 롤백까지 실제 GitLab·EC2에서
+검증했다. 운영 배포 주체는 `front/master`, `back/master`이며 `develop`은 배포하지
+않는 통합 기록 브랜치다.
 
 ## 1. 최종 브랜치와 배포 규칙
 
@@ -81,11 +82,14 @@ Backend도 `aiot-backend:back-<commit>`과 동일한 순서로 동작한다. Git
 아직 Backend 안정 버전에 없는 API를 Front 배포의 필수 조건으로 만들지 않는다.
 OpenAPI에 기능이 생기면 해당 검사를 required로 승격한다.
 
-2026-07-23 격리 검증 결과:
+2026-07-23 검증 결과:
 
-- 현재 운영 Front + 현재 운영 Back: 통과
-- `front/dev` 후보 `8dc13a4be2c7` + 현재 운영 Back: 통과
-- 현재 운영 Front + `back/dev` 후보 `e9fa069d81ff`: signup/JWT/Robot 포함 통과
+- `front/master` 후보 `e77a0bbe0f08` + 안정 Back: Pipeline #155528 통과
+- 안정 Front + `back/master` 후보 `803a18295269`: Pipeline #155529 통과
+- Front `2c622b92f330` 독립 배포: Pipeline #155531 통과
+- Back `cc68cf846f3b` 독립 배포와 Flyway V1~V5: Pipeline #155532 통과
+- Front/Back 선택 롤백: 상대 앱·MySQL·MQTT 무재시작 확인
+- Front/Back 실패 이미지 배포: readiness 실패 뒤 해당 앱만 자동 복구 확인
 
 ## 4. Front 운영 빌드 계약
 
@@ -160,28 +164,36 @@ Back 이미지 롤백은 DB down migration을 실행하지 않는다. Flyway 변
 통합 마일스톤:
 
 1. Release Manifest에서 마지막으로 배포 성공한 각 파트 commit을 선택한다.
-2. 선택한 `파트/master` release를 release/integration 브랜치에 순서대로 합친다.
-3. 전체 계약·통합 테스트 뒤 `develop` MR로 기록한다.
-4. 단순히 각 master 최신 HEAD를 무조건 develop에 넣지 않는다.
+2. 최신 `develop`에서 `release/integration-<날짜>` 브랜치를 만든다.
+3. 선택한 `front/master`와 `back/master`의 배포 성공 commit만 순서대로 merge한다.
+4. 충돌을 해결하고 MR 대상 브랜치를 `develop`으로 지정한다.
+5. 두 파트 CI와 후보 통합 테스트가 모두 통과한 뒤 `develop`에 merge한다.
+6. `develop` merge는 운영 EC2를 바꾸지 않는다. 검증된 조합과 통합 이력만 남긴다.
 
-## 8. 안전한 활성화 순서
+예시:
 
-1. `infra/cicd-v2 -> infra/dev` MR과 Infra Pipeline을 통과시킨다.
-2. 공통 Infra 커밋을 정상 MR로 `front/dev`, `back/dev`에 동기화한다.
-3. `front/dev -> front/master`, `back/dev -> back/master` MR을 각각 만든다.
-4. 후보 통합 테스트가 성공한 파트부터 master에 merge한다.
-5. 실제 자동 배포 후 container image와 Release Manifest가 일치하는지 확인한다.
-6. Front/Back 개별 배포와 강제 실패 자동 롤백을 각 1회 검증한다.
-7. 그 뒤에만 기존 `deploy_develop` 자동 운영 배포를 비활성화한다.
+```bash
+git fetch origin --prune
+git switch -c release/integration-20260723 origin/develop
+git merge --no-ff 2c622b92f3304ace60c57bf7770093b9ab269583
+git merge --no-ff cc68cf846f3bbd0adc1e5e1075841f85d3b42ed7
+git push -u origin release/integration-20260723
+```
 
-이 브랜치에서는 1~6 검증 전 서비스 공백을 막기 위해 기존 `develop` 자동 배포를
-아직 유지한다. 따라서 MR 병합 직후 별도 전환 커밋에서 7번을 수행해야 한다.
+단순히 각 master 최신 HEAD를 무조건 develop에 넣지 않는다. Manifest에 기록된 배포
+성공 commit과 GitLab Environment의 성공 상태를 먼저 대조한다.
+
+## 8. 활성화 검증 결과
+
+1. `infra/cicd-v2 -> infra/dev`: 완료
+2. 공통 Infra를 `front/dev`, `back/dev`에 MR 동기화: 완료
+3. `front/dev -> front/master`, `back/dev -> back/master` 후보 검증: 완료
+4. Front/Back 개별 자동 배포 및 Manifest 일치: 완료
+5. Front/Back 선택 롤백과 강제 실패 자동 롤백: 완료
+6. 기존 `sync_runtime`, `deploy_develop`, `verify_develop` 제거: 완료
 
 ## 9. 아직 남은 범위
 
-- 보호 브랜치 MR을 통한 실제 GitLab 활성화
-- 첫 master 자동 배포 및 의도적 실패 롤백 검증
-- `develop` 운영 자동 배포 제거
 - `infra/master` 공통 설정 수동 승인 정책 확정
 - AI/IOT 실제 코드 계약 확정 후 파트별 package/checksum 게시
 - 승인된 AI+IoT 조합만 Jetson stable manifest로 승격
@@ -193,6 +205,6 @@ stable manifest를 부팅 시 확인해 필요한 package만 Pull OTA로 갱신�
 ## 10. 비밀값과 긴급 중지
 
 비밀값은 `/srv/aiot/secrets`에만 두고 Pipeline 로그·Manifest·Git에 넣지 않는다.
-배포를 긴급 중지할 때 GitLab CI/CD 변수 `DEPLOY_FREEZE=true`를 설정하면 master와
-기존 develop 배포 Job이 실행되지 않는다. 이미 실행 중인 배포는 서버의
+배포를 긴급 중지할 때 GitLab CI/CD 변수 `DEPLOY_FREEZE=true`를 설정하면 파트 master
+배포 Job이 실행되지 않는다. 이미 실행 중인 배포는 서버의
 `/srv/aiot/deploy/deploy.lock`으로 중복 실행이 차단된다.

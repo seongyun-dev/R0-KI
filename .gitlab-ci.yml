@@ -490,40 +490,6 @@ jetson_publish:
     name: jetson-stable
     url: https://i15e103.p.ssafy.io/jetson/releases/stable/manifest.json
 
-sync_runtime:
-  stage: sync
-  interruptible: false
-  resource_group: aiot-ec2-deploy
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
-      changes:
-        - frontend/**/*
-        - backend/**/*
-        - infra/**/*
-        - .gitlab-ci.yml
-    - when: never
-  script:
-    - bash infra/scripts/sync-runtime.sh
-
-deploy_develop:
-  stage: deploy
-  interruptible: false
-  resource_group: aiot-ec2-deploy
-  timeout: 20m
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
-      changes:
-        - frontend/**/*
-        - backend/**/*
-        - infra/**/*
-        - .gitlab-ci.yml
-    - when: never
-  script:
-    - bash infra/scripts/deploy.sh develop "$CI_COMMIT_SHA" auto
-  environment:
-    name: aiot-ec2
-    url: https://i15e103.p.ssafy.io
-
 deploy_frontend_master:
   stage: deploy
   interruptible: false
@@ -577,23 +543,6 @@ deploy_root_master:
   script:
     - bash infra/scripts/sync-runtime.sh
     - bash infra/scripts/deploy.sh master "$CI_COMMIT_SHA" auto
-  environment:
-    name: aiot-ec2
-    url: https://i15e103.p.ssafy.io
-
-verify_develop:
-  stage: verify
-  interruptible: false
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop" && $DEPLOY_FREEZE != "true"'
-      changes:
-        - frontend/**/*
-        - backend/**/*
-        - infra/**/*
-        - .gitlab-ci.yml
-    - when: never
-  script:
-    - bash infra/scripts/health-check.sh application
   environment:
     name: aiot-ec2
     url: https://i15e103.p.ssafy.io

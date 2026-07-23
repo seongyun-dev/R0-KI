@@ -19,20 +19,14 @@ single-EC2 runtime, backup, MQTT, and certificate procedures.
 ## Branch flow
 
 ```text
-front/dev ─┐
-back/dev  ─┼→ develop → master
-iot/dev   ─┤
-ai/dev    ─┤
-infra/dev ─┘
+feature -> part/dev -> part/master -> develop -> root master
 ```
 
-The currently installed pipeline still has part branches running CI,
-`develop` deploying automatically, and root `master` deploying manually. This
-is the **current state, not the new target**. The approved migration changes CD
-to part-master releases and removes production auto-deploy from `develop` only
-after component deployment, integration testing, manifests, and rollback have
-been verified. Follow [CICD_MIGRATION_HANDOFF.md](CICD_MIGRATION_HANDOFF.md)
-instead of changing branch rules directly.
+The part-master release flow is active. `front/master` and `back/master` run
+candidate integration and deploy only their own application component.
+`develop` records an approved component combination and does not deploy EC2;
+root `master` is a manually approved final milestone. Follow
+[CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for daily use.
 Robot and AI artifacts use an approved-release Pull OTA flow. CI packages only a
 `jetson-vX.Y.Z` tag, and a protected manual job publishes the immutable archive
 plus stable manifest. The Jetson validates compatibility and checksum before an
