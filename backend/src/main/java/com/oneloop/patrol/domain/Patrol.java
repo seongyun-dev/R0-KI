@@ -3,6 +3,7 @@ package com.oneloop.patrol.domain;
 import com.oneloop.global.common.BaseEntity;
 import com.oneloop.robot.domain.PatrolRobot;
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import lombok.*;
@@ -37,9 +38,16 @@ public class Patrol extends BaseEntity {
     @Column(name = "detected_event_count", nullable = false)
     private int detectedEventCount;
 
+    @Column(name = "start_battery_level", precision = 5, scale = 2)
+    private BigDecimal startBatteryLevel;
+
+    @Column(name = "end_battery_level", precision = 5, scale = 2)
+    private BigDecimal endBatteryLevel;
+
     public Patrol(PatrolRobot robot, LocalDateTime startedAt) {
         this.robot = robot;
         this.startedAt = startedAt;
+        this.startBatteryLevel = robot.getBatteryLevel();
     }
 
     public void increaseDetectedEventCount() {
@@ -49,6 +57,7 @@ public class Patrol extends BaseEntity {
     public void complete() {
         this.status = PatrolStatus.COMPLETED;
         this.endedAt = LocalDateTime.now();
+        this.endBatteryLevel = robot.getBatteryLevel();
         if (startedAt != null)
             this.totalDuration = Math.toIntExact(Duration.between(startedAt, endedAt).toSeconds());
     }
