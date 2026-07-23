@@ -62,11 +62,17 @@ for script_name in \
   install-nginx.sh \
   monitor-health.sh \
   rollback.sh \
-  sync-certificates.sh; do
+  sync-certificates.sh \
+  sync-runtime.sh; do
   install -m 0750 -o root -g aiot \
     "${source_root}/infra/scripts/${script_name}" \
     "/srv/aiot/deploy/${script_name}"
 done
+
+# The official MySQL image runs as UID/GID 999. Keep the shared aiot group so
+# operators can inspect the bind mount without taking write access from MySQL.
+chown 999:aiot /srv/aiot/data/mysql
+chmod 2770 /srv/aiot/data/mysql
 
 # The Eclipse Mosquitto image runs as UID/GID 1883.
 chown 1883:aiot /srv/aiot/data/mosquitto
