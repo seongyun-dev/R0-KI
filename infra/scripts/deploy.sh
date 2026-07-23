@@ -18,6 +18,22 @@ release_history_dir="${deploy_dir}/releases"
 health_check_script="${repository_root}/infra/scripts/health-check.sh"
 rollback_script="${repository_root}/infra/scripts/rollback.sh"
 release_manifest_script="${repository_root}/infra/scripts/release-manifest.py"
+deploy_result_file="${DEPLOY_RESULT_FILE:-}"
+
+write_deploy_result() {
+  if [ -n "${deploy_result_file}" ]; then
+    printf '%s\n' "$1" >"${deploy_result_file}"
+  fi
+}
+
+rollback_after_failure() {
+  if ROLLBACK_FROM_DEPLOY=true HEALTH_CHECK_SCRIPT="${health_check_script}" \
+    bash "${rollback_script}" automatic "${deploy_services[@]}"; then
+    write_deploy_result rolled_back
+  else
+    write_deploy_result rollback_failed
+  fi
+}
 
 if [ -z "${target_branch}" ] || [ -z "${commit_sha}" ]; then
   echo "usage: deploy.sh <branch> <commit-sha> [auto|all|frontend|backend|frontend,backend]" >&2
@@ -236,14 +252,12 @@ EOF
 mv "${current_env}.tmp" "${current_env}"
 
 if ! docker compose --env-file "${current_env}" -f "${compose_target}" up -d "${deploy_services[@]}"; then
-  ROLLBACK_FROM_DEPLOY=true HEALTH_CHECK_SCRIPT="${health_check_script}" \
-    bash "${rollback_script}" automatic "${deploy_services[@]}"
+  rollback_after_failure
   exit 1
 fi
 
 if ! bash "${health_check_script}" application "${deploy_services[@]}"; then
-  ROLLBACK_FROM_DEPLOY=true HEALTH_CHECK_SCRIPT="${health_check_script}" \
-    bash "${rollback_script}" automatic "${deploy_services[@]}"
+  rollback_after_failure
   exit 1
 fi
 
@@ -268,8 +282,7 @@ if ! release_id="$(python3 "${release_manifest_script}" write \
   --components "${components_csv}" \
   --integration-status "${integration_status}")"; then
   echo "Release manifest update failed; restoring the previous component version" >&2
-  ROLLBACK_FROM_DEPLOY=true HEALTH_CHECK_SCRIPT="${health_check_script}" \
-    bash "${rollback_script}" automatic "${deploy_services[@]}"
+  rollback_after_failure
   exit 1
 fi
 
@@ -281,4 +294,5 @@ printf '%s|%s|%s|release=%s|frontend=%s|backend=%s\n' \
   "${next_frontend_image}" \
   "${next_backend_image}" \
   >>"${deploy_dir}/history.log"
+write_deploy_result succeeded
 echo "Deployment ${commit_sha} completed: ${deploy_services[*]}"
