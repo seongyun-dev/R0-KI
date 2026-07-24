@@ -25,10 +25,22 @@ ALTER TABLE detected_events
 --------------------------------------------------------------------------------
 
 ALTER TABLE patrol_maps
-    ADD COLUMN resolution DECIMAL(6,4) NULL COMMENT '지도 해상도(픽셀당 실제 미터)' AFTER map_url,
-    ADD COLUMN origin_x DECIMAL(10,3) NULL COMMENT '지도 원점 X좌표(미터)' AFTER resolution,
-    ADD COLUMN origin_y DECIMAL(10,3) NULL COMMENT '지도 원점 Y좌표(미터)' AFTER origin_x,
-    ADD COLUMN origin_yaw DECIMAL(6,2) NULL COMMENT '지도 원점 회전각(도)' AFTER origin_y,
-    ADD COLUMN width INT NULL COMMENT '지도 가로 크기(픽셀)' AFTER origin_yaw,
-    ADD COLUMN height INT NULL COMMENT '지도 세로 크기(픽셀)' AFTER width,
+    ADD COLUMN resolution DECIMAL(6,4) NULL COMMENT '지도 해상도(픽셀당 실제 미터)' AFTER map_url;
+
+ALTER TABLE patrol_maps
+    ADD COLUMN origin_x DECIMAL(10,3) NULL COMMENT '지도 원점 X좌표(미터)' AFTER resolution;
+
+ALTER TABLE patrol_maps
+    ADD COLUMN origin_y DECIMAL(10,3) NULL COMMENT '지도 원점 Y좌표(미터)' AFTER origin_x;
+
+ALTER TABLE patrol_maps
+    ADD COLUMN origin_yaw DECIMAL(6,2) NULL COMMENT '지도 원점 회전각(도)' AFTER origin_y;
+
+ALTER TABLE patrol_maps
+    ADD COLUMN width INT NULL COMMENT '지도 가로 크기(픽셀)' AFTER origin_yaw;
+
+ALTER TABLE patrol_maps
+    ADD COLUMN height INT NULL COMMENT '지도 세로 크기(픽셀)' AFTER width;
+
+ALTER TABLE patrol_maps
     ADD COLUMN map_version INT NULL DEFAULT 1 COMMENT '지도 버전' AFTER height;
