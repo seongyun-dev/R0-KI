@@ -28,10 +28,10 @@ public class MqttConfig {
     // destroyMethod="disconnect": 앱 종료 시 브로커 연결을 정리
     @Bean(destroyMethod = "disconnect")
     public IMqttClient mqttClient(
-            @Value("${app.mqtt.broker-url}") String brokerUrl,
+            @Value("${mqtt.broker-uri}") String brokerUrl,
             @Value("${app.mqtt.client-id}") String clientIdPrefix,
-            @Value("${app.mqtt.username:}") String username,
-            @Value("${app.mqtt.password:}") String password,
+            @Value("${mqtt.username:}") String username,
+            @Value("${mqtt.password:}") String password,
             RobotRepository robotRepository)
             throws MqttException {
         // Jetson과 clientId가 겹치면 브로커가 한쪽 연결을 끊어버리므로 UUID로 유일성 보장

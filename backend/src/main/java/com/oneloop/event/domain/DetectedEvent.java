@@ -36,6 +36,9 @@ public class DetectedEvent extends BaseEntity {
     @Column(name = "event_details", columnDefinition = "TEXT")
     private String details;
 
+    @Column(name = "confidence", precision = 4, scale = 3)
+    private BigDecimal confidence;
+
     @Column(name = "occurred_at", nullable = false)
     private LocalDateTime occurredAt;
 

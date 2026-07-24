@@ -33,6 +33,9 @@ public class PatrolRobot extends BaseEntity {
     @Column(name = "y_coordinate", precision = 10, scale = 3)
     private BigDecimal yCoordinate;
 
+    @Column(name = "heading", precision = 6, scale = 2)
+    private BigDecimal heading;
+
     @Column(name = "location_updated_at")
     private LocalDateTime locationUpdatedAt;
 
@@ -54,6 +57,10 @@ public class PatrolRobot extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "motor_status", length = 20)
     private SensorStatus motorStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "line_sensor_status", length = 20)
+    private SensorStatus lineSensorStatus;
 
     @Column(name = "status_reported_at")
     private LocalDateTime statusReportedAt;
