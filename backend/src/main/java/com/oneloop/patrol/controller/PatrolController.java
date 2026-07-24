@@ -1,17 +1,27 @@
 package com.oneloop.patrol.controller;
 
 import com.oneloop.global.response.ApiResponse;
+import com.oneloop.global.response.PageResponse;
 import com.oneloop.global.security.CustomUserDetails;
+import com.oneloop.patrol.dto.request.PatrolPeriodFilter;
+import com.oneloop.patrol.dto.request.PatrolStatusFilter;
 import com.oneloop.patrol.dto.response.PatrolDetailResponse;
+import com.oneloop.patrol.dto.response.PatrolListResponse;
 import com.oneloop.patrol.service.PatrolService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import static org.springframework.data.domain.Sort.Direction.DESC;
 
 @RestController
 @RequiredArgsConstructor
@@ -19,6 +29,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class PatrolController {
 
     private final PatrolService patrolService;
+
+    @Operation(
+            summary = "순찰 목록 조회",
+            description = "소속 단지의 순찰 기록을 기간과 상태로 필터링하여 최신순으로 조회합니다.")
+    @GetMapping
+    public ApiResponse<PageResponse<PatrolListResponse>> list(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Parameter(description = "기간 필터", example = "ALL")
+                    @RequestParam(defaultValue = "ALL")
+                    PatrolPeriodFilter period,
+            @Parameter(description = "순찰 상태 필터", example = "ALL")
+                    @RequestParam(defaultValue = "ALL")
+                    PatrolStatusFilter status,
+            @ParameterObject
+                    @PageableDefault(size = 20, sort = "startedAt", direction = DESC)
+                    Pageable pageable) {
+        return ApiResponse.success(
+                patrolService.findAll(
+                        principal.getApartmentComplexId(), period, status, pageable));
+    }
 
     @Operation(summary = "순찰 상세 조회", description = "순찰 경로, 배터리, 감지 이벤트 타임라인과 AI 요약을 조회합니다.")
     @GetMapping("/{patrolId}")
