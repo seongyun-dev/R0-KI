@@ -6,5 +6,6 @@ public enum RobotStatus {
     CHARGING,
     ERROR,
     OFFLINE,
-    DELETED
+    DELETED,
+    OBSTACLE_STOP
 }

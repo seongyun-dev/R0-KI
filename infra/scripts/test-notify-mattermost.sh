@@ -19,7 +19,7 @@ import os
 import sys
 
 text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
-assert text.startswith("# 🟢 Frontend 배포 완료")
+assert text.startswith("# :small_green_circle: Frontend 배포 완료")
 assert "**담당자** 홍길동" in text
 assert "**변경 규모** 4개 커밋 · 17개 파일" in text
 assert "**완료 시각** 07/23 10:11 KST · 1분 24초" in text
@@ -34,7 +34,7 @@ import os
 import sys
 
 text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
-assert text.startswith("# 🟠 Backend 배포 실패 · 자동 복구 완료")
+assert text.startswith("# :small_orange_circle: Backend 배포 실패 · 자동 복구 완료")
 assert "이전 정상 버전으로 자동 복구했습니다." in text
 assert "@channel" not in text
 PY
@@ -46,9 +46,19 @@ import os
 import sys
 
 text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
-assert text.startswith("# 🔴 Backend 배포 실패 · 자동 복구 실패")
+assert text.startswith("# :small_red_circle: Backend 배포 실패 · 자동 복구 실패")
 assert "@channel" in text
 assert "즉시 서버 확인이 필요합니다." in text
+PY
+
+failed_payload="$(env "${common_env[@]}" bash "${notify_script}" failed backend 0)"
+MM_TEST_PAYLOAD="${failed_payload}" python3 - <<'PY'
+import json
+import os
+
+text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
+assert text.startswith("# :small_red_circle: Backend 배포 실패")
+assert "@channel" in text
 PY
 
 integration_payload="$(env "${common_env[@]}" CI_JOB_URL=https://gitlab.example/job/1 \
@@ -58,9 +68,18 @@ import json
 import os
 
 text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
-assert text.startswith("# 🟡 Frontend 통합 검증 실패")
+assert text.startswith("# :small_yellow_circle: Frontend 통합 검증 실패")
 assert "배포하지 않았습니다." in text
 assert "[Job 로그 열기](https://gitlab.example/job/1)" in text
+PY
+
+jetson_payload="$(env "${common_env[@]}" bash "${notify_script}" jetson_published jetson 0)"
+MM_TEST_PAYLOAD="${jetson_payload}" python3 - <<'PY'
+import json
+import os
+
+text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
+assert text.startswith("# :small_blue_circle: Jetson 릴리스 게시 완료")
 PY
 
 connection_payload="$(env "${common_env[@]}" bash "${notify_script}" connection_test all 0)"
@@ -69,7 +88,7 @@ import json
 import os
 
 text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
-assert text.startswith("# ⚪ Mattermost 알림 연결 확인")
+assert text.startswith("# Mattermost 알림 연결 확인")
 assert "**확인 시각** 07/23 10:11 KST · 1분 24초" in text
 assert "CI/CD 배포 알림 연결이 정상입니다." in text
 PY

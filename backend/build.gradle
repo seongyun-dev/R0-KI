@@ -43,6 +43,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
 	implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'

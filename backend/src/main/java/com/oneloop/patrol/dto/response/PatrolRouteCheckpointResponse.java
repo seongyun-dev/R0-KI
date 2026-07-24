@@ -9,9 +9,6 @@ import lombok.Getter;
 @Builder
 @Schema(description = "방문 체크포인트 응답")
 public class PatrolRouteCheckpointResponse {
-    @Schema(description = "체크포인트 ID", example = "1")
-    private Long checkpointId;
-
     @Schema(description = "체크포인트 이름", example = "출발지")
     private String checkpointName;
 
@@ -20,8 +17,7 @@ public class PatrolRouteCheckpointResponse {
 
     public static PatrolRouteCheckpointResponse from(PatrolCheckpointVisit visit) {
         return PatrolRouteCheckpointResponse.builder()
-                .checkpointId(visit.getCheckpoint().getId())
-                .checkpointName(visit.getCheckpoint().getType().getDisplayName())
+                .checkpointName(visit.getCheckpoint().getName())
                 .sequence(visit.getVisitSequence())
                 .build();
     }
