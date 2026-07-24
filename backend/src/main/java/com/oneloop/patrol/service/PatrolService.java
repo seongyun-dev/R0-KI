@@ -87,7 +87,7 @@ public class PatrolService {
             return null;
         }
         return findCheckpoint(checkpoints, event.getX(), event.getY())
-                .map(checkpoint -> checkpoint.getType().getDisplayName())
+                .map(Checkpoint::getName)
                 .orElse(null);
     }
 
