@@ -59,6 +59,9 @@ export const eventsApi = {
       method: 'PATCH',
       body: jsonBody({ processingStatus, processingNote }),
     }),
+  // 긴급 이벤트 실시간 수신 (SSE) — 엔드포인트/페이로드 스키마 백엔드 확정 필요
+  subscribeEmergency: (onMessage: (data: EventResponse) => void, signal: AbortSignal) =>
+    consumeSse<EventResponse>('/api/events/emergency/stream', onMessage, signal),
 }
 
 export const patrolsApi = {

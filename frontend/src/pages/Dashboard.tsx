@@ -1,20 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { PageHeader } from '../components/layout/PageHeader'
 import { BotIcon } from '../components/icons'
-import { Card, QueryErrorState, Skeleton, StatusBadge, useToast } from '../components/ui'
+import { Card, QueryErrorState, Skeleton, StatusBadge } from '../components/ui'
 import { ComplexMap } from '../features/dashboard/ComplexMap'
 import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
+import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
 import { useEvents } from '../features/events/useEvents'
 import { BatteryBar } from '../features/robots/BatteryBar'
 import { useRobots } from '../features/robots/useRobot'
 import { cn } from '../lib/cn'
+import type { PatrolEvent } from '../types/domain'
 
 /** 대시보드 (1c) — 실시간 지도 + 최근 이벤트(긴급만) + 로봇 상태 요약. 긴급 발생 시 알림 모달(1c+) */
 export default function Dashboard() {
   const navigate = useNavigate()
-  const toast = useToast()
   const {
     data: events,
     isLoading: eventsLoading,
@@ -33,21 +34,21 @@ export default function Dashboard() {
     error: mapError,
     refetch: refetchMap,
   } = useComplexMap()
-  const [alertOpen, setAlertOpen] = useState(false)
+  // 최근 이벤트 카드 — 긴급을 최상단, 그 아래 처리된(과거) 이벤트 순
+  // (백엔드: 긴급만 활성 이벤트로 저장, 나머지는 순찰 완료 후 처리된 이력)
+  const recentEvents = [...(events ?? [])].sort(
+    (a, b) => (a.riskLevel === '긴급' ? 0 : 1) - (b.riskLevel === '긴급' ? 0 : 1),
+  )
 
-  const emergencies = (events ?? []).filter((e) => e.status === '긴급')
-
-  // 긴급 이벤트가 있으면 알림 모달 자동 표시 (닫으면 세션 동안 재표시 안 함)
-  const emergency = emergencies[0]
-  useEffect(() => {
-    if (emergency && !sessionStorage.getItem(`emg-dismissed-${emergency.id}`)) {
-      setAlertOpen(true)
-    }
-  }, [emergency])
+  // 긴급 알림 — 진입 시 목록을 훑지 않고, 백엔드 push(목업은 시뮬레이션)로 도착할 때만 띄운다
+  const [alertEvent, setAlertEvent] = useState<PatrolEvent | null>(null)
+  useEmergencyAlert((event) => {
+    if (!isEmergencySeen(event.id)) setAlertEvent(event)
+  })
 
   const dismissAlert = () => {
-    if (emergency) sessionStorage.setItem(`emg-dismissed-${emergency.id}`, '1')
-    setAlertOpen(false)
+    if (alertEvent) markEmergencySeen(alertEvent.id)
+    setAlertEvent(null)
   }
 
   return (
@@ -79,7 +80,6 @@ export default function Dashboard() {
         <Card className="flex flex-col p-5 sm:p-6">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-bold text-muted">최근 이벤트</h2>
-            <span className="font-mono text-xs font-bold text-danger">[ 긴급만 ]</span>
           </div>
           {eventsError ? (
             <QueryErrorState error={eventsError} onRetry={refetchEvents} />
@@ -90,13 +90,13 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {emergencies.map((e, i) => (
+              {recentEvents.map((e) => (
                 <Link
                   key={e.id}
                   to={`/app/events/${e.id}`}
                   className={cn(
                     'block rounded-control px-4 py-3 ring-1 transition-colors',
-                    i === 0 ? 'bg-danger-soft/60 ring-danger hover:bg-danger-soft' : 'bg-bg ring-line hover:bg-surface',
+                    e.riskLevel === '긴급' ? 'bg-danger-soft/60 ring-danger hover:bg-danger-soft' : 'bg-bg ring-line hover:bg-surface',
                   )}
                 >
                   <div className="mb-1 flex items-center justify-between gap-3">
@@ -104,7 +104,7 @@ export default function Dashboard() {
                       {e.type}
                       {e.subType ? ` · ${e.subType}` : ''}
                     </span>
-                    <StatusBadge label="긴급" bracket className="flex-none" />
+                    <StatusBadge label={e.riskLevel === '긴급' ? '긴급' : e.status} bracket className="flex-none" />
                   </div>
                   <p className="text-xs text-muted">
                     <span className="font-mono tabular">{e.time}</span> · {e.location} ·{' '}
@@ -165,20 +165,16 @@ export default function Dashboard() {
         )}
       </Card>
 
-      {/* 긴급 알림 모달 (1c+) */}
-      {emergency && (
+      {/* 긴급 알림 모달 (1c+) — push 도착 시에만 표시 */}
+      {alertEvent && (
         <EmergencyAlertModal
-          open={alertOpen}
-          event={emergency}
+          open={Boolean(alertEvent)}
+          event={alertEvent}
           onClose={dismissAlert}
           onConfirm={() => {
+            const id = alertEvent.id
             dismissAlert()
-            navigate(`/app/events/${emergency.id}`)
-          }}
-          onSnooze={() => {
-            dismissAlert()
-            toast('5분 후 다시 알립니다')
-            // 서버 연동 시: 알림 스누즈 API 호출로 교체
+            navigate(`/app/events/${id}`)
           }}
         />
       )}

@@ -9,12 +9,10 @@ export type EmergencyAlertModalProps = {
   onClose: () => void
   /** [즉시 확인 →] — 긴급 이벤트 상세(1o)로 진입 */
   onConfirm: () => void
-  /** [5분 후 다시 알림] */
-  onSnooze: () => void
 }
 
 /** 긴급 알림 모달 (1c+) — 긴급상황 발생 시 대시보드 위에 표시 */
-export function EmergencyAlertModal({ open, event, onClose, onConfirm, onSnooze }: EmergencyAlertModalProps) {
+export function EmergencyAlertModal({ open, event, onClose, onConfirm }: EmergencyAlertModalProps) {
   const clock = useClock()
   // 목업: 탐지 12초 후 알림 도착 가정
   const elapsed = useElapsed(open, 12)
@@ -46,10 +44,7 @@ export function EmergencyAlertModal({ open, event, onClose, onConfirm, onSnooze 
           </p>
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="outline" onClick={onSnooze}>
-            5분 후 다시 알림
-          </Button>
+        <div className="flex justify-end">
           <Button variant="dark" className="bg-danger" onClick={onConfirm}>
             즉시 확인 →
           </Button>
