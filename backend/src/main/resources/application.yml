@@ -28,7 +28,9 @@ springdoc:
 
 app:
   cors:
-    allowed-origins: http://localhost:3000
+    allowed-origins:
+      - http://localhost:3000
+      - http://localhost:5173
   mqtt:
     client-id: oneloop-backend
 
