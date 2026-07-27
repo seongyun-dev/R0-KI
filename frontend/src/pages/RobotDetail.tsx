@@ -114,9 +114,7 @@ export default function RobotDetail() {
               items={[
                 { label: '로봇명', value: <span className="font-mono tabular">{robot.name}</span> },
                 { label: '등록번호', value: <span className="font-mono tabular">{robot.registrationNo}</span> },
-                { label: '모델', value: <span className="font-mono">{robot.model}</span> },
                 { label: '도입일', value: <span className="font-mono tabular">{robot.introducedAt}</span> },
-                { label: '담당 구역', value: robot.zone },
               ]}
             />
           </SectionCard>
@@ -152,6 +150,7 @@ export default function RobotDetail() {
             <DescList
               items={[
                 { label: '현재 상태', value: <StatusBadge label={robot.status} bracket /> },
+                { label: '배터리 잔량', value: <span className="font-mono tabular">{robot.battery}%</span> },
                 // 누적 주행: 로봇 x,y 위치 로그 기반 이동거리 합산 / 가동률: 가동·정지 시간 비율
                 { label: '누적 주행', value: <span className="font-mono tabular">{robot.odometerKm ?? '-'}km</span> },
                 { label: '이번 주 가동률', value: <span className="font-mono tabular">{robot.weeklyUptime ?? '-'}%</span> },
@@ -161,19 +160,21 @@ export default function RobotDetail() {
 
           <SectionCard title="최근 순찰 기록">
             <ul className="flex flex-col divide-y divide-line">
-              {recent.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2 py-2.5 first:pt-0">
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="font-mono text-sm font-semibold tabular">
-                      {p.start}–{p.end ?? ''}
-                    </span>
-                    <span className="truncate text-xs text-muted">
-                      {p.routeZones.filter((z) => z !== '출발지').join('·')}
-                    </span>
-                  </div>
-                  <StatusBadge label={p.status} bracket className="flex-none" />
-                </li>
-              ))}
+              {recent.map((p) => {
+                // 경로 대신 해당 순찰에서 탐지된 이벤트 건수만 표시
+                const eventText = p.eventCount > 0 ? `이벤트 ${p.eventCount}건` : '탐지 이벤트 없음'
+                return (
+                  <li key={p.id} className="flex items-center justify-between gap-2 py-2.5 first:pt-0">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="font-mono text-sm font-semibold tabular">
+                        {p.start}–{p.end ?? ''}
+                      </span>
+                      <span className="truncate text-xs text-muted">{eventText}</span>
+                    </div>
+                    <StatusBadge label={p.status} bracket className="flex-none" />
+                  </li>
+                )
+              })}
             </ul>
             <Link
               to="/app/patrol"
@@ -189,14 +190,13 @@ export default function RobotDetail() {
         open={drawerOpen}
         robot={robot}
         onClose={() => setDrawerOpen(false)}
-        onSave={async ({ name, status }) => {
+        onSave={async ({ name }) => {
           try {
             await updateRobot.mutateAsync({
               robotId: robot.backendId ?? robot.id,
               robotName: name,
-              robotStatus: status,
             })
-            setPatch({ name, status })
+            setPatch({ name })
             toast('✓ 저장되었습니다')
           } catch (reason) {
             toast(reason instanceof Error ? reason.message : '로봇 수정에 실패했습니다')
