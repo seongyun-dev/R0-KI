@@ -15,6 +15,8 @@ import org.springframework.data.repository.query.Param;
 public interface PatrolRepository extends JpaRepository<Patrol, Long> {
     Page<Patrol> findAllByRobotIdOrderByStartedAtDesc(Long robotId, Pageable pageable);
 
+    Optional<Patrol> findFirstByRobotIdOrderByStartedAtDesc(Long robotId);
+
     List<Patrol> findAllByRobotIdAndStartedAtGreaterThanEqual(Long robotId, LocalDateTime since);
 
     Optional<Patrol> findByIdAndRobotApartmentComplexId(Long id, Long apartmentComplexId);

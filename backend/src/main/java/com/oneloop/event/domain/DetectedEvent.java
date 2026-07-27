@@ -68,6 +68,7 @@ public class DetectedEvent extends BaseEntity {
             EventType type,
             String title,
             String details,
+            BigDecimal confidence,
             LocalDateTime occurredAt,
             BigDecimal x,
             BigDecimal y,
@@ -78,6 +79,7 @@ public class DetectedEvent extends BaseEntity {
         this.type = type;
         this.title = title;
         this.details = details;
+        this.confidence = confidence;
         this.occurredAt = occurredAt;
         this.x = x;
         this.y = y;
