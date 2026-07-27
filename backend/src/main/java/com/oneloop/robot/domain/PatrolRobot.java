@@ -27,6 +27,9 @@ public class PatrolRobot extends BaseEntity {
     @Column(name = "robot_serial_number", nullable = false, unique = true, length = 100)
     private String serialNumber;
 
+    @Column(name = "service_token", unique = true, length = 255)
+    private String serviceToken;
+
     @Column(name = "x_coordinate", precision = 10, scale = 3)
     private BigDecimal xCoordinate;
 
@@ -92,5 +95,9 @@ public class PatrolRobot extends BaseEntity {
 
     public void delete() {
         this.status = RobotStatus.DELETED;
+    }
+
+    public void issueServiceToken(String serviceToken) {
+        this.serviceToken = serviceToken;
     }
 }
