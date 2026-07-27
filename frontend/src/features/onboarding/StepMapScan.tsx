@@ -1,37 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, ProgressBar, StatusBadge } from '../../components/ui'
+import { Button, Spinner, StatusBadge } from '../../components/ui'
 
 export type StepMapScanProps = {
   onPrev: () => void
   onNext: () => void
 }
 
-const TOTAL_AREA = 18200 // ㎡
-
 /** Step 3/3 — 맵 파악 (로봇 자동 스캔) (1w) */
 export function StepMapScan({ onPrev, onNext }: StepMapScanProps) {
   const [phase, setPhase] = useState<'idle' | 'scanning' | 'done'>('idle')
-  const [progress, setProgress] = useState(0)
   const timerRef = useRef<number>()
 
-  useEffect(() => () => window.clearInterval(timerRef.current), [])
+  useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
   const startScan = () => {
     setPhase('scanning')
-    setProgress(0)
-    timerRef.current = window.setInterval(() => {
-      setProgress((p) => {
-        const next = Math.min(100, p + 1 + Math.random() * 2)
-        if (next >= 100) {
-          window.clearInterval(timerRef.current)
-          setPhase('done')
-        }
-        return next
-      })
-    }, 60)
+    // 진행률(%) 대신 로딩 표시 — 스캔 완료 시 다음 단계 활성화
+    timerRef.current = window.setTimeout(() => setPhase('done'), 2500)
   }
-
-  const scannedArea = Math.round(((progress / 100) * TOTAL_AREA) / 100) * 100
 
   return (
     <div className="flex flex-col gap-6">
@@ -47,14 +33,10 @@ export function StepMapScan({ onPrev, onNext }: StepMapScanProps) {
       )}
 
       {phase === 'scanning' && (
-        <div className="flex flex-col gap-4 rounded-card-sm bg-surface px-6 py-10">
-          <div className="flex items-center justify-between">
-            <StatusBadge label="SCANNING…" bracket />
-            <span className="font-mono text-sm tabular text-muted">
-              파악된 영역 {scannedArea.toLocaleString()}㎡ / {TOTAL_AREA.toLocaleString()}㎡
-            </span>
-          </div>
-          <ProgressBar value={progress} label="맵 스캔 진행률" />
+        <div className="flex flex-col items-center gap-4 rounded-card-sm bg-surface px-6 py-12 text-center">
+          <Spinner className="h-6 w-6 text-accent" />
+          <p className="font-mono text-sm text-muted">loading..</p>
+          <p className="text-xs text-subtle">로봇이 단지를 순찰하며 맵을 그리고 있습니다</p>
         </div>
       )}
 

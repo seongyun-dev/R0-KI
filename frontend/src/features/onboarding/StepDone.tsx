@@ -5,11 +5,12 @@ import { useAuthStore } from '../auth/useAuthStore'
 
 export type StepDoneProps = {
   complexName: string
+  robotName?: string
   zoneCount: number
 }
 
 /** 온보딩 완료 (1x) */
-export function StepDone({ complexName, zoneCount }: StepDoneProps) {
+export function StepDone({ complexName, robotName, zoneCount }: StepDoneProps) {
   const navigate = useNavigate()
   const login = useAuthStore((s) => s.login)
   return (
@@ -19,7 +20,7 @@ export function StepDone({ complexName, zoneCount }: StepDoneProps) {
       </span>
       <h2 className="text-xl font-bold">회원가입이 완료되었습니다</h2>
       <p className="text-sm text-muted">
-        {complexName} 단지 등록 · 로봇 1대 등록 · 맵 파악 완료
+        {complexName} 단지 등록 · 로봇 {robotName || '1대'} 등록 · 맵 파악 완료
       </p>
       <StatusBadge label={`구역 ${zoneCount}곳 등록 완료`} bracket />
       <Button

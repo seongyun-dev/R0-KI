@@ -21,7 +21,7 @@ export type RiskLevel = '낮음' | '보통' | '긴급';
 export type Tone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
 
 export type EventType = '불법주차' | '쓰레기' | '위험구역' | '응급상황' | '화재 의심' | '침입' | '정기 점검';
-export type ZoneType = '주차장' | '분리수거장' | '위험구역' | '출입구' | '기타';
+export type ZoneType = '주차장' | '분리수거장' | '위험구역' | '출입구' | '도착지' | '기타';
 
 export interface Complex {          // 아파트단지
   id: string;

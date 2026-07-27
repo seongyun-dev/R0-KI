@@ -5,6 +5,7 @@ import { mapApi } from '../../api/services'
 import type { MapMonitoringResponse } from '../../api/contracts'
 import { env } from '../../config/env'
 import { useAuthStore } from '../auth/useAuthStore'
+import { useRegisteredMap } from '../onboarding/useRegisteredMap'
 import { useApiQuery } from '../../lib/useApiQuery'
 import type { MapRobot } from '../../types/domain'
 
@@ -20,14 +21,17 @@ export function useComplexMap() {
   const sessionRobotId = useAuthStore((state) => state.robotId)
   const mapId = sessionMapId ?? env.defaultMapId
   const robotId = sessionRobotId ?? env.defaultRobotId
+  // 온보딩에서 등록한 구역 — 있으면 기본 맵 대신 이 구역을 렌더 (목업 단계)
+  const registeredZones = useRegisteredMap((state) => state.zones)
   const [liveRobot, setLiveRobot] = useState<MapRobot | null>(null)
 
   const query = useApiQuery<{ view: MapViewData; monitoring?: MapMonitoringResponse }>(
     async () => {
       if (env.useMocks) {
+        const map = registeredZones.length ? { ...complexMap, zones: registeredZones } : complexMap
         return {
           view: {
-            map: complexMap,
+            map,
             robot: mapRobot,
             pins: mapPins,
             checkpoints: mapCheckpoints,
@@ -40,7 +44,7 @@ export function useComplexMap() {
       const monitoring = await mapApi.monitoring(mapId, robotId)
       return { view: mapMonitoringToView(monitoring), monitoring }
     },
-    [mapId, robotId],
+    [mapId, robotId, registeredZones],
     { delayMs: env.useMocks ? 350 : 0 },
   )
 
