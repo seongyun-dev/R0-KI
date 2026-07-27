@@ -9,7 +9,7 @@ import type { ProcessingStatus } from '../../types/domain'
 
 /** 이벤트 목록 (1f). 서버 연동 시 useQuery(['events'])로 교체. */
 export function useEvents(
-  params: { type?: string; status?: string; period?: string } = {},
+  params: { type?: string; status?: string; risk?: string; period?: string } = {},
 ) {
   return useApiQuery(
     async () => {
@@ -17,17 +17,19 @@ export function useEvents(
         let list = events
         if (params.type && params.type !== 'all') list = list.filter((event) => event.type === params.type)
         if (params.status && params.status !== 'all') list = list.filter((event) => event.status === params.status)
+        if (params.risk && params.risk !== 'all') list = list.filter((event) => event.riskLevel === params.risk)
         return list
       }
       return (
         await eventsApi.list({
           eventType: params.type,
           processingStatus: params.status,
+          riskLevel: params.risk,
           period: params.period,
         })
       ).map(eventResponseToDomain)
     },
-    [params.type, params.status, params.period],
+    [params.type, params.status, params.risk, params.period],
     { delayMs: env.useMocks ? 350 : 0 },
   )
 }

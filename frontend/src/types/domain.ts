@@ -133,9 +133,11 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   type: EventType;
   location: string;                 // 101동 앞
   robotId: string;                  // R-01
-  status: StatusLabel;              // 긴급 / 탐지 / 처리중 / 처리완료
-  riskLevel?: RiskLevel;
+  status: StatusLabel;              // 탐지 / 처리중 / 처리완료 (긴급은 riskLevel로 분리)
+  riskLevel?: RiskLevel;            // 긴급 / 보통 / 낮음
   processingStatus?: ProcessingStatus;
+  assignee?: string;                // 담당자 (처리중/처리완료 시) — 백엔드 제공
+  processedAt?: string;             // 처리 완료 시각 (처리완료 시 표시)
   occurredAt?: string;
   x?: number;
   y?: number;

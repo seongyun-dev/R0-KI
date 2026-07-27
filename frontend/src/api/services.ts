@@ -50,7 +50,7 @@ export const authApi = {
 }
 
 export const eventsApi = {
-  list: (params: { eventType?: string; processingStatus?: string; period?: string } = {}) =>
+  list: (params: { eventType?: string; processingStatus?: string; riskLevel?: string; period?: string } = {}) =>
     apiRequest<ListResponse<EventResponse>>(withQuery('/api/events', params)).then(unwrapList),
   detail: (eventId: string | number) =>
     apiRequest<EventResponse>(`/api/events/${encodeURIComponent(eventId)}`),

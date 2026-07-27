@@ -1,14 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { PageHeader } from '../components/layout/PageHeader'
 import { CameraIcon } from '../components/icons'
-import { Button, Card, EmptyState, QueryErrorState, Skeleton, StatusBadge, useToast } from '../components/ui'
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Modal,
+  QueryErrorState,
+  Skeleton,
+  StatusBadge,
+  Textarea,
+  useToast,
+} from '../components/ui'
 import { useEvent, useUpdateEventStatus } from '../features/events/useEvents'
 import { useElapsed } from '../lib/useElapsed'
 import { cn } from '../lib/cn'
 import type { ProcessingStatus } from '../types/domain'
 
-// 처리 상태 — 경비원 관리 3단계 (와이어프레임 v15, 1g·1o)
+// 처리 상태 — 경비원 관리 3단계 (와이어프레임 v15, 1g)
 const PROC_STATUSES: ProcessingStatus[] = ['탐지', '처리중', '처리완료']
 const PROC_SELECTED: Record<string, string> = {
   탐지: 'bg-danger text-white ring-danger',
@@ -50,7 +61,7 @@ function ProcStatusToggle({
   )
 }
 
-/** 이벤트 상세 (1g) — 증거 이미지 + 메타 + 인라인 처리 상태. 긴급이면 1o 변형 */
+/** 이벤트 상세 (1g) — 증거 이미지 + 메타 + 인라인 처리 상태 */
 export default function EventDetail() {
   const { id } = useParams()
   const { data: event, isLoading, error, refetch } = useEvent(id)
@@ -58,17 +69,23 @@ export default function EventDetail() {
   const toast = useToast()
   // 처리 상태(경비원 관리) — 서버 연동 시 mutation으로 교체
   const [proc, setProc] = useState<ProcessingStatus>('탐지')
-
-  const isEmergency = event?.status === '긴급'
+  const [memo, setMemo] = useState<string>()
+  const [processedAt, setProcessedAt] = useState<string>()
+  // 처리완료 시 처리 메모 입력 모달
+  const [memoModalOpen, setMemoModalOpen] = useState(false)
+  const [memoInput, setMemoInput] = useState('')
 
   useEffect(() => {
     if (!event) return
-    // 긴급 이벤트는 별도 처리 상태(기본 탐지), 일반 이벤트는 자신의 상태에서 시작
     setProc(event.processingStatus ?? (event.status === '처리중' || event.status === '처리완료' ? event.status : '탐지'))
+    setMemo(event.memo)
+    setProcessedAt(event.processedAt)
   }, [event])
 
-  // 1o "경과시간 3분 12초"부터 실시간 카운트
-  const elapsed = useElapsed(Boolean(event) && Boolean(isEmergency), 192)
+  // 경과시간 — 탐지/처리중일 때만 실시간 카운트. 메모 모달이 열려 있는 동안은 멈춤
+  // (1초마다 재렌더되면 모달 포커스가 튕겨 메모 입력이 방해됨)
+  const isOngoing = proc === '탐지' || proc === '처리중'
+  const elapsed = useElapsed(Boolean(event) && isOngoing && !memoModalOpen, 192)
 
   if (isLoading) {
     return (
@@ -92,43 +109,49 @@ export default function EventDetail() {
     )
   }
 
-  const changeProc = async (s: ProcessingStatus) => {
+  const changeProc = async (s: ProcessingStatus, note?: string) => {
     const previous = proc
     setProc(s)
+    if (note !== undefined) setMemo(note)
+    // 처리완료로 바뀌면 완료 시각 기록
+    if (s === '처리완료') setProcessedAt((prev) => prev ?? new Date().toTimeString().slice(0, 5))
     try {
-      await updateStatus.mutateAsync({ eventId: event.backendId ?? event.id, status: s })
-      toast(`✓ 처리 상태가 [ ${s} ](으)로 변경되었습니다`)
+      await updateStatus.mutateAsync({ eventId: event.backendId ?? event.id, status: s, note })
+      toast(s === '처리완료' ? '✓ 처리 완료되었습니다.' : `✓ 처리 상태가 [ ${s} ](으)로 변경되었습니다`)
     } catch (reason) {
       setProc(previous)
       toast(reason instanceof Error ? reason.message : '처리 상태 변경에 실패했습니다')
     }
   }
 
-  // 1o: 유형 "응급상황(쓰러짐 의심)" · 탐지로봇 "(현장 대기중)" · 경과시간 · 처리상태
+  // 처리완료 선택 시엔 바로 변경하지 않고 메모 입력 모달을 연다
+  const onProcChange = (s: ProcessingStatus) => {
+    if (s === '처리완료') {
+      setMemoInput(memo ?? '')
+      setMemoModalOpen(true)
+      return
+    }
+    void changeProc(s)
+  }
+
+  const confirmComplete = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setMemoModalOpen(false)
+    // 처리 메모는 선택 입력 — 비워도 완료 가능
+    void changeProc('처리완료', memoInput.trim() || undefined)
+  }
+
   const meta: { label: string; value: React.ReactNode }[] = [
-    {
-      label: '유형',
-      value: (
-        <span className="font-semibold">
-          {event.type}
-          {isEmergency && event.subType ? `(${event.subType})` : ''}
-        </span>
-      ),
-    },
+    { label: '유형', value: <span className="font-semibold">{event.type}{event.subType ? `(${event.subType})` : ''}</span> },
     { label: '탐지시각', value: <span className="font-mono tabular">{event.time}</span> },
     { label: '위치', value: event.location },
-    {
-      label: '탐지로봇',
-      value: (
-        <span className="font-mono tabular">
-          {event.robotId}
-          {isEmergency && <span className="font-sans text-muted"> (현장 대기중)</span>}
-        </span>
-      ),
-    },
+    { label: '탐지로봇', value: <span className="font-mono tabular">{event.robotId}</span> },
     { label: '신뢰도', value: <span className="font-mono tabular">{event.confidence ?? '-'}%</span> },
-    ...(isEmergency
-      ? [{ label: '경과시간', value: <span className="font-mono tabular text-danger">{elapsed}</span> }]
+    ...(isOngoing
+      ? [{ label: '경과시간', value: <span className="font-mono tabular">{elapsed}</span> }]
+      : []),
+    ...(proc === '처리완료' && processedAt
+      ? [{ label: '처리시간', value: <span className="font-mono tabular">{processedAt}</span> }]
       : []),
     { label: '처리상태', value: <StatusBadge label={proc} bracket /> },
   ]
@@ -141,17 +164,8 @@ export default function EventDetail() {
           { label: '이벤트관리', to: '/app/events' },
           { label: event.id },
         ]}
-        title={isEmergency ? `⚠ 긴급 이벤트 상세 — ${event.id}` : `이벤트 상세 — ${event.id}`}
-        aside={isEmergency ? <StatusBadge label="긴급 · 즉시 확인 필요" bracket /> : undefined}
+        title={`이벤트 상세 — ${event.id}`}
       />
-
-      {/* 긴급 판단 사유 (1o) */}
-      {isEmergency && event.emergencyReason && (
-        <div className="rounded-card-sm bg-danger-soft px-5 py-4 text-sm leading-relaxed ring-1 ring-danger/30">
-          <span className="font-bold text-danger">긴급 판단 사유: </span>
-          {event.emergencyReason}
-        </div>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         {/* 증거 이미지 (로봇 카메라 캡처) */}
@@ -162,11 +176,7 @@ export default function EventDetail() {
             ) : (
               <>
                 <CameraIcon className="text-4xl text-subtle" />
-                <p className="text-sm font-semibold text-subtle">
-                  {isEmergency
-                    ? `[ ${event.robotId} 현장 이미지 · ${event.time} 수신 ]`
-                    : '증거 이미지 (로봇 카메라 캡처)'}
-                </p>
+                <p className="text-sm font-semibold text-subtle">증거 이미지 (로봇 카메라 캡처)</p>
               </>
             )}
             {/* 카메라 오버레이 */}
@@ -190,35 +200,46 @@ export default function EventDetail() {
               </div>
             ))}
           </dl>
-          {event.memo && (
+
+          {/* 처리 메모 — 완료 후 재표시 */}
+          {proc === '처리완료' && memo && (
             <div className="mt-4 rounded-control bg-surface px-4 py-3">
               <p className="text-xs font-semibold text-muted">처리 메모</p>
-              <p className="mt-1 text-sm">{event.memo}</p>
+              <p className="mt-1 text-sm">{memo}</p>
             </div>
           )}
 
-          {/* 처리 상태 — 경비원 관리 (1g·1o 인라인 토글) */}
-          <div className={cn('mt-5 border-t pt-5', isEmergency ? 'border-danger/30' : 'border-line')}>
+          {/* 처리 상태 — 경비원 관리 (인라인 토글) */}
+          <div className="mt-5 border-t border-line pt-5">
+            {/* 처리완료 후에는 되돌릴 수 없음 → 토글 비활성화 */}
             <ProcStatusToggle
               value={proc}
-              onChange={(status) => void changeProc(status)}
-              disabled={updateStatus.isPending}
+              onChange={onProcChange}
+              disabled={updateStatus.isPending || proc === '처리완료'}
             />
           </div>
-
-          {/* 긴급 액션 (1o): 보안 출동 요청 · 입주민 긴급알림 발송 */}
-          {isEmergency && (
-            <div className="mt-4 flex flex-col gap-2">
-              <Button variant="dark" className="w-full bg-danger" onClick={() => toast('✓ 보안팀 출동이 요청되었습니다')}>
-                보안 출동 요청
-              </Button>
-              <Button variant="outline" className="w-full" onClick={() => toast('✓ 입주민 긴급알림이 발송되었습니다')}>
-                입주민 긴급알림 발송
-              </Button>
-            </div>
-          )}
         </Card>
       </div>
+
+      {/* 처리 완료 메모 입력 모달 */}
+      <Modal open={memoModalOpen} onClose={() => setMemoModalOpen(false)} title="처리 완료">
+        <form className="flex flex-col gap-4" onSubmit={confirmComplete}>
+          <Field label="처리 메모" htmlFor="proc-memo" hint="선택 입력 — 비워도 완료할 수 있어요">
+            <Textarea
+              id="proc-memo"
+              value={memoInput}
+              onChange={(e) => setMemoInput(e.target.value)}
+              rows={4}
+              placeholder="처리 내용을 남겨주세요 (예: 경비팀 현장 확인·조치 완료)"
+              autoFocus
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setMemoModalOpen(false)}>취소</Button>
+            <Button type="submit" variant="dark">완료 처리</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }
