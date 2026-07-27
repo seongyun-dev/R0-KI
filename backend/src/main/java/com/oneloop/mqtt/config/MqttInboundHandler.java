@@ -2,6 +2,8 @@ package com.oneloop.mqtt.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.oneloop.mapping.dto.mqtt.MappingCommandAck;
+import com.oneloop.mapping.service.MappingCommandAckService;
 import com.oneloop.robot.repository.RobotRepository;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -25,12 +27,15 @@ class MqttInboundHandler implements MqttCallbackExtended {
 
     private final IMqttClient client;
     private final RobotRepository robotRepository;
+    private final MappingCommandAckService mappingCommandAckService;
     // Spring이 관리하는 ObjectMapper 빈이 없어서, 단순 Map 파싱용으로 직접 생성
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
-    MqttInboundHandler(IMqttClient client, RobotRepository robotRepository) {
+    MqttInboundHandler(IMqttClient client, RobotRepository robotRepository,
+            MappingCommandAckService mappingCommandAckService) {
         this.client = client;
         this.robotRepository = robotRepository;
+        this.mappingCommandAckService = mappingCommandAckService;
     }
 
     @Override
@@ -64,11 +69,34 @@ class MqttInboundHandler implements MqttCallbackExtended {
             return;
         }
 
+        // 공통 ACK 토픽에서는 command 값으로 지도 생성 ACK를 구분한다.
+        if (topic.endsWith("/command/ack")
+                && "START_MAPPING".equals(String.valueOf(parsed.get("command")))) {
+            handleMappingCommandAck(topic, payload);
+            return;
+        }
+
         Object robotKey = parsed.get("robotKey");
         boolean known =
                 robotKey != null
                         && robotRepository.findBySerialNumber(String.valueOf(robotKey)).isPresent();
         log.info("[MQTT] topic={}, robotKey={}, known={}, payload={}", topic, robotKey, known, parsed);
+    }
+
+    private void handleMappingCommandAck(String topic, String payload) {
+        try {
+            MappingCommandAck ack = objectMapper.readValue(payload, MappingCommandAck.class);
+            String[] topicSegments = topic.split("/");
+            // 정상 토픽: hanbakwi/v1/robots/{robotKey}/command/ack
+            if (topicSegments.length != 6) {
+                log.warn("[MQTT] 잘못된 매핑 ACK 토픽을 무시합니다. topic={}", topic);
+                return;
+            }
+            // 네 번째 토픽 구간의 robotKey와 ACK 내용을 서비스에서 교차 검증한다.
+            mappingCommandAckService.handle(topicSegments[3], ack);
+        } catch (Exception exception) {
+            log.warn("[MQTT] 매핑 ACK 처리 실패. topic={}, payload={}", topic, payload, exception);
+        }
     }
 
     @Override
