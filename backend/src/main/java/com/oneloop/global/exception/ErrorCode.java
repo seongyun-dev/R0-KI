@@ -14,6 +14,8 @@ public enum ErrorCode {
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_999", "서버 내부 오류가 발생했습니다."),
     ROBOT_NOT_FOUND(HttpStatus.NOT_FOUND, "ROBOT_001", "존재하지 않는 순찰로봇입니다."),
     ROBOT_SERIAL_NUMBER_DUPLICATE(HttpStatus.CONFLICT, "ROBOT_002", "이미 등록된 시리얼 번호입니다."),
+    MAPPING_SESSION_ALREADY_ACTIVE(
+            HttpStatus.CONFLICT, "MAPPING_001", "해당 로봇에서 이미 지도 생성이 진행 중입니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
     EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다.");
 
