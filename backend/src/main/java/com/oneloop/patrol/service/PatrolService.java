@@ -9,6 +9,7 @@ import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.map.util.CheckpointLocator;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolAiSummary;
 import com.oneloop.patrol.domain.PatrolCheckpointVisit;
@@ -23,7 +24,6 @@ import com.oneloop.patrol.repository.PatrolAiSummaryRepository;
 import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.patrol.repository.RoutePositionRepository;
-import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -54,6 +54,7 @@ public class PatrolService {
     private final PatrolAiSummaryRepository patrolAiSummaryRepository;
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
+    private final CheckpointLocator checkpointLocator;
 
     /**
      * 로그인한 관리자의 소속 단지 순찰 기록을 기간과 상태로 필터링하여 조회한다. 페이지에 포함된 모든 순찰의 체크포인트 방문 기록은 한 번의 IN 쿼리로
@@ -138,24 +139,7 @@ public class PatrolService {
     }
 
     private String findCheckpointName(DetectedEvent event, List<Checkpoint> checkpoints) {
-        if (event.getX() == null || event.getY() == null) {
-            return null;
-        }
-        return findCheckpoint(checkpoints, event.getX(), event.getY())
-                .map(Checkpoint::getName)
-                .orElse(null);
-    }
-
-    private Optional<Checkpoint> findCheckpoint(
-            List<Checkpoint> checkpoints, BigDecimal x, BigDecimal y) {
-        return checkpoints.stream().filter(checkpoint -> contains(checkpoint, x, y)).findFirst();
-    }
-
-    private boolean contains(Checkpoint checkpoint, BigDecimal x, BigDecimal y) {
-        return x.compareTo(checkpoint.getMinX()) >= 0
-                && x.compareTo(checkpoint.getMaxX()) <= 0
-                && y.compareTo(checkpoint.getMinY()) >= 0
-                && y.compareTo(checkpoint.getMaxY()) <= 0;
+        return checkpointLocator.resolveLocationName(checkpoints, event.getX(), event.getY());
     }
 
     private Map<Long, List<PatrolCheckpointVisit>> findVisitsByPatrolId(
