@@ -104,6 +104,7 @@ export interface Patrol {
   id: string;                       // P-1042
   backendId?: string | number;
   robotId: string;                  // R-01
+  robotName?: string;               // 로봇 이름 (사용자 지정) — 서버 응답에 포함, 없으면 로봇 목록에서 조회
   date: string;                     // 07/15
   start: string;                    // 09:00
   end?: string | null;              // 09:42 (진행중이면 null)

@@ -9,67 +9,66 @@ import {
   QueryErrorState,
   type Column,
 } from '../components/ui'
-import { useRobot } from '../features/robots/useRobot'
+import { useRobots } from '../features/robots/useRobot'
 import { usePatrols } from '../features/patrol/usePatrols'
 import type { Patrol } from '../types/domain'
 import { env } from '../config/env'
 import { useAuthStore } from '../features/auth/useAuthStore'
 
-const columns: Column<Patrol>[] = [
-  { key: 'id', header: '순찰ID', render: (p) => <span className="font-mono font-bold tabular">{p.id}</span> },
-  { key: 'start', header: '시작', render: (p) => <span className="font-mono tabular">{p.date} {p.start}</span> },
-  { key: 'end', header: '종료', render: (p) => <span className="font-mono tabular">{p.end ?? '-'}</span> },
-  { key: 'route', header: '순찰 경로 (구역 순서)', render: (p) => <span className="text-muted">{p.routeZones.join(' → ')}</span> },
-  { key: 'events', header: '이벤트', render: (p) => <span className="font-mono tabular">{p.eventCount}</span>, align: 'right' },
-  {
-    key: 'detail',
-    header: '',
-    align: 'right',
-    render: (p) => (
-      <Link to={`/app/patrol/${p.id}`} className="font-semibold text-accent underline-offset-4 hover:underline">
-        상세 →
-      </Link>
-    ),
-  },
-]
-
-/** 순찰 관리 목록 (1d) — 순찰 이력 R-01 */
+/** 순찰 관리 목록 (1d) — 순찰 이력 */
 export default function PatrolList() {
   const sessionRobotId = useAuthStore((state) => state.robotId)
   const selectedRobotId = env.useMocks ? 'R-01' : sessionRobotId ?? env.defaultRobotId
-  const { data: robot } = useRobot(selectedRobotId)
+  const { data: robots } = useRobots()
   const [period, setPeriod] = useState('all')
-  const [status, setStatus] = useState('all')
-  const [applied, setApplied] = useState({ period: 'all', status: 'all' })
+  const [applied, setApplied] = useState({ period: 'all' })
   const { data: patrols, isLoading, error, refetch } = usePatrols({
     robotId: selectedRobotId,
     period: applied.period,
-    status: applied.status,
   })
 
-  const rows = patrols ?? []
+  // 완료된 순찰만 기록/표시 (진행중 등 제외)
+  const rows = (patrols ?? []).filter((p) => p.status === '완료')
+  // 로봇 이름 조회 (사용자 지정 이름 반영) — 서버 응답의 robotName 우선, 없으면 목록에서 조회
+  const nameById = new Map((robots ?? []).map((r) => [r.id, r.name]))
+
+  const columns: Column<Patrol>[] = [
+    { key: 'id', header: '순찰ID', render: (p) => <span className="font-mono font-bold tabular">{p.id}</span> },
+    {
+      key: 'robot',
+      header: '로봇',
+      render: (p) => <span className="font-semibold">{p.robotName ?? nameById.get(p.robotId) ?? p.robotId}</span>,
+    },
+    { key: 'start', header: '시작', render: (p) => <span className="font-mono tabular">{p.date} {p.start}</span> },
+    { key: 'end', header: '종료', render: (p) => <span className="font-mono tabular">{p.end ?? '-'}</span> },
+    { key: 'route', header: '순찰 경로 (구역 순서)', render: (p) => <span className="text-muted">{p.routeZones.join(' → ')}</span> },
+    { key: 'events', header: '이벤트', render: (p) => <span className="font-mono tabular">{p.eventCount}</span>, align: 'right' },
+    {
+      key: 'detail',
+      header: '',
+      align: 'right',
+      render: (p) => (
+        <Link to={`/app/patrol/${p.id}`} className="font-semibold text-accent underline-offset-4 hover:underline">
+          상세 →
+        </Link>
+      ),
+    },
+  ]
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         breadcrumb={[{ label: 'Dashboard', to: '/app' }, { label: '순찰관리' }]}
-        title={`순찰 이력 — ${robot?.name ?? selectedRobotId ?? '로봇'}`}
-        aside={
-          robot && (
-            <span className="inline-flex items-center gap-1.5 rounded-pill bg-success-soft px-3 py-1 text-xs font-semibold text-success">
-              [ {robot.status} · 배터리 <span className="font-mono tabular">{robot.battery}%</span> ]
-            </span>
-          )
-        }
+        title="순찰 이력"
       />
 
       <Card className="p-5 sm:p-6">
-        {/* 필터바 */}
+        {/* 필터바 — 기간만 (상태는 완료 순찰만 기록하므로 제거) */}
         <form
           className="mb-4 flex flex-wrap items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            setApplied({ period, status })
+            setApplied({ period })
           }}
         >
           <Select aria-label="기간 선택" value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40">
@@ -77,11 +76,6 @@ export default function PatrolList() {
             <option value="today">오늘</option>
             <option value="7d">최근 7일</option>
             <option value="30d">최근 30일</option>
-          </Select>
-          <Select aria-label="상태" value={status} onChange={(e) => setStatus(e.target.value)} className="w-32">
-            <option value="all">상태 전체</option>
-            <option value="완료">완료</option>
-            <option value="진행중">진행중</option>
           </Select>
           <Button type="submit" variant="dark" size="sm">검색</Button>
         </form>
