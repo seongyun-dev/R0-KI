@@ -1,25 +1,51 @@
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Button, Field, Input } from '../../components/ui'
 
 export type StepRobotProps = {
   onPrev: () => void
-  onNext: () => void
+  /** 입력한 일련번호·로봇명을 상위로 전달 (등록 API 저장용) */
+  onNext: (data: { serial: string; name: string }) => void
 }
 
 /** Step 2/3 — 첫 순찰 로봇 등록 (1v) */
 export function StepRobot({ onPrev, onNext }: StepRobotProps) {
+  const [serial, setSerial] = useState('')
+  const [name, setName] = useState('')
+  const [nameError, setNameError] = useState<string>()
+
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    onNext()
+    const trimmedName = name.trim()
+    // 로봇 이름 검증: 1~20자, 앞뒤 공백 제거, 빈 값 불가 (중복은 백엔드에서 최종 검증)
+    if (trimmedName.length < 1 || trimmedName.length > 20) {
+      setNameError('로봇 이름은 1~20자로 입력해주세요')
+      return
+    }
+    setNameError(undefined)
+    onNext({ serial: serial.trim(), name: trimmedName })
   }
 
   return (
     <form className="flex flex-col gap-5" onSubmit={onSubmit}>
       <Field label="로봇 일련번호 입력" htmlFor="ob-serial" required hint="로봇 하단 라벨 표기">
-        <Input id="ob-serial" placeholder="예: SN-2026-0001" className="font-mono tabular" required />
+        <Input
+          id="ob-serial"
+          value={serial}
+          onChange={(e) => setSerial(e.target.value)}
+          placeholder="예: SN-2026-0001"
+          className="font-mono tabular"
+          required
+        />
       </Field>
-      <Field label="로봇명" htmlFor="ob-robot-name" required>
-        <Input id="ob-robot-name" placeholder="예: R-01" required />
+      <Field label="로봇명" htmlFor="ob-robot-name" required hint="1~20자 · 직접 지어주세요" error={nameError}>
+        <Input
+          id="ob-robot-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="예: R-01"
+          maxLength={20}
+          required
+        />
       </Field>
 
       <p className="rounded-control bg-surface px-4 py-3 text-sm text-muted">

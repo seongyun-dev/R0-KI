@@ -1,25 +1,28 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { CloseIcon } from '../../components/icons'
-import { Button, StatusBadge, useToast } from '../../components/ui'
+import { Button, Field, Input, Modal, StatusBadge, useToast } from '../../components/ui'
 import { cn } from '../../lib/cn'
-import type { ZoneType } from '../../types/domain'
+import type { Zone, ZoneType } from '../../types/domain'
 
 export type StepZonesProps = {
   onPrev: () => void
-  onComplete: (zoneCount: number) => void
+  /** 등록한 구역 목록을 상위로 전달 (대시보드 지도에 반영) */
+  onComplete: (zones: Zone[]) => void
 }
 
 const COLS = 14 // 열 A~N
 const ROWS = 7 // 행 1~7
 const colLabel = (i: number) => String.fromCharCode(65 + i)
 
-const ZONE_TYPES: ZoneType[] = ['주차장', '분리수거장', '위험구역', '출입구', '기타']
+// 위험구역 제거 · 도착지(순찰 복귀 종료 지점) 추가
+const ZONE_TYPES: ZoneType[] = ['주차장', '분리수거장', '출입구', '도착지', '기타']
 
 const zoneStyle: Record<ZoneType, string> = {
   주차장: 'bg-info-soft/80 ring-info text-info',
   분리수거장: 'bg-success-soft/80 ring-success text-success',
   위험구역: 'bg-danger-soft/80 ring-danger text-danger',
   출입구: 'bg-warning-soft/80 ring-warning text-warning',
+  도착지: 'bg-accent/10 ring-accent text-accent',
   기타: 'bg-surface-2/80 ring-muted text-muted',
 }
 
@@ -33,6 +36,10 @@ const toRect = (a: { c: number; r: number }, b: { c: number; r: number }): Rect 
   h: Math.abs(a.r - b.r) + 1,
 })
 
+// 두 사각형이 한 칸이라도 겹치는지 (겹침 방지용)
+const overlaps = (a: Rect, b: Rect) =>
+  a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+
 /** Step 3/3 — 구역 지정 (IoT 수신 맵 위 드래그) (1y) */
 export function StepZones({ onPrev, onComplete }: StepZonesProps) {
   const toast = useToast()
@@ -43,6 +50,12 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
   // 드래그 상태는 ref가 진실원천(포인터 이벤트가 리렌더보다 빠를 수 있음), state는 프리뷰 렌더용
   const dragRef = useRef<{ start: { c: number; r: number }; cur: { c: number; r: number } } | null>(null)
   const [drag, setDrag] = useState<typeof dragRef.current>(null)
+  // 구역 이름 입력/수정 모달 — 드래그로 그린 직후, 또는 기존 구역 클릭 시
+  const [nameModalOpen, setNameModalOpen] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [draftRect, setDraftRect] = useState<Rect | null>(null)
+  const [draftType, setDraftType] = useState<ZoneType>('주차장')
+  const [editingId, setEditingId] = useState<number | null>(null)
 
   const cellAt = (e: React.PointerEvent) => {
     const rect = gridRef.current!.getBoundingClientRect()
@@ -72,11 +85,52 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
     dragRef.current = null
     setDrag(null)
     const rect = toRect(d.start, d.cur)
-    setZones((zs) => {
-      const count = zs.filter((z) => z.type === selectedType).length
-      return [...zs, { id: ++idRef.current, type: selectedType, label: `${selectedType} ${count + 1}`, rect }]
-    })
-    toast(`✓ ${selectedType} 구역이 등록되었습니다`)
+
+    // 겹침 방지: 기존 구역과 겹치면 등록 취소
+    if (zones.some((z) => overlaps(z.rect, rect))) {
+      toast('다른 구역과 겹칩니다 · 빈 곳에 그려주세요')
+      return
+    }
+    // 도착지는 맵당 한 곳만
+    if (selectedType === '도착지' && zones.some((z) => z.type === '도착지')) {
+      toast('도착지는 한 곳만 등록할 수 있습니다')
+      return
+    }
+
+    // 이름 입력 모달 오픈 (기본값을 미리 채워 수정 가능하게)
+    const count = zones.filter((z) => z.type === selectedType).length
+    setDraftRect(rect)
+    setDraftType(selectedType)
+    setEditingId(null)
+    setNameInput(`${selectedType} ${count + 1}`)
+    setNameModalOpen(true)
+  }
+
+  const openEdit = (z: DraftZone) => {
+    setEditingId(z.id)
+    setDraftRect(null)
+    setDraftType(z.type)
+    setNameInput(z.label)
+    setNameModalOpen(true)
+  }
+
+  const closeNameModal = () => {
+    setNameModalOpen(false)
+    setDraftRect(null)
+    setEditingId(null)
+    setNameInput('')
+  }
+
+  const confirmName = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const label = nameInput.trim() || draftType
+    if (editingId != null) {
+      setZones((zs) => zs.map((z) => (z.id === editingId ? { ...z, label } : z)))
+    } else if (draftRect) {
+      setZones((zs) => [...zs, { id: ++idRef.current, type: draftType, label, rect: draftRect }])
+      toast(`✓ ${label} 구역이 등록되었습니다`)
+    }
+    closeNameModal()
   }
 
   const rectStyle = (r: Rect) => ({
@@ -111,7 +165,7 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
         <div>
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-xs font-bold tracking-wider text-muted">[ IoT MAP · <StatusBadge label="수신됨" className="px-1.5 py-0" /> ]</span>
-            <span className="text-xs text-muted">구역 유형 선택 후 맵 위를 드래그하세요 (✕로 삭제)</span>
+            <span className="text-xs text-muted">구역 유형 선택 후 맵 위를 드래그하세요 (✕로 삭제 · 이름 클릭 시 수정)</span>
           </div>
           {/* 열 라벨 A~N */}
           <div className="ml-6 grid font-mono text-center text-xs text-subtle" style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)` }}>
@@ -149,7 +203,15 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
                   className={cn('absolute flex items-start justify-between gap-1 rounded-md p-1.5 ring-2 ring-inset', zoneStyle[z.type])}
                   style={rectStyle(z.rect)}
                 >
-                  <span className="truncate text-xs font-bold">{z.label}</span>
+                  <button
+                    type="button"
+                    aria-label={`${z.label} 이름 수정`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => openEdit(z)}
+                    className="truncate text-left text-xs font-bold underline-offset-2 hover:underline"
+                  >
+                    {z.label}
+                  </button>
                   <button
                     type="button"
                     aria-label={`${z.label} 삭제`}
@@ -184,10 +246,35 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onPrev}>← 이전</Button>
-        <Button variant="accent" withArrow="right" onClick={() => onComplete(zones.length)} disabled={zones.length === 0}>
+        <Button
+          variant="accent"
+          withArrow="right"
+          onClick={() => onComplete(zones.map((z) => ({ id: `Z-${z.id}`, type: z.type, label: z.label, rect: z.rect })))}
+          disabled={zones.length === 0}
+        >
           가입 완료
         </Button>
       </div>
+
+      {/* 구역 이름 입력/수정 모달 */}
+      <Modal open={nameModalOpen} onClose={closeNameModal} title={editingId != null ? '구역 이름 수정' : '구역 이름 입력'}>
+        <form className="flex flex-col gap-4" onSubmit={confirmName}>
+          <Field label="구역 이름" htmlFor="zone-name" hint="1~20자 · 직접 입력할 수 있어요">
+            <Input
+              id="zone-name"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              maxLength={20}
+              autoFocus
+              required
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={closeNameModal}>취소</Button>
+            <Button type="submit" variant="dark">{editingId != null ? '수정' : '등록'}</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

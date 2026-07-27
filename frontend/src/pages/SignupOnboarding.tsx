@@ -9,6 +9,7 @@ import { StepDone } from '../features/onboarding/StepDone'
 import { StepMapScan } from '../features/onboarding/StepMapScan'
 import { StepRobot } from '../features/onboarding/StepRobot'
 import { StepZones } from '../features/onboarding/StepZones'
+import { useRegisteredMap } from '../features/onboarding/useRegisteredMap'
 
 type Phase = 'account' | 'robot' | 'scan' | 'zones' | 'done'
 
@@ -45,6 +46,9 @@ export default function SignupOnboarding() {
   const [phase, setPhase] = useState<Phase>('account')
   const [complexName, setComplexName] = useState('가온아파트')
   const [zoneCount, setZoneCount] = useState(0)
+  // 로봇 등록 입력값(이름) — 서버 연동 시 최종 제출(등록 API)로 전송. 일련번호는 등록 API 연동 시 함께 캡처
+  const [robotName, setRobotName] = useState('')
+  const setRegisteredZones = useRegisteredMap((s) => s.setZones)
 
   return (
     <AuthLayout
@@ -75,18 +79,27 @@ export default function SignupOnboarding() {
           </p>
         </>
       )}
-      {phase === 'robot' && <StepRobot onPrev={() => setPhase('account')} onNext={() => setPhase('scan')} />}
+      {phase === 'robot' && (
+        <StepRobot
+          onPrev={() => setPhase('account')}
+          onNext={({ name }) => {
+            setRobotName(name)
+            setPhase('scan')
+          }}
+        />
+      )}
       {phase === 'scan' && <StepMapScan onPrev={() => setPhase('robot')} onNext={() => setPhase('zones')} />}
       {phase === 'zones' && (
         <StepZones
           onPrev={() => setPhase('scan')}
-          onComplete={(n) => {
-            setZoneCount(n)
+          onComplete={(zones) => {
+            setRegisteredZones(zones) // 대시보드 지도에 반영
+            setZoneCount(zones.length)
             setPhase('done')
           }}
         />
       )}
-      {phase === 'done' && <StepDone complexName={complexName} zoneCount={zoneCount} />}
+      {phase === 'done' && <StepDone complexName={complexName} robotName={robotName} zoneCount={zoneCount} />}
     </AuthLayout>
   )
 }
