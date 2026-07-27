@@ -34,12 +34,13 @@ export function useRobot(id: string | undefined) {
 
 export function useUpdateRobot() {
   const update = useCallback(
-    async (variables: { robotId: string | number; robotName: string; robotStatus: RobotStatus }) => {
+    async (variables: { robotId: string | number; robotName: string; robotStatus?: RobotStatus }) => {
       if (env.useMocks) return undefined
       return robotResponseToDomain(
         await robotsApi.update(variables.robotId, {
           robotName: variables.robotName,
-          robotStatus: variables.robotStatus,
+          // 상태는 시스템이 관리 — 전달된 경우에만 포함
+          ...(variables.robotStatus ? { robotStatus: variables.robotStatus } : {}),
         }),
       )
     },
