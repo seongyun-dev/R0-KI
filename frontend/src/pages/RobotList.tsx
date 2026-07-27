@@ -107,14 +107,13 @@ export default function RobotList() {
           open={Boolean(editing)}
           robot={{ ...editing, ...patches[editing.id] }}
           onClose={() => setEditing(null)}
-          onSave={async ({ name, status }) => {
+          onSave={async ({ name }) => {
             try {
               await updateRobot.mutateAsync({
                 robotId: editing.backendId ?? editing.id,
                 robotName: name,
-                robotStatus: status,
               })
-              setPatches((prev) => ({ ...prev, [editing.id]: { name, status } }))
+              setPatches((prev) => ({ ...prev, [editing.id]: { name } }))
               toast('✓ 저장되었습니다')
             } catch (reason) {
               toast(reason instanceof Error ? reason.message : '로봇 수정에 실패했습니다')
