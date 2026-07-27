@@ -16,6 +16,8 @@ public enum ErrorCode {
     ROBOT_SERIAL_NUMBER_DUPLICATE(HttpStatus.CONFLICT, "ROBOT_002", "이미 등록된 시리얼 번호입니다."),
     MAPPING_SESSION_ALREADY_ACTIVE(
             HttpStatus.CONFLICT, "MAPPING_001", "해당 로봇에서 이미 지도 생성이 진행 중입니다."),
+    MAPPING_SESSION_NOT_FOUND(
+            HttpStatus.NOT_FOUND, "MAPPING_002", "지도 생성 세션을 찾을 수 없습니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
     EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다.");
 

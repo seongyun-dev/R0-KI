@@ -3,9 +3,11 @@ package com.oneloop.mapping.service;
 import com.oneloop.mapping.domain.MappingSession;
 import com.oneloop.mapping.domain.MappingStatus;
 import com.oneloop.mapping.dto.mqtt.MappingCommandAck;
+import com.oneloop.mapping.event.MappingStatusChangedEvent;
 import com.oneloop.mapping.repository.MappingSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +21,7 @@ public class MappingCommandAckService {
     private static final String START_MAPPING = "START_MAPPING";
 
     private final MappingSessionRepository mappingSessionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void handle(String topicRobotKey, MappingCommandAck ack) {
@@ -39,7 +42,12 @@ public class MappingCommandAckService {
             return;
         }
 
-        applyResult(session, ack);
+        MappingStatus changedStatus = applyResult(session, ack);
+        if (changedStatus != null) {
+            // DB 상태 변경이 커밋된 후 SSE로 전달할 수 있도록 상태 변경 이벤트를 발행한다.
+            eventPublisher.publishEvent(
+                    new MappingStatusChangedEvent(session.getId(), changedStatus));
+        }
 
         log.info(
                 "[MQTT] 매핑 명령 ACK 처리 완료. sessionId={}, commandId={}, result={}",
@@ -58,11 +66,12 @@ public class MappingCommandAckService {
                 && ack.receivedAt() != null;
     }
 
-    private void applyResult(MappingSession session, MappingCommandAck ack) {
+    private MappingStatus applyResult(MappingSession session, MappingCommandAck ack) {
         if (ack.result() == MappingCommandAck.AckResult.ACCEPTED) {
             // ACCEPTED는 실제 LiDAR·SLAM 시작 성공을 의미하며, 중복 ACK는 시작 시각을 변경하지 않는다.
             if (session.getStatus() == MappingStatus.REQUESTED) {
                 session.startMapping();
+                return MappingStatus.MAPPING;
             } else if (session.getStatus() != MappingStatus.MAPPING) {
                 log.warn(
                         "[MQTT] 허용되지 않은 ACK 상태 전환을 무시합니다. sessionId={}, currentStatus={}, result={}",
@@ -70,12 +79,13 @@ public class MappingCommandAckService {
                         session.getStatus(),
                         ack.result());
             }
-            return;
+            return null;
         }
 
         // 시작 전에 거절된 경우만 실패 처리하며, 뒤늦게 도착한 상충 ACK로 진행 중인 작업을 종료하지 않는다.
         if (session.getStatus() == MappingStatus.REQUESTED) {
             session.fail();
+            return MappingStatus.FAILED;
         } else if (session.getStatus() != MappingStatus.FAILED) {
             log.warn(
                     "[MQTT] 허용되지 않은 ACK 상태 전환을 무시합니다. sessionId={}, currentStatus={}, result={}",
@@ -83,5 +93,6 @@ public class MappingCommandAckService {
                     session.getStatus(),
                     ack.result());
         }
+        return null;
     }
 }
