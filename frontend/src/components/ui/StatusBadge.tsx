@@ -25,6 +25,13 @@ const toneClass: Record<Tone, string> = {
   neutral: 'bg-surface text-muted',
 }
 
+// 위험도·상태 라벨별 색 지정 (긴급=빨강 / 탐지=하늘색 / 보통=노랑). 낮음은 미지정 → 회색(neutral)
+const LABEL_CLASS: Record<string, string> = {
+  긴급: 'bg-danger-soft text-danger',
+  탐지: 'bg-info-soft text-info',
+  보통: 'bg-warning-soft text-warning',
+}
+
 export type StatusBadgeProps = {
   label: string
   /** `[ 완료 ]` 대괄호 스타일 */
@@ -37,7 +44,7 @@ export function StatusBadge({ label, bracket, className }: StatusBadgeProps) {
     <span
       className={cn(
         'inline-flex items-center whitespace-nowrap rounded-pill px-2.5 py-1 text-xs font-semibold',
-        toneClass[toneOf(label)],
+        LABEL_CLASS[label] ?? toneClass[toneOf(label)],
         className,
       )}
     >

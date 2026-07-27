@@ -31,12 +31,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex flex-col items-center gap-2 px-4"
+        className="pointer-events-none fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 px-4"
       >
         {items.map((t) => (
           <div
             key={t.id}
-            className="rounded-pill bg-ink px-5 py-3 text-sm font-semibold text-white shadow-pop"
+            className="rounded-card bg-success px-10 py-6 text-lg font-bold text-white shadow-pop"
           >
             {t.message}
           </div>
