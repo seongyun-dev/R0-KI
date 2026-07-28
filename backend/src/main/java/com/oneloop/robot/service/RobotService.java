@@ -46,13 +46,15 @@ public class RobotService {
     private final CheckpointRepository checkpointRepository;
     private final PatrolRepository patrolRepository;
     private final CheckpointLocator checkpointLocator;
+    private final RobotServiceTokenPublisher robotServiceTokenPublisher;
 
     /**
-     * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다.
+     * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다. 등록과 동시에 로봇 전용 서비스 토큰(REST 인증용)을 발급하고,
+     * MQTT retained 메시지로 로봇에 전달한다.
      *
      * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @param request 로봇 이름과 시리얼 번호
-     * @return 등록된 로봇 정보
+     * @return 등록된 로봇 정보(서비스 토큰 포함, 이후엔 재조회 불가)
      * @throws BusinessException 시리얼 번호가 이미 등록되어 있는 경우
      */
     @Transactional
@@ -65,7 +67,12 @@ public class RobotService {
         ApartmentComplex apartmentComplex = apartmentComplexRepository.getReferenceById(apartmentComplexId);
         PatrolRobot robot =
                 new PatrolRobot(apartmentComplex, request.getName(), request.getSerialNumber());
-        return RobotRegisterResponse.from(robotRepository.save(robot));
+        String serviceToken = robotServiceTokenPublisher.generate();
+        robot.issueServiceToken(serviceToken);
+        robotRepository.save(robot);
+
+        robotServiceTokenPublisher.publish(robot.getSerialNumber(), serviceToken);
+        return RobotRegisterResponse.from(robot);
     }
 
     /**

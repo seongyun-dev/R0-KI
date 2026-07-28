@@ -19,7 +19,8 @@ public enum ErrorCode {
     MAPPING_SESSION_NOT_FOUND(
             HttpStatus.NOT_FOUND, "MAPPING_002", "지도 생성 세션을 찾을 수 없습니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
-    EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다.");
+    EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다."),
+    FILE_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "EVENT_003", "파일 저장 중 오류가 발생했습니다.");
 
     private final HttpStatus status;
     private final String code;

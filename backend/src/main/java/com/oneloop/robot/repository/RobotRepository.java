@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface RobotRepository extends JpaRepository<PatrolRobot, Long> {
     Optional<PatrolRobot> findBySerialNumber(String serialNumber);
 
+    Optional<PatrolRobot> findByServiceToken(String serviceToken);
+
     Page<PatrolRobot> findAllByApartmentComplexIdAndStatusNot(
             Long apartmentComplexId, RobotStatus excludedStatus, Pageable pageable);
 

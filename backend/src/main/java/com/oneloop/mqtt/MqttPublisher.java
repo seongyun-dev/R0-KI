@@ -22,11 +22,22 @@ public class MqttPublisher {
 
     // 나중에 순찰 시작/종료(PatrolService) 등에서 그대로 호출할 범용 발행 메서드
     public void publish(String topic, String payload) {
+        send(topic, payload, false);
+    }
+
+    // 브로커가 마지막 메시지를 저장해뒀다가, 나중에 구독하는 클라이언트에게 즉시 재전달한다.
+    // (로봇이 발행 시점에 연결되어 있지 않아도 나중에 구독하면 받을 수 있음 - 서비스 토큰 최초 전달 등에 사용)
+    public void publishRetained(String topic, String payload) {
+        send(topic, payload, true);
+    }
+
+    private void send(String topic, String payload, boolean retained) {
         try {
             MqttMessage message = new MqttMessage(payload.getBytes(StandardCharsets.UTF_8));
             message.setQos(QOS);
+            message.setRetained(retained);
             mqttClient.publish(topic, message);
-            log.info("[MQTT] 발행 완료 topic={}, payload={}", topic, payload);
+            log.info("[MQTT] 발행 완료 topic={}, retained={}, payload={}", topic, retained, payload);
         } catch (MqttException e) {
             // 호출부가 아직 없어 지금은 로그만 남김 - 실제 사용처 붙을 때 실패 처리 다시 판단
             log.error("[MQTT] 발행 실패 topic={}, payload={}", topic, payload, e);

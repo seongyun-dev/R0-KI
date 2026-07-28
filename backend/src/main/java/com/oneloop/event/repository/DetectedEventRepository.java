@@ -20,6 +20,9 @@ public interface DetectedEventRepository extends JpaRepository<DetectedEvent, Lo
     // 이벤트 상세조회 - 로그인한 관리자 소속 단지의 이벤트인지 함께 확인
     Optional<DetectedEvent> findByIdAndRobotApartmentComplexId(Long id, Long apartmentComplexId);
 
+    // 증거자료 업로드 - 호출한 로봇이 그 이벤트의 담당 로봇인지 함께 확인
+    Optional<DetectedEvent> findByIdAndRobotId(Long id, Long robotId);
+
     // 단지/유형/상태/기간으로 필터링한 이벤트 목록. robot은 fetch join으로 같이 가져와 N+1 방지
     @EntityGraph(attributePaths = "robot")
     @Query(
