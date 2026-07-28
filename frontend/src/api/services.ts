@@ -39,12 +39,12 @@ function withQuery(path: string, params: Record<string, string | number | undefi
 
 export const authApi = {
   signIn: (request: SignInRequest) =>
-    apiRequest<SignInResponse>('/api/auth/signin', {
+    apiRequest<SignInResponse['data']>('/api/auth/signin', {
       method: 'POST',
       body: jsonBody(request),
     }),
   signUp: (request: SignUpRequest) =>
-    apiRequest<SignUpResponse>('/api/auth/signup', {
+    apiRequest<SignUpResponse['data']>('/api/auth/signup', {
       method: 'POST',
       body: jsonBody(request),
     }),

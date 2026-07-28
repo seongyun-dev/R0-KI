@@ -11,6 +11,7 @@ import { StepRobot } from '../features/onboarding/StepRobot'
 import { StepZones } from '../features/onboarding/StepZones'
 import { useRegisteredMap } from '../features/onboarding/useRegisteredMap'
 import { authApi } from '../api/services'
+import { useAuthStore } from '../features/auth/useAuthStore'
 
 type Phase = 'account' | 'robot' | 'scan' | 'zones' | 'done'
 
@@ -44,6 +45,7 @@ const stepIndex: Record<Phase, number> = { account: 0, robot: 1, scan: 2, zones:
 /** 회원가입 · 최초 가입자 온보딩 (1u→1v→1w→1y→1x) */
 export default function SignupOnboarding() {
   const clock = useClock()
+  const login = useAuthStore((state) => state.login)
   const [phase, setPhase] = useState<Phase>('account')
   const [complexName, setComplexName] = useState('가온아파트')
   const [zoneCount, setZoneCount] = useState(0)
@@ -77,6 +79,7 @@ export default function SignupOnboarding() {
 
               try {
                 const response = await authApi.signUp(data)
+                login(data.username, response.accessToken)
                 setComplexName(data.apartment.name)
                 setPhase(response.isNewApartment ? 'robot' : 'done')
               } catch (error) {

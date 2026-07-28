@@ -25,7 +25,13 @@ export type SignUpRequest = {
 }
 
 export type SignUpResponse = {
-  isNewApartment: boolean
+  success: boolean,
+  code: string,
+  message: string,
+  data: {
+    accessToken: string,
+    isNewApartment: boolean
+  }
 }
 
 export type SignInRequest = {
@@ -34,7 +40,12 @@ export type SignInRequest = {
 }
 
 export type SignInResponse = {
-  accessToken: string
+  success: boolean,
+  code: string,
+  message: string,
+  data: {
+    accessToken: string
+  }
 }
 
 export type ComplexResponse = {
