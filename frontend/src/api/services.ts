@@ -19,6 +19,8 @@ import type {
   RobotUpdateResponse,
   SignInRequest,
   SignInResponse,
+  SignUpRequest,
+  SignUpResponse,
 } from './contracts'
 
 export function unwrapList<T>(response: ListResponse<T>): T[] {
@@ -37,17 +39,12 @@ function withQuery(path: string, params: Record<string, string | number | undefi
 
 export const authApi = {
   signIn: (request: SignInRequest) =>
-    apiRequest<SignInResponse>('/api/auth/signin', {
+    apiRequest<SignInResponse['data']>('/api/auth/signin', {
       method: 'POST',
       body: jsonBody(request),
     }),
-  signUp: (request: unknown) =>
-    apiRequest<unknown>('/api/auth/signup', {
-      method: 'POST',
-      body: jsonBody(request),
-    }),
-  initialSignUp: (request: unknown) =>
-    apiRequest<SignInResponse>('/api/auth/initial-signup', {
+  signUp: (request: SignUpRequest) =>
+    apiRequest<SignUpResponse['data']>('/api/auth/signup', {
       method: 'POST',
       body: jsonBody(request),
     }),

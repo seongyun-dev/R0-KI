@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { CheckIcon } from '../../components/icons'
 import { Button, StatusBadge } from '../../components/ui'
-import { useAuthStore } from '../auth/useAuthStore'
 
 export type StepDoneProps = {
   complexName: string
@@ -12,7 +11,6 @@ export type StepDoneProps = {
 /** 온보딩 완료 (1x) */
 export function StepDone({ complexName, robotName, zoneCount }: StepDoneProps) {
   const navigate = useNavigate()
-  const login = useAuthStore((s) => s.login)
   return (
     <div className="flex flex-col items-center gap-5 py-6 text-center">
       <span className="grid h-14 w-14 place-items-center rounded-pill bg-ink text-accent-light">
@@ -28,8 +26,6 @@ export function StepDone({ complexName, robotName, zoneCount }: StepDoneProps) {
         withArrow="right"
         className="mt-3"
         onClick={() => {
-          // 가입 완료 = 로그인 상태로 진입
-          login('new-admin')
           navigate('/app', { replace: true })
         }}
       >

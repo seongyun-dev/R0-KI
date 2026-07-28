@@ -12,24 +12,40 @@ export type PageResponse<T> = {
 
 export type ListResponse<T> = T[] | PageResponse<T>
 
+export type SignUpRequest = {
+  username: string
+  password: string
+  name: string
+  phoneNumber: string
+  apartment: {
+    name: string
+    postalCode: string
+    address: string
+  }
+}
+
+export type SignUpResponse = {
+  success: boolean,
+  code: string,
+  message: string,
+  data: {
+    accessToken: string,
+    isNewApartment: boolean
+  }
+}
+
 export type SignInRequest = {
   username: string
   password: string
 }
 
 export type SignInResponse = {
-  accessToken: string
-  member?: {
-    memberId?: Id
-    username?: string
-    name?: string
-    role?: string
-    apartmentComplexId?: Id
-    mapId?: Id
-    robotId?: Id
+  success: boolean,
+  code: string,
+  message: string,
+  data: {
+    accessToken: string
   }
-  mapId?: Id
-  robotId?: Id
 }
 
 export type ComplexResponse = {

@@ -63,11 +63,14 @@ export default function Signup() {
         await authApi.signUp({
           username: loginId,
           password: pw,
-          name,
-          nickname,
+          name: name,
           phoneNumber: phone,
-          apartmentComplexId: complex.id,
-        })
+          apartment: {
+            name: complex.name,
+            postalCode: complex.zipcode ?? '',
+            address: complex.roadAddress,
+          }
+          })
       }
       toast('✓ 가입이 완료되었습니다')
       navigate('/login')

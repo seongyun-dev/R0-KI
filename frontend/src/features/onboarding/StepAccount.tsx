@@ -1,20 +1,65 @@
 import { useState, type FormEvent } from 'react'
 import { Button, Field, Input } from '../../components/ui'
 import { formatPhone } from '../../lib/formatters'
-
+import type { SignUpRequest } from '../../api/contracts'
+import { openPostcodeSearch } from '../../lib/daumPostcode'
 export type StepAccountProps = {
-  onNext: (data: { complexName: string }) => void
+  onNext: (data: SignUpRequest) => void
+  isSubmitting: boolean
+  errorMessage?: string
 }
 
 /** Step 1/3 — 계정·단지 (1u) */
-export function StepAccount({ onNext }: StepAccountProps) {
+export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountProps) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [nickname, setNickname] = useState('')
   const [phone, setPhone] = useState('')
   const [zipcode, setZipcode] = useState('')
   const [complexName, setComplexName] = useState('')
-
+  const [address, setAddress] = useState('')
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    onNext({ complexName: complexName || '가온아파트' })
+    if (isSubmitting) {
+      return
+    }
+    const request: SignUpRequest = {
+      username,
+      password,
+      name,
+      phoneNumber: phone,
+      apartment: {
+        name: complexName,
+        postalCode: zipcode,
+        address,
+      },
+    }
+    onNext(request)
+  }
+
+
+  const handlePostcodeSearch = () => {
+    try {
+      openPostcodeSearch(
+        ({
+          postalCode,
+          apartmentName,
+          roadAddress,
+        }) => {
+          setZipcode(postalCode)
+          setComplexName(apartmentName)
+          setAddress(roadAddress)
+        },
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : '주소 검색 중 오류가 발생했습니다.'
+
+      alert(message)
+    }
   }
 
   return (
@@ -23,16 +68,16 @@ export function StepAccount({ onNext }: StepAccountProps) {
         <h2 className="border-b border-line pb-2 text-sm font-bold text-muted">계정</h2>
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="아이디" htmlFor="ob-id" required hint="4~20자 영문/숫자">
-            <Input id="ob-id" placeholder="아이디 입력" pattern="[A-Za-z0-9]{4,20}" required />
+            <Input id="ob-id" placeholder="아이디 입력" pattern="[A-Za-z0-9]{4,20}" type="text" value={username} onChange={(e) => setUsername(e.target.value)} required />
           </Field>
           <Field label="비밀번호" htmlFor="ob-pw" required hint="8자 이상, 영문+숫자+특수문자 조합">
-            <Input id="ob-pw" type="password" placeholder="비밀번호 입력" autoComplete="new-password" minLength={8} required />
+            <Input id="ob-pw" type="password" value={password} onChange={(e)=> setPassword(e.target.value)} placeholder="비밀번호 입력" autoComplete="new-password" minLength={8} required />
           </Field>
           <Field label="이름" htmlFor="ob-name" required>
-            <Input id="ob-name" placeholder="이름 입력" required />
+            <Input id="ob-name" type="text" value={name} onChange={(e)=>setName(e.target.value)} placeholder="이름 입력" required />
           </Field>
           <Field label="닉네임" htmlFor="ob-nick" required>
-            <Input id="ob-nick" placeholder="닉네임 입력" required />
+            <Input id="ob-nick" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="닉네임 입력" required />
           </Field>
           <Field label="전화번호" htmlFor="ob-phone" required className="sm:col-span-2">
             <Input
@@ -60,7 +105,7 @@ export function StepAccount({ onNext }: StepAccountProps) {
               className="max-w-40 font-mono tabular"
               required
             />
-            <Button variant="outline" className="flex-none" onClick={() => setZipcode('06212')}>
+            <Button type="button" variant="outline" className="flex-none" onClick={handlePostcodeSearch}>
               우편번호 찾기
             </Button>
           </div>
@@ -75,12 +120,18 @@ export function StepAccount({ onNext }: StepAccountProps) {
           />
         </Field>
         <Field label="도로명주소" htmlFor="ob-addr" required>
-          <Input id="ob-addr" placeholder="도로명주소 입력" required />
+          <Input type="text" value={address} onChange={(e)=> setAddress(e.target.value)} id="ob-addr" placeholder="도로명주소 입력" required />
         </Field>
       </section>
 
+      {errorMessage && (
+        <p role="alert" className="text-sm text-danger">
+          {errorMessage}
+        </p>
+      )}
+
       <div className="mt-2 flex justify-end">
-        <Button type="submit" variant="dark" withArrow="right">
+        <Button type="submit" variant="dark" withArrow="right" loading={isSubmitting}>
           다음: 로봇 등록
         </Button>
       </div>
