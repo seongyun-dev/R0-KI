@@ -3,6 +3,8 @@ package com.oneloop.global.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+    INVALID_ZONE_BOUNDS(
+            HttpStatus.BAD_REQUEST, "ZONE_001", "구역은 너비와 높이가 있는 사각형이어야 합니다."),
     MAPPING_SESSION_ALREADY_EXISTS(
             HttpStatus.CONFLICT, "MAPPING_004", "아파트 단지 또는 로봇에 이미 지도 생성 세션이 존재합니다."),
     DUPLICATE_USERNAME(HttpStatus.CONFLICT, "AUTH_005", "이미 사용 중인 아이디입니다."),
