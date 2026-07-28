@@ -34,6 +34,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(
             HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+        // RobotTokenAuthenticationFilter가 앞서 로봇 토큰으로 이미 인증을 세팅했다면, 같은 헤더값을
+        // JWT로 다시 파싱 시도하지 않고 그냥 통과시킨다(안 그러면 파싱 실패로 401 처리돼버림)
+        if (SecurityContextHolder.getContext().getAuthentication() != null) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String token = resolveToken(request);
         if (!StringUtils.hasText(token)) {
             filterChain.doFilter(request, response);

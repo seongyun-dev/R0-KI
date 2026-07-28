@@ -31,6 +31,9 @@ app:
     allowed-origins: http://localhost:3000,http://localhost:5173
   mqtt:
     client-id: oneloop-backend
+  file-storage:
+    upload-dir: uploads
+    url-prefix: /uploads
 
 gms:
   base-url: ${GMS_BASE_URL:https://gms.ssafy.io/gmsapi/api.openai.com/v1}

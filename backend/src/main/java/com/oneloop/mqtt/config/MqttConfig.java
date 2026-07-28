@@ -28,7 +28,7 @@ public class MqttConfig {
     // destroyMethod="disconnect": 앱 종료 시 브로커 연결을 정리
     @Bean(destroyMethod = "disconnect")
     public IMqttClient mqttClient(
-            @Value("${mqtt.broker-uri}") String brokerUrl,
+            @Value("${mqtt.broker-url}") String brokerUrl,
             @Value("${app.mqtt.client-id}") String clientIdPrefix,
             @Value("${mqtt.username:}") String username,
             @Value("${mqtt.password:}") String password,
