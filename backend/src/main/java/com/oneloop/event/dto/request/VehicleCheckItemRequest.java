@@ -33,6 +33,12 @@ public class VehicleCheckItemRequest {
     @NotBlank(message = "licensePlate는 필수입니다.")
     private String licensePlate;
 
+    @Schema(
+            description = "이벤트 상세 원본 텍스트 (confidence= 값이 있으면 파싱해서 별도 저장)",
+            example = "CAR, confidence=0.91",
+            nullable = true)
+    private String eventDetails;
+
     @Schema(description = "감지 시각", example = "2026-07-23T14:10:00+09:00")
     @NotNull(message = "occurredAt은 필수입니다.")
     private OffsetDateTime occurredAt;
