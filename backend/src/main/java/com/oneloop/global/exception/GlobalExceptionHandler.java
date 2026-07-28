@@ -40,6 +40,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<ErrorResponse>> handleInvalidJson(
             HttpMessageNotReadableException exception) {
+        log.warn("요청 본문 파싱 실패: {}", exception.getMessage());
         return buildResponse(
                 ErrorCode.INVALID_JSON, ErrorCode.INVALID_JSON.getMessage(), ErrorResponse.now());
     }

@@ -71,22 +71,49 @@ public class PatrolRobot extends BaseEntity {
     @Column(name = "last_connected_at")
     private LocalDateTime lastConnectedAt;
 
+    // obstacle.status=STOP일 때만 값이 채워지고, 해제되면 둘 다 null로 비워짐
+    @Column(name = "obstacle_direction", length = 20)
+    private String obstacleDirection;
+
+    @Column(name = "obstacle_message", length = 255)
+    private String obstacleMessage;
+
     public PatrolRobot(ApartmentComplex apartmentComplex, String name, String serialNumber) {
         this.apartmentComplex = apartmentComplex;
         this.name = name;
         this.serialNumber = serialNumber;
     }
 
-    public void updateLocation(BigDecimal x, BigDecimal y, BigDecimal batteryLevel) {
+    // pose 토픽 수신 시 호출
+    public void updatePose(BigDecimal x, BigDecimal y, BigDecimal heading, LocalDateTime locationUpdatedAt) {
         this.xCoordinate = x;
         this.yCoordinate = y;
-        this.batteryLevel = batteryLevel;
-        this.locationUpdatedAt = LocalDateTime.now();
-        this.lastConnectedAt = LocalDateTime.now();
+        this.heading = heading;
+        this.locationUpdatedAt = locationUpdatedAt;
+        this.lastConnectedAt = locationUpdatedAt;
     }
 
-    public void changeStatus(RobotStatus status) {
+    // status 토픽 수신 시 호출 - obstacleDirection/obstacleMessage는 장애물 상태가 아니면 null
+    public void updateStatus(
+            RobotStatus status,
+            BigDecimal batteryLevel,
+            SensorStatus cameraStatus,
+            SensorStatus lidarStatus,
+            SensorStatus motorStatus,
+            SensorStatus lineSensorStatus,
+            LocalDateTime statusReportedAt,
+            String obstacleDirection,
+            String obstacleMessage) {
         this.status = status;
+        this.batteryLevel = batteryLevel;
+        this.cameraStatus = cameraStatus;
+        this.lidarStatus = lidarStatus;
+        this.motorStatus = motorStatus;
+        this.lineSensorStatus = lineSensorStatus;
+        this.statusReportedAt = statusReportedAt;
+        this.lastConnectedAt = statusReportedAt;
+        this.obstacleDirection = obstacleDirection;
+        this.obstacleMessage = obstacleMessage;
     }
 
     public void rename(String name) {
