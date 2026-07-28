@@ -65,7 +65,10 @@ public class AuthService {
                         passwordEncoder);
         memberRepository.save(member);
 
-        return new SignupResponse(isNewApartment);
+        String accessToken =
+                jwtTokenProvider.createAccessToken(
+                        member.getId().toString(), apartmentComplex.getId(), List.of());
+        return new SignupResponse(isNewApartment, accessToken);
     }
 
     /**
