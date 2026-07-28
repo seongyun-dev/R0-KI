@@ -39,33 +39,49 @@ export type ComplexResponse = {
   postalCode?: string | null
 }
 
-export type EvidenceResponse = {
-  evidenceId: Id
+// 백엔드 enum 코드 (back/dev 기준)
+export type EventTypeCode =
+  | 'ILLEGAL_PARKING'
+  | 'UNREGISTERED_VEHICLE'
+  | 'TRASH_DETECTED'
+  | 'RECYCLING_AREA_FULL'
+  | 'EMERGENCY'
+export type RiskLevelCode = 'LOW' | 'NORMAL' | 'EMERGENCY'
+export type ProcessingStatusCode = 'DETECTED' | 'PROCESSING' | 'COMPLETED'
+export type MediaTypeCode = 'IMAGE' | 'VIDEO' | string
+
+export type EventEvidenceResponse = {
+  mediaType: MediaTypeCode
   fileUrl: string
-  mediaType: '이미지' | '영상' | string
-  capturedAt?: string | null
 }
 
-export type EventResponse = {
+// GET /api/events (목록)
+export type EventListResponse = {
   eventId: Id
-  patrolId?: Id | null
-  robotId: Id
-  checkpointId?: Id | null
-  checkpointLabel?: string | null
-  locationLabel?: string | null
-  eventType: string
-  eventTitle: string
-  eventDetails?: string | null
   occurredAt: string
-  xCoordinate?: number | string | null
-  yCoordinate?: number | string | null
-  riskLevel: string
-  processingStatus: string
-  processedAt?: string | null
-  createdAt: string
-  detectionConfidence?: number | string | null
+  type: EventTypeCode | string
+  location?: string | null
+  robotName: string
+  riskLevel: RiskLevelCode | string
+  status: ProcessingStatusCode | string
+  assignee?: string | null
+}
+
+// GET /api/events/{id} (상세)
+export type EventDetailResponse = {
+  eventId: Id
+  type: EventTypeCode | string
+  confidence?: number | string | null // 0~1
+  occurredAt: string
+  elapsedSeconds?: number | null // 처리완료 전에만
+  processedAt?: string | null // 처리완료 시각
+  location?: string | null
+  robotName: string
+  riskLevel: RiskLevelCode | string
+  status: ProcessingStatusCode | string
   processingNote?: string | null
-  evidences?: EvidenceResponse[]
+  licensePlateNumber?: string | null
+  evidence?: EventEvidenceResponse | null
 }
 
 export type PatrolReportResponse = {
@@ -105,34 +121,84 @@ export type PatrolPathPointResponse = {
   recordedAt: string
 }
 
-export type RobotPartResponse = {
-  name: string
-  status: string
+// 백엔드 enum 코드 (back/dev 기준)
+export type RobotStatusCode =
+  | 'IDLE'
+  | 'PATROLLING'
+  | 'CHARGING'
+  | 'ERROR'
+  | 'OFFLINE'
+  | 'DELETED'
+  | 'OBSTACLE_STOP'
+export type SensorStatusCode = 'NORMAL' | 'NEEDS_INSPECTION' | 'ERROR' | 'DISCONNECTED'
+
+// GET /api/robots (목록) — 축소형
+export type RobotListResponse = {
+  robotId: Id
+  robotName: string
+  robotStatus: RobotStatusCode | string
+  batteryLevel?: number | string | null
+  location?: string | null
 }
 
-export type RobotResponse = {
+// GET /api/robots/{id} 의 recentPatrols 항목
+export type RobotRecentPatrolResponse = {
+  patrolId: Id
+  patrolStatus: string
+  startedAt?: string | null
+  endedAt?: string | null
+  detectedEventCount: number
+}
+
+// GET /api/robots/{id} (상세)
+export type RobotDetailResponse = {
   robotId: Id
   robotName: string
   robotSerialNumber: string
-  registrationCode?: string | null
-  model?: string | null
-  assignedZone?: string | null
-  currentLocationLabel?: string | null
-  robotStatus: string
+  robotStatus: RobotStatusCode | string
   batteryLevel?: number | string | null
-  xCoordinate?: number | string | null
-  yCoordinate?: number | string | null
-  locationUpdatedAt?: string | null
-  lastConnectedAt?: string | null
+  cameraStatus?: SensorStatusCode | string | null
+  lidarStatus?: SensorStatusCode | string | null
+  motorStatus?: SensorStatusCode | string | null
   registeredAt: string
-  odometerKm?: number | string | null
-  weeklyUptime?: number | string | null
-  parts?: RobotPartResponse[]
-  lastPatrol?: {
-    patrolId?: Id
-    startedAt?: string | null
-    endedAt?: string | null
-  } | null
+  weeklyOperationRate?: number | string | null
+  recentPatrols?: RobotRecentPatrolResponse[]
+}
+
+// GET /api/robots/stats
+export type RobotStatsResponse = {
+  totalCount: number
+  patrollingCount: number
+  idleOrChargingCount: number
+}
+
+// POST /api/robots
+export type RobotRegisterRequest = {
+  name: string
+  serialNumber: string
+}
+export type RobotRegisterResponse = {
+  robotId: Id
+  robotName: string
+  robotSerialNumber: string
+  robotStatus: RobotStatusCode | string
+  registeredAt: string
+}
+
+// PATCH /api/robots/{id}
+export type RobotUpdateRequest = {
+  name: string
+}
+export type RobotUpdateResponse = {
+  robotId: Id
+  robotName: string
+  updatedAt: string
+}
+
+// DELETE /api/robots/{id}
+export type RobotDeleteResponse = {
+  robotId: Id
+  deletedAt: string
 }
 
 export type MapInfoResponse = {

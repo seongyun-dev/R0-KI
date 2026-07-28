@@ -13,7 +13,6 @@ export default function RobotNew() {
   const [manual, setManual] = useState(false)
   const [regNo, setRegNo] = useState('')
   const [name, setName] = useState('')
-  const [model, setModel] = useState('')
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -23,10 +22,10 @@ export default function RobotNew() {
       return
     }
     try {
+      // 백엔드 등록 요청은 name·serialNumber만 받는다.
       await createRobot.mutateAsync({
-        robotSerialNumber: regNo,
-        robotName: name,
-        model,
+        serialNumber: regNo,
+        name,
       })
       toast('✓ 로봇이 등록되었습니다')
       navigate('/app/robots')
@@ -81,16 +80,6 @@ export default function RobotNew() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="예: R-02"
-              required
-            />
-          </Field>
-
-          <Field label="모델·사양" htmlFor="rn-model" required>
-            <Input
-              id="rn-model"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="예: PATROL-X1"
               required
             />
           </Field>

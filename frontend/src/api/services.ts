@@ -2,13 +2,21 @@ import { env } from '../config/env'
 import { apiRequest, consumeSse, jsonBody } from './client'
 import type {
   ComplexResponse,
-  EventResponse,
+  EventDetailResponse,
+  EventListResponse,
   ListResponse,
   MapMonitoringResponse,
   PatrolPathPointResponse,
   PatrolResponse,
+  RobotDeleteResponse,
+  RobotDetailResponse,
+  RobotListResponse,
   RobotLocationEvent,
-  RobotResponse,
+  RobotRegisterRequest,
+  RobotRegisterResponse,
+  RobotStatsResponse,
+  RobotUpdateRequest,
+  RobotUpdateResponse,
   SignInRequest,
   SignInResponse,
 } from './contracts'
@@ -50,18 +58,19 @@ export const authApi = {
 }
 
 export const eventsApi = {
-  list: (params: { eventType?: string; processingStatus?: string; riskLevel?: string; period?: string } = {}) =>
-    apiRequest<ListResponse<EventResponse>>(withQuery('/api/events', params)).then(unwrapList),
+  // 백엔드 GET /api/events 쿼리: type / status / period (+ page,size,sort). 위험도 필터는 미지원.
+  list: (params: { type?: string; status?: string; period?: string } = {}) =>
+    apiRequest<ListResponse<EventListResponse>>(withQuery('/api/events', params)).then(unwrapList),
   detail: (eventId: string | number) =>
-    apiRequest<EventResponse>(`/api/events/${encodeURIComponent(eventId)}`),
+    apiRequest<EventDetailResponse>(`/api/events/${encodeURIComponent(eventId)}`),
   updateStatus: (eventId: string | number, processingStatus: string, processingNote?: string) =>
     apiRequest<unknown>(`/api/events/${encodeURIComponent(eventId)}/status`, {
       method: 'PATCH',
       body: jsonBody({ processingStatus, processingNote }),
     }),
   // 긴급 이벤트 실시간 수신 (SSE) — 엔드포인트/페이로드 스키마 백엔드 확정 필요
-  subscribeEmergency: (onMessage: (data: EventResponse) => void, signal: AbortSignal) =>
-    consumeSse<EventResponse>('/api/events/emergency/stream', onMessage, signal),
+  subscribeEmergency: (onMessage: (data: EventListResponse) => void, signal: AbortSignal) =>
+    consumeSse<EventListResponse>('/api/events/emergency/stream', onMessage, signal),
 }
 
 export const patrolsApi = {
@@ -76,18 +85,23 @@ export const patrolsApi = {
 }
 
 export const robotsApi = {
-  list: () => apiRequest<ListResponse<RobotResponse>>('/api/robots').then(unwrapList),
+  list: () => apiRequest<ListResponse<RobotListResponse>>('/api/robots').then(unwrapList),
+  stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
   detail: (robotId: string | number) =>
-    apiRequest<RobotResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
-  create: (request: unknown) =>
-    apiRequest<RobotResponse>('/api/robots', {
+    apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
+  create: (request: RobotRegisterRequest) =>
+    apiRequest<RobotRegisterResponse>('/api/robots', {
       method: 'POST',
       body: jsonBody(request),
     }),
-  update: (robotId: string | number, request: unknown) =>
-    apiRequest<RobotResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
+  update: (robotId: string | number, request: RobotUpdateRequest) =>
+    apiRequest<RobotUpdateResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
       method: 'PATCH',
       body: jsonBody(request),
+    }),
+  delete: (robotId: string | number) =>
+    apiRequest<RobotDeleteResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
+      method: 'DELETE',
     }),
 }
 
