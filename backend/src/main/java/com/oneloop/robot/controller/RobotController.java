@@ -12,12 +12,14 @@ import com.oneloop.robot.dto.response.RobotRegisterResponse;
 import com.oneloop.robot.dto.response.RobotStatsResponse;
 import com.oneloop.robot.dto.response.RobotUpdateResponse;
 import com.oneloop.robot.service.RobotService;
+import com.oneloop.robot.service.RobotSseService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequiredArgsConstructor
@@ -35,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class RobotController {
 
     private final RobotService robotService;
+    private final RobotSseService robotSseService;
 
     @Operation(summary = "로봇 등록", description = "새로운 순찰로봇을 등록합니다.")
     @PostMapping
@@ -86,5 +90,11 @@ public class RobotController {
         return ApiResponse.success(
                 "로봇이 삭제되었습니다.",
                 robotService.delete(principal.getApartmentComplexId(), robotId));
+    }
+
+    @Operation(summary = "로봇 장애물 이벤트 구독", description = "로그인한 관리자 단지의 로봇 장애물 감지/해제 이벤트를 SSE로 구독합니다.")
+    @GetMapping(value = "/obstacle-events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribeObstacleEvents(@AuthenticationPrincipal CustomUserDetails principal) {
+        return robotSseService.subscribe(principal.getApartmentComplexId());
     }
 }
