@@ -1,6 +1,10 @@
 spring:
   application:
     name: oneloop
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 210MB
   config:
     import: optional:classpath:application-secret.yml
   jpa:
@@ -32,8 +36,9 @@ app:
   mqtt:
     client-id: oneloop-backend
   file-storage:
-    upload-dir: uploads
+    upload-dir: ${UPLOAD_DIR:uploads}
     url-prefix: /uploads
+    map-subdirectory: maps
 
 gms:
   base-url: ${GMS_BASE_URL:https://gms.ssafy.io/gmsapi/api.openai.com/v1}

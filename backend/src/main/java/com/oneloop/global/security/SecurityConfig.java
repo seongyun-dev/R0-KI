@@ -57,6 +57,9 @@ public class SecurityConfig {
                                 authorize
                                         .requestMatchers(HttpMethod.OPTIONS, "/**")
                                         .permitAll()
+                                        .requestMatchers(
+                                                HttpMethod.POST, "/api/map/mapping-sessions/*/map")
+                                        .hasRole("ROBOT")
                                         .requestMatchers(PUBLIC_ENDPOINTS)
                                         .permitAll()
                                         .anyRequest()
