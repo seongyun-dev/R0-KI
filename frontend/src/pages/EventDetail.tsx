@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { PageHeader } from '../components/layout/PageHeader'
 import { CameraIcon } from '../components/icons'
@@ -85,7 +85,13 @@ export default function EventDetail() {
   // 경과시간 — 탐지/처리중일 때만 실시간 카운트. 메모 모달이 열려 있는 동안은 멈춤
   // (1초마다 재렌더되면 모달 포커스가 튕겨 메모 입력이 방해됨)
   const isOngoing = proc === '탐지' || proc === '처리중'
-  const elapsed = useElapsed(Boolean(event) && isOngoing && !memoModalOpen, 192)
+  // 경과시간 기준 = 탐지시각(occurredAt)부터 지금까지 (백엔드 실데이터 반영)
+  const baseSec = useMemo(() => {
+    if (!event?.occurredAt) return 0
+    const s = Math.floor((Date.now() - Date.parse(event.occurredAt)) / 1000)
+    return Number.isFinite(s) && s > 0 ? s : 0
+  }, [event?.occurredAt])
+  const elapsed = useElapsed(Boolean(event) && isOngoing && !memoModalOpen, baseSec)
 
   if (isLoading) {
     return (
@@ -185,7 +191,10 @@ export default function EventDetail() {
               REC · {event.robotId}
             </div>
             <div className="absolute bottom-4 right-4 font-mono text-xs tabular text-white/80">
-              2026/07/15 {event.time}
+              {event.occurredAt
+                ? `${new Intl.DateTimeFormat('sv-SE').format(new Date(event.occurredAt)).replace(/-/g, '/')} `
+                : ''}
+              {event.time}
             </div>
           </div>
         </Card>
