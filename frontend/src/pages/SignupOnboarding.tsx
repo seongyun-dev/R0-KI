@@ -10,6 +10,7 @@ import { StepMapScan } from '../features/onboarding/StepMapScan'
 import { StepRobot } from '../features/onboarding/StepRobot'
 import { StepZones } from '../features/onboarding/StepZones'
 import { useRegisteredMap } from '../features/onboarding/useRegisteredMap'
+import { authApi } from '../api/services'
 
 type Phase = 'account' | 'robot' | 'scan' | 'zones' | 'done'
 
@@ -49,6 +50,8 @@ export default function SignupOnboarding() {
   // 로봇 등록 입력값(이름) — 서버 연동 시 최종 제출(등록 API)로 전송. 일련번호는 등록 API 연동 시 함께 캡처
   const [robotName, setRobotName] = useState('')
   const setRegisteredZones = useRegisteredMap((s) => s.setZones)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string>()
 
   return (
     <AuthLayout
@@ -66,9 +69,23 @@ export default function SignupOnboarding() {
       {phase === 'account' && (
         <>
           <StepAccount
-            onNext={({ complexName: name }) => {
-              setComplexName(name)
-              setPhase('robot')
+            isSubmitting={isSubmitting}
+            errorMessage={errorMessage}
+            onNext={async (data) => {
+              setIsSubmitting(true)
+              setErrorMessage(undefined)
+
+              try {
+                const response = await authApi.signUp(data)
+                setComplexName(data.apartment.name)
+                setPhase(response.isNewApartment ? 'robot' : 'done')
+              } catch (error) {
+                setErrorMessage(
+                  error instanceof Error ? error.message : '회원가입에 실패했습니다.',
+                )
+              } finally {
+                setIsSubmitting(false)
+              }
             }}
           />
           <p className="mt-6 border-t border-line pt-5 text-center text-sm text-muted">

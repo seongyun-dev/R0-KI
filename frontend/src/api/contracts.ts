@@ -12,6 +12,22 @@ export type PageResponse<T> = {
 
 export type ListResponse<T> = T[] | PageResponse<T>
 
+export type SignUpRequest = {
+  username: string
+  password: string
+  name: string
+  phoneNumber: string
+  apartment: {
+    name: string
+    postalCode: string
+    address: string
+  }
+}
+
+export type SignUpResponse = {
+  isNewApartment: boolean
+}
+
 export type SignInRequest = {
   username: string
   password: string
@@ -19,17 +35,6 @@ export type SignInRequest = {
 
 export type SignInResponse = {
   accessToken: string
-  member?: {
-    memberId?: Id
-    username?: string
-    name?: string
-    role?: string
-    apartmentComplexId?: Id
-    mapId?: Id
-    robotId?: Id
-  }
-  mapId?: Id
-  robotId?: Id
 }
 
 export type ComplexResponse = {

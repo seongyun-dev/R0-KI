@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Button, Field, Input } from '../../components/ui'
+import { robotsApi } from '../../api/services'
 
 export type StepRobotProps = {
   onPrev: () => void
@@ -12,9 +13,13 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
   const [serial, setSerial] = useState('')
   const [name, setName] = useState('')
   const [nameError, setNameError] = useState<string>()
+  const [errorMessage, setErrorMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (isSubmitting) return
+
     const trimmedName = name.trim()
     // 로봇 이름 검증: 1~20자, 앞뒤 공백 제거, 빈 값 불가 (중복은 백엔드에서 최종 검증)
     if (trimmedName.length < 1 || trimmedName.length > 20) {
@@ -22,7 +27,20 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
       return
     }
     setNameError(undefined)
-    onNext({ serial: serial.trim(), name: trimmedName })
+    setErrorMessage('')
+    setIsSubmitting(true)
+
+    try {
+      const serialNumber = serial.trim()
+      await robotsApi.create({ name: trimmedName, serialNumber })
+      onNext({ serial: serialNumber, name: trimmedName })
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : '로봇 등록 중 오류가 발생했습니다.',
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -52,9 +70,15 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
         담당 구역은 맵 파악이 끝난 뒤 자동으로 지정됩니다
       </p>
 
+      {errorMessage && (
+        <p role="alert" className="text-sm text-danger">
+          {errorMessage}
+        </p>
+      )}
+
       <div className="mt-2 flex justify-between">
-        <Button variant="outline" onClick={onPrev}>← 이전</Button>
-        <Button type="submit" variant="dark" withArrow="right">
+        <Button type="button" variant="outline" onClick={onPrev}>← 이전</Button>
+        <Button type="submit" variant="dark" withArrow="right" loading={isSubmitting}>
           다음: 맵 파악하기
         </Button>
       </div>

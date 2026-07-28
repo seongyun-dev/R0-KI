@@ -37,10 +37,7 @@ export default function Login() {
               login(loginId)
             } else {
               const response = await authApi.signIn({ username: loginId, password })
-              login(loginId, response.accessToken, {
-                mapId: response.mapId ?? response.member?.mapId,
-                robotId: response.robotId ?? response.member?.robotId,
-              })
+              login(loginId, response.accessToken)
             }
             navigate(from, { replace: true })
           } catch (reason) {
