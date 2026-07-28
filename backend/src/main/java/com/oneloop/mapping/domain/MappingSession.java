@@ -3,7 +3,17 @@ package com.oneloop.mapping.domain;
 import com.oneloop.apartment.domain.ApartmentComplex;
 import com.oneloop.global.common.BaseEntity;
 import com.oneloop.robot.domain.PatrolRobot;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -20,12 +30,12 @@ public class MappingSession extends BaseEntity {
     @Column(name = "mapping_session_id")
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "apartment_complex_id", nullable = false)
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "apartment_complex_id", nullable = false, unique = true)
     private ApartmentComplex apartmentComplex;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "robot_id", nullable = false)
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "robot_id", nullable = false, unique = true)
     private PatrolRobot robot;
 
     // 백엔드가 발행한 MQTT 명령의 UUID이며 IoT ACK 검증에 사용한다.
@@ -59,5 +69,10 @@ public class MappingSession extends BaseEntity {
         // IoT가 실제 SLAM 시작 상태를 전송한 시점에만 시작 시각을 기록한다.
         status = MappingStatus.MAPPING;
         startedAt = LocalDateTime.now();
+    }
+
+    public void complete() {
+        status = MappingStatus.COMPLETED;
+        finishedAt = LocalDateTime.now();
     }
 }

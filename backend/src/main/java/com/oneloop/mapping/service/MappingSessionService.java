@@ -55,6 +55,11 @@ public class MappingSessionService {
             throw new BusinessException(ErrorCode.MAPPING_SESSION_ALREADY_ACTIVE);
         }
 
+        if (mappingSessionRepository.existsByApartmentComplexIdOrRobotId(
+                apartmentComplexId, robot.getId())) {
+            throw new BusinessException(ErrorCode.MAPPING_SESSION_ALREADY_EXISTS);
+        }
+
         // commandId는 MQTT 명령과 IoT가 돌려주는 ACK가 같은 명령인지 확인하기 위해 저장한다.
         String commandId = UUID.randomUUID().toString();
         MappingSession session =
