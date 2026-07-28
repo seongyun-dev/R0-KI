@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oneloop.mapping.dto.mqtt.MappingCommandAck;
 import com.oneloop.mapping.service.MappingCommandAckService;
-import com.oneloop.robot.repository.RobotRepository;
+import com.oneloop.robot.dto.mqtt.RobotPoseMessage;
+import com.oneloop.robot.dto.mqtt.RobotStatusMessage;
+import com.oneloop.robot.service.RobotTelemetryService;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -26,18 +28,19 @@ class MqttInboundHandler implements MqttCallbackExtended {
     private static final int QOS = 1;
 
     private final IMqttClient client;
-    private final RobotRepository robotRepository;
+    private final RobotTelemetryService robotTelemetryService;
     private final MappingCommandAckService mappingCommandAckService;
     // Spring이 관리하는 ObjectMapper 빈이 없어서, 단순 Map 파싱용으로 직접 생성
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
-    MqttInboundHandler(IMqttClient client, RobotRepository robotRepository,
+    MqttInboundHandler(IMqttClient client, RobotTelemetryService robotTelemetryService,
             MappingCommandAckService mappingCommandAckService) {
         this.client = client;
-        this.robotRepository = robotRepository;
+        this.robotTelemetryService = robotTelemetryService;
         this.mappingCommandAckService = mappingCommandAckService;
     }
 
+    // 최초 연결/재연결 시마다 호출됨 - 구독
     @Override
     public void connectComplete(boolean reconnect, String serverURI) {
         log.info("[MQTT] 브로커 연결 완료 (재연결={}, serverURI={})", reconnect, serverURI);
@@ -51,16 +54,17 @@ class MqttInboundHandler implements MqttCallbackExtended {
         }
     }
 
+    // 연결 끊김 콜백 - automaticReconnect가 재연결 시도
     @Override
     public void connectionLost(Throwable cause) {
         log.warn("[MQTT] 연결 끊김, 자동 재연결 대기", cause);
     }
 
+    // 메시지 수신 진입점 - 공통 파싱 후 토픽/필드 기준으로 각 전용 핸들러에 위임
     @Override
     public void messageArrived(String topic, MqttMessage message) {
         String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
 
-        // 이번 단계는 엔티티 갱신 없이, 역직렬화/robotKey 매칭까지만 확인 (실제 반영은 다음 단계)
         Map<String, Object> parsed;
         try {
             parsed = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
@@ -69,6 +73,7 @@ class MqttInboundHandler implements MqttCallbackExtended {
             return;
         }
 
+        // 라우팅
         // 공통 ACK 토픽에서는 command 값으로 지도 생성 ACK를 구분한다.
         if (topic.endsWith("/command/ack")
                 && "START_MAPPING".equals(String.valueOf(parsed.get("command")))) {
@@ -76,13 +81,35 @@ class MqttInboundHandler implements MqttCallbackExtended {
             return;
         }
 
-        Object robotKey = parsed.get("robotKey");
-        boolean known =
-                robotKey != null
-                        && robotRepository.findBySerialNumber(String.valueOf(robotKey)).isPresent();
-        log.info("[MQTT] topic={}, robotKey={}, known={}, payload={}", topic, robotKey, known, parsed);
+        if (topic.endsWith("/pose")) {
+            handlePose(topic, payload);
+        } else if (topic.endsWith("/status")) {
+            handleStatus(topic, payload);
+        } else {
+            // command/ack 중 지도 생성이 아닌 나머지(PING 등)는 아직 처리 대상이 아님
+            log.info("[MQTT] 처리 대상이 아닌 토픽, 로그만 남김. topic={}, payload={}", topic, parsed);
+        }
     }
 
+    // pose payload를 RobotPoseMessage로 역직렬화해서 좌표 갱신 서비스에 위임
+    private void handlePose(String topic, String payload) {
+        try {
+            robotTelemetryService.updatePose(objectMapper.readValue(payload, RobotPoseMessage.class));
+        } catch (Exception e) {
+            log.warn("[MQTT] pose 처리 실패. topic={}, payload={}", topic, payload, e);
+        }
+    }
+
+    // status payload를 RobotStatusMessage로 역직렬화해서 상태/장애물 갱신 서비스에 위임
+    private void handleStatus(String topic, String payload) {
+        try {
+            robotTelemetryService.updateStatus(objectMapper.readValue(payload, RobotStatusMessage.class));
+        } catch (Exception e) {
+            log.warn("[MQTT] status 처리 실패. topic={}, payload={}", topic, payload, e);
+        }
+    }
+
+    // 지도 생성 명령의 ACK를 파싱해서 매핑 세션 서비스로 위임
     private void handleMappingCommandAck(String topic, String payload) {
         try {
             MappingCommandAck ack = objectMapper.readValue(payload, MappingCommandAck.class);
