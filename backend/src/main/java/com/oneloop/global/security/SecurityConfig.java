@@ -27,7 +27,8 @@ public class SecurityConfig {
         "/api/auth/signin",
         "/v3/api-docs/**",
         "/swagger-ui/**",
-        "/swagger-ui.html"
+        "/swagger-ui.html",
+        "/uploads/**"
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;

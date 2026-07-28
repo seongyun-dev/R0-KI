@@ -1,21 +1,26 @@
 package com.oneloop.event.service;
 
 import com.oneloop.event.domain.DetectedEvent;
+import com.oneloop.event.domain.EventEvidence;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.RiskLevel;
 import com.oneloop.event.dto.request.EventBatchCreateRequest;
 import com.oneloop.event.dto.request.EventBatchItemRequest;
 import com.oneloop.event.dto.request.EventCreateRequest;
+import com.oneloop.event.dto.request.EvidenceUploadRequest;
 import com.oneloop.event.dto.request.VehicleCheckItemRequest;
 import com.oneloop.event.dto.request.VehicleCheckRequest;
 import com.oneloop.event.dto.response.EventBatchCreateResponse;
 import com.oneloop.event.dto.response.EventBatchCreatedItem;
 import com.oneloop.event.dto.response.EventCreateResponse;
+import com.oneloop.event.dto.response.EvidenceUploadResponse;
 import com.oneloop.event.dto.response.VehicleCheckResponse;
 import com.oneloop.event.dto.response.VehicleViolationResponse;
 import com.oneloop.event.repository.DetectedEventRepository;
+import com.oneloop.event.repository.EventEvidenceRepository;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
+import com.oneloop.global.file.FileStorageService;
 import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.CheckpointType;
 import com.oneloop.map.domain.PatrolMap;
@@ -47,11 +52,13 @@ public class EventCreationService {
     private static final Pattern CONFIDENCE_PATTERN = Pattern.compile("confidence=([0-9]*\\.?[0-9]+)");
 
     private final DetectedEventRepository detectedEventRepository;
+    private final EventEvidenceRepository eventEvidenceRepository;
     private final PatrolRepository patrolRepository;
     private final RegisteredVehicleRepository registeredVehicleRepository;
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
+    private final FileStorageService fileStorageService;
 
     /**
      * 로봇이 응급상황을 감지했을 때 호출하는 단건 이벤트 생성.
@@ -174,6 +181,25 @@ public class EventCreationService {
         patrol.increaseDetectedEventCount();
 
         return VehicleViolationResponse.of(vehicle.getTempId(), event.getId());
+    }
+
+    /**
+     * 로봇이 이벤트에 대한 증거자료(사진)를 업로드한다.
+     */
+    public EvidenceUploadResponse uploadEvidence(Long robotId, Long eventId, EvidenceUploadRequest request) {
+        // 호출한 로봇이 그 이벤트의 담당 로봇인지 확인 후 파일을 저장한다.
+        DetectedEvent event =
+                detectedEventRepository
+                        .findByIdAndRobotId(eventId, robotId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.EVENT_NOT_FOUND));
+
+        String fileUrl = fileStorageService.store(request.getFile());
+        LocalDateTime capturedAt =
+                request.getCapturedAt() != null ? request.getCapturedAt() : LocalDateTime.now();
+        EventEvidence evidence = new EventEvidence(event, request.getMediaType(), fileUrl, capturedAt);
+        eventEvidenceRepository.save(evidence);
+
+        return EvidenceUploadResponse.of(evidence.getId());
     }
 
     private String resolveVehicleEventTitle(EventType type) {
