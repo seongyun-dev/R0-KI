@@ -1,5 +1,7 @@
 /* Pretendard (한국어 웹폰트) */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+/* IBM Plex Mono — R0-Ki 리디자인 숫자·시각 전용 (한글 라벨엔 쓰지 않음) */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
 /* 디자인 토큰 (CSS 변수) — Tailwind보다 먼저 */
 @import './tokens.css';

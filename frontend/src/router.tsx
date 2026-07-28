@@ -40,15 +40,25 @@ export const router = createBrowserRouter([
   },
   {
     path: '/app',
-    // 비로그인 접근 시 /login으로
-    element: (
-      <RequireAuth>
-        <AppShell />
-      </RequireAuth>
-    ),
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <Dashboard /> },
+      // 대시보드(R0-Ki 리디자인) — 자체 상단바 레이아웃이라 AppShell 밖 독립 렌더
+      {
+        index: true,
+        element: (
+          <RequireAuth>
+            <Dashboard />
+          </RequireAuth>
+        ),
+      },
+      {
+        // 비로그인 접근 시 /login으로 — 나머지 화면은 기존 셸 유지
+        element: (
+          <RequireAuth>
+            <AppShell />
+          </RequireAuth>
+        ),
+        children: [
       { path: 'patrol', element: <PatrolList /> },
       { path: 'patrol/:id', element: <PatrolDetail /> },
       { path: 'events', element: <EventList /> },
@@ -64,6 +74,8 @@ export const router = createBrowserRouter([
             <Stats />
           </Suspense>
         ),
+      },
+        ],
       },
     ],
   },
