@@ -1,10 +1,10 @@
 import { Suspense, lazy, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/layout/PageHeader'
 import { PlusIcon } from '../components/icons'
 import { Button, Card, EmptyState, QueryErrorState, Skeleton, StatusBadge, useToast } from '../components/ui'
 import { RobotEditDrawer } from '../features/robots/RobotEditDrawer'
-import { useRobot, useUpdateRobot } from '../features/robots/useRobot'
+import { useDeleteRobot, useRobot, useUpdateRobot } from '../features/robots/useRobot'
 import { usePatrols } from '../features/patrol/usePatrols'
 import { cn } from '../lib/cn'
 import type { Robot } from '../types/domain'
@@ -47,11 +47,13 @@ const PART_CORNERS = [
 /** 로봇 관리 상세 (1i) — R-01. 좌(프로필) | 중앙(LIVE DIAGNOSTICS) | 우(리포트·기록) */
 export default function RobotDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const robotId = id ?? 'R-01'
   const { data: loaded, isLoading, error, refetch } = useRobot(robotId)
   const { data: patrols } = usePatrols()
   const toast = useToast()
   const updateRobot = useUpdateRobot()
+  const deleteRobot = useDeleteRobot()
   const [drawerOpen, setDrawerOpen] = useState(false)
   // 수정 드로어 저장 결과(목업 — 서버 연동 시 mutation으로 교체)
   const [patch, setPatch] = useState<Partial<Robot> | null>(null)
@@ -200,6 +202,16 @@ export default function RobotDetail() {
             toast('✓ 저장되었습니다')
           } catch (reason) {
             toast(reason instanceof Error ? reason.message : '로봇 수정에 실패했습니다')
+            throw reason
+          }
+        }}
+        onDelete={async () => {
+          try {
+            await deleteRobot.mutateAsync({ robotId: robot.backendId ?? robot.id })
+            toast('✓ 로봇이 삭제되었습니다')
+            navigate('/app/robots')
+          } catch (reason) {
+            toast(reason instanceof Error ? reason.message : '로봇 삭제에 실패했습니다')
             throw reason
           }
         }}

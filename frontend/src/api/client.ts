@@ -32,6 +32,21 @@ async function readResponse(response: Response) {
   return text || undefined
 }
 
+// 백엔드 공통 응답 래퍼(ApiResponse<T> = { success, code, message, data })를 벗긴다.
+// 래퍼 형태가 아니면(구버전/외부 응답) 원본을 그대로 반환한다.
+function unwrapEnvelope(body: unknown): unknown {
+  if (
+    body &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    'success' in body &&
+    'data' in body
+  ) {
+    return (body as { data: unknown }).data
+  }
+  return body
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isFormData = init.body instanceof FormData
   const headers = new Headers(init.headers)
@@ -54,7 +69,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     throw new ApiError(response.status, message, body)
   }
 
-  return body as T
+  return unwrapEnvelope(body) as T
 }
 
 export async function consumeSse<T>(

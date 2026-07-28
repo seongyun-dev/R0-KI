@@ -79,7 +79,6 @@ export interface Robot {
   name: string;                     // R-01
   registrationNo: string;           // RB-2024-01
   serialNo?: string;                // SN-2026-0001
-  model: string;                    // PATROL-X1
   introducedAt: string;             // 2026/03/12
   zone: string;                     // 담당 구역 (전체 / 101~103동)
   status: StatusLabel;              // 순찰중 등

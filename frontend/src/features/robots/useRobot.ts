@@ -1,18 +1,35 @@
 import { robots } from '../../mocks'
 import { useCallback } from 'react'
-import { robotResponseToDomain } from '../../api/mappers'
+import { robotDetailToDomain, robotListItemToDomain } from '../../api/mappers'
 import { robotsApi } from '../../api/services'
 import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
 import { useApiQuery } from '../../lib/useApiQuery'
-import type { RobotStatus } from '../../types/domain'
 
-/** 로봇 목록. 서버 연동 시 useQuery(['robots'])로 교체. */
+/** 로봇 목록 (1i). 서버 연동 시 useQuery(['robots'])로 교체. */
 export function useRobots() {
   return useApiQuery(
     async () => {
       if (env.useMocks) return robots
-      return (await robotsApi.list()).map(robotResponseToDomain)
+      return (await robotsApi.list()).map(robotListItemToDomain)
+    },
+    [],
+    { delayMs: env.useMocks ? 350 : 0 },
+  )
+}
+
+/** 로봇 현황 통계 (1i KPI) — 전체/순찰중/대기·충전중. */
+export function useRobotStats() {
+  return useApiQuery(
+    async () => {
+      if (env.useMocks) {
+        return {
+          totalCount: robots.length,
+          patrollingCount: robots.filter((r) => r.status === '순찰중').length,
+          idleOrChargingCount: robots.filter((r) => r.status === '대기' || r.status === '충전중').length,
+        }
+      }
+      return robotsApi.stats()
     },
     [],
     { delayMs: env.useMocks ? 350 : 0 },
@@ -25,7 +42,7 @@ export function useRobot(id: string | undefined) {
     async () => {
       if (!id) return undefined
       if (env.useMocks) return robots.find((r) => r.id === id)
-      return robotResponseToDomain(await robotsApi.detail(id))
+      return robotDetailToDomain(await robotsApi.detail(id))
     },
     [id],
     { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },
@@ -34,15 +51,10 @@ export function useRobot(id: string | undefined) {
 
 export function useUpdateRobot() {
   const update = useCallback(
-    async (variables: { robotId: string | number; robotName: string; robotStatus?: RobotStatus }) => {
+    async (variables: { robotId: string | number; robotName: string }) => {
       if (env.useMocks) return undefined
-      return robotResponseToDomain(
-        await robotsApi.update(variables.robotId, {
-          robotName: variables.robotName,
-          // 상태는 시스템이 관리 — 전달된 경우에만 포함
-          ...(variables.robotStatus ? { robotStatus: variables.robotStatus } : {}),
-        }),
-      )
+      // 백엔드 수정 요청은 name만 받는다(상태는 시스템이 관리).
+      return robotsApi.update(variables.robotId, { name: variables.robotName })
     },
     [],
   )
@@ -51,15 +63,22 @@ export function useUpdateRobot() {
 
 export function useCreateRobot() {
   const create = useCallback(
-    async (variables: {
-      robotSerialNumber: string
-      robotName: string
-      model?: string
-    }) => {
+    async (variables: { serialNumber: string; name: string }) => {
       if (env.useMocks) return undefined
-      return robotResponseToDomain(await robotsApi.create(variables))
+      return robotsApi.create({ name: variables.name, serialNumber: variables.serialNumber })
     },
     [],
   )
   return useApiMutation(create)
+}
+
+export function useDeleteRobot() {
+  const remove = useCallback(
+    async (variables: { robotId: string | number }) => {
+      if (env.useMocks) return undefined
+      return robotsApi.delete(variables.robotId)
+    },
+    [],
+  )
+  return useApiMutation(remove)
 }

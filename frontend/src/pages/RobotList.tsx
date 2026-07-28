@@ -5,26 +5,27 @@ import { PlusIcon } from '../components/icons'
 import { Button, Card, DataTable, QueryErrorState, StatusBadge, useToast, type Column } from '../components/ui'
 import { BatteryBar } from '../features/robots/BatteryBar'
 import { RobotEditDrawer } from '../features/robots/RobotEditDrawer'
-import { useRobots, useUpdateRobot } from '../features/robots/useRobot'
+import { useDeleteRobot, useRobots, useRobotStats, useUpdateRobot } from '../features/robots/useRobot'
 import type { Robot } from '../types/domain'
 
 /** 로봇 관리 목록 (1i) — KPI + 로봇 테이블. 상세는 1i-r01(/app/robots/:id) */
 export default function RobotList() {
   const { data: robots, isLoading, error, refetch } = useRobots()
+  const { data: stats } = useRobotStats()
   const toast = useToast()
   const updateRobot = useUpdateRobot()
+  const deleteRobot = useDeleteRobot()
   const [editing, setEditing] = useState<Robot | null>(null)
   // 수정 드로어 저장 결과(목업 — 서버 연동 시 mutation으로 교체)
   const [patches, setPatches] = useState<Record<string, Partial<Robot>>>({})
 
   const rows = (robots ?? []).map((r) => ({ ...r, ...patches[r.id] }))
-  const patrolling = rows.filter((r) => r.status === '순찰중').length
-  const idleCharging = rows.filter((r) => r.status === '대기' || r.status === '충전중').length
 
+  // KPI는 단지 전체 현황 통계(GET /api/robots/stats) 기준. 목록은 페이지네이션되므로 rows로 계산하지 않는다.
   const kpis = [
-    { label: '전체 로봇', value: rows.length, cls: '' },
-    { label: '순찰중', value: patrolling, cls: 'text-success' },
-    { label: '대기 · 충전중', value: idleCharging, cls: 'text-muted' },
+    { label: '전체 로봇', value: stats?.totalCount ?? rows.length, cls: '' },
+    { label: '순찰중', value: stats?.patrollingCount ?? 0, cls: 'text-success' },
+    { label: '대기 · 충전중', value: stats?.idleOrChargingCount ?? 0, cls: 'text-muted' },
   ]
 
   const columns: Column<Robot>[] = [
@@ -117,6 +118,16 @@ export default function RobotList() {
               toast('✓ 저장되었습니다')
             } catch (reason) {
               toast(reason instanceof Error ? reason.message : '로봇 수정에 실패했습니다')
+              throw reason
+            }
+          }}
+          onDelete={async () => {
+            try {
+              await deleteRobot.mutateAsync({ robotId: editing.backendId ?? editing.id })
+              toast('✓ 로봇이 삭제되었습니다')
+              refetch()
+            } catch (reason) {
+              toast(reason instanceof Error ? reason.message : '로봇 삭제에 실패했습니다')
               throw reason
             }
           }}

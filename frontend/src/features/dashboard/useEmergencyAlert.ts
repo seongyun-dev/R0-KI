@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { events } from '../../mocks'
 import { eventsApi } from '../../api/services'
-import { eventResponseToDomain } from '../../api/mappers'
+import { eventListItemToDomain } from '../../api/mappers'
 import { env } from '../../config/env'
 import type { PatrolEvent } from '../../types/domain'
 
@@ -41,7 +41,7 @@ export function useEmergencyAlert(onEmergency: (event: PatrolEvent) => void) {
     // 실서버 SSE — 엔드포인트/페이로드 스키마는 백엔드 확정 필요
     const controller = new AbortController()
     eventsApi
-      .subscribeEmergency((payload) => onRef.current(eventResponseToDomain(payload)), controller.signal)
+      .subscribeEmergency((payload) => onRef.current(eventListItemToDomain(payload)), controller.signal)
       .catch(() => {
         // 초기 화면은 유지. 재연결 정책은 백엔드 SSE 정책 확정 후 조정.
       })

@@ -1,11 +1,23 @@
 import { events } from '../../mocks'
 import { useCallback } from 'react'
 import { eventsApi } from '../../api/services'
-import { eventResponseToDomain } from '../../api/mappers'
+import { eventDetailToDomain, eventListItemToDomain } from '../../api/mappers'
 import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
 import { useApiQuery } from '../../lib/useApiQuery'
 import type { ProcessingStatus } from '../../types/domain'
+
+// UI 필터값 → 백엔드 enum. 매핑 없는 값(all 등)은 undefined → 쿼리에서 생략(전체).
+// 유형·위험도 필터는 백엔드 목록 API가 아직 미지원 → 서버로 보내지 않고 보류.
+const STATUS_PARAM: Record<string, string | undefined> = {
+  탐지: 'DETECTED',
+  처리중: 'PROCESSING',
+  처리완료: 'COMPLETED',
+}
+const PERIOD_PARAM: Record<string, string | undefined> = {
+  today: 'TODAY',
+  '7d': 'LAST_7_DAYS',
+}
 
 /** 이벤트 목록 (1f). 서버 연동 시 useQuery(['events'])로 교체. */
 export function useEvents(
@@ -22,12 +34,11 @@ export function useEvents(
       }
       return (
         await eventsApi.list({
-          eventType: params.type,
-          processingStatus: params.status,
-          riskLevel: params.risk,
-          period: params.period,
+          status: params.status ? STATUS_PARAM[params.status] : undefined,
+          period: params.period ? PERIOD_PARAM[params.period] : undefined,
+          // 유형·위험도 필터는 백엔드 미지원 → 보류 (확장 후 연결)
         })
-      ).map(eventResponseToDomain)
+      ).map(eventListItemToDomain)
     },
     [params.type, params.status, params.risk, params.period],
     { delayMs: env.useMocks ? 350 : 0 },
@@ -40,7 +51,7 @@ export function useEvent(id: string | undefined) {
     async () => {
       if (!id) return undefined
       if (env.useMocks) return events.find((e) => e.id === id)
-      return eventResponseToDomain(await eventsApi.detail(id))
+      return eventDetailToDomain(await eventsApi.detail(id))
     },
     [id],
     { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },
