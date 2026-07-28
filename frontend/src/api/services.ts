@@ -6,8 +6,8 @@ import type {
   EventListResponse,
   ListResponse,
   MapMonitoringResponse,
-  PatrolPathPointResponse,
-  PatrolResponse,
+  PatrolDetailResponse,
+  PatrolListResponse,
   RobotDeleteResponse,
   RobotDetailResponse,
   RobotListResponse,
@@ -74,14 +74,12 @@ export const eventsApi = {
 }
 
 export const patrolsApi = {
-  list: (params: { robotId?: string | number; period?: string; status?: string } = {}) =>
-    apiRequest<ListResponse<PatrolResponse>>(withQuery('/api/patrols', params)).then(unwrapList),
+  // 백엔드 GET /api/patrols 쿼리: period / status (+ page,size,sort). robotId 필터는 미지원.
+  list: (params: { period?: string; status?: string } = {}) =>
+    apiRequest<ListResponse<PatrolListResponse>>(withQuery('/api/patrols', params)).then(unwrapList),
+  // 상세 응답에 경로·타임라인이 포함됨(별도 /path 엔드포인트 없음)
   detail: (patrolId: string | number) =>
-    apiRequest<PatrolResponse>(`/api/patrols/${encodeURIComponent(patrolId)}`),
-  path: (patrolId: string | number) =>
-    apiRequest<ListResponse<PatrolPathPointResponse>>(
-      `/api/patrols/${encodeURIComponent(patrolId)}/path`,
-    ).then(unwrapList),
+    apiRequest<PatrolDetailResponse>(`/api/patrols/${encodeURIComponent(patrolId)}`),
 }
 
 export const robotsApi = {

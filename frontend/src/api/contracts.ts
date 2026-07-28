@@ -84,41 +84,63 @@ export type EventDetailResponse = {
   evidence?: EventEvidenceResponse | null
 }
 
-export type PatrolReportResponse = {
-  reportId: Id
-  reportTitle: string
-  patrolSummary?: string | null
-  reportContent?: string | null
-  totalEventCount: number
-  emergencyEventCount: number
-  anomalyComment?: string | null
-  createdAt: string
+// 백엔드 enum 코드 (back/dev 기준)
+export type PatrolStatusCode = 'IN_PROGRESS' | 'COMPLETED' | 'STOPPED' | 'FAILED'
+export type AiSummaryStatusCode = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
+
+export type PatrolRouteCheckpointResponse = {
+  checkpointName: string
+  sequence: number
 }
 
-export type PatrolResponse = {
+// GET /api/patrols (목록)
+export type PatrolListResponse = {
   patrolId: Id
-  robotId: Id
-  patrolStatus: string
-  patrolStartedAt?: string | null
-  patrolEndedAt?: string | null
-  totalDuration?: number | null
+  robotName: string
+  startedAt: string
+  endedAt?: string | null
+  patrolStatus: PatrolStatusCode | string
   detectedEventCount: number
-  batteryFrom?: number | string | null
-  batteryTo?: number | string | null
-  report?: PatrolReportResponse | null
+  route?: PatrolRouteCheckpointResponse[]
 }
 
-export type PatrolPathPointResponse = {
-  positionId?: Id
-  checkpointId?: Id | null
-  checkpointLabel?: string | null
-  eventId?: Id | null
-  eventType?: string | null
-  processingStatus?: string | null
-  note?: string | null
+export type PatrolBatteryResponse = {
+  startLevel?: number | string | null
+  endLevel?: number | string | null
+}
+
+export type PatrolRoutePointResponse = {
   xCoordinate: number | string
   yCoordinate: number | string
   recordedAt: string
+}
+
+export type PatrolTimelineResponse = {
+  recordedAt: string
+  checkpointName?: string | null
+  eventId?: Id | null
+  eventType?: EventTypeCode | string
+  processingStatus?: ProcessingStatusCode | string
+}
+
+export type PatrolAiSummaryResponse = {
+  generationStatus: AiSummaryStatusCode | string
+  summaryContent?: string | null
+}
+
+// GET /api/patrols/{id} (상세) — 경로/배터리/좌표/타임라인/AI요약 포함, patrolId·robotId 없음
+export type PatrolDetailResponse = {
+  robotName: string
+  patrolStatus: PatrolStatusCode | string
+  startedAt: string
+  endedAt?: string | null
+  totalDurationMinutes?: number | null
+  mapUrl?: string | null
+  route?: PatrolRouteCheckpointResponse[]
+  battery?: PatrolBatteryResponse
+  routePoints?: PatrolRoutePointResponse[]
+  timeline?: PatrolTimelineResponse[]
+  aiSummary?: PatrolAiSummaryResponse | null
 }
 
 // 백엔드 enum 코드 (back/dev 기준)

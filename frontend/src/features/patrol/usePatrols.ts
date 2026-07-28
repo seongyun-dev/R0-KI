@@ -1,8 +1,14 @@
 import { patrols } from '../../mocks'
-import { patrolResponseToDomain } from '../../api/mappers'
+import { patrolDetailToDomain, patrolListItemToDomain } from '../../api/mappers'
 import { patrolsApi } from '../../api/services'
 import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
+
+// UI 기간 필터값 → 백엔드 enum. 매핑 없는 값(all·30d 등)은 undefined → 쿼리에서 생략(전체).
+const PERIOD_PARAM: Record<string, string | undefined> = {
+  today: 'TODAY',
+  '7d': 'LAST_7_DAYS',
+}
 
 /** 순찰 목록 (1d). 서버 연동 시 useQuery(['patrols'])로 교체. */
 export function usePatrols(
@@ -19,13 +25,12 @@ export function usePatrols(
         if (params.period === 'today') list = list.filter((patrol) => patrol.date === '07/15')
         return list
       }
+      // 백엔드 목록은 단지 전체 순찰을 반환(robotId 필터 미지원). 완료 필터는 화면에서 처리.
       return (
         await patrolsApi.list({
-          robotId: params.robotId,
-          period: params.period,
-          status: params.status,
+          period: params.period ? PERIOD_PARAM[params.period] : undefined,
         })
-      ).map((patrol) => patrolResponseToDomain(patrol))
+      ).map(patrolListItemToDomain)
     },
     [params.robotId, params.period, params.status],
     { delayMs: env.useMocks ? 350 : 0 },
@@ -38,11 +43,8 @@ export function usePatrol(id: string | undefined) {
     async () => {
       if (!id) return undefined
       if (env.useMocks) return patrols.find((p) => p.id === id)
-      const [patrol, path] = await Promise.all([
-        patrolsApi.detail(id),
-        patrolsApi.path(id).catch(() => []),
-      ])
-      return patrolResponseToDomain(patrol, path)
+      // 상세 응답에 patrolId가 없어 요청 id를 그대로 도메인 id로 사용
+      return patrolDetailToDomain(await patrolsApi.detail(id), id)
     },
     [id],
     { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },

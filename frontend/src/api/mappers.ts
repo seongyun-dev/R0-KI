@@ -4,8 +4,10 @@ import type {
   EventListResponse,
   MapInfoResponse,
   MapMonitoringResponse,
-  PatrolPathPointResponse,
-  PatrolResponse,
+  PatrolDetailResponse,
+  PatrolListResponse,
+  PatrolRouteCheckpointResponse,
+  PatrolTimelineResponse,
   RobotDetailResponse,
   RobotListResponse,
   RobotLocationEvent,
@@ -148,51 +150,86 @@ export function eventDetailToDomain(value: EventDetailResponse): PatrolEvent {
   }
 }
 
-function patrolPoint(value: PatrolPathPointResponse): PatrolPoint {
+function patrolStatus(value: string): StatusLabel {
+  const map: Record<string, StatusLabel> = {
+    IN_PROGRESS: '진행중',
+    COMPLETED: '완료',
+    STOPPED: '중단',
+    FAILED: '실패',
+  }
+  return map[value] ?? (value as StatusLabel)
+}
+
+/** route(체크포인트 방문) → 순서대로 구역 이름 배열. 연속 중복은 제거. */
+function routeZoneNames(route: PatrolRouteCheckpointResponse[] = []): string[] {
+  return [...route]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((checkpoint) => checkpoint.checkpointName)
+    .filter((name): name is string => Boolean(name))
+    .filter((name, index, names) => index === 0 || name !== names[index - 1])
+}
+
+function timelinePoint(value: PatrolTimelineResponse): PatrolPoint {
   const { time } = dateParts(value.recordedAt)
   return {
     time,
     type: value.eventType ? eventType(value.eventType) : '정기 점검',
-    location: value.checkpointLabel ?? `좌표 ${toNumber(value.xCoordinate).toFixed(1)}, ${toNumber(value.yCoordinate).toFixed(1)}`,
+    location: value.checkpointName ?? '위치 미확인',
     status: (value.processingStatus ? processingStatus(value.processingStatus) : '이상무') as StatusLabel,
-    note: value.note ?? undefined,
     eventId: value.eventId == null ? undefined : String(value.eventId),
   }
 }
 
-export function patrolResponseToDomain(
-  value: PatrolResponse,
-  path: PatrolPathPointResponse[] = [],
-): Patrol {
-  const started = dateParts(value.patrolStartedAt)
-  const ended = dateParts(value.patrolEndedAt)
-  const routeZones = path
-    .map((point) => point.checkpointLabel)
-    .filter((label): label is string => Boolean(label))
-    .filter((label, index, values) => index === 0 || label !== values[index - 1])
-
+/** 목록 항목(PatrolListResponse) → 도메인 (1d) */
+export function patrolListItemToDomain(value: PatrolListResponse): Patrol {
+  const started = dateParts(value.startedAt)
+  const ended = dateParts(value.endedAt)
+  const zones = routeZoneNames(value.route)
   return {
     id: String(value.patrolId),
     backendId: value.patrolId,
-    robotId: String(value.robotId),
+    robotId: value.robotName, // 백엔드 목록은 로봇 이름만 제공(id 아님) — 표시용
+    robotName: value.robotName,
     date: started.date,
     start: started.time,
-    end: value.patrolEndedAt ? ended.time : null,
-    routeZones: routeZones.length > 0 ? routeZones : ['경로 정보 없음'],
-    routeSummary: routeZones.length > 0 ? routeZones.join('→') : undefined,
+    end: value.endedAt ? ended.time : null,
+    routeZones: zones.length > 0 ? zones : ['경로 정보 없음'],
+    routeSummary: zones.length > 0 ? zones.join('→') : undefined,
     eventCount: value.detectedEventCount,
-    status: value.patrolStatus as StatusLabel,
-    batteryFrom: value.batteryFrom == null ? undefined : toNumber(value.batteryFrom),
-    batteryTo: value.batteryTo == null ? undefined : toNumber(value.batteryTo),
-    report: value.report
+    status: patrolStatus(value.patrolStatus),
+  }
+}
+
+/** 상세(PatrolDetailResponse) → 도메인 (1e). 응답에 patrolId가 없어 id는 인자로 받는다. */
+export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): Patrol {
+  const started = dateParts(value.startedAt)
+  const ended = dateParts(value.endedAt)
+  const zones = routeZoneNames(value.route)
+  const timeline = value.timeline ?? []
+  const summaryContent = value.aiSummary?.summaryContent
+  return {
+    id,
+    backendId: id,
+    robotId: value.robotName, // 상세엔 robotId 없음 — 이름을 표시용으로
+    robotName: value.robotName,
+    date: started.date,
+    start: started.time,
+    end: value.endedAt ? ended.time : null,
+    routeZones: zones.length > 0 ? zones : ['경로 정보 없음'],
+    routeSummary: zones.length > 0 ? zones.join('→') : undefined,
+    eventCount: timeline.filter((point) => point.eventId != null).length,
+    status: patrolStatus(value.patrolStatus),
+    batteryFrom: value.battery?.startLevel == null ? undefined : toNumber(value.battery.startLevel),
+    batteryTo: value.battery?.endLevel == null ? undefined : toNumber(value.battery.endLevel),
+    // AI 요약이 실제 생성(내용 존재)된 경우에만 보고서 노출
+    report: summaryContent
       ? {
-          reportNo: String(value.report.reportId),
-          createdAt: value.report.createdAt,
-          aiSummary: value.report.patrolSummary ?? value.report.reportContent ?? '',
-          anomalyComment: value.report.anomalyComment ?? undefined,
+          reportNo: id,
+          createdAt: value.endedAt ?? value.startedAt,
+          aiSummary: summaryContent,
         }
       : undefined,
-    points: path.length > 0 ? path.map(patrolPoint) : undefined,
+    points: timeline.length > 0 ? timeline.map(timelinePoint) : undefined,
   }
 }
 
