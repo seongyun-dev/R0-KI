@@ -78,15 +78,20 @@
   color-scheme:dark;
 }
 
-/* ── 루트 ────────────────────────────────────────────────── */
+/* ── 루트 ──────────────────────────────────────────────────
+   관제 대시보드는 한 화면에 고정된다 — 페이지 스크롤 없음(overflow:hidden),
+   외곽 여백 없음(패딩 0). 여백을 주면 페이지 배경(--page)이 드러나
+   유리 무대 둘레에 파란 테두리처럼 보인다. */
 .r0ki{
-  font-family:var(--sans);background:var(--page);color:var(--text-1);min-height:100vh;
-  padding:var(--s8) var(--s6) var(--s16);-webkit-font-smoothing:antialiased;
+  font-family:var(--sans);background:var(--page);color:var(--text-1);
+  height:100vh;height:100dvh;overflow:hidden;
+  -webkit-font-smoothing:antialiased;
   transition:background var(--d-slow) var(--e-glass),color var(--d-slow) var(--e-glass);
 }
 .r0ki *,.r0ki *::before,.r0ki *::after{box-sizing:border-box;margin:0;padding:0}
 .r0ki .mono,.r0ki .num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
-.r0ki .wrap{max-width:var(--shell-max);margin:0 auto}
+/* 전체 폭 사용 — 좌우에 페이지 배경이 남지 않도록 */
+.r0ki .wrap{width:100%;height:100%;margin:0 auto}
 
 /* ══ 유리 엔진 — 유리는 채움이 아니라 모서리로 읽힌다 (하단 pool 이 핵심) ══ */
 .r0ki .glass{position:relative;isolation:isolate}
@@ -141,8 +146,9 @@
 .r0ki :focus-visible{outline:none;box-shadow:0 0 0 2px var(--focus-in),0 0 0 4px var(--accent)}
 
 /* ══ 씬 배경 — 유리 뒤. 어두운 요소 금지(얼룩으로 읽힘) ══ */
-.r0ki .stage{position:relative;border-radius:var(--r-panel);overflow:hidden;isolation:isolate;padding:var(--s5);
-  box-shadow:0 40px 90px rgba(20,56,104,.22)}
+/* 무대 = 화면 전체. 라운드·바깥 그림자 없음(테두리로 읽히므로) */
+.r0ki .stage{position:relative;border-radius:0;overflow:hidden;isolation:isolate;
+  height:100%;display:flex;flex-direction:column;padding:var(--s4)}
 .r0ki .scene{position:absolute;inset:0;z-index:0}
 .r0ki[data-theme="crystal"] .scene{
   background:
@@ -209,9 +215,11 @@
 @keyframes r0ki-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}
 .r0ki .live{animation:r0ki-pulse 2.4s var(--e-glass) infinite}
 
-/* ══ HMI — 지도 1fr + 우측 424px, 높이 950px ══ */
-.r0ki .hmi{display:grid;grid-template-columns:1fr var(--side-col);gap:var(--s2);align-items:stretch;height:950px}
-@media(max-width:1240px){.r0ki .hmi{grid-template-columns:1fr;height:auto}}
+/* ══ HMI — 지도 1fr + 우측 424px.
+   높이는 고정값이 아니라 무대의 남은 공간 전부(=한 화면에 딱 맞음) ══ */
+.r0ki .hmi{display:grid;grid-template-columns:1fr var(--side-col);gap:var(--s2);align-items:stretch;
+  flex:1;min-height:0}
+@media(max-width:1240px){.r0ki .hmi{grid-template-columns:1fr;overflow-y:auto}}
 .r0ki .zone{padding:var(--s5);display:flex;flex-direction:column}
 .r0ki .zh{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s4)}
 .r0ki .zl{font-family:var(--sans);font-size:13px;font-weight:700;letter-spacing:-.01em;color:var(--text-2)}
