@@ -26,7 +26,7 @@ export type ZoneType = '주차장' | '분리수거장' | '위험구역' | '출�
 export interface Complex {          // 아파트단지
   id: string;
   name: string;                     // 예: 가온아파트
-  zipcode: string;
+  zipcode?: string;
   roadAddress: string;
 }
 

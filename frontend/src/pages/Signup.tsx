@@ -67,7 +67,7 @@ export default function Signup() {
           phoneNumber: phone,
           apartment: {
             name: complex.name,
-            postalCode: complex.zipcode,
+            postalCode: complex.zipcode ?? '',
             address: complex.roadAddress,
           }
           })
