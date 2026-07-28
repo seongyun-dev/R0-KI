@@ -239,6 +239,66 @@ export type RobotDeleteResponse = {
   deletedAt: string
 }
 
+export type MappingStatusCode =
+  | 'REQUESTED'
+  | 'MAPPING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED'
+
+export type MappingStartResponse = {
+  mappingSessionId: Id
+  robotId: Id
+  mappingStatus: MappingStatusCode
+  createdAt: string
+}
+
+export type MappingStatusEventResponse = {
+  mappingSessionId: Id
+  status: MappingStatusCode
+  mapId?: Id | null
+}
+
+export type MapDetailResponse = {
+  mapId: Id
+  mapName: string
+  mapUrl: string
+  resolution: number | string
+  originX: number | string
+  originY: number | string
+  originYaw: number | string
+  width: number
+  height: number
+  mapVersion: number
+}
+
+export type ZoneTypeCode =
+  | 'START'
+  | 'PARKING'
+  | 'RECYCLING_AREA'
+  | 'DANGER_ZONE'
+  | 'DESTINATION'
+
+export type ZoneCreateRequest = {
+  name: string
+  type: ZoneTypeCode
+  startX: number
+  startY: number
+  endX: number
+  endY: number
+}
+
+export type ZoneCreateResponse = {
+  zoneId: Id
+  name: string
+  type: ZoneTypeCode
+  minX: number | string
+  minY: number | string
+  maxX: number | string
+  maxY: number | string
+}
+
+/** @deprecated Legacy dashboard mapper shape; no backend monitoring endpoint uses this contract. */
 export type MapInfoResponse = {
   mapId: Id
   mapUrl: string
@@ -249,6 +309,7 @@ export type MapInfoResponse = {
   height?: number | null
 }
 
+/** @deprecated Legacy dashboard mapper shape. */
 export type ZoneResponse = {
   checkpointId: Id
   checkpointType: string
@@ -259,6 +320,7 @@ export type ZoneResponse = {
   maxY: number | string
 }
 
+/** @deprecated Kept only until the location mapper is migrated to MapDetailResponse. */
 export type MapRobotResponse = {
   robotId: Id
   robotName: string
@@ -268,6 +330,7 @@ export type MapRobotResponse = {
   updatedAt: string
 }
 
+/** @deprecated No backend endpoint returns this combined response. */
 export type MapMonitoringResponse = {
   map: MapInfoResponse
   zones: ZoneResponse[]
