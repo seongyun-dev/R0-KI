@@ -14,7 +14,6 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
-  const [nickname, setNickname] = useState('')
   const [phone, setPhone] = useState('')
   const [zipcode, setZipcode] = useState('')
   const [complexName, setComplexName] = useState('')
@@ -76,9 +75,7 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
           <Field label="이름" htmlFor="ob-name" required>
             <Input id="ob-name" type="text" value={name} onChange={(e)=>setName(e.target.value)} placeholder="이름 입력" required />
           </Field>
-          <Field label="닉네임" htmlFor="ob-nick" required>
-            <Input id="ob-nick" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="닉네임 입력" required />
-          </Field>
+
           <Field label="전화번호" htmlFor="ob-phone" required className="sm:col-span-2">
             <Input
               id="ob-phone"
