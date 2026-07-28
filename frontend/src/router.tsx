@@ -42,12 +42,28 @@ export const router = createBrowserRouter([
     path: '/app',
     errorElement: <RouteError />,
     children: [
-      // 대시보드(R0-Ki 리디자인) — 자체 상단바 레이아웃이라 AppShell 밖 독립 렌더
+      // R0-Ki 리디자인 화면 — 자체 상단바 레이아웃(R0KiShell)이라 AppShell 밖 독립 렌더
       {
         index: true,
         element: (
           <RequireAuth>
             <Dashboard />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'patrol',
+        element: (
+          <RequireAuth>
+            <PatrolList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'patrol/:id',
+        element: (
+          <RequireAuth>
+            <PatrolDetail />
           </RequireAuth>
         ),
       },
@@ -59,8 +75,6 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-      { path: 'patrol', element: <PatrolList /> },
-      { path: 'patrol/:id', element: <PatrolDetail /> },
       { path: 'events', element: <EventList /> },
       { path: 'events/:id', element: <EventDetail /> },
       // 로봇관리 (1i 목록 → 1i-r01 상세)
