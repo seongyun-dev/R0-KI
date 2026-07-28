@@ -6,7 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -37,9 +37,9 @@ public class EventBatchItemRequest {
             nullable = true)
     private String eventDetails;
 
-    @Schema(description = "탐지 시각", example = "2026-07-23T14:12:00")
+    @Schema(description = "탐지 시각", example = "2026-07-23T14:12:00+09:00")
     @NotNull(message = "occurredAt은 필수입니다.")
-    private LocalDateTime occurredAt;
+    private OffsetDateTime occurredAt;
 
     @Schema(description = "발생 위치 x좌표", example = "3.200")
     @NotNull(message = "x는 필수입니다.")

@@ -78,7 +78,7 @@ public class EventCreationService {
                         request.getEventTitle(),
                         request.getEventDetails(),
                         parseConfidence(request.getEventDetails()),
-                        request.getOccurredAt(),
+                        request.getOccurredAt().toLocalDateTime(),
                         request.getX(),
                         request.getY(),
                         request.getRiskLevel(),
@@ -117,7 +117,7 @@ public class EventCreationService {
                         item.getEventTitle(),
                         item.getEventDetails(),
                         parseConfidence(item.getEventDetails()),
-                        item.getOccurredAt(),
+                        item.getOccurredAt().toLocalDateTime(),
                         item.getX(),
                         item.getY(),
                         item.getRiskLevel(),
@@ -173,7 +173,7 @@ public class EventCreationService {
                         resolveVehicleEventTitle(violationType),
                         null,
                         null,
-                        vehicle.getOccurredAt(),
+                        vehicle.getOccurredAt().toLocalDateTime(),
                         vehicle.getX(),
                         vehicle.getY(),
                         RiskLevel.NORMAL,
@@ -195,7 +195,9 @@ public class EventCreationService {
 
         String fileUrl = fileStorageService.store(request.getFile());
         LocalDateTime capturedAt =
-                request.getCapturedAt() != null ? request.getCapturedAt() : LocalDateTime.now();
+                request.getCapturedAt() != null
+                        ? request.getCapturedAt().toLocalDateTime()
+                        : LocalDateTime.now();
         EventEvidence evidence = new EventEvidence(event, request.getMediaType(), fileUrl, capturedAt);
         eventEvidenceRepository.save(evidence);
 
