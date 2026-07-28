@@ -18,6 +18,7 @@ public class MappingStatusChangedEventListener {
     public void handle(MappingStatusChangedEvent event) {
         mappingSseService.broadcast(
                 event.mappingSessionId(),
-                MappingStatusEventResponse.of(event.mappingSessionId(), event.status()));
+                MappingStatusEventResponse.of(
+                        event.mappingSessionId(), event.status(), event.mapId()));
     }
 }

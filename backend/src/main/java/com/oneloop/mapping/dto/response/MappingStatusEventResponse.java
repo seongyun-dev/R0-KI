@@ -17,14 +17,27 @@ public class MappingStatusEventResponse {
     @Schema(description = "지도 생성 상태", example = "MAPPING")
     private MappingStatus status;
 
+    @Schema(description = "완료된 지도 ID. COMPLETED 상태에서만 전달", example = "15")
+    private Long mapId;
+
     public static MappingStatusEventResponse from(MappingSession session) {
         return of(session.getId(), session.getStatus());
     }
 
+    public static MappingStatusEventResponse from(MappingSession session, Long mapId) {
+        return of(session.getId(), session.getStatus(), mapId);
+    }
+
     public static MappingStatusEventResponse of(Long mappingSessionId, MappingStatus status) {
+        return of(mappingSessionId, status, null);
+    }
+
+    public static MappingStatusEventResponse of(
+            Long mappingSessionId, MappingStatus status, Long mapId) {
         return MappingStatusEventResponse.builder()
                 .mappingSessionId(mappingSessionId)
                 .status(status)
+                .mapId(mapId)
                 .build();
     }
 }

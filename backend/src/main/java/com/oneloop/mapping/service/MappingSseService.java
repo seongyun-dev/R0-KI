@@ -2,7 +2,9 @@ package com.oneloop.mapping.service;
 
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
+import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.mapping.domain.MappingSession;
+import com.oneloop.mapping.domain.MappingStatus;
 import com.oneloop.mapping.dto.response.MappingStatusEventResponse;
 import com.oneloop.mapping.repository.MappingSessionRepository;
 import java.io.IOException;
@@ -24,6 +26,7 @@ public class MappingSseService {
     private static final String MAPPING_STATUS_EVENT = "mapping-status";
 
     private final MappingSessionRepository mappingSessionRepository;
+    private final PatrolMapRepository patrolMapRepository;
     private final ConcurrentHashMap<Long, Set<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     public SseEmitter subscribe(Long apartmentComplexId, Long mappingSessionId) {
@@ -44,7 +47,15 @@ public class MappingSseService {
         emitter.onError(exception -> remove(mappingSessionId, emitter));
 
         // ACK가 SSE 연결보다 먼저 도착한 경우에도 프론트가 최신 상태를 바로 알 수 있게 한다.
-        send(mappingSessionId, emitter, MappingStatusEventResponse.from(session));
+        Long mapId =
+                patrolMapRepository
+                        .findByApartmentComplexId(session.getApartmentComplex().getId())
+                        .map(patrolMap -> patrolMap.getId())
+                        .orElse(null);
+        send(mappingSessionId, emitter, MappingStatusEventResponse.from(session, mapId));
+        if (isTerminal(session.getStatus())) {
+            complete(mappingSessionId, emitter);
+        }
         return emitter;
     }
 
@@ -54,7 +65,12 @@ public class MappingSseService {
             return;
         }
 
-        sessionEmitters.forEach(emitter -> send(mappingSessionId, emitter, response));
+        Set<SseEmitter> snapshot = Set.copyOf(sessionEmitters);
+        snapshot.forEach(emitter -> send(mappingSessionId, emitter, response));
+
+        if (isTerminal(response.getStatus())) {
+            completeAll(mappingSessionId);
+        }
     }
 
     private void send(
@@ -86,5 +102,23 @@ public class MappingSseService {
         if (sessionEmitters.isEmpty()) {
             emitters.remove(mappingSessionId, sessionEmitters);
         }
+    }
+
+    private void complete(Long mappingSessionId, SseEmitter emitter) {
+        remove(mappingSessionId, emitter);
+        emitter.complete();
+    }
+
+    private void completeAll(Long mappingSessionId) {
+        Set<SseEmitter> sessionEmitters = emitters.remove(mappingSessionId);
+        if (sessionEmitters != null) {
+            sessionEmitters.forEach(SseEmitter::complete);
+        }
+    }
+
+    private boolean isTerminal(MappingStatus status) {
+        return status == MappingStatus.COMPLETED
+                || status == MappingStatus.FAILED
+                || status == MappingStatus.CANCELLED;
     }
 }
