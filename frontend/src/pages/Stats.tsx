@@ -21,7 +21,8 @@ const PERIOD_OPTIONS = [
   { value: 'week', label: '이번 주' },
   { value: 'quarter', label: '이번 분기' },
 ]
-// 구역 드롭다운 UI는 유지. 1차 연동에서는 API 필터로 보내지 않음 (checkpoint 타입 필터 보류)
+// 구역 드롭다운은 화면 값을 zoneId(checkpoint_id) 목록으로 변환해 API 필터에 반영한다.
+// (현재는 zoneName 키워드 기반 매핑: parking=주차, recycle=분리수거, danger=위험)
 const ZONE_OPTIONS = [
   { value: 'parking', label: '구역: 주차장' },
   { value: 'recycle', label: '구역: 분리수거장' },
