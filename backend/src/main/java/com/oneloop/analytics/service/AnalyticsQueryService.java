@@ -1,6 +1,7 @@
 package com.oneloop.analytics.service;
 
 import com.oneloop.analytics.dto.request.AnalyticsBucket;
+import com.oneloop.analytics.dto.response.ByTypeResponse;
 import com.oneloop.analytics.dto.response.OverviewResponse;
 import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.repository.AnalyticsRepository;
@@ -254,6 +255,116 @@ public class AnalyticsQueryService {
         }
 
         return TrendResponse.builder().bucket(bucket).series(series).build();
+    }
+
+    /**
+     * [이벤트 유형별 통계]
+     * 조회 기간 동안 유형별 건수·비율·이전 동기간 대비 증감을 계산한다.
+     *
+     * <p>프론트가 이 API로 얻는 것:
+     * - 유형별 막대/파이 차트 데이터
+     * - 각 유형이 전체에서 차지하는 비율
+     * - 이전 같은 길이의 기간보다 늘었는지/줄었는지
+     *
+     * <p>overview / trend와 다른 점:
+     * - overview: 최다 유형 1개 + 요약 숫자
+     * - trend: 시간축으로 쪼갠 건수
+     * - by-type: 유형 축으로 전체를 나눠 보여줌
+     *
+     * <p>정렬: 건수 많은 유형이 위로 오도록 내림차순.
+     * 차트가 "큰 문제부터" 보이게 하기 위함이다.
+     *
+     * @param apartmentComplexId 로그인 관리자 소속 단지 ID
+     * @param from 조회 시작 시각
+     * @param to 조회 종료 시각
+     * @param compare true면 이전 동기간 대비 증감 계산
+     * @param zoneIds 구역 필터 (없으면 전체)
+     * @param robotIds 로봇 필터 (없으면 전체)
+     * @param statuses 처리상태 필터 (없으면 전체)
+     * @return ByTypeResponse 유형별 통계
+     */
+    public ByTypeResponse getByType(
+            Long apartmentComplexId,
+            LocalDateTime from,
+            LocalDateTime to,
+            boolean compare,
+            List<Long> zoneIds,
+            List<Long> robotIds,
+            List<ProcessingStatus> statuses) {
+        validateRange(from, to);
+        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
+
+        // 1) 현재 기간 이벤트 (유형 필터는 넣지 않음 — 유형별 전체를 보는 API이기 때문)
+        List<DetectedEvent> currentEvents =
+                filterByZone(
+                        findEvents(
+                                apartmentComplexId, from, to, null, robotIds, statuses),
+                        checkpoints,
+                        zoneIds);
+        Map<EventType, Long> currentTypeCounts = countByType(currentEvents);
+        long totalCount = currentEvents.size();
+
+        // 2) 이전 동기간 유형별 건수 (compare=false면 빈 Map → previous=0으로 계산)
+        Map<EventType, Long> previousTypeCounts = Map.of();
+        if (compare) {
+            DateRange previous = previousRange(from, to);
+            List<DetectedEvent> previousEvents =
+                    filterByZone(
+                            findEvents(
+                                    apartmentComplexId,
+                                    previous.from(),
+                                    previous.to(),
+                                    null,
+                                    robotIds,
+                                    statuses),
+                            checkpoints,
+                            zoneIds);
+            previousTypeCounts = countByType(previousEvents);
+        }
+
+        // 3) 현재 기간에 한 번이라도 나온 유형만 항목으로 만든다.
+        //    데이터 없는 초기에는 items=[] 가 된다.
+        Map<EventType, Long> finalPreviousTypeCounts = previousTypeCounts;
+        List<ByTypeResponse.ByTypeItem> items =
+                currentTypeCounts.entrySet().stream()
+                        .sorted(Map.Entry.<EventType, Long>comparingByValue().reversed())
+                        .map(
+                                entry -> {
+                                    EventType type = entry.getKey();
+                                    long current = entry.getValue();
+                                    long previous = finalPreviousTypeCounts.getOrDefault(type, 0L);
+                                    long diff = current - previous;
+                                    return ByTypeResponse.ByTypeItem.builder()
+                                            .eventType(type)
+                                            .count(current)
+                                            .ratio(calculateRatio(current, totalCount))
+                                            .delta(
+                                                    ByTypeResponse.Delta.builder()
+                                                            .current(current)
+                                                            .previous(previous)
+                                                            .diff(diff)
+                                                            .changeRate(
+                                                                    calculateChangeRate(
+                                                                            previous, diff))
+                                                            .build())
+                                            .build();
+                                })
+                        .toList();
+
+        return ByTypeResponse.builder().totalCount(totalCount).items(items).build();
+    }
+
+    /**
+     * 전체 대비 비율(%) 계산.
+     * total=0이면 0으로 둔다. (0으로 나누기 방지)
+     */
+    private BigDecimal calculateRatio(long count, long total) {
+        if (total == 0L) {
+            return BigDecimal.ZERO;
+        }
+        return BigDecimal.valueOf(count)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP);
     }
 
     /**
