@@ -62,25 +62,59 @@ export type EventTypeCode =
   | 'TRASH_DETECTED'
   | 'RECYCLING_AREA_FULL'
   | 'EMERGENCY'
-export type RiskLevelCode = 'LOW' | 'NORMAL' | 'EMERGENCY'
-export type ProcessingStatusCode = 'DETECTED' | 'PROCESSING' | 'COMPLETED'
+  
+export type ProcessingStatusCode = 
+  |'DETECTED' 
+  | 'PROCESSING' 
+  | 'COMPLETED'
+
+export type EventPeriodCode =
+  | 'ALL'
+  | 'TODAY'
+  | 'LAST_7_DAYS'
+
+export type RiskLevelCode = 
+  | 'LOW' 
+  | 'NORMAL' 
+  | 'EMERGENCY'
+
+export type EventListRequest = {
+  type?: EventTypeCode, 
+  status?: ProcessingStatusCode,
+  period?: EventPeriodCode,
+  risk?: RiskLevelCode
+  page?: number,
+  size?: number,
+  sort?: string[]
+}
+
+// GET /api/events (목록)
+export type EventListItemResponse  = {
+    eventId: number,
+    occurredAt: string,
+    type: EventTypeCode,
+    location: string,
+    robotName: string,
+    riskLevel: RiskLevelCode,
+    status: ProcessingStatusCode,
+    assignee: string | null
+  }
+export type EventListResponse = {
+  content: EventListItemResponse[]
+  page: number,
+  size: number,
+  totalElements: number,
+  totalPages: number,
+  first: boolean,
+  last: boolean
+}
+
+
 export type MediaTypeCode = 'IMAGE' | 'VIDEO' | string
 
 export type EventEvidenceResponse = {
   mediaType: MediaTypeCode
   fileUrl: string
-}
-
-// GET /api/events (목록)
-export type EventListResponse = {
-  eventId: Id
-  occurredAt: string
-  type: EventTypeCode | string
-  location?: string | null
-  robotName: string
-  riskLevel: RiskLevelCode | string
-  status: ProcessingStatusCode | string
-  assignee?: string | null
 }
 
 // GET /api/events/{id} (상세)
@@ -99,6 +133,19 @@ export type EventDetailResponse = {
   licensePlateNumber?: string | null
   evidence?: EventEvidenceResponse | null
 }
+
+// GET /api/events/{id}/status (상태 변경)
+export type EventStatusChangeRequest = {
+  processingStatus: ProcessingStatusCode,
+  processingNote?: string,
+}
+
+export type EventStatusChangeResponse = {
+  eventId: number,
+  processingStatus: ProcessingStatusCode,
+  updatedAt: string,
+}
+
 
 // 백엔드 enum 코드 (back/dev 기준)
 export type PatrolStatusCode = 'IN_PROGRESS' | 'COMPLETED' | 'STOPPED' | 'FAILED'
