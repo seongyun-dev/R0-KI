@@ -72,6 +72,18 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return unwrapEnvelope(body) as T
 }
 
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const headers = new Headers()
+  const auth = authHeaders()
+  if (auth) headers.set('Authorization', auth.Authorization)
+  const response = await fetch(apiUrl(path), { headers, signal })
+  if (!response.ok) {
+    if (response.status === 401) useAuthStore.getState().logout()
+    throw new ApiError(response.status, `이미지를 불러오지 못했습니다 (${response.status})`)
+  }
+  return response.blob()
+}
+
 export async function consumeSse<T>(
   path: string,
   onMessage: (data: T) => void,
