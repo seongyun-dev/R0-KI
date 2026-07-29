@@ -76,7 +76,7 @@ export default function Login() {
       </form>
       <p className="mt-6 text-center text-sm text-muted">
         계정이 없으신가요?{' '}
-        <Link to="/signup" className="font-semibold text-fg underline-offset-4 hover:underline">
+        <Link to="/signup/onboarding" className="font-semibold text-fg underline-offset-4 hover:underline">
           회원가입 →
         </Link>
       </p>
