@@ -611,3 +611,206 @@
 .r0ki .mdact .btn{height:48px;padding:0 26px;font-size:15.5px}
 
 @media(max-width:1240px){.r0ki .egrid{grid-template-columns:1fr}}
+
+/* ══════════════ 로봇 관리 화면 (R0Ki-robots-detail 시안 포팅) ══════════════ */
+
+/* ── 목록: KPI 3열 ── */
+.r0ki .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s2);margin-bottom:var(--s2);flex:none}
+.r0ki .kpi{padding:var(--s5) var(--s6);border-radius:var(--r-panel)}
+.r0ki .kpi .k{display:block;font-size:13.5px;font-weight:600;color:var(--text-3);margin-bottom:8px}
+.r0ki .kpi .v{display:flex;align-items:baseline;gap:8px;font-family:var(--mono);font-size:34px;font-weight:700;
+  letter-spacing:-.04em;line-height:1}
+.r0ki .kpi .v em{font-style:normal;font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text-2);letter-spacing:-.01em}
+@media(max-width:900px){.r0ki .kpis{grid-template-columns:1fr}}
+
+/* ── 목록: 배터리 막대 ── */
+.r0ki .bat{display:flex;align-items:center;gap:10px}
+.r0ki .bat .bar{width:74px;height:10px;border-radius:5px;background:var(--track);border:1px solid var(--hair);overflow:hidden}
+.r0ki .bat .bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--graphic),var(--accent-fill-2))}
+.r0ki .bat .pct{font-family:var(--mono);font-size:14px;font-weight:700;min-width:40px}
+
+/* ── 목록: 행 액션 ── */
+.r0ki .rowacts{display:flex;align-items:center;gap:4px;justify-content:flex-end}
+.r0ki .linkbtn{height:36px;padding:0 14px;border:0;border-radius:var(--r-pill);background:transparent;cursor:pointer;
+  font-family:var(--sans);font-size:13.5px;font-weight:700;color:var(--text-2);
+  transition:all var(--d-fast) var(--e-glass)}
+.r0ki .linkbtn:hover{background:var(--track);color:var(--text-1)}
+
+/* ── 로봇 등록 버튼 ── */
+.r0ki .btn-add{display:inline-flex;align-items:center;gap:8px}
+.r0ki .btn-add svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round}
+
+/* ══ 상세 — 무대형(rd-*) · 중앙 히어로 + 타원 광원 받침 + 궤도 카드 + 부위 지시선.
+   ⚠️ 유리(g1/g2/g3)는 무대·상단바만. 궤도 카드는 --track 기반(backdrop-filter 없음) —
+   틴트 0.018 뒤로 어두운 로봇 셸이 비쳐 얼룩으로 읽히는 문제를 피한다.
+   어떤 카드도 로봇 위에 겹치지 않고, 지시선이 그 간격을 잇는다. ══ */
+.r0ki .rd-stage{
+  position:relative;flex:1;min-height:0;
+  display:grid;
+  grid-template-columns:268px 1fr 300px;
+  grid-template-rows:auto 1fr auto;
+  gap:var(--s5);
+  padding:var(--s8);
+}
+
+/* 상단 중앙 이브로우 — 한글이라 --mono 금지, --sans + 자간 */
+.r0ki .rd-eyebrow{
+  position:absolute;top:var(--s8);left:50%;transform:translateX(-50%);z-index:3;
+  display:flex;align-items:center;justify-content:center;gap:11px;
+  font-family:var(--sans);font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--text-3)}
+.r0ki .rd-eyebrow .sep{width:4px;height:4px;border-radius:50%;background:var(--graphic);opacity:.55;flex:none}
+.r0ki .rd-eyebrow .sub{font-weight:600;letter-spacing:.06em;color:var(--text-3);opacity:.85}
+
+/* 히어로 식별 블록 (상태 리포트) */
+.r0ki .rd-glabel{display:block;font-size:12.5px;font-weight:700;letter-spacing:.02em;color:var(--text-3);margin-bottom:var(--s3)}
+.r0ki .rd-hero{grid-column:1;grid-row:1;align-self:start}
+.r0ki .rd-hero .k{font-size:13.5px;font-weight:700;letter-spacing:-.01em;color:var(--text-3);display:block;margin-bottom:var(--s2)}
+.r0ki .rd-hero .st{height:38px;padding:0 17px;font-size:15px;font-weight:700}
+.r0ki .rd-hero .st i{width:9px;height:9px}
+.r0ki .rd-hero .rule{height:1px;background:var(--hair);margin:var(--s6) 0 var(--s5)}
+.r0ki .rd-batt{display:flex;align-items:baseline;gap:2px}
+.r0ki .rd-batt .v{font-family:var(--mono);font-size:56px;font-weight:700;line-height:.92;letter-spacing:-.045em;color:var(--text-1)}
+.r0ki .rd-batt .u{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--text-2)}
+
+/* 궤도 카드 */
+.r0ki .rd-card{
+  display:flex;align-items:center;gap:var(--s4);
+  padding:var(--s4) var(--s5);border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5),0 6px 16px rgba(20,56,104,.07)}
+.r0ki[data-theme="nocturne"] .rd-card{box-shadow:inset 0 1px 0 rgba(255,255,255,.13),0 8px 20px rgba(0,0,0,.30)}
+.r0ki .rd-card .ico{
+  width:38px;height:38px;flex:none;border-radius:12px;display:grid;place-items:center;
+  background:var(--track);border:1px solid var(--edge);color:var(--graphic);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}
+.r0ki[data-theme="nocturne"] .rd-card .ico{box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+.r0ki .rd-card .ico svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.r0ki .rd-card .txt{min-width:0;display:flex;flex-direction:column;gap:3px}
+.r0ki .rd-card .k{font-size:12.5px;font-weight:600;letter-spacing:-.01em;color:var(--text-3)}
+.r0ki .rd-card .v{font-size:17px;font-weight:700;letter-spacing:-.015em;color:var(--text-1);white-space:nowrap}
+.r0ki .rd-card .v.num{font-family:var(--mono);font-size:17px;letter-spacing:-.01em}
+
+.r0ki .rd-left{grid-column:1;grid-row:2;display:flex;flex-direction:column;gap:var(--s3);align-self:end;padding-bottom:var(--s10)}
+.r0ki .rd-right{grid-column:3;grid-row:1/span 2;display:flex;flex-direction:column;gap:var(--s2);align-self:start}
+
+/* 로봇 무대 */
+.r0ki .rd-bot{grid-column:2;grid-row:1/span 2;position:relative;
+  display:grid;place-items:center;min-height:0;padding:var(--s10) 0 var(--s6)}
+/* 프레임 — 콜아웃 앵커 %의 기준 좌표계 */
+.r0ki .rd-frame{position:relative;height:100%;min-height:0;aspect-ratio:340/400;max-height:720px;max-width:min(560px,100%)}
+/* 3D 진단 뷰(three.js) — 프레임보다 크게 깔아 로봇을 키운다. 콜아웃(z-index:2)이 위에 뜬다 */
+.r0ki .rd-3d{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:170%;height:130%;z-index:1;pointer-events:none}
+.r0ki .rd-3d canvas{display:block;width:100%;height:100%}
+
+/* 타원 광원 받침 */
+.r0ki .rd-plinth{position:absolute;left:50%;top:83%;transform:translate(-50%,-50%);
+  width:132%;aspect-ratio:430/108;pointer-events:none;z-index:0}
+.r0ki .rd-plinth::before{content:'';position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,255,255,1),rgba(255,255,255,.62) 46%,rgba(255,255,255,.16) 70%,transparent 82%)}
+.r0ki .rd-plinth::after{content:'';position:absolute;inset:0;border-radius:50%;
+  border:1px solid var(--edge);box-shadow:0 0 0 1px rgba(255,255,255,.30) inset}
+.r0ki[data-theme="nocturne"] .rd-plinth::before{
+  background:radial-gradient(closest-side,rgba(170,210,255,.30),rgba(170,210,255,.10) 52%,transparent 80%)}
+
+/* 부위 콜아웃 + 지시선 */
+.r0ki .rd-cal{position:absolute;display:flex;align-items:center;width:max-content;z-index:2;pointer-events:none}
+.r0ki .rd-cal.l{right:69%}
+.r0ki .rd-cal.r{left:69%;flex-direction:row-reverse}
+.r0ki .rd-cal .box{
+  pointer-events:auto;flex:none;display:flex;flex-direction:column;gap:6px;
+  padding:11px 15px;border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 5px 14px rgba(20,56,104,.06)}
+.r0ki[data-theme="nocturne"] .rd-cal .box{box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 6px 16px rgba(0,0,0,.28)}
+.r0ki .rd-cal.r .box{align-items:flex-end}
+.r0ki .rd-cal .n{font-size:13.5px;font-weight:700;letter-spacing:-.01em;color:var(--text-2);white-space:nowrap}
+.r0ki .rd-cal .st{height:27px;padding:0 11px;font-size:12.5px}
+.r0ki .rd-cal .st i{width:6px;height:6px}
+/* 점검 필요 부위만 강조 — --urgent 금지(응급이 아니라 상태 램프의 한 단계) */
+.r0ki .rd-cal.warn .box{border-color:var(--graphic);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 0 0 3px var(--accent-glow),0 5px 14px rgba(20,56,104,.08)}
+.r0ki[data-theme="nocturne"] .rd-cal.warn .box{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 0 3px var(--accent-glow),0 6px 16px rgba(0,0,0,.28)}
+.r0ki .rd-cal.warn .n{color:var(--text-1)}
+.r0ki .rd-cal .lead{width:clamp(34px,5vw,64px);height:1px;flex:none;position:relative;background:var(--graphic);opacity:.45}
+.r0ki .rd-cal .lead::after{content:'';position:absolute;top:-3px;width:7px;height:7px;border-radius:50%;
+  background:var(--graphic);box-shadow:0 0 0 3px var(--track)}
+.r0ki .rd-cal.l .lead::after{right:-3px}
+.r0ki .rd-cal.r .lead::after{left:-3px}
+.r0ki .rd-cal.warn .lead{opacity:.85;height:1.5px}
+/* 부위별 앵커 — 3D 로봇(정면 포즈, 카메라 fov35 · z9.6)의 부위를 프레임 좌표로 투영한 값.
+   지시선 점(dot)이 부위 가장자리에 닿도록 .l 은 right, .r 은 left 가 앵커다.
+   카메라 모듈=헤드 우측 센서 포드 / 라이다=헤드 돔 상단 / 휠 모터=좌측 발 / 구동부=베이스 링 */
+.r0ki .rd-cal.c-cam  {top:20%;  left:87%}
+.r0ki .rd-cal.c-lidar{top:3.5%; right:73%}
+.r0ki .rd-cal.c-motor{top:75%;  right:71%}
+.r0ki .rd-cal.c-drive{top:78%;  left:73%}
+
+/* 하단 프로필 레일 (가로) */
+.r0ki .rd-foot{grid-column:1/-1;grid-row:3;display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.r0ki .rd-foot .rd-card{flex:1 1 220px;min-width:0;padding:var(--s2) var(--s4);gap:var(--s3)}
+/* 가로 레일에서는 라벨·값을 좌우로 펼쳐 폭을 쓴다 */
+.r0ki .rd-foot .rd-card .txt{flex:1;flex-direction:row;align-items:center;justify-content:space-between;gap:var(--s4)}
+.r0ki .rd-foot .rd-card .k{flex:none}
+.r0ki .rd-foot .rd-card .v{text-align:right}
+/* 보조 정보라 무게를 낮춘다 */
+.r0ki .rd-foot .rd-card .ico{width:30px;height:30px;border-radius:10px}
+.r0ki .rd-foot .rd-card .ico svg{width:16px;height:16px}
+.r0ki .rd-foot .rd-card .v,.r0ki .rd-foot .rd-card .v.num{font-size:15.5px}
+.r0ki .rd-foot .lbl{flex:none;align-self:center;font-size:12.5px;font-weight:700;
+  letter-spacing:-.01em;color:var(--text-3);padding-right:var(--s2)}
+
+/* 우측 순찰 기록 (세로) */
+.r0ki .rd-log{display:flex;align-items:flex-start;gap:var(--s3);
+  padding:var(--s4);border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5)}
+.r0ki[data-theme="nocturne"] .rd-log{box-shadow:inset 0 1px 0 rgba(255,255,255,.13)}
+.r0ki .rd-log .ico{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;
+  background:var(--track);border:1px solid var(--edge);color:var(--graphic)}
+.r0ki .rd-log .ico svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.r0ki .rd-log .txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+/* 세로 컬럼(300px)에서는 시각+상태 윗줄, 이벤트 아랫줄로 접는다 */
+.r0ki .rd-log .top{display:flex;align-items:center;justify-content:space-between;gap:var(--s2)}
+.r0ki .rd-log .t{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--text-1);white-space:nowrap}
+.r0ki .rd-log .m{font-size:12.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r0ki .rd-log .st{flex:none;height:27px;padding:0 11px;font-size:12.5px}
+.r0ki .rd-log .st i{width:6px;height:6px}
+.r0ki .rd-all{width:100%;justify-content:center;margin-top:var(--s1)}
+
+/* 세로가 좁아지면 수직 여백부터 회수 */
+@media(max-height:880px){
+  .r0ki .rd-stage{padding:var(--s5);gap:var(--s3)}
+  .r0ki .rd-bot{padding:var(--s6) 0 var(--s2)}
+  .r0ki .rd-hero .rule{margin:var(--s4) 0 var(--s3)}
+  .r0ki .rd-batt .v{font-size:46px}
+  .r0ki .rd-right{gap:6px}
+}
+@media(max-height:800px){
+  .r0ki .rd-stage{padding:var(--s4);gap:var(--s2)}
+  .r0ki .rd-bot{padding:var(--s5) 0 var(--s1)}
+  .r0ki .rd-hero .rule{margin:var(--s3) 0 var(--s2)}
+  .r0ki .rd-batt .v{font-size:40px}
+  .r0ki .rd-batt .u{font-size:18px}
+}
+
+/* 반응형 — 궤도를 풀고 세로로 쌓는다 (좁은 화면은 .pcol이 스크롤을 연다) */
+@media(max-width:1240px){
+  .r0ki .rd-stage{grid-template-columns:1fr;grid-template-rows:none;flex:none;padding:var(--s6)}
+  .r0ki .rd-hero,.r0ki .rd-left,.r0ki .rd-bot,.r0ki .rd-right,.r0ki .rd-foot{grid-column:1;grid-row:auto}
+  .r0ki .rd-eyebrow{position:static;transform:none;grid-row:1;justify-content:flex-start}
+  .r0ki .rd-bot{min-height:520px;padding:var(--s6) 0}
+  .r0ki .rd-left{align-self:auto;padding-bottom:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .r0ki .rd-right{align-self:auto}
+  .r0ki .rd-cal .lead{width:30px}
+  .r0ki .rd-cal .n{white-space:normal}
+}
+@media(max-width:820px){
+  .r0ki .rd-cal{position:static;width:auto;flex-direction:row!important}
+  .r0ki .rd-cal .lead{display:none}
+  .r0ki .rd-cal .box{flex:1;align-items:flex-start!important}
+  .r0ki .rd-bot{display:grid;gap:var(--s3);min-height:0}
+  .r0ki .rd-frame{order:-1;margin:0 auto;height:auto;width:min(300px,80%)}
+  .r0ki .rd-plinth{display:none}
+}
