@@ -48,10 +48,14 @@ export interface ComplexMapData {
   mapId?: string;
   mapUrl?: string;
   mapImageUrl?: string;
+  /** 격자 1칸의 실제 거리(m) — 축척 표기용. 백엔드 resolution×width 에서 환산 */
+  metersPerCell?: number;
 }
 
 export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표, 소수 허용)
   id: string;                       // R-01
+  /** 지도에 띄우는 표시 이름 (R0-Ki 1호기). 없으면 id 를 쓴다 */
+  name?: string;
   x: number;
   y: number;
   battery?: number;
@@ -61,6 +65,8 @@ export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표
 export interface MapPin {           // 지도 위 이벤트 핀
   id: string;                       // 이벤트 ID (E-3312)
   label: string;                    // "불법주차 · 101동 앞"
+  /** 지도 콜아웃 둘째 줄 — "02:14 감지 · 지하주차장 진입로". 없으면 카드에 제목만 */
+  detail?: string;
   x: number;
   y: number;
   tone: Tone;
@@ -72,6 +78,9 @@ export interface MapCheckpoint {    // 순찰 체크포인트 (1h LIVE MAP)
   label: string;                    // 출발지, 분리수거장, 주차장 A…
   x: number;
   y: number;
+  /** 통과 기록 등 부가 설명 — "02:03 통과 · 최근 지점".
+      값이 있는 지점만 지도에서 물방울 마커 + 콜아웃 카드로 강조된다 */
+  note?: string;
 }
 
 export interface Robot {

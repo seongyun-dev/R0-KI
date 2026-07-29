@@ -21,6 +21,32 @@ function dotColor(e: PatrolEvent) {
   return 'var(--detect)'
 }
 
+/* 로봇 상태 색 — 상태 팔레트(--st-*). 색상만 다르고 톤은 같은 계열 */
+const STATUS_COLOR: Record<string, string> = {
+  순찰중: 'var(--st-patrol)',
+  대기: 'var(--st-idle)',
+  충전중: 'var(--st-charge)',
+  오류: 'var(--urgent)',
+  오프라인: 'var(--st-idle)',
+}
+const statusColor = (status: string) => STATUS_COLOR[status] ?? 'var(--st-idle)'
+
+/* R0-Ki 미니 로봇 — 로봇 요약 칩용 아이콘. 안테나 + 바이저(LED 눈) + 바퀴 */
+function MiniBot() {
+  return (
+    <svg className="mini" viewBox="0 0 26 26" aria-hidden>
+      <line className="ant" x1="13" y1="4.8" x2="13" y2="7.6" />
+      <circle className="tip" cx="13" cy="3.4" r="1.6" />
+      <rect className="body" x="4.6" y="7.6" width="16.8" height="12.2" rx="5.4" />
+      <rect className="visor" x="7.5" y="10.4" width="11" height="4.6" rx="2.3" />
+      <circle className="led" cx="10.7" cy="12.7" r="1.15" />
+      <circle className="led" cx="15.3" cy="12.7" r="1.15" />
+      <circle className="wheel" cx="9.3" cy="21.6" r="1.9" />
+      <circle className="wheel" cx="16.7" cy="21.6" r="1.9" />
+    </svg>
+  )
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const clock = useClockText()
@@ -65,7 +91,12 @@ export default function Dashboard() {
           <div className="mapzone glass g2">
             <div className="bigmap">
               {mapData ? (
-                <ComplexMap map={mapData.map} robot={mapData.robot} pins={mapData.pins} />
+                <ComplexMap
+                  map={mapData.map}
+                  robot={mapData.robot}
+                  pins={mapData.pins}
+                  checkpoints={mapData.checkpoints}
+                />
               ) : (
                 <R0KiPatrolMap
                   urgent={hasUrgent ? { label: `응급상황 ${urgentEvents[0]?.time ?? ''}` } : null}
@@ -73,6 +104,29 @@ export default function Dashboard() {
                 />
               )}
             </div>
+
+            {/* 로봇 요약 — 지도 아래 한 줄. 이름·상태·배터리, 클릭 시 로봇 상세로 */}
+            {(robots ?? []).length > 0 && (
+              <div className="botlist">
+                {(robots ?? []).map((r) => (
+                  <Link key={r.id} to={`/app/robots/${r.id}`} className="botitem">
+                    <MiniBot />
+                    <span className="d" style={{ background: statusColor(r.status) }} />
+                    <span className="nm">{r.name}</span>
+                    <span className="st" style={{ color: statusColor(r.status) }}>{r.status}</span>
+                    <span className="bar" aria-hidden>
+                      <i
+                        style={{
+                          width: `${r.battery}%`,
+                          ...(r.battery <= 25 ? { background: 'var(--urgent)' } : null),
+                        }}
+                      />
+                    </span>
+                    <b className="pct num">{r.battery}%</b>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="side">
@@ -137,19 +191,6 @@ export default function Dashboard() {
                 {(events ?? []).length === 0 && (
                   <div className="hgrp">기록된 이력이 없습니다</div>
                 )}
-              </div>
-
-              {/* 다음 순찰 지점 — 하단 고정 */}
-              <div className="nextwrap">
-                <div className="zl" style={{ marginBottom: 'var(--s3)' }}>다음 순찰 지점</div>
-                <div className="next">
-                  <div>
-                    <div className="next-n">{hasUrgent ? '현장 대기 중 · 관제 확인 요청' : '정상 순찰 진행 중'}</div>
-                    <div className="next-m">{hasUrgent ? '순찰 일시 정지' : '다음 지점으로 이동'}</div>
-                  </div>
-                  <div className="next-v num">7<span className="u">/12</span></div>
-                </div>
-                <div className="prog"><i style={{ width: '58%' }} /></div>
               </div>
             </div>
           </div>

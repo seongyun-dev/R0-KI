@@ -31,6 +31,9 @@
   --accent-edge:transparent;--accent-2:#0E93F2;--accent-glow:rgba(14,120,200,.42);
   --graphic:#0876CA;--graphic-soft:#A1D2F7;
   --alert:#19324E;--detect:#244366;--patrol:#2A4F79;--charge:#305988;--offline:#335E90;
+  /* 로봇 상태 팔레트 — 색상만 다르고 채도·명도는 같은 톤으로 묶는다
+     (순찰=파랑·충전=초록·대기/오프라인=회청) */
+  --st-patrol:#0876CA;--st-charge:#0E9D6A;--st-idle:#6C7F9E;
   --urgent:#C0272D;--urgent-text:#981F25;--urgent-ink:#FFFFFF;
   --urgent-bg:rgba(192,39,45,.075);--urgent-edge:rgba(192,39,45,.40);
   --track:rgba(255,255,255,.40);--edge:rgba(255,255,255,.46);
@@ -59,6 +62,8 @@
   --accent-edge:transparent;--accent-2:#8FBAE2;--accent-glow:rgba(168,203,234,.40);
   --graphic:#B5D2EC;--graphic-soft:#3D6089;
   --alert:#F7FAFD;--detect:#D6E7F5;--patrol:#B5D2EC;--charge:#97C1E5;--offline:#A4CCEE;
+  /* 로봇 상태 팔레트 — 야간은 같은 색상을 파스텔 명도로 올린다 */
+  --st-patrol:#8FC6F0;--st-charge:#7BD8AC;--st-idle:#9DB0CC;
   --urgent:#FF8A93;--urgent-text:#FCC5C8;--urgent-ink:#2A0508;
   --urgent-bg:rgba(255,138,147,.11);--urgent-edge:rgba(255,138,147,.45);
   --track:rgba(255,255,255,.07);--edge:rgba(255,255,255,.20);
@@ -256,6 +261,117 @@
 @keyframes r0ki-sweepMap{0%,100%{transform:rotate(-34deg)}50%{transform:rotate(34deg)}}
 .r0ki .bot path{animation:r0ki-sweepMap 8s var(--e-glass) infinite;transform-origin:0 0}
 
+/* ══ 단지 지도 (ComplexMap) — 백엔드 스캔 맵 + 등록 구역 벡터 ══
+   .bigmap 이 색(color:var(--text-1))을 내려주므로 SVG 는 currentColor 로 구조물을 그린다.
+   조작·표기 오버레이(줌·실시간·범례)는 SVG 밖 HTML 이라 확대해도 크기가 고정된다. */
+.r0ki .cmwrap{position:relative;width:100%;height:100%}
+.r0ki .cmap{display:block;width:100%;height:100%;touch-action:none}
+.r0ki .cmwrap.zoomed .cmap{cursor:grab}
+.r0ki .cmwrap.pan .cmap{cursor:grabbing}
+/* 확대·이동 — 버튼 조작은 부드럽게, 드래그 중에는 즉시 따라오게(전환 없음) */
+.r0ki .cmview{transition:transform var(--d-base) var(--e-glass)}
+.r0ki .cmwrap.pan .cmview{transition:none}
+/* 백엔드 ROS 점유격자 도면 — 원본 회색이 유리 무대에서 얼룩으로 읽힌다.
+   회색조로 눌러 톤을 통일하고 투명도를 낮춰 무대 색이 비치게 한다. */
+.r0ki .cmap .mapbase{filter:grayscale(1) contrast(.78) brightness(1.16);opacity:.42}
+.r0ki[data-theme="nocturne"] .cmap .mapbase{filter:grayscale(1) invert(1) contrast(.72) brightness(.9);opacity:.3}
+/* 구역 — 온보딩 편집기(.au-zone)와 같은 반투명 레시피로 색을 잇는다 */
+.r0ki .cmz rect{fill:color-mix(in srgb,var(--z) 13%,transparent);
+  stroke:color-mix(in srgb,var(--z) 62%,transparent);stroke-width:1.2}
+.r0ki .cmz .bul{fill:var(--z);stroke:none;opacity:.9}
+.r0ki .cmz text{font-family:var(--sans);font-size:8.5px;font-weight:700;letter-spacing:-.01em;
+  fill:var(--text-1);paint-order:stroke;stroke:var(--page);stroke-width:2.4px;stroke-linejoin:round}
+.r0ki .cmz text.mid{font-size:9.5px}
+/* 구역 설비 묘사 — 구역 색의 옅은 선/면. 라벨보다 뒤로 물러나야 한다 */
+.r0ki .cmfx line,.r0ki .cmfx rect,.r0ki .cmfx path{fill:none;stroke:var(--z);stroke-opacity:.3;stroke-width:0.9}
+.r0ki .cmfx .fill{fill:var(--z);fill-opacity:.16;stroke-opacity:.24}
+/* 출입구 — 경계 안쪽 라벨(정문·후문) */
+.r0ki .cmgate text{font-family:var(--sans);font-size:7px;font-weight:700;letter-spacing:-.01em;fill:var(--graphic);
+  paint-order:stroke;stroke:var(--page);stroke-width:2.2px;stroke-linejoin:round}
+/* 축척 — 실제 resolution 이 있을 때만 표기 */
+.r0ki .cmscale line{stroke:currentColor;stroke-opacity:.42;stroke-width:1.1}
+.r0ki .cmscale text{font-family:var(--sans);font-size:6.5px;font-weight:600;fill:var(--text-3);
+  paint-order:stroke;stroke:var(--page);stroke-width:2px;stroke-linejoin:round}
+/* 순찰 경로 — 예정 구간은 흐르는 점선, 완료 구간은 굵은 실선 + 옅은 광 */
+@keyframes r0ki-cmdash{to{stroke-dashoffset:-44}}
+.r0ki .cmroute{fill:none;stroke:var(--graphic);stroke-opacity:.26;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:6 5;animation:r0ki-cmdash 3.4s linear infinite}
+.r0ki .cmdone{fill:none;stroke:var(--graphic);stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+.r0ki .cmdoneglow{fill:none;stroke:var(--graphic);stroke-opacity:.16;stroke-width:8;
+  stroke-linecap:round;stroke-linejoin:round}
+/* 체크포인트 — 통과(채운 점) / 대기(.pend 빈 점). 라벨 "N번 · 이름" */
+.r0ki .cmwp circle{fill:var(--graphic);stroke:#fff;stroke-width:1.4}
+.r0ki .cmwp text{font-family:var(--sans);font-size:6.8px;font-weight:700;letter-spacing:-.01em;fill:var(--text-2);
+  paint-order:stroke;stroke:var(--page);stroke-width:2.2px;stroke-linejoin:round}
+.r0ki .cmwp.pend circle{fill:var(--page);stroke:var(--graphic);stroke-opacity:.55;stroke-width:1.5}
+.r0ki .cmwp.pend text{fill:var(--text-3)}
+/* 물방울 마커 — 긴급 이벤트 전용 */
+.r0ki .cmmark path{fill:var(--graphic);stroke:#fff;stroke-opacity:.92;stroke-width:1.1}
+.r0ki .cmmark .core{fill:#fff}
+.r0ki .cmmark.urg path{fill:var(--urgent);stroke:#fff;stroke-opacity:.92;stroke-width:1.2}
+/* 콜아웃 카드 — 긴급 요약. 테두리·제목만 빨강 */
+.r0ki .cmcard rect{fill:var(--focus-in);fill-opacity:.94;stroke:var(--edge);stroke-width:.9}
+.r0ki[data-theme="nocturne"] .cmcard rect{fill-opacity:.9;stroke:var(--hair)}
+.r0ki .cmcard .t{font-family:var(--sans);font-size:7.2px;font-weight:800;letter-spacing:-.01em;fill:var(--text-1)}
+.r0ki .cmcard .s{font-family:var(--sans);font-size:6.2px;font-weight:600;letter-spacing:-.01em;fill:var(--text-3)}
+.r0ki .cmcard.urg rect{stroke:var(--urgent-edge);stroke-width:1.1}
+.r0ki .cmcard.urg .t{fill:var(--urgent-text)}
+/* 경계 라벨 */
+.r0ki .cmedge{font-family:var(--sans);font-size:6.5px;font-weight:600;letter-spacing:-.01em;fill:var(--text-3);
+  paint-order:stroke;stroke:var(--page);stroke-width:2px;stroke-linejoin:round}
+.r0ki .cmlight{pointer-events:none;mix-blend-mode:screen;opacity:.55}
+.r0ki[data-theme="nocturne"] .cmlight{opacity:.22}
+/* 로봇 — 흰 링 + 파란 심(도면 위에서 가장 강한 표기) */
+.r0ki .cmbotdot circle{fill:#fff;stroke:var(--graphic);stroke-width:1.8}
+.r0ki .cmbotdot .core{fill:var(--graphic);stroke:none}
+
+/* ── 지도 오버레이 ── */
+.r0ki .cmovl{position:absolute;z-index:2;display:flex;flex-direction:column;gap:var(--s2)}
+.r0ki .cmovl.tl{left:var(--s3);top:var(--s3)}
+.r0ki .cmovl.tr{right:var(--s3);top:var(--s3);align-items:flex-end}
+.r0ki .cmovl.bl{left:var(--s3);bottom:var(--s2)}
+/* 유리 조작 버튼 — 확대·축소·전체 보기 */
+.r0ki .cmbtn{width:34px;height:34px;display:grid;place-items:center;cursor:pointer;
+  border:1px solid var(--edge);border-radius:12px;background:var(--tint-3);color:var(--text-2);
+  -webkit-backdrop-filter:blur(6px) saturate(125%);backdrop-filter:blur(6px) saturate(125%);
+  box-shadow:var(--sh-1);transition:color var(--d-fast) var(--e-glass),transform var(--d-fast) var(--e-glass),
+    opacity var(--d-fast) var(--e-glass)}
+.r0ki .cmbtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
+.r0ki .cmbtn:hover:not(:disabled){color:var(--text-1);transform:translateY(-1px)}
+.r0ki .cmbtn:disabled{opacity:.4;cursor:default}
+/* 실시간 시각 칩 */
+.r0ki .cmclock{display:inline-flex;align-items:center;gap:var(--s1);padding:6px var(--s3);
+  border:1px solid var(--edge);border-radius:var(--r-pill);background:var(--tint-3);
+  -webkit-backdrop-filter:blur(6px) saturate(125%);backdrop-filter:blur(6px) saturate(125%);
+  box-shadow:var(--sh-1);font-size:11.5px;font-weight:700;color:var(--text-3)}
+.r0ki .cmclock b{font-size:13px;font-weight:700;color:var(--text-1);letter-spacing:.01em}
+/* 방위 — 북쪽 고정 */
+.r0ki .cmnorth{width:34px;height:34px;display:grid;place-items:center;
+  border:1px solid var(--edge);border-radius:50%;background:var(--tint-3);
+  -webkit-backdrop-filter:blur(6px) saturate(125%);backdrop-filter:blur(6px) saturate(125%);
+  box-shadow:var(--sh-1)}
+.r0ki .cmnorth svg{width:22px;height:22px}
+.r0ki .cmnorth .n{fill:var(--graphic)}
+/* 범례 — 경로·지점 표기 읽는 법. 지도 콘텐츠를 가리지 않도록
+   가로 한 줄 슬림 바로 하단 여백 띠 안에만 얹는다 */
+.r0ki .cmlegend{display:flex;align-items:center;gap:var(--s4);padding:6px var(--s3);
+  border:1px solid var(--edge);border-radius:var(--r-pill);background:var(--tint-3);
+  -webkit-backdrop-filter:blur(6px) saturate(125%);backdrop-filter:blur(6px) saturate(125%);
+  box-shadow:var(--sh-1)}
+.r0ki .cmlegend .lg{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;
+  color:var(--text-2);white-space:nowrap}
+.r0ki .cmlegend .d{width:8px;height:8px;border-radius:50%;flex:none;
+  border:1.5px solid var(--graphic);background:transparent}
+.r0ki .cmlegend .d.on{background:var(--graphic)}
+.r0ki .cmlegend .d.u{border-color:var(--urgent);background:var(--urgent)}
+@media(max-width:1240px){
+  .r0ki .cmlegend{gap:var(--s3);padding:5px var(--s3)}
+  .r0ki .cmlegend .lg{font-size:10px}
+}
+/* 로봇 라벨 — 도면 위에서도 읽히도록 배경색으로 외곽선을 깐다 */
+.r0ki .cmap .cmbot{font-family:var(--sans);font-size:9px;font-weight:800;letter-spacing:-.01em;
+  fill:var(--text-1);paint-order:stroke;stroke:var(--page);stroke-width:2.6px;stroke-linejoin:round}
+
 /* ══ 실시간 탐지 영상 ══ */
 .r0ki .cam{position:relative;margin-top:var(--s4);border-radius:var(--r-inner);overflow:hidden;aspect-ratio:16/10;
   background:#1B2836;border:1px solid var(--edge);
@@ -304,14 +420,29 @@
 .r0ki .hr.urgent .ht{color:var(--text-1)}
 
 /* ══ 다음 순찰 지점 ══ */
-.r0ki .nextwrap{margin-top:auto;padding-top:var(--s5);border-top:1px solid var(--hair)}
-.r0ki .next{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
-.r0ki .next-n{font-size:13px;font-weight:600}
-.r0ki .next-m{font-family:var(--mono);font-size:10.5px;color:var(--text-2);margin-top:4px}
-.r0ki .next-v{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--patrol)}
-.r0ki .next-v .u{font-size:12px;font-weight:500;color:var(--text-2);margin-left:1px}
-.r0ki .prog{margin-top:var(--s4);height:4px;border-radius:2px;background:var(--track);overflow:hidden;border:1px solid var(--hair)}
-.r0ki .prog i{display:block;height:100%;border-radius:2px;background:linear-gradient(90deg,var(--graphic,var(--patrol)),var(--accent-fill-2,var(--accent)))}
+/* 로봇 요약 — 지도 아래 한 줄. 미니 로봇 · 상태점 · 이름 · 상태 · 배터리 게이지 */
+.r0ki .botlist{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--s3);
+  margin-top:var(--s3);flex:none}
+.r0ki .botitem{display:flex;align-items:center;gap:var(--s2);min-width:0;padding:var(--s3) var(--s4);
+  border:1px solid var(--edge);border-radius:var(--r-inner);background:var(--track);
+  text-decoration:none;color:var(--text-1);
+  transition:transform var(--d-fast) var(--e-glass),background var(--d-fast) var(--e-glass)}
+.r0ki .botitem:hover{transform:translateY(-1px);background:var(--focus-in)}
+.r0ki .botitem .d{width:7px;height:7px;border-radius:50%;flex:none}
+.r0ki .botitem .nm{font-size:13.5px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.r0ki .botitem .st{font-size:11.5px;font-weight:600;color:var(--text-3);white-space:nowrap}
+.r0ki .botitem .bar{flex:1;min-width:24px;height:5px;border-radius:3px;overflow:hidden;
+  background:var(--track);border:1px solid var(--hair)}
+.r0ki .botitem .bar i{display:block;height:100%;border-radius:3px;background:var(--graphic)}
+.r0ki .botitem .pct{font-size:12.5px;font-weight:700;color:var(--text-2)}
+/* 미니 로봇 — 안테나 + 바이저(LED 눈) + 바퀴. 전부 토큰 색 */
+.r0ki .botitem .mini{width:26px;height:26px;flex:none}
+.r0ki .botitem .mini .ant{stroke:var(--graphic);stroke-width:1.4;stroke-linecap:round}
+.r0ki .botitem .mini .tip{fill:var(--bot-led)}
+.r0ki .botitem .mini .body{fill:var(--focus-in);stroke:var(--graphic);stroke-width:1.4}
+.r0ki .botitem .mini .visor{fill:var(--accent-ink)}
+.r0ki .botitem .mini .led{fill:var(--bot-led)}
+.r0ki .botitem .mini .wheel{fill:var(--graphic)}
 
 /* ══════════════ 순찰 관리 화면 (R0Kipatrol 시안 포팅) ══════════════ */
 /* 페이지 컬럼 — 무대의 남은 높이 전부 사용(한 화면 고정) */
