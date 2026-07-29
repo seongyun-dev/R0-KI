@@ -8,13 +8,13 @@ import type { Robot } from '../types/domain'
 /* R0-Ki 로봇 목록 — 시안 R0Ki-robots-detail 그대로.
    유리 KPI 3장 + 유리 테이블(배터리 막대). 데이터/뮤테이션은 기존 훅 그대로. */
 
-/* 로봇 상태 점 색 — 명도 램프 */
+/* 로봇 상태 점 색 — 대시보드 로봇 요약과 같은 상태 팔레트(--st-*) */
 const STATUS_DOT: Record<string, string> = {
-  순찰중: 'var(--patrol)',
-  대기: 'var(--offline)',
-  충전중: 'var(--charge)',
-  오류: 'var(--alert)',
-  오프라인: 'var(--offline)',
+  순찰중: 'var(--st-patrol)',
+  대기: 'var(--st-idle)',
+  충전중: 'var(--st-charge)',
+  오류: 'var(--urgent)',
+  오프라인: 'var(--st-idle)',
 }
 
 export default function RobotList() {

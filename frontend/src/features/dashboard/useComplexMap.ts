@@ -78,6 +78,13 @@ function registeredMapToView(
     }
   })
 
+  // 격자 1칸의 실제 거리 — 지도 가로(px)×resolution(m/px)을 열 수로 나눈다. 축척 표기용
+  const resolution = Number(detail.resolution)
+  const metersPerCell =
+    Number.isFinite(resolution) && resolution > 0 && detail.width
+      ? (detail.width * resolution) / GRID_COLS
+      : undefined
+
   return {
     map: {
       cols: GRID_COLS,
@@ -86,6 +93,7 @@ function registeredMapToView(
       mapId: String(detail.mapId),
       mapUrl: detail.mapUrl,
       mapImageUrl,
+      metersPerCell,
     },
     robot: {
       id: String(robotId),
