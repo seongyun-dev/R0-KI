@@ -161,10 +161,10 @@ export interface DailyEventStat {   // 일자별 이벤트 추이 (1m 라인 차
   count: number;                    // 6
 }
 
-// 시간대별 이벤트 발생(유형별 누적 막대, 1m). 유형 키는 와이어프레임 표기 그대로.
-// 위험구역 유형은 서비스 범위에서 제외되어 뺐다.
+// 시간대별 이벤트(유형별 누적). slot = 3시간 단위 8칸 (0-3시 … 21-24시).
+// 백엔드 GET /trend?bucket=hour3 + mapTrendToHourly 와 연결.
 export interface HourlyEventStat {
-  slot: string;                     // 9-12시
+  slot: string;                     // 예: '9-12시'
   주차: number;
   쓰레기: number;
 }

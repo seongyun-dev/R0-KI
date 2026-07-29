@@ -1,5 +1,10 @@
-import { env } from '../config/env'
 import { apiBlob, apiRequest, consumeSse, jsonBody } from './client'
+import type {
+  AnalyticsByZoneResponse,
+  AnalyticsHandlingResponse,
+  AnalyticsOverviewResponse,
+  AnalyticsTrendResponse,
+} from './analyticsContracts'
 import type {
   ComplexResponse,
   EventDetailResponse,
@@ -143,6 +148,40 @@ export const mapApi = {
 }
 
 export const statsApi = {
-  get: (params: { period?: string; zone?: string } = {}) =>
-    apiRequest<unknown>(withQuery(env.statsEndpoint, params)),
+  /**
+   * 통계 대시보드용 Analytics API 묶음 호출.
+   *
+   * 예전 단일 `/api/statistics` 가정은 폐기하고,
+   * 백엔드 확정 엔드포인트 4(+trend 2회)를 병렬로 부른 뒤
+   * assembleStatsDashboard 매퍼가 Stats 화면 형태로 합친다.
+   *
+   * @param range resolveAnalyticsRange() 결과 (from/to, +09:00)
+   * zone 드롭다운(parking/recycle/danger)은 1차 미연동 — 쿼리에 넣지 않음.
+   */
+  fetchDashboard: (range: { from: string; to: string }) => {
+    const base = {
+      from: range.from,
+      to: range.to,
+    }
+    return Promise.all([
+      // KPI: 순찰수·이벤트·평균처리시간 + 증감
+      apiRequest<AnalyticsOverviewResponse>(
+        withQuery('/api/analytics/events/overview', { ...base, compare: 'true' }),
+      ),
+      // 일자별 추이 차트
+      apiRequest<AnalyticsTrendResponse>(
+        withQuery('/api/analytics/events/trend', { ...base, bucket: 'day' }),
+      ),
+      // 시간대×유형 차트 (3시간×8칸)
+      apiRequest<AnalyticsTrendResponse>(
+        withQuery('/api/analytics/events/trend', { ...base, bucket: 'hour3' }),
+      ),
+      // 처리/미처리 현황
+      apiRequest<AnalyticsHandlingResponse>(
+        withQuery('/api/analytics/events/handling', base),
+      ),
+      // 구역 파이차트 (checkpoint_id)
+      apiRequest<AnalyticsByZoneResponse>(withQuery('/api/analytics/events/by-zone', base)),
+    ])
+  },
 }

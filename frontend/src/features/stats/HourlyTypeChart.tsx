@@ -12,10 +12,11 @@ import type { HourlyEventStat } from '../../types/domain'
 import { AXIS_TICK, AXIS_TICK_NUM, RAMP } from './chartTheme'
 import { ChartTooltip } from './ChartTooltip'
 
-/* 시간대별 이벤트 발생(유형별 누적) — 시안 R0Ki-stats cHour 그대로.
+/* 시간대별 이벤트 발생(유형별 누적) — 시안 R0Ki-stats cHour 레이아웃 유지.
+   데이터만 백엔드 trend?bucket=hour3 (3시간×8칸) + 주차/쓰레기 묶음에 맞춤.
    --graphic 단일 계열 명도 램프 — 램프 순서 = 주의도(진할수록 주의).
    아래(진함)→위(옅음) 누적, 스택 꼭대기에 합계 라벨.
-   위험구역 유형은 서비스 범위에서 제외되어 뺐다. */
+   위험(EMERGENCY) 유형은 시안과 같이 이 차트에서 제외. */
 export const HOURLY_SERIES = [
   { key: '주차', opacity: RAMP[1] },
   { key: '쓰레기', opacity: RAMP[2] },
@@ -30,7 +31,8 @@ export function HourlyTypeChart({ data }: { data: HourlyEventStat[] }) {
   return (
     <div className="st-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 0, left: -26 }} barCategoryGap="26%">
+        {/* 8칸 기준: 막대 간격만 소폭 조정(높이·패널 크기는 CSS 그대로) */}
+        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 0, left: -26 }} barCategoryGap="18%">
           <CartesianGrid vertical={false} stroke="var(--hair)" strokeDasharray="4 4" />
           <XAxis
             dataKey="slot"
