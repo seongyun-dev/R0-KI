@@ -1,69 +1,58 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import type { ZoneShareStat } from '../../types/domain'
-import { ChartFrame } from './ChartFrame'
+import { RAMP } from './chartTheme'
 import { ChartTooltip } from './ChartTooltip'
 
-const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)']
-
-/** 구역별 이벤트 비율 (파이차트) (1m) — 도넛 중앙에 총 건수 */
+/* 구역별 이벤트 비율 — 시안 R0Ki-stats cZone 그대로.
+   도넛(62~86%) + 중앙 총계. 순위 목록(st-rank)은 Stats.tsx 가 담당. */
 export function ZonePieChart({ data }: { data: ZoneShareStat[] }) {
   const total = data.reduce((s, d) => s + d.count, 0)
 
   return (
-    <ChartFrame
-      title="구역별 이벤트 비율"
-      table={{
-        caption: '구역별 이벤트 건수 및 비율',
-        head: ['구역', '건수', '비율(%)'],
-        rows: data.map((d) => [d.zone, d.count, d.pct]),
-      }}
-    >
-      <div className="flex flex-col items-center gap-5 sm:flex-row">
-        <div className="relative h-48 w-48 flex-none">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey="count"
-                nameKey="zone"
-                innerRadius="58%"
-                outerRadius="90%"
-                paddingAngle={2}
-                stroke="var(--bg)"
-                strokeWidth={2}
-                isAnimationActive={false}
-              >
-                {data.map((d, i) => (
-                  <Cell key={d.zone} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip content={<ChartTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
-          {/* 도넛 중앙 총계 */}
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="font-mono text-2xl font-bold tabular">{total}건</span>
-            <span className="text-xs text-muted">전체</span>
-          </div>
-        </div>
-
-        {/* 범례 = 직접 라벨 (건수 · 비율) */}
-        <ul className="flex w-full flex-col gap-2.5">
-          {data.map((d, i) => (
-            <li key={d.zone} className="flex items-center gap-2.5 text-sm">
-              <span
-                aria-hidden
-                className="h-2.5 w-2.5 flex-none rounded-sm"
-                style={{ background: COLORS[i % COLORS.length] }}
+    <div className="st-chart">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={data}
+            dataKey="count"
+            nameKey="zone"
+            innerRadius="62%"
+            outerRadius="86%"
+            stroke="var(--page)"
+            strokeWidth={3}
+            isAnimationActive={false}
+          >
+            {data.map((d, i) => (
+              <Cell key={d.zone} fill="var(--graphic)" fillOpacity={RAMP[i % RAMP.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            content={
+              <ChartTooltip
+                opacities={Object.fromEntries(data.map((d, i) => [d.zone, RAMP[i % RAMP.length]]))}
               />
-              <span className="min-w-0 flex-1 truncate">{d.zone}</span>
-              <span className="font-mono text-xs tabular text-muted">
-                {d.count}건 · {d.pct}%
-              </span>
-            </li>
-          ))}
-        </ul>
+            }
+          />
+        </PieChart>
+      </ResponsiveContainer>
+
+      {/* 도넛 중앙 총계 */}
+      <div className="st-dc">
+        <span className="v">{total}건</span>
+        <span className="k">전체</span>
       </div>
-    </ChartFrame>
+
+      <table className="sr-only">
+        <caption>구역별 이벤트 건수 및 비율</caption>
+        <thead>
+          <tr><th scope="col">구역</th><th scope="col">건수</th><th scope="col">비율(%)</th></tr>
+        </thead>
+        <tbody>
+          {data.map((d) => (
+            <tr key={d.zone}><th scope="row">{d.zone}</th><td>{d.count}</td><td>{d.pct}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

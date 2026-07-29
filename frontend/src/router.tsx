@@ -100,6 +100,17 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
       },
+      // 통계 — R0KiShell 자체 상단바라 AppShell 밖 독립 렌더 (recharts 청크 지연 로드)
+      {
+        path: 'stats',
+        element: (
+          <RequireAuth>
+            <Suspense fallback={null}>
+              <Stats />
+            </Suspense>
+          </RequireAuth>
+        ),
+      },
       {
         // 비로그인 접근 시 /login으로 — 나머지 화면은 기존 셸 유지
         element: (
@@ -107,17 +118,7 @@ export const router = createBrowserRouter([
             <AppShell />
           </RequireAuth>
         ),
-        children: [
-      { path: 'robots/new', element: <RobotNew /> },
-      {
-        path: 'stats',
-        element: (
-          <Suspense fallback={null}>
-            <Stats />
-          </Suspense>
-        ),
-      },
-        ],
+        children: [{ path: 'robots/new', element: <RobotNew /> }],
       },
     ],
   },

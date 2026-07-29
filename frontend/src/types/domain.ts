@@ -162,11 +162,11 @@ export interface DailyEventStat {   // 일자별 이벤트 추이 (1m 라인 차
 }
 
 // 시간대별 이벤트 발생(유형별 누적 막대, 1m). 유형 키는 와이어프레임 표기 그대로.
+// 위험구역 유형은 서비스 범위에서 제외되어 뺐다.
 export interface HourlyEventStat {
   slot: string;                     // 9-12시
   주차: number;
   쓰레기: number;
-  위험구역: number;
 }
 
 export interface HandlingStat {     // 처리 현황 100% 기준 (1m)
@@ -181,6 +181,13 @@ export interface ZoneShareStat {    // 구역별 이벤트 비율 파이차트 (
   zone: string;                     // 지하주차장 B2
   count: number;                    // 9 (건)
   pct: number;                      // 42 (%)
+}
+
+// AI 인사이트 리포트 소견 (1m) — 서버가 문자열만 주면 body로 정규화해 표시
+export interface AiInsight {
+  title: string;                    // 불법주차 증가 추세
+  body: string;                     // 서술형 본문
+  action?: string;                  // 권장 조치 — B2 구역 순찰 빈도 상향
 }
 
 export interface User {

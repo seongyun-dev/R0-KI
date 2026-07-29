@@ -568,6 +568,147 @@
 .r0ki .empty svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
 .r0ki .empty span{font-size:15px;font-weight:600}
 
+/* ══════════════ 통계 화면 (R0Ki-stats 시안 포팅) ══════════════
+   3단 구성 — 좌 KPI 스택 / 중앙 주력 차트 / 우 보조 패널 / 하단 AI 인사이트.
+   유리 예산: 차트 패널 4개 + AI 인사이트만 g2. KPI는 --track 기반(backdrop-filter 없음).
+   차트 캔버스가 GPU를 쓰므로 유리를 늘리면 임베디드 단말에서 합성 비용이 겹친다. */
+/* 그리드는 내용 아래로 절대 줄어들지 않는다(flex-shrink:0) — 화면이 모자라면
+   .pcol 이 스크롤한다. min-height:0 로 눌러 넣으면 차트가 AI 블록 위로 겹친다. */
+.r0ki .st-grid{display:grid;grid-template-columns:264px 1fr 396px;grid-template-rows:1fr auto;
+  gap:var(--s2);align-items:stretch;flex:1 0 auto}
+/* 통계 본문 스크롤러 — 다른 pcol 화면(순찰/이벤트)에는 영향 없음 */
+.r0ki .pcol:has(.st-grid){overflow-y:auto;padding-right:6px}
+.r0ki .pcol:has(.st-grid)::-webkit-scrollbar{width:6px}
+.r0ki .pcol:has(.st-grid)::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .pcol:has(.st-grid)::-webkit-scrollbar-track{background:transparent}
+.r0ki .st-col{display:flex;flex-direction:column;gap:var(--s2);min-width:0;min-height:0}
+.r0ki .st-col.c1{grid-column:1;grid-row:1}
+.r0ki .st-col.c2{grid-column:2;grid-row:1}
+.r0ki .st-col.c3{grid-column:3;grid-row:1}
+.r0ki .st-ai{grid-column:1/-1;grid-row:2}
+
+/* 패널 — 컬럼 안에서 남는 높이를 나눠 갖는다(차트 캔버스가 0px로 접히지 않도록) */
+.r0ki .st-panel{padding:var(--s5);display:flex;flex-direction:column;min-width:0;min-height:0}
+.r0ki .st-col>.st-panel{flex:1;min-height:230px}
+.r0ki .st-head{display:flex;align-items:center;gap:var(--s3);flex:none;margin-bottom:var(--s3)}
+/* HUD 불릿 — 마름모. 각진 코너 브래킷은 r-panel 곡률과 싸워서 불릿+헤어라인으로 대신한다 */
+.r0ki .st-head .bul{width:7px;height:7px;flex:none;background:var(--graphic);transform:rotate(45deg)}
+.r0ki .st-head .ttl{font-size:15px;font-weight:700;letter-spacing:-.01em;color:var(--text-1);white-space:nowrap}
+.r0ki .st-head .sub{font-size:12.5px;font-weight:600;color:var(--text-2);white-space:nowrap}
+.r0ki .st-head .meta{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--text-2);white-space:nowrap}
+.r0ki .st-head .meta b{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text-2);margin-right:2px}
+.r0ki .st-rule{height:1px;background:var(--hair);flex:none;margin-bottom:var(--s3)}
+
+/* 범례 — 색·점·텍스트 3중 표기 (색맹 대응) */
+.r0ki .st-leg{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;flex:none;margin-bottom:var(--s2)}
+.r0ki .st-leg span{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--text-2)}
+.r0ki .st-leg i{width:10px;height:10px;border-radius:3px;flex:none}
+
+/* 차트 캔버스 — 패널의 남는 높이 전부 */
+.r0ki .st-chart{position:relative;flex:1;min-height:0;width:100%}
+
+/* KPI 타일 (좌측 스택) */
+.r0ki .st-kpi{flex:1;min-height:0;display:flex;flex-direction:row;align-items:center;gap:var(--s3);
+  padding:var(--s4) var(--s5);border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5)}
+.r0ki[data-theme="nocturne"] .st-kpi{box-shadow:inset 0 1px 0 rgba(255,255,255,.13)}
+.r0ki .st-kb{flex:1;min-width:0;display:flex;flex-direction:column}
+.r0ki .st-kpi .k{font-size:12.5px;font-weight:600;letter-spacing:-.01em;color:var(--text-3)}
+.r0ki .st-kpi .v{font-family:var(--mono);font-size:33px;font-weight:700;letter-spacing:-.045em;
+  line-height:1;color:var(--text-1);margin:7px 0 8px}
+.r0ki .st-kpi .v .u{font-size:16px;font-weight:600;color:var(--text-2);margin-left:1px}
+.r0ki .st-kpi .d{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--text-2)}
+/* 증감 화살표 — 색이 아니라 방향으로 읽히게 (모노크롬 규칙) */
+.r0ki .st-kpi .d .ar{font-size:10px;line-height:1;color:var(--graphic)}
+/* 가동률 — 액센트 채움 반전 타일 + 링 게이지 */
+.r0ki .st-kpi.hi{background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
+  border-color:transparent;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(5,42,71,.22),
+             0 2px 5px rgba(6,48,88,.42),0 8px 20px var(--accent-glow)}
+.r0ki .st-kpi.hi .v{color:var(--accent-ink)}
+.r0ki .st-kpi.hi .k,.r0ki .st-kpi.hi .d,.r0ki .st-kpi.hi .v .u{color:var(--accent-ink);opacity:.86}
+.r0ki .st-ring{width:62px;height:62px;flex:none;transform:rotate(-90deg)}
+.r0ki .st-ring circle{fill:none;stroke-width:6;stroke-linecap:round}
+.r0ki .st-ring .trk{stroke:var(--accent-ink);opacity:.18}
+.r0ki .st-ring .arc{stroke:var(--accent-ink)}
+
+/* 도넛 + 순위 목록 */
+.r0ki .st-donut{display:flex;align-items:center;gap:var(--s3);flex:1;min-height:0}
+.r0ki .st-donut .st-chart{flex:0 0 144px;height:144px}
+.r0ki .st-dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;pointer-events:none}
+.r0ki .st-dc .v{font-family:var(--mono);font-size:23px;font-weight:700;color:var(--text-1)}
+.r0ki .st-dc .k{font-size:12px;font-weight:600;color:var(--text-3)}
+.r0ki .st-rank{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.r0ki .st-rk{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--hair)}
+.r0ki .st-rk:last-child{border-bottom:0}
+.r0ki .st-rk i{width:10px;height:10px;border-radius:3px;flex:none;background:var(--graphic)}
+.r0ki .st-rk .n{flex:1;min-width:0;font-size:13.5px;font-weight:600;color:var(--text-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r0ki .st-rk .c{font-family:var(--mono);font-size:13.5px;font-weight:700;color:var(--text-1);flex:none}
+.r0ki .st-rk .p{font-family:var(--mono);font-size:12.5px;font-weight:600;color:var(--text-3);
+  flex:none;width:34px;text-align:right}
+
+/* AI 인사이트 — 가로 스트립. 내용이 늘어날 영역이라 최소 높이를 확보하고
+   항목이 많아지면 블록 안에서 스크롤한다(차트가 눌리지 않도록) */
+.r0ki .st-ai{padding:var(--s4) var(--s5) var(--s5);min-height:230px;
+  display:flex;flex-direction:column}
+.r0ki .st-ai .st-head{margin-bottom:var(--s3)}
+.r0ki .st-ins{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);
+  flex:1;min-height:0;align-content:start;overflow-y:auto;padding-right:4px}
+.r0ki .st-ins::-webkit-scrollbar{width:6px}
+.r0ki .st-ins::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .st-ins::-webkit-scrollbar-track{background:transparent}
+/* 종합 요약 문단 — 리포트 도입부 (AI 요약 .q 와 같은 액센트 바) */
+.r0ki .st-sum{position:relative;flex:none;margin-bottom:var(--s3);padding-left:var(--s4);
+  font-size:14.5px;line-height:1.65;color:var(--text-1);letter-spacing:-.01em;max-width:120ch}
+.r0ki .st-sum::before{content:'';position:absolute;left:0;top:3px;bottom:3px;width:4px;border-radius:2px;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2))}
+/* 소견 카드 — 번호·제목·권장 조치 헤더 + 서술형 본문 */
+.r0ki .st-in{display:flex;flex-direction:column;gap:7px;
+  padding:13px var(--s4) 14px;border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);
+  border-left:3px solid var(--graphic)}
+.r0ki .st-in .hd{display:flex;align-items:center;gap:10px;min-width:0}
+.r0ki .st-in .no{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--graphic);flex:none}
+.r0ki .st-in .tt{font-size:14.5px;font-weight:700;color:var(--text-1);letter-spacing:-.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r0ki .st-in .act{margin-left:auto;flex:none;font-size:12.5px;font-weight:700;color:var(--graphic);white-space:nowrap}
+.r0ki .st-in .bd{font-size:13.5px;line-height:1.55;color:var(--text-2)}
+.r0ki .st-in b{font-weight:700;color:var(--text-1)}
+
+/* 세로가 좁아지면 수직 여백부터 회수 */
+@media (max-height:880px){
+  .r0ki .st-panel{padding:var(--s4)}
+  .r0ki .st-kpi{padding:var(--s3) var(--s4)}
+  .r0ki .st-kpi .v{font-size:28px;margin:5px 0 6px}
+  .r0ki .st-ring{width:54px;height:54px}
+  .r0ki .st-donut .st-chart{flex:0 0 132px;height:132px}
+}
+@media (max-height:760px){
+  .r0ki .st-kpi .v{font-size:25px}
+  .r0ki .st-ai{padding:var(--s3) var(--s4);min-height:190px}
+  .r0ki .st-in{padding:9px var(--s3) 10px;gap:5px}
+  .r0ki .st-in .bd{font-size:13px}
+  .r0ki .st-sum{font-size:13.5px}
+}
+/* 반응형 */
+@media(max-width:1360px){
+  .r0ki .st-grid{grid-template-columns:230px 1fr 330px}
+  /* 좁아지면 도넛과 순위 목록이 폭을 못 나눠 가져 구역명이 잘린다 → 세로로 쌓는다 */
+  .r0ki .st-donut{flex-direction:column;gap:var(--s3)}
+  .r0ki .st-donut .st-chart{flex:0 0 138px;width:138px;height:138px;align-self:center}
+  .r0ki .st-rank{width:100%}
+}
+@media(max-width:1180px){
+  .r0ki .st-grid{grid-template-columns:1fr;grid-template-rows:auto}
+  .r0ki .st-col.c1,.r0ki .st-col.c2,.r0ki .st-col.c3,.r0ki .st-ai{grid-column:1;grid-row:auto}
+  .r0ki .st-col.c1{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .r0ki .st-panel{min-height:300px}
+  .r0ki .st-ins{grid-template-columns:1fr}
+}
+
 /* 토스트 */
 .r0ki .toast{position:fixed;left:50%;top:52%;transform:translate(-50%,-50%) scale(.94);
   display:flex;align-items:center;gap:12px;height:64px;padding:0 34px;border-radius:var(--r-pill);
