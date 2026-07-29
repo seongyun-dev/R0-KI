@@ -302,6 +302,31 @@ export const mapApi = {
 
 export const statsApi = {
   /**
+   * 드롭다운 구역 키(parking/recycle/danger)를 by-zone 결과의 zoneId 목록으로 변환한다.
+   *
+   * <p>백엔드는 checkpoint_type 필터 파라미터가 아직 없으므로,
+   * 1차는 zoneName 키워드 매칭으로 zoneIds를 만든 뒤 기존 zoneIds 필터 API를 재사용한다.
+   * (예: parking -> "주차", recycle -> "분리수거", danger -> "위험")
+   */
+  resolveZoneIds: (
+    byZone: AnalyticsByZoneResponse,
+    zone: string,
+  ): number[] | undefined => {
+    if (!zone || zone === 'all') return undefined
+    const keywordByZone: Record<string, string> = {
+      parking: '주차',
+      recycle: '분리수거',
+      danger: '위험',
+    }
+    const keyword = keywordByZone[zone]
+    if (!keyword) return undefined
+    const ids = (byZone.items ?? [])
+      .filter((item) => item.zoneName?.includes(keyword))
+      .map((item) => item.zoneId)
+    return ids.length > 0 ? ids : undefined
+  },
+
+  /**
    * 통계 대시보드용 Analytics API 묶음 호출.
    *
    * 예전 단일 `/api/statistics` 가정은 폐기하고,
@@ -309,32 +334,51 @@ export const statsApi = {
    * assembleStatsDashboard 매퍼가 Stats 화면 형태로 합친다.
    *
    * @param range resolveAnalyticsRange() 결과 (from/to, +09:00)
-   * zone 드롭다운(parking/recycle/danger)은 1차 미연동 — 쿼리에 넣지 않음.
+   * @param zone 구역 드롭다운 값. parking/recycle/danger를 zoneIds로 변환해 함께 적용한다.
    */
-  fetchDashboard: (range: { from: string; to: string }) => {
+  fetchDashboard: async (range: { from: string; to: string }, zone?: string) => {
     const base = {
       from: range.from,
       to: range.to,
     }
-    return Promise.all([
+    // 1) 기간 필터만 적용된 by-zone을 먼저 조회해 zoneId 후보를 얻는다.
+    //    이후 구역 선택값을 zoneIds로 변환해 나머지 API에 공통 적용한다.
+    const byZoneAll = await apiRequest<AnalyticsByZoneResponse>(
+      withQuery('/api/analytics/events/by-zone', base),
+    )
+    const zoneIds = statsApi.resolveZoneIds(byZoneAll, zone ?? 'all')
+    const zoneIdsCsv = zoneIds?.join(',')
+    const scoped = { ...base, zoneIds: zoneIdsCsv }
+
+    const [overview, dailyTrend, hourlyTrend, handling] = await Promise.all([
       // KPI: 순찰수·이벤트·평균처리시간 + 증감
       apiRequest<AnalyticsOverviewResponse>(
-        withQuery('/api/analytics/events/overview', { ...base, compare: 'true' }),
+        withQuery('/api/analytics/events/overview', { ...scoped, compare: 'true' }),
       ),
       // 일자별 추이 차트
       apiRequest<AnalyticsTrendResponse>(
-        withQuery('/api/analytics/events/trend', { ...base, bucket: 'day' }),
+        withQuery('/api/analytics/events/trend', { ...scoped, bucket: 'day' }),
       ),
       // 시간대×유형 차트 (3시간×8칸)
       apiRequest<AnalyticsTrendResponse>(
-        withQuery('/api/analytics/events/trend', { ...base, bucket: 'hour3' }),
+        withQuery('/api/analytics/events/trend', { ...scoped, bucket: 'hour3' }),
       ),
       // 처리/미처리 현황
       apiRequest<AnalyticsHandlingResponse>(
-        withQuery('/api/analytics/events/handling', base),
+        withQuery('/api/analytics/events/handling', scoped),
       ),
-      // 구역 파이차트 (checkpoint_id)
-      apiRequest<AnalyticsByZoneResponse>(withQuery('/api/analytics/events/by-zone', base)),
     ])
+
+    // 2) by-zone은 백엔드 zoneIds 필터가 없어 프론트에서 동일 zoneIds로 후필터한다.
+    //    이렇게 하면 "기간 + 구역" 조건이 모든 패널에 동일하게 적용된다.
+    const byZone =
+      zoneIds && zoneIds.length > 0
+        ? {
+            ...byZoneAll,
+            items: byZoneAll.items.filter((item) => zoneIds.includes(item.zoneId)),
+          }
+        : byZoneAll
+
+    return [overview, dailyTrend, hourlyTrend, handling, byZone] as const
   },
 }

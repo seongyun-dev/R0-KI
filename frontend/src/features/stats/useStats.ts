@@ -23,10 +23,12 @@ import type { StatsDashboardData } from './mapAnalyticsToStats'
  *
  * 연결:
  * - period: 화면 드롭다운 → resolveAnalyticsRange → from/to
- * - zone: 1차 미연동 (parking/recycle/danger 목업용). API 쿼리에 넣지 않음.
+ * - zone: parking/recycle/danger → by-zone 결과의 zoneId(checkpoint_id)로 변환 후
+ *         overview/trend/handling + 파이차트에 동일하게 적용
  */
 export function useStats(params: { period?: string; zone?: string } = {}) {
   const period = params.period || 'month'
+  const zone = params.zone || 'all'
 
   return useApiQuery<StatsDashboardData>(
     async () => {
@@ -44,7 +46,7 @@ export function useStats(params: { period?: string; zone?: string } = {}) {
       // 실연동: period → 기간, 5개 API 병렬 호출 후 화면 형태로 조립
       const range = resolveAnalyticsRange(period)
       const [overview, dailyTrend, hourlyTrend, handling, byZone] =
-        await statsApi.fetchDashboard(range)
+        await statsApi.fetchDashboard(range, zone)
 
       return assembleStatsDashboard({
         overview,
@@ -54,8 +56,8 @@ export function useStats(params: { period?: string; zone?: string } = {}) {
         byZone,
       })
     },
-    // zone은 UI만 유지하고 의존성에서 빼 두어 불필요한 재요청을 막는다 (1차 미연동)
-    [period],
+    // period/zone 둘 중 하나라도 바뀌면 동일 조건으로 전체 패널을 다시 조회한다.
+    [period, zone],
     { delayMs: env.useMocks ? 350 : 0 },
   )
 }
