@@ -1,5 +1,10 @@
 package com.oneloop.mqtt;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.oneloop.global.exception.BusinessException;
+import com.oneloop.global.exception.ErrorCode;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,10 +22,25 @@ import org.springframework.stereotype.Component;
 public class MqttPublisher {
 
     private static final int QOS = 1;
+    // 모든 로봇 명령은 공통 토픽으로 보내고 IoT는 payload의 command 값으로 기능을 구분한다.
+    private static final String ROBOT_COMMAND_TOPIC = "hanbakwi/v1/robots/%s/command";
 
     private final IMqttClient mqttClient;
+    private final ObjectMapper objectMapper =
+            new ObjectMapper()
+                    .findAndRegisterModules()
+                    .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-    // 나중에 순찰 시작/종료(PatrolService) 등에서 그대로 호출할 범용 발행 메서드
+    // 순찰/지도 생성 등 도메인 서비스가 로봇 명령 DTO를 그대로 넘기면 공통 명령 토픽으로 직렬화해 발행한다.
+    public void publishCommand(String robotKey, Object command) {
+        try {
+            publish(ROBOT_COMMAND_TOPIC.formatted(robotKey), objectMapper.writeValueAsString(command));
+        } catch (JsonProcessingException exception) {
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // 범용 발행 메서드
     public void publish(String topic, String payload) {
         send(topic, payload, false);
     }
