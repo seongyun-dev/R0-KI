@@ -91,12 +91,6 @@ export default function SignupOnboarding() {
               }
             }}
           />
-          <p className="mt-6 border-t border-line pt-5 text-center text-sm text-muted">
-            이미 등록된 단지 소속이신가요?{' '}
-            <Link to="/signup" className="font-semibold text-fg underline-offset-4 hover:underline">
-              일반 회원가입 →
-            </Link>
-          </p>
         </>
       )}
       {phase === 'robot' && (
