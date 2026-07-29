@@ -167,7 +167,7 @@ export function buildRobot() {
   baseRing.position.y = -1.5
   robot.add(baseRing)
 
-  return { robot, head, visorMat, glow, glow2, baseRing }
+  return { robot, head, visor, visorMat, glow, glow2, baseRing }
 }
 
 /** 바이저 점멸 + 머리 흔들림 — 두 뷰가 공유하는 "생동감" 애니메이션 */
