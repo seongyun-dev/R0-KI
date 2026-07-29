@@ -25,9 +25,23 @@ export default function PatrolList() {
   const { data: robots } = useRobots()
   const [period, setPeriod] = useState('all')
   const [applied, setApplied] = useState('all')
-  const { data: patrols, isLoading, error, refetch } = usePatrols({
+  const [page, setPage] = useState(0)
+  const {
+    data: patrols,
+    isLoading,
+    error,
+    refetch,
+    totalElements,
+    totalPages,
+    first,
+    last,
+  } = usePatrols({
     robotId: selectedRobotId,
     period: applied,
+    status: 'COMPLETED',
+    page,
+    size: 10,
+    sort: ['startedAt,DESC'],
   })
 
   // 완료된 순찰만 기록/표시 (진행중 등 제외)
@@ -50,6 +64,7 @@ export default function PatrolList() {
             className="headtools"
             onSubmit={(e) => {
               e.preventDefault()
+              setPage(0)
               setApplied(period)
             }}
           >
@@ -119,6 +134,31 @@ export default function PatrolList() {
               <div className="tfoot">
                 <span>{isLoading ? '불러오는 중…' : rows.length === 0 ? '조건에 맞는 순찰 이력이 없습니다' : `전체 ${rows.length}건`}</span>
                 <span>{PERIOD_LABEL[applied] ?? '기간 전체'}</span>
+              </div>
+              <div
+                className="tfoot"
+                style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  disabled={first || isLoading}
+                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                >
+                  이전
+                </button>
+                <span>
+                  {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  disabled={last || isLoading}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  다음
+                </button>
+                <span>전체 {totalElements}건</span>
               </div>
             </>
           )}

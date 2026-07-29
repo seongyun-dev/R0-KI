@@ -19,7 +19,21 @@ const STATUS_DOT: Record<string, string> = {
 
 export default function RobotList() {
   const navigate = useNavigate()
-  const { data: robots, isLoading, error, refetch } = useRobots()
+  const [page, setPage] = useState(0)
+  const {
+    data: robots,
+    isLoading,
+    error,
+    refetch,
+    totalElements,
+    totalPages,
+    first,
+    last,
+  } = useRobots({
+    page,
+    size: 10,
+    sort: ['robotId,ASC'],
+  })
   const { data: stats } = useRobotStats()
   const updateRobot = useUpdateRobot()
   const deleteRobot = useDeleteRobot()
@@ -142,6 +156,31 @@ export default function RobotList() {
               <div className="tfoot">
                 <span>{isLoading ? '불러오는 중…' : `전체 ${rows.length}대`}</span>
                 <span>등록순</span>
+              </div>
+              <div
+                className="tfoot"
+                style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  disabled={first || isLoading}
+                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                >
+                  이전
+                </button>
+                <span>
+                  {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  disabled={last || isLoading}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  다음
+                </button>
+                <span>전체 {totalElements}대</span>
               </div>
             </>
           )}

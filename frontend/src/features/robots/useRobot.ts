@@ -7,15 +7,45 @@ import { useApiMutation } from '../../lib/useApiMutation'
 import { useApiQuery } from '../../lib/useApiQuery'
 
 /** 로봇 목록 (1i). 서버 연동 시 useQuery(['robots'])로 교체. */
-export function useRobots() {
-  return useApiQuery(
+export function useRobots(
+  params: { page?: number; size?: number; sort?: string[] } = {},
+) {
+  const query = useApiQuery(
     async () => {
-      if (env.useMocks) return robots
-      return (await robotsApi.list()).map(robotListItemToDomain)
+      if (env.useMocks) {
+        const page = params.page ?? 0
+        const size = params.size ?? 10
+        const start = page * size
+        return {
+          content: robots.slice(start, start + size),
+          page,
+          size,
+          totalElements: robots.length,
+          totalPages: Math.ceil(robots.length / size),
+          first: page === 0,
+          last: start + size >= robots.length,
+        }
+      }
+      const response = await robotsApi.list(params)
+      return {
+        ...response,
+        content: response.content.map(robotListItemToDomain),
+      }
     },
-    [],
+    [params.page, params.size, params.sort?.join(',')],
     { delayMs: env.useMocks ? 350 : 0 },
   )
+
+  return {
+    ...query,
+    data: query.data?.content,
+    page: query.data?.page ?? params.page ?? 0,
+    size: query.data?.size ?? params.size ?? 10,
+    totalElements: query.data?.totalElements ?? 0,
+    totalPages: query.data?.totalPages ?? 0,
+    first: query.data?.first ?? true,
+    last: query.data?.last ?? true,
+  }
 }
 
 /** 로봇 현황 통계 (1i KPI) — 전체/순찰중/대기·충전중. */

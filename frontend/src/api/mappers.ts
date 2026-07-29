@@ -267,7 +267,7 @@ export function robotListItemToDomain(value: RobotListResponse): Robot {
     zone: '미지정',
     status: robotStatusLabel(value.robotStatus),
     battery: toNumber(value.batteryLevel),
-    location: value.location ?? '위치 미확인',
+    location: value.checkpointType,
     parts: [],
   }
 }
@@ -447,15 +447,14 @@ export function locationEventToMapRobot(
   monitoring: MapMonitoringResponse,
 ): MapRobot {
   const point = mapPointToGrid(
-    event.xCoordinate,
-    event.yCoordinate,
+    event.x ?? monitoring.robot.xCoordinate,
+    event.y ?? monitoring.robot.yCoordinate,
     monitoring.map,
     responseBounds(monitoring),
   )
   return {
-    id: event.robotName || String(event.robotId),
+    id: String(event.robotId),
     ...point,
-    battery: event.batteryLevel == null ? undefined : toNumber(event.batteryLevel),
-    updatedAt: event.updatedAt ?? event.locationUpdatedAt,
+    updatedAt: event.updatedAt ?? undefined,
   }
 }

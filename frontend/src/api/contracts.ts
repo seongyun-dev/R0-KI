@@ -146,12 +146,124 @@ export type EventStatusChangeResponse = {
   updatedAt: string,
 }
 
+// POST /api/events/{eventId}/notify
+export type EventNotificationResponse = {
+  notificationId: number
+  eventId: number
+  recipientResidentId: number
+  sendStatus: string
+  sentAt: string
+}
+
+// GET /api/notifications
+export type NotificationHistoryItemResponse = {
+  notificationId: number
+  eventId: number
+  recipientResidentId: number
+  notificationTitle: string
+  notificationContent: string
+  sendStatus: string
+  sentAt: string
+  createdAt: string
+}
+
+// GET /api/events/{eventId}/history (상태 변경 이력 전체 조회)
+export type EventStatusHistoryItemResponse = {
+  processingHistoryId: number
+  processingMemberId: number
+  changedProcessingStatus: ProcessingStatusCode
+  processingNote: string
+  changedAt: string
+}
+
+// POST /api/robot/events/batch (로봇 전용 이벤트 일괄 등록)
+export type EventBatchItemRequest = {
+  tempId: string
+  eventType: Extract<EventTypeCode, 'TRASH_DETECTED' | 'RECYCLING_AREA_FULL'>
+  eventTitle: string
+  eventDetails?: string
+  occurredAt: string
+  x: number
+  y: number
+  riskLevel: RiskLevelCode
+}
+
+export type EventBatchCreateRequest = {
+  events: EventBatchItemRequest[]
+}
+
+// apiRequest가 공통 응답 래퍼를 벗기므로 data 내부 구조만 선언한다.
+export type EventBatchCreateResponse = {
+  events: {
+    tempId: string
+    eventId: number
+  }[]
+}
+
+// POST /api/robot/vehicle-checks (로봇 전용 차량 일괄 판별)
+export type VehicleCheckItemRequest = {
+  tempId: string
+  eventDetails?: string
+  x: number
+  y: number
+  licensePlate: string
+  occurredAt: string
+}
+
+export type VehicleCheckRequest = {
+  vehicles: VehicleCheckItemRequest[]
+}
+
+// apiRequest가 공통 응답 래퍼를 벗기므로 data 내부 구조만 선언한다.
+export type VehicleCheckResponse = {
+  violations: {
+    tempId: string
+    eventId: number
+  }[]
+}
+
+// POST /api/events/{eventId}/evidence (로봇 전용 증거자료 업로드)
+export type EvidenceUploadRequest = {
+  file: File
+  mediaType: 'IMAGE' | 'VIDEO'
+  capturedAt?: string
+}
+
+// apiRequest가 공통 응답 래퍼를 벗기므로 data 내부 구조만 선언한다.
+export type EvidenceUploadResponse = {
+  eventId: number
+}
+
 
 // 백엔드 enum 코드 (back/dev 기준)
 export type PatrolStatusCode = 'IN_PROGRESS' | 'COMPLETED' | 'STOPPED' | 'FAILED'
 export type AiSummaryStatusCode = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 
+// POST /api/patrols (순찰 기록 생성)
+export type PatrolCreateRequest = {
+  robotId: number
+}
+
+export type PatrolCreateResponse = {
+  patrolId: number
+  robotId: number
+  patrolStatus: PatrolStatusCode
+  patrolStartedAt: string
+}
+
+// PATCH /api/patrols/{patrolId}/end (순찰 기록 종료)
+export type PatrolEndRequest = {
+  robotKey: string
+  patrolStatus: PatrolStatusCode
+  patrolEndedAt: string
+  endBatteryLevel: number
+  totalDuration: number
+}
+
+export type PatrolEndResponse = Record<string, never>
+
 export type PatrolRouteCheckpointResponse = {
+  checkpointId?: Id
   checkpointName: string
   sequence: number
 }
@@ -167,6 +279,16 @@ export type PatrolListResponse = {
   route?: PatrolRouteCheckpointResponse[]
 }
 
+export type PatrolListPageResponse = {
+  content: PatrolListResponse[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  first: boolean
+  last: boolean
+}
+
 export type PatrolBatteryResponse = {
   startLevel?: number | string | null
   endLevel?: number | string | null
@@ -176,6 +298,19 @@ export type PatrolRoutePointResponse = {
   xCoordinate: number | string
   yCoordinate: number | string
   recordedAt: string
+}
+
+// GET /api/patrols/{patrolId}/path
+export type PatrolPathPointResponse = {
+  positionId: Id
+  xCoordinate: number | string
+  yCoordinate: number | string
+  recordedAt: string
+}
+
+export type PatrolPathResponse = {
+  patrolId: Id
+  path: PatrolPathPointResponse[]
 }
 
 export type PatrolTimelineResponse = {
@@ -222,32 +357,42 @@ export type RobotListResponse = {
   robotId: Id
   robotName: string
   robotStatus: RobotStatusCode | string
-  batteryLevel?: number | string | null
-  location?: string | null
+  batteryLevel: number
+  checkpointType: string
+}
+
+export type RobotListPageResponse = {
+  content: RobotListResponse[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  first: boolean
+  last: boolean
 }
 
 // GET /api/robots/{id} 의 recentPatrols 항목
 export type RobotRecentPatrolResponse = {
-  patrolId: Id
+  patrolId: number
   patrolStatus: string
-  startedAt?: string | null
-  endedAt?: string | null
+  startedAt: string
+  endedAt: string | null
   detectedEventCount: number
 }
 
 // GET /api/robots/{id} (상세)
 export type RobotDetailResponse = {
-  robotId: Id
+  robotId: number
   robotName: string
   robotSerialNumber: string
   robotStatus: RobotStatusCode | string
-  batteryLevel?: number | string | null
-  cameraStatus?: SensorStatusCode | string | null
-  lidarStatus?: SensorStatusCode | string | null
-  motorStatus?: SensorStatusCode | string | null
+  batteryLevel: number | null
+  cameraStatus: SensorStatusCode | string | null
+  lidarStatus: SensorStatusCode | string | null
+  motorStatus: SensorStatusCode | string | null
   registeredAt: string
-  weeklyOperationRate?: number | string | null
-  recentPatrols?: RobotRecentPatrolResponse[]
+  weeklyOperationRate: number
+  recentPatrols: RobotRecentPatrolResponse[]
 }
 
 // GET /api/robots/stats
@@ -275,14 +420,14 @@ export type RobotUpdateRequest = {
   name: string
 }
 export type RobotUpdateResponse = {
-  robotId: Id
+  robotId: number
   robotName: string
   updatedAt: string
 }
 
 // DELETE /api/robots/{id}
 export type RobotDeleteResponse = {
-  robotId: Id
+  robotId: number
   deletedAt: string
 }
 
@@ -390,11 +535,24 @@ export type MapMonitoringResponse = {
 }
 
 export type RobotLocationEvent = {
-  robotId: Id
-  robotName?: string
-  xCoordinate: number | string
-  yCoordinate: number | string
-  batteryLevel?: number | string | null
-  updatedAt?: string
-  locationUpdatedAt?: string
+  robotId: number
+  x: number | null
+  y: number | null
+  heading: number | null
+  status:
+    | 'IDLE'
+    | 'PATROLLING'
+    | 'CHARGING'
+    | 'OBSTACLE_STOP'
+    | 'OFFLINE'
+    | 'DELETED'
+  updatedAt: string | null
+}
+
+// GET /api/robots/obstacle-events (SSE: robot-obstacle)
+export type RobotObstacleEvent = {
+  robotId: number
+  status: 'STOP' | 'CLEAR'
+  direction: string | null
+  message: string | null
 }
