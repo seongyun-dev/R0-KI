@@ -1,6 +1,7 @@
 package com.oneloop.patrol.repository;
 
 import com.oneloop.patrol.domain.PatrolCheckpointVisit;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -22,4 +23,27 @@ public interface PatrolCheckpointVisitRepository
             """)
     List<PatrolCheckpointVisit> findAllByPatrolIds(
             @Param("patrolIds") List<Long> patrolIds);
+
+    /**
+     * 단지/기간 기준 체크포인트(구역)별 방문 횟수를 집계한다.
+     * analytics by-zone API의 patrolCount(분모)로 사용한다.
+     *
+     * <p>반환: Object[0]=checkpointId(Long), Object[1]=visitCount(Long)
+     */
+    @Query(
+            """
+            SELECT visit.checkpoint.id, COUNT(visit)
+            FROM PatrolCheckpointVisit visit
+            WHERE visit.patrol.robot.apartmentComplex.id = :apartmentComplexId
+              AND visit.visitedAt >= :from
+              AND visit.visitedAt <= :to
+              AND (:hasRobotIds = false OR visit.patrol.robot.id IN :robotIds)
+            GROUP BY visit.checkpoint.id
+            """)
+    List<Object[]> countVisitsGroupedByCheckpoint(
+            @Param("apartmentComplexId") Long apartmentComplexId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to,
+            @Param("hasRobotIds") boolean hasRobotIds,
+            @Param("robotIds") List<Long> robotIds);
 }

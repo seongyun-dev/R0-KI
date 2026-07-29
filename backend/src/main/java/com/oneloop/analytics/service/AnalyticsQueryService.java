@@ -1,7 +1,9 @@
 package com.oneloop.analytics.service;
 
 import com.oneloop.analytics.dto.request.AnalyticsBucket;
+import com.oneloop.analytics.dto.request.ZoneSort;
 import com.oneloop.analytics.dto.response.ByTypeResponse;
+import com.oneloop.analytics.dto.response.ByZoneResponse;
 import com.oneloop.analytics.dto.response.OverviewResponse;
 import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.repository.AnalyticsRepository;
@@ -15,6 +17,7 @@ import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
@@ -59,6 +62,7 @@ public class AnalyticsQueryService {
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
+    private final PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
 
     /**
      * [이벤트 전체 현황 요약]
@@ -352,6 +356,174 @@ public class AnalyticsQueryService {
                         .toList();
 
         return ByTypeResponse.builder().totalCount(totalCount).items(items).build();
+    }
+
+    /**
+     * [구역별 이벤트 통계]
+     * 좌표→체크포인트 매핑으로 구역별 이벤트 건수를 세고,
+     * 같은 기간의 구역 방문 횟수와 순찰 대비 비율을 함께 계산한다.
+     *
+     * <p>프론트가 이 API로 얻는 것:
+     * - 구역별 이벤트 막대 차트
+     * - 최다 발생 구역(topZone)
+     * - 순찰 대비 비율 (나중에 안 쓰면 필드만 제거 가능)
+     *
+     * <p>순찰 대비 정의 (현재 확정값):
+     * - patrolCount = patrol_checkpoint_visits 방문 횟수 (같은 순찰에서 2번 방문하면 2)
+     * - eventRatePerPatrol = eventCount / patrolCount
+     * - patrolCount=0 이면 rate=null (0으로 나누지 않음)
+     *
+     * <p>구역 매핑 정책:
+     * CheckpointLocator.findContaining(정확히 사각형 안)만 사용.
+     * "근처" 폴백은 통계에 넣지 않는다.
+     *
+     * @param apartmentComplexId 로그인 관리자 소속 단지 ID
+     * @param from 조회 시작 시각
+     * @param to 조회 종료 시각
+     * @param eventTypes 유형 필터 (없으면 전체)
+     * @param robotIds 로봇 필터 (없으면 전체)
+     * @param statuses 처리상태 필터 (없으면 전체)
+     * @param sort 정렬 (count_desc | rate_desc), null이면 count_desc
+     * @return ByZoneResponse 구역별 통계
+     */
+    public ByZoneResponse getByZone(
+            Long apartmentComplexId,
+            LocalDateTime from,
+            LocalDateTime to,
+            List<EventType> eventTypes,
+            List<Long> robotIds,
+            List<ProcessingStatus> statuses,
+            ZoneSort sort) {
+        validateRange(from, to);
+        ZoneSort effectiveSort = sort == null ? ZoneSort.count_desc : sort;
+
+        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
+        Map<Long, String> zoneNames = new HashMap<>();
+        for (Checkpoint checkpoint : checkpoints) {
+            zoneNames.put(checkpoint.getId(), checkpoint.getName());
+        }
+
+        // 1) 이벤트 조회 후 좌표→구역 매핑하여 구역별 건수/유형 집계
+        List<DetectedEvent> events =
+                findEvents(apartmentComplexId, from, to, eventTypes, robotIds, statuses);
+
+        Map<Long, Long> eventCountByZone = new HashMap<>();
+        Map<Long, Map<EventType, Long>> typeCountByZone = new HashMap<>();
+        for (DetectedEvent event : events) {
+            checkpointLocator
+                    .findContaining(checkpoints, event.getX(), event.getY())
+                    .ifPresent(
+                            checkpoint -> {
+                                Long zoneId = checkpoint.getId();
+                                eventCountByZone.merge(zoneId, 1L, Long::sum);
+                                typeCountByZone
+                                        .computeIfAbsent(zoneId, key -> new HashMap<>())
+                                        .merge(event.getType(), 1L, Long::sum);
+                            });
+        }
+
+        // 2) 같은 기간·로봇 필터로 구역별 방문 횟수(분모) 조회
+        Map<Long, Long> patrolCountByZone = findPatrolCountByZone(apartmentComplexId, from, to, robotIds);
+
+        // 3) 이벤트가 한 건이라도 있는 구역만 응답 항목으로 만든다.
+        //    (방문만 있고 이벤트 0인 구역은 이번 차트 범위에서 제외)
+        List<ByZoneResponse.ByZoneItem> items =
+                eventCountByZone.entrySet().stream()
+                        .map(
+                                entry -> {
+                                    Long zoneId = entry.getKey();
+                                    long eventCount = entry.getValue();
+                                    long patrolCount = patrolCountByZone.getOrDefault(zoneId, 0L);
+                                    return ByZoneResponse.ByZoneItem.builder()
+                                            .zoneId(zoneId)
+                                            .zoneName(zoneNames.get(zoneId))
+                                            .eventCount(eventCount)
+                                            .patrolCount(patrolCount)
+                                            .eventRatePerPatrol(
+                                                    calculateEventRate(eventCount, patrolCount))
+                                            .topEventType(findTopType(typeCountByZone.get(zoneId)))
+                                            .build();
+                                })
+                        .sorted(zoneComparator(effectiveSort))
+                        .toList();
+
+        ByZoneResponse.TopZone topZone =
+                items.stream()
+                        .max(Comparator.comparingLong(ByZoneResponse.ByZoneItem::getEventCount))
+                        .map(
+                                item ->
+                                        ByZoneResponse.TopZone.builder()
+                                                .zoneId(item.getZoneId())
+                                                .zoneName(item.getZoneName())
+                                                .eventCount(item.getEventCount())
+                                                .build())
+                        .orElse(null);
+
+        return ByZoneResponse.builder().items(items).topZone(topZone).build();
+    }
+
+    /**
+     * 구역별 순찰 방문 횟수 Map을 만든다.
+     * robotIds 필터가 있으면 해당 로봇 순찰의 방문만 분모에 포함한다.
+     */
+    private Map<Long, Long> findPatrolCountByZone(
+            Long apartmentComplexId,
+            LocalDateTime from,
+            LocalDateTime to,
+            List<Long> robotIds) {
+        boolean hasRobotIds = robotIds != null && !robotIds.isEmpty();
+        List<Object[]> rows =
+                patrolCheckpointVisitRepository.countVisitsGroupedByCheckpoint(
+                        apartmentComplexId,
+                        from,
+                        to,
+                        hasRobotIds,
+                        hasRobotIds ? robotIds : List.of(-1L));
+
+        Map<Long, Long> result = new HashMap<>();
+        for (Object[] row : rows) {
+            Long zoneId = (Long) row[0];
+            Long count = (Long) row[1];
+            result.put(zoneId, count);
+        }
+        return result;
+    }
+
+    /**
+     * 순찰 대비 이벤트 비율.
+     * patrolCount=0 이면 null (0 나눗셈 방지, "아직 방문 기록 없음"을 표현).
+     */
+    private BigDecimal calculateEventRate(long eventCount, long patrolCount) {
+        if (patrolCount == 0L) {
+            return null;
+        }
+        return BigDecimal.valueOf(eventCount)
+                .divide(BigDecimal.valueOf(patrolCount), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 구역 내 유형별 건수 Map에서 최다 유형 1개를 고른다. */
+    private EventType findTopType(Map<EventType, Long> typeCounts) {
+        if (typeCounts == null || typeCounts.isEmpty()) {
+            return null;
+        }
+        return typeCounts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(null);
+    }
+
+    /**
+     * 구역 목록 정렬 Comparator.
+     * rate_desc일 때 rate=null 인 항목은 뒤로 보낸다.
+     */
+    private Comparator<ByZoneResponse.ByZoneItem> zoneComparator(ZoneSort sort) {
+        if (sort == ZoneSort.rate_desc) {
+            return Comparator.comparing(
+                            ByZoneResponse.ByZoneItem::getEventRatePerPatrol,
+                            Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(ByZoneResponse.ByZoneItem::getEventCount, Comparator.reverseOrder());
+        }
+        return Comparator.comparingLong(ByZoneResponse.ByZoneItem::getEventCount).reversed();
     }
 
     /**
