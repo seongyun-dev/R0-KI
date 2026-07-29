@@ -1,5 +1,5 @@
 import { env } from '../config/env'
-import { apiRequest, consumeSse, jsonBody } from './client'
+import { apiBlob, apiRequest, consumeSse, jsonBody } from './client'
 import type {
   ComplexResponse,
   EventDetailResponse,
@@ -8,7 +8,9 @@ import type {
   EventStatusChangeRequest,
   EventStatusChangeResponse,
   ListResponse,
-  MapMonitoringResponse,
+  MapDetailResponse,
+  MappingStartResponse,
+  MappingStatusEventResponse,
   PatrolDetailResponse,
   PatrolListResponse,
   RobotDeleteResponse,
@@ -24,6 +26,8 @@ import type {
   SignInResponse,
   SignUpRequest,
   SignUpResponse,
+  ZoneCreateRequest,
+  ZoneCreateResponse,
 } from './contracts'
 
 export function unwrapList<T>(response: ListResponse<T>): T[] {
@@ -116,15 +120,31 @@ export const robotsApi = {
 }
 
 export const mapApi = {
-  monitoring: (mapId: string | number, robotId: string | number) =>
-    apiRequest<MapMonitoringResponse>(
-      `/api/map/${encodeURIComponent(mapId)}/monitoring?robotId=${encodeURIComponent(robotId)}`,
+  startMapping: (robotId: string | number) =>
+    apiRequest<MappingStartResponse>('/api/map/mapping-sessions', {
+      method: 'POST',
+      body: jsonBody({ robotId }),
+    }),
+  subscribeMapping: (
+    mappingSessionId: string | number,
+    onMessage: (data: MappingStatusEventResponse) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<MappingStatusEventResponse>(
+      `/api/map/mapping-sessions/${encodeURIComponent(mappingSessionId)}/events`,
+      onMessage,
+      signal,
     ),
-  registerZones: (mapId: string | number, zones: unknown[]) =>
-    apiRequest<unknown>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
+  detail: (mapId: string | number) =>
+    apiRequest<MapDetailResponse>(`/api/map/${encodeURIComponent(mapId)}`),
+  file: (mapUrl: string, signal?: AbortSignal) => apiBlob(mapUrl, signal),
+  registerZones: (mapId: string | number, zones: ZoneCreateRequest[]) =>
+    apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
       method: 'POST',
       body: jsonBody({ zones }),
     }),
+  zones: (mapId: string | number) =>
+    apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`),
   subscribeRobotLocation: (
     robotId: string | number,
     onMessage: (data: RobotLocationEvent) => void,

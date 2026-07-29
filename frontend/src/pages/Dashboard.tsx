@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { R0KiShell, useClockText } from '../components/layout/R0KiShell'
 import { R0KiLiveCam } from '../features/dashboard/R0KiLiveCam'
 import { R0KiPatrolMap } from '../features/dashboard/R0KiPatrolMap'
+import { ComplexMap } from '../features/dashboard/ComplexMap'
+import { useComplexMap } from '../features/dashboard/useComplexMap'
 import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
 import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
 import { useEvents } from '../features/events/useEvents'
@@ -24,6 +26,7 @@ export default function Dashboard() {
   const clock = useClockText()
   const { data: events } = useEvents()
   const { data: robots } = useRobots()
+  const { data: mapData } = useComplexMap()
 
   // 긴급(발견 즉시 기록) — 목록 맨 위 고정 / 정상(일괄 기록) — 아래 그룹
   const urgentEvents = (events ?? []).filter((e) => e.riskLevel === '긴급')
@@ -61,10 +64,14 @@ export default function Dashboard() {
         <div className="hmi">
           <div className="mapzone glass g2">
             <div className="bigmap">
-              <R0KiPatrolMap
-                urgent={hasUrgent ? { label: `응급상황 ${urgentEvents[0]?.time ?? ''}` } : null}
-                robotName={lead ? `R0-Ki ${lead.name}` : 'R0-Ki 1호기'}
-              />
+              {mapData ? (
+                <ComplexMap map={mapData.map} robot={mapData.robot} pins={mapData.pins} />
+              ) : (
+                <R0KiPatrolMap
+                  urgent={hasUrgent ? { label: `응급상황 ${urgentEvents[0]?.time ?? ''}` } : null}
+                  robotName={lead ? `R0-Ki ${lead.name}` : 'R0-Ki 1호기'}
+                />
+              )}
             </div>
           </div>
 

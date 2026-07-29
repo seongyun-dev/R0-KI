@@ -7,6 +7,7 @@ type AuthState = {
   mapId: string | null
   robotId: string | null
   isAuthenticated: boolean
+  setMapContext: (context: { mapId?: string | number; robotId?: string | number }) => void
   login: (
     loginId: string,
     accessToken?: string,
@@ -24,6 +25,11 @@ export const useAuthStore = create<AuthState>()(
       mapId: null,
       robotId: null,
       isAuthenticated: false,
+      setMapContext: (context) =>
+        set((state) => ({
+          mapId: context.mapId == null ? state.mapId : String(context.mapId),
+          robotId: context.robotId == null ? state.robotId : String(context.robotId),
+        })),
       login: (loginId, accessToken = 'mock-access-token', context) =>
         set({
           loginId,

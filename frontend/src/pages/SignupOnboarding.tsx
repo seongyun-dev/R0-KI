@@ -51,9 +51,12 @@ export default function SignupOnboarding() {
   const [zoneCount, setZoneCount] = useState(0)
   // 로봇 등록 입력값(이름) — 서버 연동 시 최종 제출(등록 API)로 전송. 일련번호는 등록 API 연동 시 함께 캡처
   const [robotName, setRobotName] = useState('')
+  const [robotId, setRobotId] = useState<string | number>()
+  const [mapId, setMapId] = useState<string | number>()
   const setRegisteredZones = useRegisteredMap((s) => s.setZones)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>()
+  const setMapContext = useAuthStore((s) => s.setMapContext)
 
   return (
     <AuthLayout
@@ -96,15 +99,28 @@ export default function SignupOnboarding() {
       {phase === 'robot' && (
         <StepRobot
           onPrev={() => setPhase('account')}
-          onNext={({ name }) => {
+          onNext={({ robotId: registeredRobotId, name }) => {
             setRobotName(name)
+            setRobotId(registeredRobotId)
+            setMapContext({ robotId: registeredRobotId })
             setPhase('scan')
           }}
         />
       )}
-      {phase === 'scan' && <StepMapScan onPrev={() => setPhase('robot')} onNext={() => setPhase('zones')} />}
-      {phase === 'zones' && (
+      {phase === 'scan' && robotId != null && (
+        <StepMapScan
+          robotId={robotId}
+          onPrev={() => setPhase('robot')}
+          onNext={(completedMapId) => {
+            setMapId(completedMapId)
+            setMapContext({ mapId: completedMapId, robotId })
+            setPhase('zones')
+          }}
+        />
+      )}
+      {phase === 'zones' && mapId != null && (
         <StepZones
+          mapId={mapId}
           onPrev={() => setPhase('scan')}
           onComplete={(zones) => {
             setRegisteredZones(zones) // 대시보드 지도에 반영

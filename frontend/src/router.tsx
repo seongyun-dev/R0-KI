@@ -68,6 +68,39 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: 'events',
+        element: (
+          <RequireAuth>
+            <EventList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'events/:id',
+        element: (
+          <RequireAuth>
+            <EventDetail />
+          </RequireAuth>
+        ),
+      },
+      // 로봇관리 (1i 목록 → 1i-r01 상세) — R0KiShell 자체 상단바라 AppShell 밖 독립 렌더
+      {
+        path: 'robots',
+        element: (
+          <RequireAuth>
+            <RobotList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'robots/:id',
+        element: (
+          <RequireAuth>
+            <RobotDetail />
+          </RequireAuth>
+        ),
+      },
+      {
         // 비로그인 접근 시 /login으로 — 나머지 화면은 기존 셸 유지
         element: (
           <RequireAuth>
@@ -75,12 +108,7 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-      { path: 'events', element: <EventList /> },
-      { path: 'events/:id', element: <EventDetail /> },
-      // 로봇관리 (1i 목록 → 1i-r01 상세)
-      { path: 'robots', element: <RobotList /> },
       { path: 'robots/new', element: <RobotNew /> },
-      { path: 'robots/:id', element: <RobotDetail /> },
       {
         path: 'stats',
         element: (

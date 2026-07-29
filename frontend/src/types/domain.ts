@@ -47,6 +47,7 @@ export interface ComplexMapData {
   zones: Zone[];
   mapId?: string;
   mapUrl?: string;
+  mapImageUrl?: string;
 }
 
 export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표, 소수 허용)

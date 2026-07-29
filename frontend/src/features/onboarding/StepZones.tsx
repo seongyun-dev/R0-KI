@@ -1,10 +1,13 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import type { MapDetailResponse, ZoneCreateRequest, ZoneTypeCode } from '../../api/contracts'
+import { mapApi } from '../../api/services'
 import { CloseIcon } from '../../components/icons'
 import { Button, Field, Input, Modal, StatusBadge, useToast } from '../../components/ui'
 import { cn } from '../../lib/cn'
 import type { Zone, ZoneType } from '../../types/domain'
 
 export type StepZonesProps = {
+  mapId: string | number
   onPrev: () => void
   /** 등록한 구역 목록을 상위로 전달 (대시보드 지도에 반영) */
   onComplete: (zones: Zone[]) => void
@@ -15,7 +18,15 @@ const ROWS = 7 // 행 1~7
 const colLabel = (i: number) => String.fromCharCode(65 + i)
 
 // 위험구역 제거 · 도착지(순찰 복귀 종료 지점) 추가
-const ZONE_TYPES: ZoneType[] = ['주차장', '분리수거장', '출입구', '도착지', '기타']
+const ZONE_TYPES: ZoneType[] = ['주차장', '분리수거장', '위험구역', '출입구', '도착지']
+
+const zoneTypeCode: Record<string, ZoneTypeCode> = {
+  주차장: 'PARKING',
+  분리수거장: 'RECYCLING_AREA',
+  위험구역: 'DANGER_ZONE',
+  출입구: 'START',
+  도착지: 'DESTINATION',
+}
 
 const zoneStyle: Record<ZoneType, string> = {
   주차장: 'bg-info-soft/80 ring-info text-info',
@@ -41,7 +52,7 @@ const overlaps = (a: Rect, b: Rect) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 
 /** Step 3/3 — 구역 지정 (IoT 수신 맵 위 드래그) (1y) */
-export function StepZones({ onPrev, onComplete }: StepZonesProps) {
+export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const toast = useToast()
   const gridRef = useRef<HTMLDivElement>(null)
   const idRef = useRef(0)
@@ -56,6 +67,34 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
   const [draftRect, setDraftRect] = useState<Rect | null>(null)
   const [draftType, setDraftType] = useState<ZoneType>('주차장')
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [map, setMap] = useState<MapDetailResponse>()
+  const [mapImageUrl, setMapImageUrl] = useState<string>()
+  const [loadError, setLoadError] = useState<string>()
+  const [saveError, setSaveError] = useState<string>()
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let objectUrl: string | undefined
+    const loadMap = async () => {
+      try {
+        const detail = await mapApi.detail(mapId)
+        const blob = await mapApi.file(detail.mapUrl, controller.signal)
+        objectUrl = URL.createObjectURL(blob)
+        setMap(detail)
+        setMapImageUrl(objectUrl)
+      } catch (reason) {
+        if (!controller.signal.aborted) {
+          setLoadError(reason instanceof Error ? reason.message : '지도를 불러오지 못했습니다.')
+        }
+      }
+    }
+    void loadMap()
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [mapId])
 
   const cellAt = (e: React.PointerEvent) => {
     const rect = gridRef.current!.getBoundingClientRect()
@@ -140,6 +179,38 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
     height: `${(r.h / ROWS) * 100}%`,
   })
 
+  const saveZones = async () => {
+    if (!map) return
+    const resolution = Number(map.resolution)
+    const originX = Number(map.originX)
+    const originY = Number(map.originY)
+    const requests: ZoneCreateRequest[] = zones.map((zone) => {
+      const leftPixel = (zone.rect.x / COLS) * map.width
+      const rightPixel = ((zone.rect.x + zone.rect.w) / COLS) * map.width
+      const topPixel = (zone.rect.y / ROWS) * map.height
+      const bottomPixel = ((zone.rect.y + zone.rect.h) / ROWS) * map.height
+      return {
+        name: zone.label,
+        type: zoneTypeCode[zone.type],
+        startX: originX + leftPixel * resolution,
+        startY: originY + (map.height - bottomPixel) * resolution,
+        endX: originX + rightPixel * resolution,
+        endY: originY + (map.height - topPixel) * resolution,
+      }
+    })
+
+    setIsSaving(true)
+    setSaveError(undefined)
+    try {
+      await mapApi.registerZones(mapId, requests)
+      onComplete(zones.map((z) => ({ id: `Z-${z.id}`, type: z.type, label: z.label, rect: z.rect })))
+    } catch (reason) {
+      setSaveError(reason instanceof Error ? reason.message : '구역 저장에 실패했습니다.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid gap-6 lg:grid-cols-[12rem_1fr]">
@@ -184,11 +255,20 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
               ref={gridRef}
               role="application"
               aria-label="IoT 맵 — 드래그하여 구역 지정"
-              className="relative aspect-[2/1] w-full cursor-crosshair touch-none select-none overflow-hidden rounded-card-sm bg-surface ring-1 ring-line"
+              className="relative w-full cursor-crosshair touch-none select-none overflow-hidden rounded-card-sm bg-surface ring-1 ring-line"
+              style={{ aspectRatio: map ? `${map.width} / ${map.height}` : '2 / 1' }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
             >
+              {mapImageUrl && (
+                <img
+                  src={mapImageUrl}
+                  alt={map?.mapName ?? '완성된 지도'}
+                  className="pointer-events-none absolute inset-0 h-full w-full object-fill"
+                  draggable={false}
+                />
+              )}
               {/* 그리드 셀 */}
               <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)`, gridTemplateRows: `repeat(${ROWS}, 1fr)` }} aria-hidden>
                 {Array.from({ length: COLS * ROWS }, (_, i) => (
@@ -243,14 +323,16 @@ export function StepZones({ onPrev, onComplete }: StepZonesProps) {
           <p className="text-sm text-muted">드래그한 구역 {zones.length}곳이 저장되었습니다</p>
         </div>
       )}
+      {loadError && <p role="alert" className="text-sm font-semibold text-danger">{loadError}</p>}
+      {saveError && <p role="alert" className="text-sm font-semibold text-danger">{saveError}</p>}
 
       <div className="flex justify-between">
         <Button variant="outline" onClick={onPrev}>← 이전</Button>
         <Button
           variant="accent"
           withArrow="right"
-          onClick={() => onComplete(zones.map((z) => ({ id: `Z-${z.id}`, type: z.type, label: z.label, rect: z.rect })))}
-          disabled={zones.length === 0}
+          onClick={saveZones}
+          disabled={zones.length === 0 || !map || isSaving}
         >
           가입 완료
         </Button>
