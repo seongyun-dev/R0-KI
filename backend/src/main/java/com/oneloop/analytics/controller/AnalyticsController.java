@@ -1,6 +1,7 @@
 package com.oneloop.analytics.controller;
 
 import com.oneloop.analytics.dto.request.AnalyticsBucket;
+import com.oneloop.analytics.dto.response.ByTypeResponse;
 import com.oneloop.analytics.dto.response.OverviewResponse;
 import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.service.AnalyticsQueryService;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>현재 제공 API:
  * - GET /overview : 상단 요약 카드용
  * - GET /trend : 일/주/월 추이 차트용
+ * - GET /by-type : 유형별 건수/비율/증감
  */
 @Tag(name = "Analytics API", description = "이벤트 분석/통계 API")
 @RestController
@@ -118,6 +120,41 @@ public class AnalyticsController {
                         bucket,
                         zoneIds,
                         eventTypes,
+                        robotIds,
+                        statuses));
+    }
+
+    @Operation(
+            summary = "이벤트 유형별 통계",
+            description =
+                    "이벤트 유형별 발생 건수, 전체 대비 비율, 이전 동기간 대비 증감을 조회합니다. "
+                            + "막대/파이 차트용 데이터입니다.")
+    @GetMapping("/by-type")
+    public ApiResponse<ByTypeResponse> byType(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Parameter(description = "조회 시작 시각 (ISO-8601)", required = true) @RequestParam
+                    OffsetDateTime from,
+            @Parameter(description = "조회 종료 시각 (ISO-8601)", required = true) @RequestParam
+                    OffsetDateTime to,
+            // true면 이전 동기간 대비 증감(delta) 계산. 기본 true.
+            @Parameter(description = "이전 동기간 대비 증감 포함 여부 (기본 true)")
+                    @RequestParam(defaultValue = "true")
+                    boolean compare,
+            @Parameter(description = "구역 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
+                    List<Long> zoneIds,
+            @Parameter(description = "로봇 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
+                    List<Long> robotIds,
+            @Parameter(description = "처리 상태 목록 (미지정 시 전체)")
+                    @RequestParam(required = false)
+                    List<ProcessingStatus> statuses) {
+        return ApiResponse.success(
+                "유형별 통계를 조회했습니다.",
+                analyticsQueryService.getByType(
+                        principal.getApartmentComplexId(),
+                        from.toLocalDateTime(),
+                        to.toLocalDateTime(),
+                        compare,
+                        zoneIds,
                         robotIds,
                         statuses));
     }
