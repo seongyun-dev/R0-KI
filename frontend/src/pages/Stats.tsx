@@ -16,10 +16,12 @@ import { downloadCsv } from '../lib/downloadCsv'
    한 화면 고정. 데이터·CSV 내보내기는 기존 훅/로직 그대로. */
 
 // 기본값(이번 달/전체)은 allLabel 로 두어 미선택 상태로 보이게 한다
+// period → resolveAnalyticsRange → analytics from/to (디자인은 그대로, 기간만 API에 반영)
 const PERIOD_OPTIONS = [
   { value: 'week', label: '이번 주' },
   { value: 'quarter', label: '이번 분기' },
 ]
+// 구역 드롭다운 UI는 유지. 1차 연동에서는 API 필터로 보내지 않음 (checkpoint 타입 필터 보류)
 const ZONE_OPTIONS = [
   { value: 'parking', label: '구역: 주차장' },
   { value: 'recycle', label: '구역: 분리수거장' },
@@ -232,7 +234,7 @@ export default function Stats() {
               </div>
             </div>
 
-            {/* ── 하단: AI 인사이트 ── */}
+            {/* ── 하단: AI 인사이트 (API 미연동 — insights는 빈 배열, 레이아웃만 유지) ── */}
             <div className="glass g2 st-ai">
               <div className="st-head">
                 <span className="bul" /><span className="ttl">AI 인사이트</span>
