@@ -1,13 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { robotsApi } from '../../api/services'
-import { Button, Field, Input } from '../../components/ui'
 
 export type StepRobotProps = {
   onPrev: () => void
   onNext: (data: { robotId: string | number; serial: string; name: string }) => void
 }
 
-/** Step 2/3 — 최초 순찰 로봇 등록 */
+/** Step 2/3 — 최초 순찰 로봇 등록. R0Kiauth 시안 pRobot */
 export function StepRobot({ onPrev, onNext }: StepRobotProps) {
   const [serial, setSerial] = useState('')
   const [name, setName] = useState('')
@@ -41,19 +40,24 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
   }
 
   return (
-    <form className="flex flex-col gap-5" onSubmit={onSubmit}>
-      <Field label="로봇 일련번호 입력" htmlFor="ob-serial" required hint="로봇 하단 라벨 표기">
-        <Input
+    <form onSubmit={onSubmit}>
+      <div className="au-row">
+        <label className="au-lab" htmlFor="ob-serial">로봇 일련번호 입력<span className="req">*</span></label>
+        <input
+          className="au-in num"
           id="ob-serial"
           value={serial}
           onChange={(event) => setSerial(event.target.value)}
           placeholder="예: SN-2026-0001"
-          className="font-mono tabular"
           required
         />
-      </Field>
-      <Field label="로봇명" htmlFor="ob-robot-name" required hint="1~20자 · 직접 지어주세요" error={nameError}>
-        <Input
+        <p className="au-help">로봇 하단 라벨 표기</p>
+      </div>
+
+      <div className={nameError ? 'au-row bad' : 'au-row'}>
+        <label className="au-lab" htmlFor="ob-robot-name">로봇명<span className="req">*</span></label>
+        <input
+          className={nameError ? 'au-in bad' : 'au-in'}
           id="ob-robot-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
@@ -61,25 +65,32 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
           maxLength={20}
           required
         />
-      </Field>
+        {nameError ? (
+          <p className="au-err" role="alert">{nameError}</p>
+        ) : (
+          <p className="au-help">1~20자 · 직접 지어주세요</p>
+        )}
+      </div>
 
-      <p className="rounded-control bg-surface px-4 py-3 text-sm text-muted">
-        해당 구역은 맵 파악이 끝난 뒤 자동으로 지정됩니다.
-      </p>
+      <div className="au-note">
+        <svg viewBox="0 0 24 24"><path d="M12 8h.01M11 12h1v5h1" /><circle cx="12" cy="12" r="9" /></svg>
+        <span>해당 구역은 <b>맵 파악이 끝난 뒤 자동으로 지정</b>됩니다.</span>
+      </div>
 
       {errorMessage && (
-        <p role="alert" className="text-sm text-danger">
-          {errorMessage}
-        </p>
+        <p role="alert" className="au-err">{errorMessage}</p>
       )}
 
-      <div className="mt-2 flex justify-between">
-        <Button type="button" variant="outline" onClick={onPrev} disabled={isSubmitting}>
-          ← 이전
-        </Button>
-        <Button type="submit" variant="dark" withArrow="right" loading={isSubmitting}>
-          다음: 맵 파악하기
-        </Button>
+      <div className="au-act">
+        <button type="button" className="btn btn-s btn-add" onClick={onPrev} disabled={isSubmitting}>
+          <svg viewBox="0 0 24 24"><path d="M19 12H6M13 5l-7 7 7 7" /></svg>
+          이전
+        </button>
+        <span className="grow" />
+        <button type="submit" className="btn btn-p btn-add" disabled={isSubmitting}>
+          {isSubmitting ? '등록 중…' : '다음: 맵 파악하기'}
+          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+        </button>
       </div>
     </form>
   )

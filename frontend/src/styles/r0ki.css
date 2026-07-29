@@ -955,3 +955,306 @@
   .r0ki .rd-frame{order:-1;margin:0 auto;height:auto;width:min(300px,80%)}
   .r0ki .rd-plinth{display:none}
 }
+
+/* ══ 상단바 — 관리자 칩 + 로그아웃 ══ */
+.r0ki .admin{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 18px;border-radius:var(--r-pill);
+  background:var(--track);border:1px solid var(--edge);font-size:14px;font-weight:600;color:var(--text-2);white-space:nowrap;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5)}
+.r0ki[data-theme="nocturne"] .admin{box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+.r0ki .admin svg{width:16px;height:16px;flex:none;fill:none;stroke:var(--text-2);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.r0ki .admin b{font-weight:700;color:var(--text-1)}
+@media(max-width:1420px){.r0ki .admin{padding:0 13px}.r0ki .admin .who{display:none}}
+
+/* ══════════════ 인증 화면 (R0Kiauth 시안 포팅) ══════════════
+   로그인 / 회원가입(기존 단지) / 최초 가입자 온보딩(계정·단지 → 로봇 → 맵).
+   Stepper(.au-stp)·Spinner(.au-spin)는 시안이 신규 등록한 공용 컴포넌트. */
+
+/* ── 인증 전용 팔레트 (.r0ki-auth) — 대시보드보다 더 밝고 연한 하늘색 ──
+   ⚠️ 공유 crystal 토큰은 대시보드/순찰/이벤트/로봇/통계가 쓰므로 건드리지 않는다.
+   인증 셸(R0KiAuthShell)에만 r0ki-auth 클래스를 붙여 여기서만 톤을 덮어쓴다.
+   .r0ki.r0ki-auth[...] (0,3,0) 로 베이스 .r0ki[...] (0,2,0) 보다 우선. 야간은 공유 톤 유지. */
+.r0ki.r0ki-auth[data-theme="crystal"]{
+  --page:#E4F2FD;
+  --accent-fill-1:#8ACDFB;--accent-fill-2:#54B2F6;--accent-ink:#073C68;
+  --accent-2:#1685DA;--accent-glow:rgba(84,178,246,.44);
+  --graphic:#1685DA;--graphic-soft:#C6E5FC;
+  --bot-led:#54B2F6;--bot-led-soft:#DCEDFB;
+}
+.r0ki.r0ki-auth[data-theme="crystal"] .scene{
+  background:
+    radial-gradient(1200px 900px at 50% -20%,rgba(255,255,255,.72),transparent 72%),
+    linear-gradient(176deg,#FBFEFF 0%,#F3F9FE 42%,#EBF5FD 74%,#E4F2FD 100%)}
+/* 상단바 왼쪽 브랜드 동그라미 — 밝은 하늘색 (인증 셸만) */
+.r0ki.r0ki-auth .brand .core{
+  background:conic-gradient(from 140deg,#6BBEF7,#A8DCFC,#6BBEF7);
+  box-shadow:0 0 16px rgba(107,190,247,.55),inset 0 1px 0 rgba(255,255,255,.85)}
+
+/* 인증 전용 상단바 — 로그인 전이라 주 메뉴·알림 없음 */
+.r0ki .au-top{display:flex;align-items:center;gap:var(--s5);padding:0 var(--s5);height:62px;
+  border-radius:var(--r-pill);margin-bottom:var(--s3);flex:none}
+.r0ki .au-top .brand{color:var(--text-1);text-decoration:none}
+
+/* 카드 무대 — 카드가 화면보다 커지면 au-wrap 이 스크롤을 연다.
+   place-items:center 는 넘친 위쪽이 잘리므로 margin:auto 로 중앙 정렬 */
+.r0ki .au-wrap{flex:1;min-height:0;display:flex;overflow-y:auto;padding:var(--s3) var(--s6)}
+.r0ki .au-wrap::-webkit-scrollbar{width:6px}
+.r0ki .au-wrap::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .au-wrap::-webkit-scrollbar-track{background:transparent}
+.r0ki .au-card{margin:auto;width:100%;max-width:560px;padding:var(--s10)}
+/* 인증 카드 채움만 흰색 — 유리 테두리·그림자는 유지 */
+.r0ki.r0ki-auth .au-card{background:#ffffff}
+/* 입력칸 — 흰 카드 위에서는 반투명 --track 이 흰색으로 묻힌다. 연한 하늘색을 직접 지정 */
+.r0ki.r0ki-auth .au-in,
+.r0ki.r0ki-auth .mdin{background:#E8EFFB;border-color:transparent}
+.r0ki .au-card.w-mid{max-width:860px}
+.r0ki .au-card.w-map{max-width:1120px}
+
+.r0ki .au-h{font-size:27px;font-weight:800;letter-spacing:-.025em;color:var(--text-1);line-height:1.2}
+.r0ki .au-sub{font-size:14px;color:var(--text-2);line-height:1.55;margin-top:var(--s2)}
+.r0ki .au-sec{font-size:12.5px;font-weight:700;letter-spacing:.02em;color:var(--text-3);
+  padding-bottom:var(--s2);border-bottom:1px solid var(--hair);margin:var(--s8) 0 var(--s5)}
+.r0ki .au-gap{margin-top:var(--s8)}
+
+/* 로그인 카드 브랜드 */
+.r0ki .au-brand{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s6)}
+.r0ki .au-brand .core{width:44px;height:44px;border-radius:50%;flex:none;position:relative;
+  background:conic-gradient(from 140deg,var(--patrol),var(--accent-fill-2),var(--patrol));
+  box-shadow:0 0 22px var(--accent-glow),inset 0 1px 0 rgba(255,255,255,.8)}
+.r0ki .au-brand .core::after{content:'';position:absolute;inset:13px;border-radius:50%;background:var(--page)}
+.r0ki .au-brand .tx{display:flex;flex-direction:column;gap:2px}
+.r0ki .au-brand .nm{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--text-1)}
+.r0ki .au-brand .sl{font-size:13px;font-weight:600;color:var(--text-3)}
+
+/* ── 폼 ── */
+.r0ki .au-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 var(--s5)}
+.r0ki .au-grid .full{grid-column:1/-1}
+@media(max-width:760px){.r0ki .au-grid{grid-template-columns:1fr}}
+.r0ki .au-row{margin-bottom:var(--s5)}
+.r0ki .au-lab{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.01em;color:var(--text-2);margin-bottom:var(--s2)}
+/* 필수 표시 — --urgent 는 응급 전용이라 쓰지 않는다(시안 각주) */
+.r0ki .au-lab .req{color:var(--accent);margin-left:3px;font-weight:800}
+.r0ki .au-in{width:100%;height:50px;padding:0 var(--s4);border-radius:var(--r-inner);border:1px solid var(--edge);
+  background:var(--track);color:var(--text-1);font-family:var(--sans);font-size:15px;outline:none;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5);
+  transition:border-color var(--d-fast) var(--e-glass)}
+.r0ki[data-theme="nocturne"] .au-in{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .au-in::placeholder{color:var(--text-3)}
+.r0ki .au-in:hover{border-color:var(--graphic-soft)}
+/* 버튼형 입력 — 아파트단지 선택처럼 클릭이 동작인 필드 */
+.r0ki button.au-in{display:flex;align-items:center;gap:10px;text-align:left;cursor:pointer}
+.r0ki button.au-in>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r0ki .au-in .ph{color:var(--text-3)}
+.r0ki .au-help{font-size:12.5px;color:var(--text-3);margin-top:7px;line-height:1.4}
+
+/* 입력 + 보조 버튼 (중복확인 · 검색 · 우편번호 찾기) */
+.r0ki .au-pair{display:flex;gap:var(--s2);align-items:stretch}
+.r0ki .au-pair .au-in{flex:1;min-width:0}
+.r0ki .au-pair .btn{flex:none;height:50px}
+.r0ki .au-srch{position:relative;flex:1;min-width:0;display:flex;align-items:center}
+.r0ki .au-srch>svg{position:absolute;left:15px;width:17px;height:17px;pointer-events:none;
+  fill:none;stroke:var(--text-3);stroke-width:1.9;stroke-linecap:round}
+.r0ki .au-srch .au-in{padding-left:42px}
+
+/* 검증 상태 — 폼 오류는 상태 램프와 다른 축이라 --urgent 세트를 쓴다(시안 각주) */
+.r0ki .au-in.bad{border-color:var(--urgent-edge);background:var(--urgent-bg)}
+.r0ki .au-err{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--urgent-text);margin-top:7px}
+.r0ki .au-ok{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--accent);margin-top:7px}
+
+/* 체크박스 — 44px 터치 목표 확보 */
+.r0ki .au-chk{display:flex;align-items:center;gap:11px;min-height:44px;cursor:pointer;user-select:none}
+.r0ki .au-chk input{position:absolute;opacity:0;width:0;height:0}
+.r0ki .au-chk .bx{width:24px;height:24px;flex:none;border-radius:7px;border:1.5px solid var(--edge);background:var(--track);
+  display:grid;place-items:center;box-shadow:inset 0 1px 0 rgba(255,255,255,.8);transition:all var(--d-fast) var(--e-glass)}
+.r0ki .au-chk .bx svg{width:14px;height:14px;fill:none;stroke:var(--accent-ink);stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.r0ki .au-chk input:checked+.bx{background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));border-color:transparent;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 2px 5px rgba(6,48,88,.18)}
+.r0ki .au-chk input:checked+.bx svg{opacity:1}
+.r0ki .au-chk input:focus-visible+.bx{box-shadow:0 0 0 2px var(--focus-in),0 0 0 4px var(--accent)}
+.r0ki .au-chk .tx{font-size:14px;font-weight:600;color:var(--text-2)}
+
+/* ── 하단 액션 · 전환 링크 ── */
+.r0ki .au-act{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin-top:var(--s8)}
+.r0ki .au-act .btn{height:52px;font-size:15.5px;display:inline-flex;align-items:center;justify-content:center;gap:9px}
+.r0ki .au-act .grow{flex:1}
+.r0ki .btn:disabled{opacity:.5;cursor:default;transform:none}
+.r0ki .au-foot{margin-top:var(--s6);padding-top:var(--s5);border-top:1px solid var(--hair);
+  text-align:center;font-size:13.5px;color:var(--text-3)}
+.r0ki .au-foot a,.r0ki .au-foot button{display:inline-flex;align-items:center;min-height:44px;padding:0 8px;
+  border:0;background:transparent;cursor:pointer;font-family:var(--sans);font-size:13.5px;
+  color:var(--accent);font-weight:700;border-radius:10px;
+  text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1.5px}
+.r0ki .au-foot a:hover,.r0ki .au-foot button:hover{color:var(--text-1)}
+
+/* ── Stepper — 완료(done) / 현재(on) / 대기 ── */
+.r0ki .au-stp{display:flex;align-items:center;gap:var(--s2);list-style:none;margin:var(--s6) 0 0;flex-wrap:wrap}
+.r0ki .au-stp li{display:flex;align-items:center;gap:var(--s2)}
+.r0ki .au-stp .st{display:inline-flex;align-items:center;gap:10px;height:46px;padding:0 20px 0 12px;
+  border-radius:var(--r-pill);background:var(--track);border:1px solid var(--edge);
+  font-size:14.5px;font-weight:700;color:var(--text-3);white-space:nowrap;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+.r0ki[data-theme="nocturne"] .au-stp .st{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .au-stp .n{width:26px;height:26px;flex:none;border-radius:50%;display:grid;place-items:center;
+  background:var(--track);border:1px solid var(--edge);
+  font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text-3)}
+.r0ki .au-stp .n svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round}
+.r0ki .au-stp .bar{width:26px;height:1.5px;background:var(--hair);flex:none}
+.r0ki .au-stp li.done .st{color:var(--text-2);border-color:var(--graphic-soft)}
+/* 완료 표시 — 진한 --graphic 대신 파스텔 --graphic-soft. 체크는 잉크색으로 대비 유지 */
+.r0ki .au-stp li.done .n{background:var(--graphic-soft);border-color:transparent;color:var(--accent-ink)}
+.r0ki[data-theme="nocturne"] .au-stp li.done .n{color:var(--text-1)}
+.r0ki .au-stp li.done .bar{background:var(--graphic-soft);opacity:.9}
+.r0ki .au-stp li.on .st{color:var(--accent-ink);border-color:transparent;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 3px rgba(6,48,88,.10),0 4px 12px var(--accent-glow)}
+.r0ki .au-stp li.on .n{background:rgba(255,255,255,.34);border-color:transparent;color:var(--accent-ink)}
+.r0ki[data-theme="nocturne"] .au-stp li.on .st{color:#0B1220}
+.r0ki[data-theme="nocturne"] .au-stp li.on .n{color:#0B1220}
+
+/* ── Spinner ── */
+@keyframes r0ki-auSpin{to{transform:rotate(360deg)}}
+.r0ki .au-spin{width:38px;height:38px;border-radius:50%;flex:none;
+  border:3px solid var(--hair);border-top-color:var(--graphic);
+  animation:r0ki-auSpin 900ms linear infinite}
+
+/* ── 상태 패널 (맵 등록 진입 · 로딩 · 실패) ── */
+.r0ki .au-panel{border-radius:var(--r-inner);background:var(--track);border:1px solid var(--edge);
+  padding:var(--s10) var(--s6);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:var(--s4);text-align:center;min-height:240px;box-shadow:inset 0 1px 0 rgba(255,255,255,.85)}
+.r0ki[data-theme="nocturne"] .au-panel{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .au-panel .t{font-size:16px;font-weight:700;color:var(--text-1)}
+.r0ki .au-panel .t.bad{color:var(--urgent-text)}
+.r0ki .au-panel .s{font-size:13.5px;color:var(--text-3)}
+.r0ki .au-note{display:flex;align-items:center;gap:10px;padding:13px var(--s4);border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);border-left:3px solid var(--graphic);
+  font-size:13.5px;color:var(--text-2);line-height:1.5}
+.r0ki .au-note b{color:var(--text-1);font-weight:700}
+/* 인라인 SVG 는 크기를 안 주면 폭 100% 로 늘어난다 */
+.r0ki .au-note>svg{width:18px;height:18px;flex:none;fill:none;stroke:var(--graphic);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── 기존 단지 감지 배너 (신규 → 기존 분기) ── */
+.r0ki .au-branch{display:flex;align-items:flex-start;gap:var(--s3);margin-top:var(--s3);
+  padding:var(--s4);border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--graphic);box-shadow:0 0 0 3px var(--accent-glow)}
+.r0ki .au-branch .ic{width:32px;height:32px;flex:none;border-radius:50%;display:grid;place-items:center;
+  background:var(--graphic);color:var(--page)}
+.r0ki .au-branch .ic svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.r0ki .au-branch .bd{flex:1;min-width:0}
+.r0ki .au-branch .bt{display:block;font-size:14px;font-weight:700;color:var(--text-1);margin-bottom:3px}
+.r0ki .au-branch .bs{display:block;font-size:13px;color:var(--text-2);line-height:1.5}
+.r0ki .au-branch .btn{flex:none;align-self:center}
+
+/* ── 맵 등록 — 구역 드래그 편집기 ──
+   구역 유형은 상태 명도 램프 색을 쓰되 색만으로 구분하지 않도록 이름을 함께 표기(3중 표기). */
+.r0ki .au-map{display:grid;grid-template-columns:196px 1fr;gap:var(--s4);align-items:start}
+@media(max-width:900px){.r0ki .au-map{grid-template-columns:1fr}}
+.r0ki .au-kinds{display:flex;flex-direction:column;gap:var(--s2)}
+@media(max-width:900px){.r0ki .au-kinds{flex-direction:row;flex-wrap:wrap}}
+.r0ki .au-kind{height:52px;padding:0 var(--s4);border-radius:var(--r-inner);cursor:pointer;
+  background:var(--track);border:1px solid var(--edge);color:var(--text-2);
+  font-family:var(--sans);font-size:15px;font-weight:600;text-align:left;
+  display:flex;align-items:center;gap:11px;box-shadow:inset 0 1px 0 rgba(255,255,255,.8);
+  transition:all var(--d-base) var(--e-glass)}
+.r0ki[data-theme="nocturne"] .au-kind{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .au-kind:hover{color:var(--text-1)}
+.r0ki .au-kind[aria-pressed="true"]{color:var(--accent-ink);border-color:transparent;font-weight:700;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 2px 5px rgba(6,48,88,.22),0 8px 20px var(--accent-glow)}
+.r0ki[data-theme="nocturne"] .au-kind[aria-pressed="true"]{color:#0B1220}
+/* 스와치 — 실제 구역과 같은 반투명 레시피. color-mix 로 테마 전환을 따라간다 */
+.r0ki .sw{width:13px;height:13px;border-radius:4px;flex:none;
+  background:color-mix(in srgb,var(--z) 24%,transparent);
+  border:1.5px solid color-mix(in srgb,var(--z) 62%,transparent)}
+
+.r0ki .au-mhead{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s3);flex-wrap:wrap;min-height:34px}
+.r0ki .au-mhead .hint{margin-left:auto;font-size:12.5px;color:var(--text-3)}
+.r0ki .au-warn{display:inline-flex;align-items:center;gap:9px;height:34px;padding:0 14px;border-radius:var(--r-pill);
+  background:var(--urgent-bg);border:1px solid var(--urgent-edge);color:var(--urgent-text);
+  font-size:13px;font-weight:700;white-space:nowrap;animation:r0ki-warnIn 200ms var(--e-glass)}
+@keyframes r0ki-warnIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.r0ki .au-warn svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
+
+.r0ki .au-canvas{position:relative;border-radius:var(--r-inner);overflow:hidden;
+  background:var(--track);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+  display:grid;grid-template-columns:26px 1fr;grid-template-rows:22px 1fr;
+  padding:var(--s2);gap:2px;user-select:none}
+.r0ki[data-theme="nocturne"] .au-canvas{box-shadow:inset 0 1px 0 rgba(255,255,255,.1)}
+.r0ki .au-colh,.r0ki .au-rowh{display:grid;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text-3)}
+.r0ki .au-colh{grid-column:2;grid-row:1;grid-auto-flow:column}
+.r0ki .au-colh span,.r0ki .au-rowh span{display:grid;place-items:center}
+.r0ki .au-rowh{grid-column:1;grid-row:2}
+.r0ki .au-cells{grid-column:2;grid-row:2;position:relative;display:grid;cursor:crosshair;touch-action:none}
+.r0ki .au-cells .cell{border:1px solid var(--hair);border-width:0 1px 1px 0}
+.r0ki .au-cells>img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none}
+.r0ki .au-zone{position:absolute;border-radius:9px;cursor:pointer;
+  border:1.5px solid color-mix(in srgb,var(--z) 62%,transparent);
+  background:color-mix(in srgb,var(--z) 13%,transparent);color:var(--z);
+  display:flex;align-items:flex-start;justify-content:space-between;gap:6px;
+  padding:5px 6px 5px 9px;font-size:12.5px;font-weight:700;line-height:1.2;overflow:hidden}
+.r0ki .au-zone:hover{filter:brightness(1.04)}
+.r0ki .au-zone .zl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.r0ki .au-zone .zx{position:relative;width:28px;height:28px;flex:none;border-radius:50%;border:0;cursor:pointer;
+  display:grid;place-items:center;background:var(--page);color:var(--text-1);
+  box-shadow:0 1px 4px rgba(20,56,104,.28)}
+/* 작은 구역 안에 들어가야 해서 원은 28px, 히트 영역만 44px 로 확장 */
+.r0ki .au-zone .zx::before{content:'';position:absolute;inset:-8px;border-radius:50%}
+.r0ki .au-zone .zx svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round}
+.r0ki .au-draft{position:absolute;border-radius:9px;border:1.5px dashed var(--graphic);
+  background:var(--accent-glow);pointer-events:none}
+.r0ki .au-draft.bad{border-color:var(--urgent);background:var(--urgent-bg)}
+.r0ki .au-mfoot{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4)}
+.r0ki .au-mfoot .au-note{flex:1}
+
+/* ── 모달 확장 — 구역 지정 · 단지 검색 (.modalwrap/.modal 위에 얹는 위젯) ── */
+.r0ki .mdsub{font-size:13.5px;color:var(--text-3);font-weight:600;margin:-12px 0 var(--s5)}
+.r0ki .mdsub b{font-family:var(--mono);color:var(--text-2)}
+.r0ki .zkinds{display:flex;gap:6px;flex-wrap:wrap}
+.r0ki .zkinds button{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 16px;border-radius:var(--r-pill);
+  border:1px solid var(--edge);background:var(--track);cursor:pointer;
+  font-family:var(--sans);font-size:14.5px;font-weight:600;color:var(--text-2);
+  transition:all var(--d-fast) var(--e-glass)}
+.r0ki .zkinds button[aria-pressed="true"]{color:var(--accent-ink);font-weight:700;border-color:transparent;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 2px 5px rgba(6,48,88,.30)}
+.r0ki[data-theme="nocturne"] .zkinds button[aria-pressed="true"]{color:#0B1220}
+.r0ki .mdin{width:100%;height:52px;padding:0 18px;border-radius:var(--r-inner);
+  border:1px solid var(--edge);background:var(--track);color:var(--text-1);
+  font-family:var(--sans);font-size:16px;font-weight:600;letter-spacing:-.01em;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85)}
+.r0ki[data-theme="nocturne"] .mdin{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .mdin::placeholder{color:var(--text-3)}
+.r0ki .mdin:focus{outline:none;box-shadow:0 0 0 2px var(--focus-in),0 0 0 4px var(--accent)}
+.r0ki .mdact.split{justify-content:space-between}
+.r0ki .mdact .right{display:flex;gap:var(--s2)}
+.r0ki .mddel{height:48px;padding:0 20px;border:0;border-radius:var(--r-pill);background:transparent;cursor:pointer;
+  font-family:var(--sans);font-size:15px;font-weight:700;color:var(--urgent-text)}
+.r0ki .mddel:hover{background:var(--urgent-bg)}
+
+/* 단지 검색 결과 목록 */
+.r0ki .srchlist{margin-top:var(--s4);max-height:320px;overflow-y:auto;padding-right:4px}
+.r0ki .srchlist::-webkit-scrollbar{width:5px}
+.r0ki .srchlist::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .srchlist::-webkit-scrollbar-track{background:transparent}
+.r0ki .srow{display:flex;align-items:center;gap:var(--s3);padding:11px 4px;border-bottom:1px solid var(--hair)}
+.r0ki .srow:last-child{border-bottom:0}
+.r0ki .srow .nm{flex:none;font-size:14.5px;font-weight:700;color:var(--text-1)}
+.r0ki .srow .ad{flex:1;min-width:0;font-size:13px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r0ki .srow .btn{height:38px;padding:0 16px;font-size:13.5px}
+.r0ki .srchbusy{display:flex;justify-content:center;padding:var(--s8) 0}
+
+/* ── 세로가 좁으면 여백부터 회수 (au-wrap 이 스크롤을 열기 전 단계) ── */
+@media(max-height:1010px){
+  .r0ki .au-card{padding:var(--s6) var(--s8)}
+  .r0ki .au-h{font-size:23px}
+  .r0ki .au-sub{font-size:13px;margin-top:4px}
+  .r0ki .au-sec{margin:var(--s5) 0 var(--s4)}
+  .r0ki .au-gap{margin-top:var(--s5)}
+  .r0ki .au-row{margin-bottom:var(--s3)}
+  .r0ki .au-in,.r0ki .au-pair .btn{height:46px}  /* 터치 하한 44px 위 */
+  .r0ki .au-help,.r0ki .au-err,.r0ki .au-ok{margin-top:5px;font-size:12px}
+  .r0ki .au-stp{margin-top:var(--s3)}
+  .r0ki .au-stp .st{height:42px;font-size:13.5px}
+  .r0ki .au-act{margin-top:var(--s5)}
+  .r0ki .au-act .btn{height:48px}
+  .r0ki .au-foot{margin-top:var(--s4);padding-top:var(--s3);font-size:12.5px}
+}

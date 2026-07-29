@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { SearchIcon } from '../../components/icons'
-import { Button, EmptyState, Input, Modal, Skeleton } from '../../components/ui'
+import { R0KiModal } from '../../components/layout/R0KiModal'
 import type { Complex } from '../../types/domain'
 import { useComplexSearch } from './useComplexSearch'
 
@@ -11,7 +10,7 @@ export type ComplexSearchModalProps = {
   onSelect: (complex: Complex) => void
 }
 
-/** 아파트단지 검색 모달 (1t) — 결과 없으면 최초 가입자 온보딩 유도 */
+/** 아파트단지 검색 모달 (1t) — 결과 없으면 최초 가입자 온보딩 유도. R0Ki 유리 모달 */
 export function ComplexSearchModal({ open, onClose, onSelect }: ComplexSearchModalProps) {
   const navigate = useNavigate()
   const [input, setInput] = useState('')
@@ -19,79 +18,54 @@ export function ComplexSearchModal({ open, onClose, onSelect }: ComplexSearchMod
   const { data: results, isLoading } = useComplexSearch(keyword)
 
   return (
-    <Modal open={open} onClose={onClose} title="아파트단지 검색" className="max-w-lg">
+    <R0KiModal open={open} onClose={onClose} title="아파트단지 검색">
       <form
-        className="flex gap-2"
+        className="au-pair"
         onSubmit={(e) => {
           e.preventDefault()
           setKeyword(input)
         }}
       >
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="아파트 이름/주소"
-          aria-label="아파트 이름/주소"
-        />
-        <Button type="submit" variant="dark" className="flex-none">
-          <SearchIcon />
-          검색
-        </Button>
+        <span className="au-srch">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+          <input
+            className="au-in"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="아파트 이름/주소"
+            aria-label="아파트 이름/주소"
+          />
+        </span>
+        <button type="submit" className="btn btn-p">검색</button>
       </form>
 
-      <div className="mt-5 max-h-72 overflow-y-auto">
+      <div className="srchlist">
         {isLoading ? (
-          <div className="flex flex-col gap-3 py-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-2/3" />
-          </div>
+          <div className="srchbusy"><span className="au-spin" role="status" aria-label="검색 중" /></div>
         ) : results && results.length > 0 ? (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-xs font-semibold text-muted">
-                <th scope="col" className="px-2 py-2 text-left">아파트 이름</th>
-                <th scope="col" className="px-2 py-2 text-left">도로명주소</th>
-                <th scope="col" className="px-2 py-2" aria-label="선택" />
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((c) => (
-                <tr key={c.id} className="border-b border-line">
-                  <td className="px-2 py-3 font-semibold">{c.name}</td>
-                  <td className="px-2 py-3 text-muted">{c.roadAddress}</td>
-                  <td className="px-2 py-3 text-right">
-                    <Button size="sm" variant="outline" onClick={() => onSelect(c)}>
-                      선택
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          results.map((c) => (
+            <div className="srow" key={c.id}>
+              <span className="nm">{c.name}</span>
+              <span className="ad">{c.roadAddress}</span>
+              <button type="button" className="btn btn-s" onClick={() => onSelect(c)}>
+                선택
+              </button>
+            </div>
+          ))
         ) : (
-          <EmptyState
-            title="검색 결과가 없습니다"
-            description="찾으시는 단지가 없다면 신규 아파트단지로 등록해주세요"
-            action={
-              <Button size="sm" variant="dark" onClick={() => navigate('/signup/onboarding')}>
-                신규 아파트단지 등록 →
-              </Button>
-            }
-          />
+          <div className="empty">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+            <span>검색 결과가 없습니다</span>
+          </div>
         )}
       </div>
 
-      <p className="mt-5 border-t border-line pt-4 text-center text-sm text-muted">
+      <div className="au-foot">
         찾으시는 단지가 없으신가요?{' '}
-        <button
-          type="button"
-          onClick={() => navigate('/signup/onboarding')}
-          className="font-semibold text-fg underline-offset-4 hover:underline"
-        >
+        <button type="button" onClick={() => navigate('/signup/onboarding')}>
           신규 아파트단지 등록(최초 가입자) →
         </button>
-      </p>
-    </Modal>
+      </div>
+    </R0KiModal>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useEvents } from '../../features/events/useEvents'
+import { useAuthStore } from '../../features/auth/useAuthStore'
 import '../../styles/r0ki.css'
 
 /* R0-Ki · AURA GLASS 공용 셸 — 상단바(로고·주 메뉴·알림·시계·야간모드) + 씬 배경.
@@ -57,11 +58,19 @@ export type R0KiShellProps = {
 }
 
 export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
+  const navigate = useNavigate()
   const { theme, toggle } = useR0KiTheme()
   const clock = useClockText()
+  const loginId = useAuthStore((s) => s.loginId)
+  const logout = useAuthStore((s) => s.logout)
   // 알림 배지 — 긴급 이벤트 건수 (실서버 연동 시 그대로 값만 교체)
   const { data: events } = useEvents()
   const urgentCount = (events ?? []).filter((e) => e.riskLevel === '긴급').length
+
+  const onLogout = () => {
+    logout()
+    navigate('/', { replace: true })
+  }
 
   return (
     <div className="r0ki" data-theme={theme}>
@@ -91,6 +100,13 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             </div>
             <button type="button" className="themebtn" onClick={toggle}>
               {theme === 'crystal' ? '야간 모드' : '주간 모드'}
+            </button>
+            <span className="admin">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>
+              {loginId && <b className="who">{loginId}</b>} 관리자
+            </span>
+            <button type="button" className="themebtn" onClick={onLogout}>
+              로그아웃
             </button>
           </div>
 
