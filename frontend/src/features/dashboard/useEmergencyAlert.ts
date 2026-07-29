@@ -38,13 +38,40 @@ export function useEmergencyAlert(onEmergency: (event: PatrolEvent) => void) {
       const timer = window.setTimeout(() => onRef.current(target), 1500)
       return () => window.clearTimeout(timer)
     }
-    // 실서버 SSE — 엔드포인트/페이로드 스키마는 백엔드 확정 필요
-    const controller = new AbortController()
-    eventsApi
-      .subscribeEmergency((payload) => onRef.current(eventListItemToDomain(payload)), controller.signal)
-      .catch(() => {
-        // 초기 화면은 유지. 재연결 정책은 백엔드 SSE 정책 확정 후 조정.
-      })
-    return () => controller.abort()
+
+    // 로봇이 POST /api/robot/events로 등록한 응급 이벤트를 관리자용 목록 API에서 확인한다.
+    // 최초 조회 결과는 기존 이벤트로 간주하고, 이후 새로 생긴 이벤트만 알림으로 전달한다.
+    let disposed = false
+    let initialized = false
+    const knownIds = new Set<string>()
+
+    const poll = async () => {
+      try {
+        const response = await eventsApi.list({
+          type: 'EMERGENCY',
+          page: 0,
+          size: 20,
+          sort: ['occurredAt,DESC'],
+        })
+        if (disposed) return
+
+        const items = response.content
+        if (initialized) {
+          const added = items.filter((item) => !knownIds.has(String(item.eventId)))
+          if (added.length > 0) onRef.current(eventListItemToDomain(added[0]))
+        }
+        items.forEach((item) => knownIds.add(String(item.eventId)))
+        initialized = true
+      } catch {
+        // 일시적인 조회 실패는 다음 주기에 다시 시도한다.
+      }
+    }
+
+    void poll()
+    const timer = window.setInterval(() => void poll(), 5000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
   }, [])
 }

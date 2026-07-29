@@ -10,15 +10,6 @@ import type { EventListRequest, ProcessingStatusCode } from '../../api/contracts
 
 // UI 필터값 → 백엔드 enum. 매핑 없는 값(all 등)은 undefined → 쿼리에서 생략(전체).
 // 유형·위험도 필터는 백엔드 목록 API가 아직 미지원 → 서버로 보내지 않고 보류.
-const STATUS_PARAM: Record<string, string | undefined> = {
-  탐지: 'DETECTED',
-  처리중: 'PROCESSING',
-  처리완료: 'COMPLETED',
-}
-const PERIOD_PARAM: Record<string, string | undefined> = {
-  today: 'TODAY',
-  '7d': 'LAST_7_DAYS',
-}
 
 /** 이벤트 목록 (1f). 서버 연동 시 useQuery(['events'])로 교체. */
 export function useEvents(params: EventListRequest = {})
