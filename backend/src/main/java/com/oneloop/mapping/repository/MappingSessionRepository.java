@@ -17,8 +17,8 @@ public interface MappingSessionRepository extends JpaRepository<MappingSession, 
 
     boolean existsByApartmentComplexIdOrRobotId(Long apartmentComplexId, Long robotId);
 
-    // IoT ACK가 백엔드에서 발행한 세션과 명령 모두에 해당하는지 확인한다.
-    Optional<MappingSession> findByIdAndCommandId(Long id, String commandId);
+    // commandId로 ACK가 어느 세션에 대한 응답인지 특정할 수 있다.
+    Optional<MappingSession> findByCommandId(String commandId);
 
     Optional<MappingSession> findByIdAndApartmentComplexId(Long id, Long apartmentComplexId);
 

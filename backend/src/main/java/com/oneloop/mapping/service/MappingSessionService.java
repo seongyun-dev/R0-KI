@@ -1,8 +1,5 @@
 package com.oneloop.mapping.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.mapping.domain.MappingSession;
@@ -27,8 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class MappingSessionService {
 
-    // 모든 로봇 명령은 공통 토픽으로 보내고 IoT는 payload의 command 값으로 기능을 구분한다.
-    private static final String ROBOT_COMMAND_TOPIC = "hanbakwi/v1/robots/%s/command";
     // 한 로봇이 동시에 두 개의 지도를 생성하지 못하도록 중복 요청을 막는 상태 목록이다.
     private static final List<MappingStatus> ACTIVE_STATUSES =
             List.of(MappingStatus.REQUESTED, MappingStatus.MAPPING);
@@ -36,10 +31,6 @@ public class MappingSessionService {
     private final MappingSessionRepository mappingSessionRepository;
     private final RobotRepository robotRepository;
     private final ObjectProvider<MqttPublisher> mqttPublisherProvider;
-    private final ObjectMapper objectMapper =
-            new ObjectMapper()
-                    .findAndRegisterModules()
-                    .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Transactional
     public MappingStartResponse start(Long apartmentComplexId, MappingStartRequest request) {
@@ -79,14 +70,6 @@ public class MappingSessionService {
         if (mqttPublisher == null) {
             throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
-
-        try {
-            // 명령 DTO를 UTF-8 JSON으로 직렬화하여 대상 로봇의 공통 명령 토픽으로 발행한다.
-            mqttPublisher.publish(
-                    ROBOT_COMMAND_TOPIC.formatted(robotKey),
-                    objectMapper.writeValueAsString(command));
-        } catch (JsonProcessingException exception) {
-            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
-        }
+        mqttPublisher.publishCommand(robotKey, command);
     }
 }

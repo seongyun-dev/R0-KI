@@ -27,6 +27,7 @@ public enum ErrorCode {
     MAP_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "MAP_002", "지도 파일 저장에 실패했습니다."),
     MAP_NOT_FOUND(HttpStatus.NOT_FOUND, "MAP_003", "지도를 찾을 수 없습니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
+    PATROL_ALREADY_IN_PROGRESS(HttpStatus.CONFLICT, "PATROL_002", "해당 로봇은 이미 순찰 중입니다."),
     EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다."),
     FILE_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "EVENT_003", "파일 저장 중 오류가 발생했습니다.");
 
