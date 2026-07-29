@@ -17,7 +17,6 @@ import type {
   EventNotificationResponse,
   EventStatusChangeRequest,
   EventStatusChangeResponse,
-  EventStatusHistoryItemResponse,
   ListResponse,
   MapDetailResponse,
   MappingStartResponse,
@@ -105,10 +104,6 @@ export const eventsApi = {
       body: jsonBody(request),
     }),
 
-  getStatusHistory: (eventId: string | number) =>
-    apiRequest<EventStatusHistoryItemResponse[]>(
-      `/api/events/${encodeURIComponent(String(eventId))}/history`,
-    ),
   notify: (eventId: string | number) =>
     apiRequest<EventNotificationResponse>(
       `/api/events/${encodeURIComponent(String(eventId))}/notify`,

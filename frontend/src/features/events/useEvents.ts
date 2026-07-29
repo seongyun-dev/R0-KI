@@ -70,7 +70,7 @@ export function useUpdateEventStatus() {
 
       await eventsApi.updateStatus(variables.eventId, {
         processingStatus: STATUS_CODE[variables.status],
-        processingNote: variables.note,
+        processingNote: variables.note ?? '',
       })
     },
     [],

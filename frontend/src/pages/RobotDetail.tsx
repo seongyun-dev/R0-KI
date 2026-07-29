@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { RobotEditDrawer } from '../features/robots/RobotEditDrawer'
 import { useDeleteRobot, useRobot, useUpdateRobot } from '../features/robots/useRobot'
-import { usePatrols } from '../features/patrol/usePatrols'
 import type { Robot } from '../types/domain'
 
 /* R0-Ki 로봇 상세 — 시안 R0Ki-robots-detail 무대형(rd-*) 그대로.
@@ -29,6 +28,24 @@ const STATUS_DOT: Record<string, string> = {
 }
 const dot = (label: string) => STATUS_DOT[label] ?? 'var(--detect)'
 
+const PATROL_STATUS_LABEL: Record<string, string> = {
+  IN_PROGRESS: '진행중',
+  COMPLETED: '완료',
+  STOPPED: '중단',
+  FAILED: '실패',
+}
+
+function patrolTime(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 /* 부위 콜아웃 앵커 — parts 순서(카메라/라이다/휠모터/구동부)와 1:1 대응.
    카메라 모듈은 헤드 우측 센서 포드라 오른쪽, 라이다는 헤드 돔 왼쪽 위 */
 const PART_ANCHORS = ['r c-cam', 'l c-lidar', 'l c-motor', 'r c-drive']
@@ -38,7 +55,6 @@ export default function RobotDetail() {
   const navigate = useNavigate()
   const robotId = id ?? 'R-01'
   const { data: loaded, isLoading, error, refetch } = useRobot(robotId)
-  const { data: patrols } = usePatrols()
   const updateRobot = useUpdateRobot()
   const deleteRobot = useDeleteRobot()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -54,7 +70,7 @@ export default function RobotDetail() {
   }, [toast])
 
   const robot: Robot | undefined = loaded ? { ...loaded, ...patch } : undefined
-  const recent = (patrols ?? []).filter((p) => p.robotId === robot?.id).slice(0, 3)
+  const recent = robot?.recentPatrols?.slice(0, 3) ?? []
 
   return (
     <R0KiShell active="robots">
@@ -114,7 +130,16 @@ export default function RobotDetail() {
               <span className="st"><i style={{ background: dot(robot.status) }} />{robot.status}</span>
               <div className="rule" />
               <span className="k">배터리 잔량</span>
-              <div className="rd-batt"><span className="v">{robot.battery}</span><span className="u">%</span></div>
+              <div className="rd-batt">
+                {robot.battery != null ? (
+                  <>
+                    <span className="v">{robot.battery}</span>
+                    <span className="u">%</span>
+                  </>
+                ) : (
+                  <span className="v">확인 불가</span>
+                )}
+              </div>
             </div>
 
             {/* 좌하: 누적 지표 */}
@@ -165,17 +190,33 @@ export default function RobotDetail() {
             <div className="rd-right">
               <span className="rd-glabel">최근 순찰 기록</span>
               {recent.map((p) => {
-                // 경로 대신 해당 순찰에서 탐지된 이벤트 건수만 표시
-                const eventText = p.eventCount > 0 ? `이벤트 ${p.eventCount}건` : '탐지 이벤트 없음'
+                const status = PATROL_STATUS_LABEL[p.patrolStatus] ?? p.patrolStatus
+                const eventText =
+                  p.detectedEventCount > 0
+                    ? `이벤트 ${p.detectedEventCount}건`
+                    : '탐지 이벤트 없음'
                 return (
-                  <div className="rd-log" key={p.id}>
+                  <div
+                    className="rd-log"
+                    key={p.patrolId}
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => navigate(`/app/patrol/${p.patrolId}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        navigate(`/app/patrol/${p.patrolId}`)
+                      }
+                    }}
+                  >
                     <span className="ico">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.4V12l3.1 2" /></svg>
                     </span>
                     <span className="txt">
                       <span className="top">
-                        <span className="t">{p.start}–{p.end ?? ''}</span>
-                        <span className="st"><i style={{ background: dot(p.status) }} />{p.status}</span>
+                        <span className="t">
+                          {patrolTime(p.startedAt)}–{p.endedAt ? patrolTime(p.endedAt) : '진행중'}
+                        </span>
+                        <span className="st"><i style={{ background: dot(status) }} />{status}</span>
                       </span>
                       <span className="m">{eventText}</span>
                     </span>

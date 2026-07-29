@@ -266,8 +266,8 @@ export function robotListItemToDomain(value: RobotListResponse): Robot {
     introducedAt: '-',
     zone: '미지정',
     status: robotStatusLabel(value.robotStatus),
-    battery: toNumber(value.batteryLevel),
-    location: value.checkpointType,
+    battery: value.batteryLevel == null ? undefined : toNumber(value.batteryLevel),
+    location: value.location ?? '위치 미확인',
     parts: [],
   }
 }
@@ -288,12 +288,13 @@ export function robotDetailToDomain(value: RobotDetailResponse): Robot {
     introducedAt: formatDate(value.registeredAt),
     zone: '미지정',
     status: robotStatusLabel(value.robotStatus),
-    battery: toNumber(value.batteryLevel),
+    battery: value.batteryLevel == null ? undefined : toNumber(value.batteryLevel),
     parts: sensors
       .filter((s) => s.status != null)
       .map((s) => ({ name: s.name, status: sensorStatusLabel(s.status as string) })),
     weeklyUptime:
       value.weeklyOperationRate == null ? undefined : toNumber(value.weeklyOperationRate),
+    recentPatrols: value.recentPatrols,
   }
 }
 

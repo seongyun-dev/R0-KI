@@ -32,7 +32,7 @@ export default function RobotList() {
   } = useRobots({
     page,
     size: 10,
-    sort: ['robotId,ASC'],
+    sort: ['id,ASC'],
   })
   const { data: stats } = useRobotStats()
   const updateRobot = useUpdateRobot()
@@ -117,8 +117,12 @@ export default function RobotList() {
                       </td>
                       <td>
                         <span className="bat">
-                          <span className="bar"><i style={{ width: `${r.battery}%` }} /></span>
-                          <span className="pct">{r.battery}%</span>
+                          <span className="bar">
+                            <i style={{ width: `${r.battery ?? 0}%` }} />
+                          </span>
+                          <span className="pct">
+                            {r.battery != null ? `${r.battery}%` : '확인 불가'}
+                          </span>
                         </span>
                       </td>
                       <td className="loc">{r.location ?? '—'}</td>

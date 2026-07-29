@@ -74,6 +74,14 @@ export interface MapCheckpoint {    // 순찰 체크포인트 (1h LIVE MAP)
   y: number;
 }
 
+export interface RobotRecentPatrol {
+  patrolId: number
+  patrolStatus: string
+  startedAt: string
+  endedAt: string | null
+  detectedEventCount: number
+}
+
 export interface Robot {
   id: string;                       // R-01
   backendId?: string | number;
@@ -83,12 +91,13 @@ export interface Robot {
   introducedAt: string;             // 2026/03/12
   zone: string;                     // 담당 구역 (전체 / 101~103동)
   status: StatusLabel;              // 순찰중 등
-  battery: number;                  // 78 (%)
+  battery?: number;                 // 78 (%), null이면 확인 불가
   location?: string;                // 현재 위치 — 지하주차장 B2 / 충전 스테이션 (1i 목록)
   lastPatrol?: string;              // 최근 순찰 — 09:00–09:42 (1i 목록)
   parts: { name: string; status: StatusLabel }[]; // 카메라/라이다/휠모터/구동부
   odometerKm?: number;              // 12.4 — x,y 위치 로그 기반 이동거리 합산
   weeklyUptime?: number;            // 94 (%) — 가동/정지/전체 시간 비율
+  recentPatrols?: RobotRecentPatrol[]
 }
 
 export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)

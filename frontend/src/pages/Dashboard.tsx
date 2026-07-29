@@ -55,7 +55,9 @@ export default function Dashboard() {
             <span className="statchip">
               <span className={hasUrgent ? 'd live' : 'd'} style={{ background: hasUrgent ? 'var(--urgent)' : 'var(--patrol)' }} />
               {hasUrgent ? `${lead.name} 긴급 대응 중` : `${lead.name} ${lead.status}`}
-              <b>배터리 {lead.battery}%</b>
+              <b>
+                배터리 {lead.battery != null ? `${lead.battery}%` : '확인 불가'}
+              </b>
             </span>
           ) : undefined
         }
