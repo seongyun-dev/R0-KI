@@ -45,6 +45,7 @@ public class MqttPublisher {
         send(topic, payload, false);
     }
 
+    // Retained 발행 메서드
     // 브로커가 마지막 메시지를 저장해뒀다가, 나중에 구독하는 클라이언트에게 즉시 재전달한다.
     // (로봇이 발행 시점에 연결되어 있지 않아도 나중에 구독하면 받을 수 있음 - 서비스 토큰 최초 전달 등에 사용)
     public void publishRetained(String topic, String payload) {

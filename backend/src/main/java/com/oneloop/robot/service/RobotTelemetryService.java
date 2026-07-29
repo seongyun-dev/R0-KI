@@ -1,5 +1,6 @@
 package com.oneloop.robot.service;
 
+import com.oneloop.patrol.service.PatrolCommandService;
 import com.oneloop.robot.domain.ObstacleStatus;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
@@ -25,8 +26,9 @@ public class RobotTelemetryService {
 
     private final RobotRepository robotRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final PatrolCommandService patrolCommandService;
 
-    // pose 메시지 처리 진입점 - robotKey로 로봇을 찾아 좌표만 갱신
+    // pose 메시지 처리 진입점 - robotKey로 로봇을 찾아 좌표를 갱신하고, 도착지 도달 여부를 확인해 순찰 자동 종료를 시도한다.
     @Transactional
     public void updatePose(RobotPoseMessage message) {
         if (!isValid(message)) {
@@ -37,12 +39,15 @@ public class RobotTelemetryService {
         robotRepository
                 .findBySerialNumber(message.robotKey())
                 .ifPresentOrElse(
-                        robot ->
-                                robot.updatePose(
-                                        message.x(),
-                                        message.y(),
-                                        message.heading(),
-                                        message.timestamp().toLocalDateTime()),
+                        robot -> {
+                            robot.updatePose(
+                                    message.x(),
+                                    message.y(),
+                                    message.heading(),
+                                    message.timestamp().toLocalDateTime());
+                            // 도착지 도달 여부를 확인해 순찰 자동 종료를 시도
+                            patrolCommandService.autoCompleteIfArrived(robot, message.x(), message.y());
+                        },
                         () -> log.warn("[MQTT] 알 수 없는 robotKey={}, pose 갱신 무시", message.robotKey()));
     }
 

@@ -17,6 +17,10 @@ public interface PatrolRepository extends JpaRepository<Patrol, Long> {
 
     Optional<Patrol> findFirstByRobotIdOrderByStartedAtDesc(Long robotId);
 
+    boolean existsByRobotIdAndStatus(Long robotId, PatrolStatus status);
+
+    Optional<Patrol> findByCommandId(String commandId);
+
     List<Patrol> findAllByRobotIdAndStartedAtGreaterThanEqual(Long robotId, LocalDateTime since);
 
     Optional<Patrol> findByIdAndRobotApartmentComplexId(Long id, Long apartmentComplexId);
