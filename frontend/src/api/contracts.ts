@@ -137,7 +137,7 @@ export type EventDetailResponse = {
 // GET /api/events/{id}/status (상태 변경)
 export type EventStatusChangeRequest = {
   processingStatus: ProcessingStatusCode,
-  processingNote?: string,
+  processingNote: string,
 }
 
 export type EventStatusChangeResponse = {
@@ -165,15 +165,6 @@ export type NotificationHistoryItemResponse = {
   sendStatus: string
   sentAt: string
   createdAt: string
-}
-
-// GET /api/events/{eventId}/history (상태 변경 이력 전체 조회)
-export type EventStatusHistoryItemResponse = {
-  processingHistoryId: number
-  processingMemberId: number
-  changedProcessingStatus: ProcessingStatusCode
-  processingNote: string
-  changedAt: string
 }
 
 // POST /api/robot/events/batch (로봇 전용 이벤트 일괄 등록)
@@ -350,15 +341,16 @@ export type RobotStatusCode =
   | 'OFFLINE'
   | 'DELETED'
   | 'OBSTACLE_STOP'
+  
 export type SensorStatusCode = 'NORMAL' | 'NEEDS_INSPECTION' | 'ERROR' | 'DISCONNECTED'
 
 // GET /api/robots (목록) — 축소형
 export type RobotListResponse = {
-  robotId: Id
+  robotId: number
   robotName: string
   robotStatus: RobotStatusCode | string
-  batteryLevel: number
-  checkpointType: string
+  batteryLevel: number | null
+  location: string | null
 }
 
 export type RobotListPageResponse = {
