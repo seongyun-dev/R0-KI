@@ -5,9 +5,11 @@ import com.oneloop.event.domain.EventProcessingHistory;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.event.dto.request.EventPeriodFilter;
+import com.oneloop.event.dto.request.EventStatusChangeRequest;
 import com.oneloop.event.dto.response.EventDetailResponse;
 import com.oneloop.event.dto.response.EventEvidenceResponse;
 import com.oneloop.event.dto.response.EventListResponse;
+import com.oneloop.event.dto.response.EventStatusChangeResponse;
 import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.event.repository.EventEvidenceRepository;
 import com.oneloop.event.repository.EventProcessingHistoryRepository;
@@ -19,6 +21,7 @@ import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.member.repository.MemberRepository;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -48,6 +51,7 @@ public class EventService {
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
+    private final MemberRepository memberRepository;
 
     /**
      * 로그인한 관리자의 소속 단지 이벤트를 유형·상태·기간으로 필터링하여 조회한다. 페이지에 포함된 모든 이벤트의 담당자는 한 번의 IN 쿼리로
@@ -79,6 +83,9 @@ public class EventService {
         return PageResponse.from(responses);
     }
 
+    /**
+     * 로그인한 관리자의 소속 단지 이벤트 하나를 상세 조회한다.
+     */
     public EventDetailResponse findDetail(Long apartmentComplexId, Long eventId) {
         // 다른 단지 소속 이벤트는 존재해도 404로 처리 (URL로 타 단지 이벤트 ID를 넣어 조회하는 것 방지)
         DetectedEvent event =
@@ -100,6 +107,30 @@ public class EventService {
                         .orElse(null);
 
         return EventDetailResponse.of(event, location, elapsedSeconds, processingNote, evidence);
+    }
+
+    /**
+     * 이벤트의 처리 상태를 변경하고, 그 변경을 처리이력에 자동으로 기록한다.
+     */
+    @Transactional
+    public EventStatusChangeResponse changeStatus(
+            Long apartmentComplexId, Long memberId, Long eventId, EventStatusChangeRequest request) {
+        DetectedEvent event =
+                detectedEventRepository
+                        .findByIdAndRobotApartmentComplexId(eventId, apartmentComplexId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.EVENT_NOT_FOUND));
+
+        event.changeStatus(request.getProcessingStatus());
+
+        EventProcessingHistory history =
+                eventProcessingHistoryRepository.save(
+                        new EventProcessingHistory(
+                                event,
+                                memberRepository.getReferenceById(memberId),
+                                request.getProcessingStatus(),
+                                request.getProcessingNote()));
+
+        return EventStatusChangeResponse.of(event, history.getChangedAt());
     }
 
     // 단지의 순찰 지도에 속한 체크포인트 전체를 가져온다. 지도가 없으면(아직 등록 안 됨) 빈 목록
