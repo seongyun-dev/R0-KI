@@ -1,9 +1,11 @@
 package com.oneloop.analytics.service;
 
 import com.oneloop.analytics.dto.request.AnalyticsBucket;
+import com.oneloop.analytics.dto.request.AnalyticsEventGroup;
 import com.oneloop.analytics.dto.request.ZoneSort;
 import com.oneloop.analytics.dto.response.ByTypeResponse;
 import com.oneloop.analytics.dto.response.ByZoneResponse;
+import com.oneloop.analytics.dto.response.HandlingResponse;
 import com.oneloop.analytics.dto.response.OverviewResponse;
 import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.repository.AnalyticsRepository;
@@ -17,10 +19,13 @@ import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
+import com.oneloop.patrol.repository.PatrolRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -58,32 +63,41 @@ public class AnalyticsQueryService {
     // 서버가 UTC로 떠도 관리자 화면의 "오늘"이 한국 기준과 어긋나지 않게 하기 위함.
     private static final ZoneId SERVICE_ZONE = ZoneId.of("Asia/Seoul");
 
+    /** hour3 슬롯 개수 (0-3, 3-6, … 21-24) */
+    private static final int HOUR3_SLOT_COUNT = 8;
+
+    /** hour3 슬롯 길이(시간) */
+    private static final int HOUR3_SLOT_HOURS = 3;
+
+    /**
+     * hour3 응답의 bucketStart 날짜 앵커.
+     * hour3는 "시각대"만 의미하므로 날짜는 더미이고, 시각(시)만 차트 X축에 쓴다.
+     */
+    private static final LocalDate HOUR3_ANCHOR_DATE = LocalDate.of(2000, 1, 1);
+
     private final AnalyticsRepository analyticsRepository;
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
     private final PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
+    private final PatrolRepository patrolRepository;
 
     /**
      * [이벤트 전체 현황 요약]
-     * 대시보드 상단 카드에 필요한 핵심 숫자를 한 번에 계산한다.
+     * 대시보드 상단 KPI/카드에 필요한 핵심 숫자를 한 번에 계산한다.
      *
      * <p>프론트가 이 API로 얻는 것:
-     * - 조회 기간 전체 이벤트 수
-     * - 오늘 발생한 이벤트 수
-     * - 가장 많이 난 이벤트 유형
-     * - 가장 많이 난 구역
-     * - 이전 같은 길이의 기간 대비 증감(전체/유형별)
-     *
-     * <p>왜 따로 overview API가 필요한가:
-     * trend(시계열)만으로는 "최다 구역", "이전 대비 증감"을 프론트마다 다르게 계산할 위험이 있다.
-     * 서버에서 기준을 고정해 카드 숫자가 항상 같게 나오게 한다.
+     * - 조회 기간 전체 이벤트 수 / 오늘 이벤트 수
+     * - 완료 순찰 수 (COMPLETED, startedAt 기간)
+     * - 평균 처리시간(분) (COMPLETED + processedAt 있는 건)
+     * - 최다 이벤트 유형 / 최다 구역 (checkpoint_id)
+     * - 이전 동기간 대비 증감 (이벤트/순찰/처리시간/유형별)
      *
      * @param apartmentComplexId 로그인 관리자 소속 단지 ID (타 단지 데이터 조회 방지)
      * @param from 조회 시작 시각 (포함)
      * @param to 조회 종료 시각 (포함)
      * @param compare true면 이전 동기간 대비 증감 계산
-     * @param zoneIds 구역 필터. null/빈 목록이면 전체 구역
+     * @param zoneIds 구역 필터 (= checkpoint_id). null/빈 목록이면 전체
      * @param eventTypes 유형 필터. null/빈 목록이면 전체 유형
      * @param robotIds 로봇 필터. null/빈 목록이면 전체 로봇
      * @return 요약 카드용 OverviewResponse
@@ -104,15 +118,13 @@ public class AnalyticsQueryService {
         List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
 
         // 1) 현재 조회 기간 이벤트
-        //    DB에서 기간·유형·로봇으로 먼저 걸러온 뒤, zoneIds가 있으면 좌표 기준으로 추가 필터
         List<DetectedEvent> currentEvents =
                 filterByZone(
                         findEvents(apartmentComplexId, from, to, eventTypes, robotIds),
                         checkpoints,
                         zoneIds);
 
-        // 2) "오늘" 카드용 이벤트
-        //    요청 기간과 별개로, KST 기준 오늘 00:00 ~ 내일 00:00 구간을 따로 센다.
+        // 2) "오늘" 카드용 이벤트 (요청 기간과 별개, KST 오늘)
         DateRange today = todayRange();
         List<DetectedEvent> todayEvents =
                 filterByZone(
@@ -125,8 +137,11 @@ public class AnalyticsQueryService {
                         checkpoints,
                         zoneIds);
 
-        // 3) 최다 유형 / 최다 구역
-        //    이벤트가 0건이면 topType, topZone 모두 null이 된다. (데이터 없는 초기 환경 정상)
+        // 3) KPI: 완료 순찰 수 / 평균 처리시간
+        long patrolCount = countCompletedPatrols(apartmentComplexId, from, to, robotIds);
+        BigDecimal avgHandleMin = calculateAvgHandleMin(currentEvents);
+
+        // 4) 최다 유형 / 최다 구역
         Map<EventType, Long> currentTypeCounts = countByType(currentEvents);
         OverviewResponse.Zone topZone = findTopZone(currentEvents, checkpoints);
         EventType topType =
@@ -135,12 +150,12 @@ public class AnalyticsQueryService {
                         .map(Map.Entry::getKey)
                         .orElse(null);
 
-        // 4) 이전 동기간 대비 증감
-        //    compare=false면 previous를 0으로 두고 diff/changeRate만 계산한다.
+        // 5) 이전 동기간 대비 증감
         OverviewResponse.TotalDelta totalDelta;
+        OverviewResponse.TotalDelta patrolDelta;
+        OverviewResponse.DecimalDelta handleTimeDelta;
         List<OverviewResponse.TypeDelta> typeDeltas = new ArrayList<>();
         if (compare) {
-            // 예: 7/1~7/31(31일) 조회면 이전 구간은 바로 앞 31일
             DateRange previous = previousRange(from, to);
             List<DetectedEvent> previousEvents =
                     filterByZone(
@@ -153,13 +168,21 @@ public class AnalyticsQueryService {
                             checkpoints,
                             zoneIds);
             Map<EventType, Long> previousTypeCounts = countByType(previousEvents);
+            long previousPatrolCount =
+                    countCompletedPatrols(
+                            apartmentComplexId, previous.from(), previous.to(), robotIds);
+            BigDecimal previousAvgHandleMin = calculateAvgHandleMin(previousEvents);
+
             totalDelta = buildTotalDelta(currentEvents.size(), previousEvents.size());
+            patrolDelta = buildTotalDelta(patrolCount, previousPatrolCount);
+            handleTimeDelta = buildDecimalDelta(avgHandleMin, previousAvgHandleMin);
             typeDeltas = buildTypeDeltas(currentTypeCounts, previousTypeCounts);
         } else {
             totalDelta = buildTotalDelta(currentEvents.size(), 0);
+            patrolDelta = buildTotalDelta(patrolCount, 0);
+            handleTimeDelta = buildDecimalDelta(avgHandleMin, null);
         }
 
-        // 5) 프론트 명세 형태의 응답 DTO로 조립
         return OverviewResponse.builder()
                 .period(
                         OverviewResponse.Period.builder()
@@ -171,37 +194,40 @@ public class AnalyticsQueryService {
                         OverviewResponse.Totals.builder()
                                 .totalCount(currentEvents.size())
                                 .todayCount(todayEvents.size())
+                                .patrolCount(patrolCount)
+                                .avgHandleMin(avgHandleMin)
                                 .build())
                 .top(OverviewResponse.Top.builder().eventType(topType).zone(topZone).build())
-                .delta(OverviewResponse.Delta.builder().total(totalDelta).byType(typeDeltas).build())
+                .delta(
+                        OverviewResponse.Delta.builder()
+                                .total(totalDelta)
+                                .patrol(patrolDelta)
+                                .handleTime(handleTimeDelta)
+                                .byType(typeDeltas)
+                                .build())
                 .build();
     }
 
     /**
      * [기간별 이벤트 발생 추이]
-     * 일/주/월 단위로 이벤트 건수를 나눠, 차트(선/막대)용 시계열 데이터를 만든다.
+     * 일/주/월 단위 시계열, 또는 3시간 시각대(hour3) 집계를 만든다.
      *
      * <p>프론트가 이 API로 얻는 것:
-     * - X축: bucketStart (하루/한 주/한 달의 시작점)
-     * - Y축: totalCount
-     * - 상세: byType, byStatus (필터·쌓인 차트용)
+     * - day/week/month: X축=시간 순 버킷, Y축=totalCount (일자별 추이 차트)
+     * - hour3: X축=하루 8칸 시각대, Y축=기간 합산 건수 + byType (시간대별 유형 차트)
      *
-     * <p>overview와 다른 점:
-     * - overview: 기간 전체를 한 덩어리로 요약
-     * - trend: 같은 기간을 bucket 단위로 쪼개 시간 순 배열로 반환
-     *
-     * <p>빈 구간도 series에 포함한다.
-     * 예: 7일에 이벤트 0건이어도 day 버킷 하나는 나와야 차트가 끊기지 않는다.
+     * <p>hour3는 day/week/month와 다르게, 날짜를 펼치지 않고
+     * "몇 시 대에 많이 났는지"만 본다. (프론트 목업 시간대 차트와 동일한 목적)
      *
      * @param apartmentComplexId 로그인 관리자 소속 단지 ID
      * @param from 조회 시작 시각
      * @param to 조회 종료 시각
-     * @param bucket 집계 단위 (day/week/month)
-     * @param zoneIds 구역 필터 (없으면 전체)
+     * @param bucket 집계 단위 (day/week/month/hour3)
+     * @param zoneIds 구역 필터 (= checkpoint_id, 없으면 전체)
      * @param eventTypes 유형 필터 (없으면 전체)
      * @param robotIds 로봇 필터 (없으면 전체)
      * @param statuses 처리상태 필터 (없으면 전체)
-     * @return TrendResponse 시계열 집계 결과
+     * @return TrendResponse 시계열/시각대 집계 결과
      */
     public TrendResponse getTrend(
             Long apartmentComplexId,
@@ -219,7 +245,6 @@ public class AnalyticsQueryService {
 
         List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
 
-        // 1) 조건에 맞는 원본 이벤트 조회 후 구역 필터
         List<DetectedEvent> events =
                 filterByZone(
                         findEvents(
@@ -232,18 +257,23 @@ public class AnalyticsQueryService {
                         checkpoints,
                         zoneIds);
 
-        // 2) 이벤트들을 버킷 시작 시각 기준으로 묶는다.
-        //    LinkedHashMap이 아니라 일단 HashMap에 넣고, series 생성 때 시간순으로 맞춘다.
+        // hour3: 기간 전체를 시각대 8칸으로만 합산 (달력 시계열이 아님)
+        if (bucket == AnalyticsBucket.hour3) {
+            return TrendResponse.builder()
+                    .bucket(bucket)
+                    .series(buildHour3Series(events))
+                    .build();
+        }
+
+        // day/week/month: 버킷 시작 시각 기준으로 묶고, 빈 구간도 0건으로 채운다.
         Map<LocalDateTime, List<DetectedEvent>> eventsByBucket = new HashMap<>();
         for (DetectedEvent event : events) {
             LocalDateTime bucketStart = resolveBucketStart(event.getOccurredAt(), bucket);
             eventsByBucket.computeIfAbsent(bucketStart, key -> new ArrayList<>()).add(event);
         }
 
-        // 3) from~to 사이의 모든 버킷을 순서대로 만들고, 이벤트 없는 구간은 0건으로 채운다.
         List<TrendResponse.TrendBucketItem> series = new ArrayList<>();
         LocalDateTime cursor = resolveBucketStart(from, bucket);
-        // to가 어떤 버킷에 속하는지도 포함해야 하므로, to의 버킷 시작까지 반복
         LocalDateTime lastBucketStart = resolveBucketStart(to, bucket);
         while (!cursor.isAfter(lastBucketStart)) {
             List<DetectedEvent> bucketEvents = eventsByBucket.getOrDefault(cursor, List.of());
@@ -259,6 +289,53 @@ public class AnalyticsQueryService {
         }
 
         return TrendResponse.builder().bucket(bucket).series(series).build();
+    }
+
+    /**
+     * [이벤트 처리 현황]
+     * 전체/주차/쓰레기/위험구역 라벨별로 처리·미처리 건수와 비율을 계산한다.
+     *
+     * <p>상태 규칙 (확정):
+     * - handled = COMPLETED
+     * - pending = DETECTED + PROCESSING
+     *
+     * <p>유형 묶음: {@link AnalyticsEventGroup}
+     * - 전체: 필터 없이 모든 이벤트
+     * - 주차/쓰레기/위험구역: 해당 그룹 EventType만
+     *
+     * @param apartmentComplexId 로그인 관리자 소속 단지 ID
+     * @param from 조회 시작 시각
+     * @param to 조회 종료 시각
+     * @param zoneIds 구역 필터 (= checkpoint_id, 없으면 전체)
+     * @param robotIds 로봇 필터 (없으면 전체)
+     * @return HandlingResponse
+     */
+    public HandlingResponse getHandling(
+            Long apartmentComplexId,
+            LocalDateTime from,
+            LocalDateTime to,
+            List<Long> zoneIds,
+            List<Long> robotIds) {
+        validateRange(from, to);
+        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
+
+        // 처리현황은 상태 필터를 걸지 않는다. (handled/pending을 나눠 세야 하므로)
+        List<DetectedEvent> events =
+                filterByZone(
+                        findEvents(apartmentComplexId, from, to, null, robotIds, null),
+                        checkpoints,
+                        zoneIds);
+
+        List<HandlingResponse.HandlingItem> items = new ArrayList<>();
+        // 1) 전체
+        items.add(buildHandlingItem("전체", events));
+        // 2) 그룹별 (주차 → 쓰레기 → 위험구역)
+        for (AnalyticsEventGroup group : AnalyticsEventGroup.values()) {
+            List<DetectedEvent> groupEvents =
+                    events.stream().filter(e -> group.contains(e.getType())).toList();
+            items.add(buildHandlingItem(group.getLabel(), groupEvents));
+        }
+        return HandlingResponse.builder().items(items).build();
     }
 
     /**
@@ -588,6 +665,7 @@ public class AnalyticsQueryService {
      * - day: 그날 00:00:00
      * - week: 그 주 월요일 00:00:00 (월~일)
      * - month: 그 달 1일 00:00:00
+     * - hour3: 전용 경로(buildHour3Series)만 사용. 여기로 오면 안 됨.
      */
     private LocalDateTime resolveBucketStart(LocalDateTime dateTime, AnalyticsBucket bucket) {
         LocalDate date = dateTime.toLocalDate();
@@ -595,6 +673,7 @@ public class AnalyticsQueryService {
             case day -> date.atStartOfDay();
             case week -> date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay();
             case month -> date.withDayOfMonth(1).atStartOfDay();
+            case hour3 -> throw new IllegalStateException("hour3는 buildHour3Series 경로를 사용해야 합니다.");
         };
     }
 
@@ -613,7 +692,147 @@ public class AnalyticsQueryService {
             case day -> bucketStart.plusDays(1);
             case week -> bucketStart.plusWeeks(1);
             case month -> bucketStart.plusMonths(1);
+            case hour3 -> throw new IllegalStateException("hour3는 buildHour3Series 경로를 사용해야 합니다.");
         };
+    }
+
+    /**
+     * hour3 series 생성: 하루를 3시간 × 8칸으로 나누고,
+     * 조회 기간 이벤트를 occurredAt의 시(hour)만 보고 슬롯에 넣는다.
+     *
+     * <p>예: 7/1 14:20, 7/15 15:00 → 둘 다 슬롯 4 (12-15시)에 합산.
+     */
+    private List<TrendResponse.TrendBucketItem> buildHour3Series(List<DetectedEvent> events) {
+        @SuppressWarnings("unchecked")
+        List<DetectedEvent>[] slots = new List[HOUR3_SLOT_COUNT];
+        for (int i = 0; i < HOUR3_SLOT_COUNT; i++) {
+            slots[i] = new ArrayList<>();
+        }
+        for (DetectedEvent event : events) {
+            int hour = event.getOccurredAt().getHour(); // 0~23
+            int slotIndex = hour / HOUR3_SLOT_HOURS; // 0~7
+            slots[slotIndex].add(event);
+        }
+
+        List<TrendResponse.TrendBucketItem> series = new ArrayList<>(HOUR3_SLOT_COUNT);
+        for (int i = 0; i < HOUR3_SLOT_COUNT; i++) {
+            LocalDateTime bucketStart = HOUR3_ANCHOR_DATE.atTime(i * HOUR3_SLOT_HOURS, 0);
+            LocalDateTime bucketEnd = bucketStart.plusHours(HOUR3_SLOT_HOURS).minusSeconds(1);
+            List<DetectedEvent> slotEvents = slots[i];
+            series.add(
+                    TrendResponse.TrendBucketItem.builder()
+                            .bucketStart(bucketStart)
+                            .bucketEnd(bucketEnd)
+                            .totalCount(slotEvents.size())
+                            .byType(countByType(slotEvents))
+                            .byStatus(countByStatus(slotEvents))
+                            .build());
+        }
+        return series;
+    }
+
+    /**
+     * 완료 순찰 건수.
+     * KPI "총 순찰 횟수" = patrol_status=COMPLETED 이고 startedAt이 기간 안인 행.
+     */
+    private long countCompletedPatrols(
+            Long apartmentComplexId, LocalDateTime from, LocalDateTime to, List<Long> robotIds) {
+        boolean hasRobotIds = robotIds != null && !robotIds.isEmpty();
+        return patrolRepository.countByApartmentAndStatusAndStartedAtBetween(
+                apartmentComplexId,
+                PatrolStatus.COMPLETED,
+                from,
+                to,
+                hasRobotIds,
+                hasRobotIds ? robotIds : List.of(-1L));
+    }
+
+    /**
+     * 평균 처리시간(분).
+     * COMPLETED 이고 processedAt이 있는 이벤트만:
+     * (processedAt - occurredAt)의 분 평균. 소수 1자리.
+     * 대상 0건이면 null.
+     */
+    private BigDecimal calculateAvgHandleMin(List<DetectedEvent> events) {
+        long totalMinutes = 0L;
+        long count = 0L;
+        for (DetectedEvent event : events) {
+            if (event.getProcessingStatus() != ProcessingStatus.COMPLETED) {
+                continue;
+            }
+            if (event.getProcessedAt() == null || event.getOccurredAt() == null) {
+                continue;
+            }
+            long minutes =
+                    Duration.between(event.getOccurredAt(), event.getProcessedAt()).toMinutes();
+            // 음수(데이터 이상)는 집계에서 제외
+            if (minutes < 0) {
+                continue;
+            }
+            totalMinutes += minutes;
+            count++;
+        }
+        if (count == 0L) {
+            return null;
+        }
+        return BigDecimal.valueOf(totalMinutes)
+                .divide(BigDecimal.valueOf(count), 1, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 소수 지표 증감 (평균 처리시간용).
+     * current가 null이면 null 반환 (표시할 값 없음).
+     * previous가 null이면 previous=0, changeRate는 previous=0 규칙 따름.
+     */
+    private OverviewResponse.DecimalDelta buildDecimalDelta(
+            BigDecimal current, BigDecimal previous) {
+        if (current == null) {
+            return null;
+        }
+        BigDecimal prev = previous == null ? BigDecimal.ZERO : previous;
+        BigDecimal diff = current.subtract(prev);
+        BigDecimal changeRate;
+        if (prev.compareTo(BigDecimal.ZERO) == 0) {
+            changeRate =
+                    current.compareTo(BigDecimal.ZERO) == 0
+                            ? BigDecimal.ZERO
+                            : BigDecimal.valueOf(100);
+        } else {
+            changeRate =
+                    diff.multiply(BigDecimal.valueOf(100))
+                            .divide(prev, 2, RoundingMode.HALF_UP);
+        }
+        return OverviewResponse.DecimalDelta.builder()
+                .current(current)
+                .previous(previous)
+                .diff(diff)
+                .changeRate(changeRate)
+                .build();
+    }
+
+    /**
+     * 처리현황 한 라벨 행을 만든다.
+     * handled=COMPLETED, pending=그 외(DETECTED+PROCESSING).
+     */
+    private HandlingResponse.HandlingItem buildHandlingItem(
+            String label, List<DetectedEvent> events) {
+        long handled = 0L;
+        long pending = 0L;
+        for (DetectedEvent event : events) {
+            if (event.getProcessingStatus() == ProcessingStatus.COMPLETED) {
+                handled++;
+            } else {
+                pending++;
+            }
+        }
+        long total = handled + pending;
+        return HandlingResponse.HandlingItem.builder()
+                .label(label)
+                .handled(handled)
+                .pending(pending)
+                .handledPct(calculateRatio(handled, total))
+                .pendingPct(calculateRatio(pending, total))
+                .build();
     }
 
     /**

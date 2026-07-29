@@ -14,13 +14,14 @@ import lombok.Getter;
  * trend API 응답 본문(data).
  *
  * <p>프론트 차트 매핑 가이드:
- * - bucket → X축 단위 (day/week/month)
+ * - bucket → X축 단위 (day/week/month/hour3)
  * - series[].bucketStart → X축 각 점의 시작 시각
  * - series[].totalCount → Y축 전체 건수
  * - series[].byType / byStatus → 쌓인 막대/필터용 상세 건수
  *
- * <p>조회 기간 안에 이벤트가 없는 구간도 series에 포함된다 (totalCount=0).
- * 차트가 중간에 끊기지 않게 하기 위함이다.
+ * <p>day/week/month: 조회 기간 안 빈 구간도 series에 포함 (차트 끊김 방지).
+ * hour3: 하루 8칸(0-3 … 21-24) 고정. 기간 내 같은 시각대 이벤트를 날짜 무시하고 합산.
+ *        프론트 "시간대별 유형" 차트용. byType으로 주차/쓰레기 그룹핑은 FE 또는 AnalyticsEventGroup 규칙.
  */
 @Getter
 @Builder
@@ -30,12 +31,12 @@ public class TrendResponse {
     @Schema(description = "집계 단위", example = "day")
     private AnalyticsBucket bucket;
 
-    @Schema(description = "시간 구간별 집계 목록 (시간순)")
+    @Schema(description = "시간 구간별 집계 목록 (시간순). hour3는 슬롯 0~7 고정 8개")
     private List<TrendBucketItem> series;
 
     @Getter
     @Builder
-    @Schema(description = "한 개 버킷(일/주/월)의 집계 결과")
+    @Schema(description = "한 개 버킷(일/주/월/3시간)의 집계 결과")
     public static class TrendBucketItem {
 
         @Schema(description = "버킷 시작 시각", example = "2026-07-01T00:00:00")
