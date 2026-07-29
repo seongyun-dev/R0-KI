@@ -2,7 +2,6 @@ import type {
   ComplexResponse,
   EventDetailResponse,
   EventListItemResponse,
-  EventListResponse,
   MapInfoResponse,
   MapMonitoringResponse,
   PatrolDetailResponse,
