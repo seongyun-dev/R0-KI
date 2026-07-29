@@ -1,9 +1,12 @@
 package com.oneloop.analytics.service;
 
+import com.oneloop.analytics.dto.request.AnalyticsBucket;
 import com.oneloop.analytics.dto.response.OverviewResponse;
+import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.repository.AnalyticsRepository;
 import com.oneloop.event.domain.DetectedEvent;
 import com.oneloop.event.domain.EventType;
+import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.map.domain.Checkpoint;
@@ -13,11 +16,14 @@ import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,6 +173,90 @@ public class AnalyticsQueryService {
     }
 
     /**
+     * [기간별 이벤트 발생 추이]
+     * 일/주/월 단위로 이벤트 건수를 나눠, 차트(선/막대)용 시계열 데이터를 만든다.
+     *
+     * <p>프론트가 이 API로 얻는 것:
+     * - X축: bucketStart (하루/한 주/한 달의 시작점)
+     * - Y축: totalCount
+     * - 상세: byType, byStatus (필터·쌓인 차트용)
+     *
+     * <p>overview와 다른 점:
+     * - overview: 기간 전체를 한 덩어리로 요약
+     * - trend: 같은 기간을 bucket 단위로 쪼개 시간 순 배열로 반환
+     *
+     * <p>빈 구간도 series에 포함한다.
+     * 예: 7일에 이벤트 0건이어도 day 버킷 하나는 나와야 차트가 끊기지 않는다.
+     *
+     * @param apartmentComplexId 로그인 관리자 소속 단지 ID
+     * @param from 조회 시작 시각
+     * @param to 조회 종료 시각
+     * @param bucket 집계 단위 (day/week/month)
+     * @param zoneIds 구역 필터 (없으면 전체)
+     * @param eventTypes 유형 필터 (없으면 전체)
+     * @param robotIds 로봇 필터 (없으면 전체)
+     * @param statuses 처리상태 필터 (없으면 전체)
+     * @return TrendResponse 시계열 집계 결과
+     */
+    public TrendResponse getTrend(
+            Long apartmentComplexId,
+            LocalDateTime from,
+            LocalDateTime to,
+            AnalyticsBucket bucket,
+            List<Long> zoneIds,
+            List<EventType> eventTypes,
+            List<Long> robotIds,
+            List<ProcessingStatus> statuses) {
+        validateRange(from, to);
+        if (bucket == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT);
+        }
+
+        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
+
+        // 1) 조건에 맞는 원본 이벤트 조회 후 구역 필터
+        List<DetectedEvent> events =
+                filterByZone(
+                        findEvents(
+                                apartmentComplexId,
+                                from,
+                                to,
+                                eventTypes,
+                                robotIds,
+                                statuses),
+                        checkpoints,
+                        zoneIds);
+
+        // 2) 이벤트들을 버킷 시작 시각 기준으로 묶는다.
+        //    LinkedHashMap이 아니라 일단 HashMap에 넣고, series 생성 때 시간순으로 맞춘다.
+        Map<LocalDateTime, List<DetectedEvent>> eventsByBucket = new HashMap<>();
+        for (DetectedEvent event : events) {
+            LocalDateTime bucketStart = resolveBucketStart(event.getOccurredAt(), bucket);
+            eventsByBucket.computeIfAbsent(bucketStart, key -> new ArrayList<>()).add(event);
+        }
+
+        // 3) from~to 사이의 모든 버킷을 순서대로 만들고, 이벤트 없는 구간은 0건으로 채운다.
+        List<TrendResponse.TrendBucketItem> series = new ArrayList<>();
+        LocalDateTime cursor = resolveBucketStart(from, bucket);
+        // to가 어떤 버킷에 속하는지도 포함해야 하므로, to의 버킷 시작까지 반복
+        LocalDateTime lastBucketStart = resolveBucketStart(to, bucket);
+        while (!cursor.isAfter(lastBucketStart)) {
+            List<DetectedEvent> bucketEvents = eventsByBucket.getOrDefault(cursor, List.of());
+            series.add(
+                    TrendResponse.TrendBucketItem.builder()
+                            .bucketStart(cursor)
+                            .bucketEnd(resolveBucketEnd(cursor, bucket))
+                            .totalCount(bucketEvents.size())
+                            .byType(countByType(bucketEvents))
+                            .byStatus(countByStatus(bucketEvents))
+                            .build());
+            cursor = nextBucketStart(cursor, bucket);
+        }
+
+        return TrendResponse.builder().bucket(bucket).series(series).build();
+    }
+
+    /**
      * AnalyticsRepository 호출을 감싸는 공통 조회 메서드.
      *
      * <p>왜 필요한가:
@@ -181,10 +271,22 @@ public class AnalyticsQueryService {
             LocalDateTime to,
             List<EventType> eventTypes,
             List<Long> robotIds) {
+        // overview는 처리상태 필터를 쓰지 않으므로 statuses=null
+        return findEvents(apartmentComplexId, from, to, eventTypes, robotIds, null);
+    }
+
+    private List<DetectedEvent> findEvents(
+            Long apartmentComplexId,
+            LocalDateTime from,
+            LocalDateTime to,
+            List<EventType> eventTypes,
+            List<Long> robotIds,
+            List<ProcessingStatus> statuses) {
         boolean hasEventTypes = eventTypes != null && !eventTypes.isEmpty();
         boolean hasRobotIds = robotIds != null && !robotIds.isEmpty();
+        boolean hasStatuses = statuses != null && !statuses.isEmpty();
 
-        return analyticsRepository.findEventsForOverview(
+        return analyticsRepository.findEventsForAnalytics(
                 apartmentComplexId,
                 from,
                 to,
@@ -193,7 +295,54 @@ public class AnalyticsQueryService {
                 hasEventTypes ? eventTypes : List.of(EventType.EMERGENCY),
                 hasRobotIds,
                 // 존재하지 않을 로봇 ID. hasRobotIds=false면 IN 조건 미적용
-                hasRobotIds ? robotIds : List.of(-1L));
+                hasRobotIds ? robotIds : List.of(-1L),
+                hasStatuses,
+                hasStatuses ? statuses : List.of(ProcessingStatus.DETECTED));
+    }
+
+    /**
+     * 이벤트가 속한 버킷의 시작 시각을 계산한다.
+     * - day: 그날 00:00:00
+     * - week: 그 주 월요일 00:00:00 (월~일)
+     * - month: 그 달 1일 00:00:00
+     */
+    private LocalDateTime resolveBucketStart(LocalDateTime dateTime, AnalyticsBucket bucket) {
+        LocalDate date = dateTime.toLocalDate();
+        return switch (bucket) {
+            case day -> date.atStartOfDay();
+            case week -> date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay();
+            case month -> date.withDayOfMonth(1).atStartOfDay();
+        };
+    }
+
+    /**
+     * 버킷의 끝 시각(포함)을 계산한다.
+     * 차트 툴팁에 "이 구간의 끝"을 보여주기 쉽게 초 단위 inclusive로 둔다.
+     * 예: day 2026-07-01 00:00:00 → end 2026-07-01 23:59:59
+     */
+    private LocalDateTime resolveBucketEnd(LocalDateTime bucketStart, AnalyticsBucket bucket) {
+        return nextBucketStart(bucketStart, bucket).minusSeconds(1);
+    }
+
+    /** 다음 버킷 시작 시각으로 이동한다. */
+    private LocalDateTime nextBucketStart(LocalDateTime bucketStart, AnalyticsBucket bucket) {
+        return switch (bucket) {
+            case day -> bucketStart.plusDays(1);
+            case week -> bucketStart.plusWeeks(1);
+            case month -> bucketStart.plusMonths(1);
+        };
+    }
+
+    /**
+     * 처리 상태별 건수를 Map으로 만든다.
+     * EnumMap을 쓰면 상태 enum 순서(DETECTED→PROCESSING→COMPLETED)가 안정적이다.
+     */
+    private Map<ProcessingStatus, Long> countByStatus(List<DetectedEvent> events) {
+        Map<ProcessingStatus, Long> result = new EnumMap<>(ProcessingStatus.class);
+        for (DetectedEvent event : events) {
+            result.merge(event.getProcessingStatus(), 1L, Long::sum);
+        }
+        return result;
     }
 
     /**

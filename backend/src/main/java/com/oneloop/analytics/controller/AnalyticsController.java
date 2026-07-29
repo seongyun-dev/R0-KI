@@ -1,8 +1,11 @@
 package com.oneloop.analytics.controller;
 
+import com.oneloop.analytics.dto.request.AnalyticsBucket;
 import com.oneloop.analytics.dto.response.OverviewResponse;
+import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.service.AnalyticsQueryService;
 import com.oneloop.event.domain.EventType;
+import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.global.response.ApiResponse;
 import com.oneloop.global.security.CustomUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,9 +27,9 @@ import org.springframework.web.bind.annotation.RestController;
  * 인증된 관리자의 apartmentComplexId로 단지 범위를 강제하므로,
  * URL만 알아도 다른 단지 통계를 볼 수 없다.
  *
- * <p>Step 1에서 제공하는 API:
+ * <p>현재 제공 API:
  * - GET /overview : 상단 요약 카드용
- * (이후 trend / by-type / by-zone 등이 같은 컨트롤러에 추가될 예정)
+ * - GET /trend : 일/주/월 추이 차트용
  */
 @Tag(name = "Analytics API", description = "이벤트 분석/통계 API")
 @RestController
@@ -77,5 +80,45 @@ public class AnalyticsController {
                         zoneIds,
                         eventTypes,
                         robotIds));
+    }
+
+    @Operation(
+            summary = "기간별 발생 추이",
+            description =
+                    "일/주/월 단위로 이벤트 발생 추이를 조회합니다. "
+                            + "차트 X축(시간)과 Y축(건수), 유형·상태별 상세 건수를 반환합니다.")
+    @GetMapping("/trend")
+    public ApiResponse<TrendResponse> trend(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Parameter(description = "조회 시작 시각 (ISO-8601)", required = true) @RequestParam
+                    OffsetDateTime from,
+            @Parameter(description = "조회 종료 시각 (ISO-8601)", required = true) @RequestParam
+                    OffsetDateTime to,
+            // day | week | month. 필수. 차트 간격의 기준이 된다.
+            @Parameter(description = "집계 단위 (day/week/month)", required = true, example = "day")
+                    @RequestParam
+                    AnalyticsBucket bucket,
+            @Parameter(description = "구역 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
+                    List<Long> zoneIds,
+            @Parameter(description = "이벤트 유형 목록 (미지정 시 전체)")
+                    @RequestParam(required = false)
+                    List<EventType> eventTypes,
+            @Parameter(description = "로봇 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
+                    List<Long> robotIds,
+            // 미지정 시 전체 상태. 예: statuses=DETECTED
+            @Parameter(description = "처리 상태 목록 (미지정 시 전체)")
+                    @RequestParam(required = false)
+                    List<ProcessingStatus> statuses) {
+        return ApiResponse.success(
+                "기간별 추이를 조회했습니다.",
+                analyticsQueryService.getTrend(
+                        principal.getApartmentComplexId(),
+                        from.toLocalDateTime(),
+                        to.toLocalDateTime(),
+                        bucket,
+                        zoneIds,
+                        eventTypes,
+                        robotIds,
+                        statuses));
     }
 }
