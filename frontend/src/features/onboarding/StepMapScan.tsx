@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { mapApi } from '../../api/services'
 import type { MappingStatusCode } from '../../api/contracts'
-import { Button, Spinner, StatusBadge } from '../../components/ui'
 
 export type StepMapScanProps = {
   robotId: string | number
@@ -17,7 +16,7 @@ const statusText: Record<MappingStatusCode, string> = {
   CANCELLED: '지도 파악이 취소되었습니다.',
 }
 
-/** Step 3/3 — 백엔드 매핑 시작 요청과 SSE 상태 구독 */
+/** Step 3/3 — 백엔드 매핑 시작 요청과 SSE 상태 구독. R0Kiauth 시안 pMap 상태 A→B */
 export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
   const [status, setStatus] = useState<MappingStatusCode | 'IDLE'>('IDLE')
   const [mapId, setMapId] = useState<string | number>()
@@ -63,52 +62,56 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
   const isDone = status === 'COMPLETED' && mapId != null
 
   return (
-    <div className="flex flex-col gap-6">
+    <div>
       {status === 'IDLE' && (
-        <div className="flex flex-col items-center gap-4 rounded-card-sm bg-surface px-6 py-12 text-center">
-          <p className="text-sm text-muted">
-            버튼을 누르면 로봇이 단지를 주행하며 자동으로 지도를 생성합니다.
-          </p>
-          <Button variant="accent" size="lg" onClick={startScan}>
-            맵 파악하기
-          </Button>
+        <div className="au-panel">
+          <p className="s">버튼을 누르면 로봇이 단지를 주행하며 자동으로 지도를 생성합니다.</p>
+          <button type="button" className="btn btn-p" onClick={startScan}>맵 파악하기</button>
         </div>
       )}
 
       {isRunning && (
-        <div className="flex flex-col items-center gap-4 rounded-card-sm bg-surface px-6 py-12 text-center">
-          <Spinner className="h-6 w-6 text-accent" />
-          <p className="font-semibold">{statusText[status]}</p>
-          <p className="text-xs text-subtle">실시간으로 로봇 상태를 확인하고 있습니다.</p>
+        <div className="au-panel">
+          <span className="au-spin" role="status" aria-live="polite" aria-label="지도 파악 중" />
+          <p className="t">{statusText[status]}</p>
+          <p className="s">실시간으로 로봇 상태를 확인하고 있습니다.</p>
         </div>
       )}
 
       {status === 'COMPLETED' && (
-        <div className="flex flex-col items-center gap-3 rounded-card-sm bg-success-soft px-6 py-10 text-center">
-          <StatusBadge label="파악 완료!" bracket className="text-sm" />
-          <p className="text-sm text-muted">
-            {mapId == null ? '완성된 지도 정보를 확인하고 있습니다.' : '구역 지정 단계로 이동할 수 있습니다.'}
-          </p>
+        <div className="au-note">
+          <svg viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></svg>
+          <span>
+            <b>지도 파악이 완료되었습니다.</b>{' '}
+            {mapId == null
+              ? '완성된 지도 정보를 확인하고 있습니다.'
+              : '구역 지정 단계로 이동할 수 있습니다.'}
+          </span>
         </div>
       )}
 
       {(status === 'FAILED' || status === 'CANCELLED') && (
-        <div className="flex flex-col items-center gap-4 rounded-card-sm bg-danger-soft px-6 py-10 text-center">
-          <p className="font-semibold text-danger">{error ?? statusText[status]}</p>
-          <Button variant="outline" onClick={startScan}>다시 시도</Button>
+        <div className="au-panel">
+          <p className="t bad" role="alert">{error ?? statusText[status]}</p>
+          <button type="button" className="btn btn-s" onClick={startScan}>다시 시도</button>
         </div>
       )}
 
-      <div className="flex justify-between">
-        <Button variant="outline" onClick={onPrev} disabled={isRunning}>← 이전</Button>
-        <Button
-          variant="dark"
-          withArrow="right"
+      <div className="au-act">
+        <button type="button" className="btn btn-s btn-add" onClick={onPrev} disabled={isRunning}>
+          <svg viewBox="0 0 24 24"><path d="M19 12H6M13 5l-7 7 7 7" /></svg>
+          이전
+        </button>
+        <span className="grow" />
+        <button
+          type="button"
+          className="btn btn-p btn-add"
           onClick={() => mapId != null && onNext(mapId)}
           disabled={!isDone}
         >
           다음: 구역 지정
-        </Button>
+          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+        </button>
       </div>
     </div>
   )
