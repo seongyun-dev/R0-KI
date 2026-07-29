@@ -7,21 +7,34 @@ import type {
 } from './analyticsContracts'
 import type {
   ComplexResponse,
+  EventBatchCreateRequest,
+  EventBatchCreateResponse,
   EventDetailResponse,
+  EvidenceUploadRequest,
+  EvidenceUploadResponse,
   EventListRequest,
   EventListResponse,
+  EventNotificationResponse,
   EventStatusChangeRequest,
   EventStatusChangeResponse,
+  EventStatusHistoryItemResponse,
   ListResponse,
   MapDetailResponse,
   MappingStartResponse,
   MappingStatusEventResponse,
+  NotificationHistoryItemResponse,
+  PatrolCreateRequest,
+  PatrolCreateResponse,
   PatrolDetailResponse,
-  PatrolListResponse,
+  PatrolEndRequest,
+  PatrolEndResponse,
+  PatrolListPageResponse,
+  PatrolPathResponse,
   RobotDeleteResponse,
   RobotDetailResponse,
-  RobotListResponse,
+  RobotListPageResponse,
   RobotLocationEvent,
+  RobotObstacleEvent,
   RobotRegisterRequest,
   RobotRegisterResponse,
   RobotStatsResponse,
@@ -31,6 +44,8 @@ import type {
   SignInResponse,
   SignUpRequest,
   SignUpResponse,
+  VehicleCheckRequest,
+  VehicleCheckResponse,
   ZoneCreateRequest,
   ZoneCreateResponse,
 } from './contracts'
@@ -89,19 +104,128 @@ export const eventsApi = {
       method: 'PATCH',
       body: jsonBody(request),
     }),
+
+  getStatusHistory: (eventId: string | number) =>
+    apiRequest<EventStatusHistoryItemResponse[]>(
+      `/api/events/${encodeURIComponent(String(eventId))}/history`,
+    ),
+  notify: (eventId: string | number) =>
+    apiRequest<EventNotificationResponse>(
+      `/api/events/${encodeURIComponent(String(eventId))}/notify`,
+      {
+        method: 'POST',
+      },
+    ),
+}
+
+export const robotEventsApi = {
+  createBatch: (robotServiceToken: string, request: EventBatchCreateRequest) =>
+    apiRequest<EventBatchCreateResponse>('/api/robot/events/batch', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${robotServiceToken}`,
+      },
+      body: jsonBody(request),
+    }),
+  checkVehicles: (robotServiceToken: string, request: VehicleCheckRequest) =>
+    apiRequest<VehicleCheckResponse>('/api/robot/vehicle-checks', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${robotServiceToken}`,
+      },
+      body: jsonBody(request),
+    }),
+  uploadEvidence: (
+    robotServiceToken: string,
+    eventId: string | number,
+    request: EvidenceUploadRequest,
+  ) => {
+    const formData = new FormData()
+    formData.append('file', request.file)
+    formData.append('mediaType', request.mediaType)
+    if (request.capturedAt) formData.append('capturedAt', request.capturedAt)
+
+    return apiRequest<EvidenceUploadResponse>(
+      `/api/events/${encodeURIComponent(String(eventId))}/evidence`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${robotServiceToken}`,
+        },
+        body: formData,
+      },
+    )
+  },
+}
+
+export const notificationsApi = {
+  list: () =>
+    apiRequest<NotificationHistoryItemResponse[]>('/api/notifications'),
 }
 
 export const patrolsApi = {
+  create: (request: PatrolCreateRequest) =>
+    apiRequest<PatrolCreateResponse>('/api/patrols', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  end: (patrolId: string | number, request: PatrolEndRequest) =>
+    apiRequest<PatrolEndResponse>(
+      `/api/patrols/${encodeURIComponent(String(patrolId))}/end`,
+      {
+        method: 'PATCH',
+        body: jsonBody(request),
+      },
+    ),
   // 백엔드 GET /api/patrols 쿼리: period / status (+ page,size,sort). robotId 필터는 미지원.
-  list: (params: { period?: string; status?: string } = {}) =>
-    apiRequest<ListResponse<PatrolListResponse>>(withQuery('/api/patrols', params)).then(unwrapList),
+  list: (
+    params: {
+      period?: string
+      status?: string
+      page?: number
+      size?: number
+      sort?: string[]
+    } = {},
+  ) => {
+    const query = new URLSearchParams()
+    const { sort, ...filters } = params
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== '' && value !== 'all') {
+        query.set(key, String(value))
+      }
+    })
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<PatrolListPageResponse>(
+      suffix ? `/api/patrols?${suffix}` : '/api/patrols',
+    )
+  },
   // 상세 응답에 경로·타임라인이 포함됨(별도 /path 엔드포인트 없음)
   detail: (patrolId: string | number) =>
     apiRequest<PatrolDetailResponse>(`/api/patrols/${encodeURIComponent(patrolId)}`),
+  path: (patrolId: string | number) =>
+    apiRequest<PatrolPathResponse>(
+      `/api/patrols/${encodeURIComponent(String(patrolId))}/path`,
+    ),
 }
 
 export const robotsApi = {
-  list: () => apiRequest<ListResponse<RobotListResponse>>('/api/robots').then(unwrapList),
+  list: (params: { page?: number; size?: number; sort?: string[] } = {}) => {
+    const query = new URLSearchParams()
+    const { sort, ...pagination } = params
+
+    Object.entries(pagination).forEach(([key, value]) => {
+      if (value !== undefined) query.set(key, String(value))
+    })
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<RobotListPageResponse>(
+      suffix ? `/api/robots?${suffix}` : '/api/robots',
+    )
+  },
   stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
   detail: (robotId: string | number) =>
     apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
@@ -119,6 +243,33 @@ export const robotsApi = {
     apiRequest<RobotDeleteResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
       method: 'DELETE',
     }),
+  subscribeLocations: (
+    onInitial: (locations: RobotLocationEvent[]) => void,
+    onLocation: (location: RobotLocationEvent) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<RobotLocationEvent[] | RobotLocationEvent>(
+      '/api/robots/location/events',
+      (data, eventName) => {
+        if (eventName === 'robot-location-initial' && Array.isArray(data)) {
+          onInitial(data)
+        } else if (eventName === 'robot-location' && !Array.isArray(data)) {
+          onLocation(data)
+        }
+      },
+      signal,
+    ),
+  subscribeObstacleEvents: (
+    onObstacle: (event: RobotObstacleEvent) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<RobotObstacleEvent>(
+      '/api/robots/obstacle-events',
+      (data, eventName) => {
+        if (eventName === 'robot-obstacle') onObstacle(data)
+      },
+      signal,
+    ),
 }
 
 export const mapApi = {
@@ -147,16 +298,6 @@ export const mapApi = {
     }),
   zones: (mapId: string | number) =>
     apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`),
-  subscribeRobotLocation: (
-    robotId: string | number,
-    onMessage: (data: RobotLocationEvent) => void,
-    signal: AbortSignal,
-  ) =>
-    consumeSse<RobotLocationEvent>(
-      `/api/robots/${encodeURIComponent(robotId)}/location/events`,
-      onMessage,
-      signal,
-    ),
 }
 
 export const statsApi = {

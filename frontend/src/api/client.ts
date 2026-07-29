@@ -53,7 +53,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   headers.set('Accept', 'application/json')
   if (!isFormData && init.body) headers.set('Content-Type', 'application/json')
   const auth = authHeaders()
-  if (auth) headers.set('Authorization', auth.Authorization)
+  if (auth && !headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
   const response = await fetch(apiUrl(path), {
     ...init,
     headers,
@@ -86,7 +86,7 @@ export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob>
 
 export async function consumeSse<T>(
   path: string,
-  onMessage: (data: T) => void,
+  onMessage: (data: T, eventName?: string) => void,
   signal: AbortSignal,
 ) {
   const headers = new Headers({ Accept: 'text/event-stream' })
@@ -113,6 +113,11 @@ export async function consumeSse<T>(
     while (boundary >= 0) {
       const block = buffer.slice(0, boundary)
       buffer = buffer.slice(boundary + 2)
+      const eventName = block
+        .split('\n')
+        .find((line) => line.startsWith('event:'))
+        ?.slice(6)
+        .trim()
       const payload = block
         .split('\n')
         .filter((line) => line.startsWith('data:'))
@@ -120,7 +125,7 @@ export async function consumeSse<T>(
         .join('\n')
       if (payload) {
         try {
-          onMessage(JSON.parse(payload) as T)
+          onMessage(JSON.parse(payload) as T, eventName)
         } catch {
           // 서버 heartbeat 또는 JSON이 아닌 SSE 데이터는 화면 상태에 반영하지 않는다.
         }
