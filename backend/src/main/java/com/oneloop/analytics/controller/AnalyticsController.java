@@ -1,7 +1,9 @@
 package com.oneloop.analytics.controller;
 
 import com.oneloop.analytics.dto.request.AnalyticsBucket;
+import com.oneloop.analytics.dto.request.ZoneSort;
 import com.oneloop.analytics.dto.response.ByTypeResponse;
+import com.oneloop.analytics.dto.response.ByZoneResponse;
 import com.oneloop.analytics.dto.response.OverviewResponse;
 import com.oneloop.analytics.dto.response.TrendResponse;
 import com.oneloop.analytics.service.AnalyticsQueryService;
@@ -32,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
  * - GET /overview : 상단 요약 카드용
  * - GET /trend : 일/주/월 추이 차트용
  * - GET /by-type : 유형별 건수/비율/증감
+ * - GET /by-zone : 구역별 건수/순찰 대비/최다 구역
  */
 @Tag(name = "Analytics API", description = "이벤트 분석/통계 API")
 @RestController
@@ -48,28 +51,21 @@ public class AnalyticsController {
                             + "전체/오늘 건수, 최다 유형·구역, 이전 동기간 대비 증감을 반환합니다.")
     @GetMapping("/overview")
     public ApiResponse<OverviewResponse> overview(
-            // JWT에서 꺼낸 로그인 사용자. 단지 ID는 여기서만 신뢰한다.
             @AuthenticationPrincipal CustomUserDetails principal,
-            // OffsetDateTime: Postman에서 +09:00(%2B09:00)까지 받을 수 있게 함.
-            // 서비스 내부 집계는 LocalDateTime으로 변환해 사용한다.
             @Parameter(description = "조회 시작 시각 (ISO-8601, 예: 2026-07-01T00:00:00+09:00)", required = true)
                     @RequestParam
                     OffsetDateTime from,
             @Parameter(description = "조회 종료 시각 (ISO-8601, 예: 2026-07-31T23:59:59+09:00)", required = true)
                     @RequestParam
                     OffsetDateTime to,
-            // true면 이전 동기간 대비 증감(delta) 계산. 기본 true.
             @Parameter(description = "이전 동기간 대비 증감 포함 여부 (기본 true)")
                     @RequestParam(defaultValue = "true")
                     boolean compare,
-            // 미지정 시 전체 구역. 복수면 zoneIds=1&zoneIds=2 형태.
             @Parameter(description = "구역 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
                     List<Long> zoneIds,
-            // 미지정 시 전체 유형. 예: eventTypes=ILLEGAL_PARKING
             @Parameter(description = "이벤트 유형 목록 (미지정 시 전체)")
                     @RequestParam(required = false)
                     List<EventType> eventTypes,
-            // 미지정 시 전체 로봇
             @Parameter(description = "로봇 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
                     List<Long> robotIds) {
         return ApiResponse.success(
@@ -96,7 +92,6 @@ public class AnalyticsController {
                     OffsetDateTime from,
             @Parameter(description = "조회 종료 시각 (ISO-8601)", required = true) @RequestParam
                     OffsetDateTime to,
-            // day | week | month. 필수. 차트 간격의 기준이 된다.
             @Parameter(description = "집계 단위 (day/week/month)", required = true, example = "day")
                     @RequestParam
                     AnalyticsBucket bucket,
@@ -107,7 +102,6 @@ public class AnalyticsController {
                     List<EventType> eventTypes,
             @Parameter(description = "로봇 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
                     List<Long> robotIds,
-            // 미지정 시 전체 상태. 예: statuses=DETECTED
             @Parameter(description = "처리 상태 목록 (미지정 시 전체)")
                     @RequestParam(required = false)
                     List<ProcessingStatus> statuses) {
@@ -136,7 +130,6 @@ public class AnalyticsController {
                     OffsetDateTime from,
             @Parameter(description = "조회 종료 시각 (ISO-8601)", required = true) @RequestParam
                     OffsetDateTime to,
-            // true면 이전 동기간 대비 증감(delta) 계산. 기본 true.
             @Parameter(description = "이전 동기간 대비 증감 포함 여부 (기본 true)")
                     @RequestParam(defaultValue = "true")
                     boolean compare,
@@ -157,5 +150,41 @@ public class AnalyticsController {
                         zoneIds,
                         robotIds,
                         statuses));
+    }
+
+    @Operation(
+            summary = "구역별 이벤트 통계",
+            description =
+                    "구역별 이벤트 건수, 순찰 방문 대비 비율, 최다 발생 구역을 조회합니다. "
+                            + "구역 막대 차트 및 위험 구역 하이라이트용 데이터입니다.")
+    @GetMapping("/by-zone")
+    public ApiResponse<ByZoneResponse> byZone(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Parameter(description = "조회 시작 시각 (ISO-8601)", required = true) @RequestParam
+                    OffsetDateTime from,
+            @Parameter(description = "조회 종료 시각 (ISO-8601)", required = true) @RequestParam
+                    OffsetDateTime to,
+            @Parameter(description = "이벤트 유형 목록 (미지정 시 전체)")
+                    @RequestParam(required = false)
+                    List<EventType> eventTypes,
+            @Parameter(description = "로봇 ID 목록 (미지정 시 전체)") @RequestParam(required = false)
+                    List<Long> robotIds,
+            @Parameter(description = "처리 상태 목록 (미지정 시 전체)")
+                    @RequestParam(required = false)
+                    List<ProcessingStatus> statuses,
+            // count_desc(기본) | rate_desc
+            @Parameter(description = "정렬 (count_desc | rate_desc)", example = "count_desc")
+                    @RequestParam(defaultValue = "count_desc")
+                    ZoneSort sort) {
+        return ApiResponse.success(
+                "구역별 통계를 조회했습니다.",
+                analyticsQueryService.getByZone(
+                        principal.getApartmentComplexId(),
+                        from.toLocalDateTime(),
+                        to.toLocalDateTime(),
+                        eventTypes,
+                        robotIds,
+                        statuses,
+                        sort));
     }
 }
