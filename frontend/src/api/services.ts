@@ -3,7 +3,10 @@ import { apiBlob, apiRequest, consumeSse, jsonBody } from './client'
 import type {
   ComplexResponse,
   EventDetailResponse,
+  EventListRequest,
   EventListResponse,
+  EventStatusChangeRequest,
+  EventStatusChangeResponse,
   ListResponse,
   MapDetailResponse,
   MappingStartResponse,
@@ -60,18 +63,27 @@ export const authApi = {
 
 export const eventsApi = {
   // 백엔드 GET /api/events 쿼리: type / status / period (+ page,size,sort). 위험도 필터는 미지원.
-  list: (params: { type?: string; status?: string; period?: string } = {}) =>
-    apiRequest<ListResponse<EventListResponse>>(withQuery('/api/events', params)).then(unwrapList),
+  list: (request: EventListRequest = {}) => {
+    const query = new URLSearchParams()
+    const { sort, ...filters } = request
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined) query.set(key, String(value))
+    })
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<EventListResponse>(suffix ? `/api/events?${suffix}` : '/api/events')
+  },
+  
   detail: (eventId: string | number) =>
     apiRequest<EventDetailResponse>(`/api/events/${encodeURIComponent(eventId)}`),
-  updateStatus: (eventId: string | number, processingStatus: string, processingNote?: string) =>
-    apiRequest<unknown>(`/api/events/${encodeURIComponent(eventId)}/status`, {
+
+  updateStatus: (eventId: string | number, request: EventStatusChangeRequest) =>
+    apiRequest<EventStatusChangeResponse>(`/api/events/${encodeURIComponent(eventId)}/status`, {
       method: 'PATCH',
-      body: jsonBody({ processingStatus, processingNote }),
+      body: jsonBody(request),
     }),
-  // 긴급 이벤트 실시간 수신 (SSE) — 엔드포인트/페이로드 스키마 백엔드 확정 필요
-  subscribeEmergency: (onMessage: (data: EventListResponse) => void, signal: AbortSignal) =>
-    consumeSse<EventListResponse>('/api/events/emergency/stream', onMessage, signal),
 }
 
 export const patrolsApi = {

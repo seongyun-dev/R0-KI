@@ -1,7 +1,7 @@
 import type {
   ComplexResponse,
   EventDetailResponse,
-  EventListResponse,
+  EventListItemResponse,
   MapInfoResponse,
   MapMonitoringResponse,
   PatrolDetailResponse,
@@ -111,7 +111,7 @@ export function complexResponseToDomain(value: ComplexResponse): Complex {
 }
 
 /** 목록 항목(EventListResponse) → 도메인 (1f) */
-export function eventListItemToDomain(value: EventListResponse): PatrolEvent {
+export function eventListItemToDomain(value: EventListItemResponse): PatrolEvent {
   const processing = processingStatus(value.status)
   return {
     id: String(value.eventId),

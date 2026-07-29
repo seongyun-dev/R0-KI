@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useComplexSearch } from '../auth/useComplexSearch'
 import { formatPhone } from '../../lib/formatters'
 import type { SignUpRequest } from '../../api/contracts'
@@ -16,9 +15,8 @@ const TAKEN_IDS = ['admin', 'manager']
 
 const normalize = (s: string) => s.trim().replace(/\s+/g, '')
 
-/** Step 1/3 — 계정·단지 (1u). R0Kiauth 시안 pNew: 기존 단지 감지 시 소속 회원 가입으로 분기 */
+/** Step 1/3 — 계정·단지 (1u). R0Kiauth 시안 pNew: 이미 등록된 단지면 안내 배너 */
 export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountProps) {
-  const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [idCheck, setIdCheck] = useState<'idle' | 'ok' | 'taken'>('idle')
   const [password, setPassword] = useState('')
@@ -75,21 +73,6 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
         error instanceof Error ? error.message : '주소 검색 중 오류가 발생했습니다.'
       alert(message)
     }
-  }
-
-  // 공통 필드 이월 — 기존 단지 가입 폼으로 전환 (시안 carry)
-  const goExisting = () => {
-    navigate('/signup', {
-      state: {
-        prefill: {
-          username,
-          password,
-          name,
-          phone,
-          complex: matched,
-        },
-      },
-    })
   }
 
   return (
@@ -209,6 +192,8 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
               required
             />
             <p className="au-help">이미 등록된 단지를 입력하면 소속 회원 가입으로 전환됩니다</p>
+            {/* 이미 등록된 단지 안내 — 별도 가입 폼으로 보내지 않는다.
+                서버가 isNewApartment=false 로 응답하면 소속 회원 가입이 그대로 완료된다. */}
             {matched && (
               <div className="au-branch">
                 <span className="ic">
@@ -217,13 +202,10 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
                 <span className="bd">
                   <span className="bt">이미 등록된 단지입니다</span>
                   <span className="bs">
-                    <b>{matched.name}</b> 은(는) 이미 관리자가 등록한 단지입니다. 단지를 새로 만들
-                    필요 없이 소속 회원으로 가입하세요.
+                    <b>{matched.name}</b> 은(는) 이미 관리자가 등록한 단지입니다. 이대로 진행하면
+                    로봇·맵 등록 없이 소속 회원으로 가입이 완료됩니다.
                   </span>
                 </span>
-                <button type="button" className="btn btn-p" onClick={goExisting}>
-                  소속 회원으로 가입 →
-                </button>
               </div>
             )}
           </div>

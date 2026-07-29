@@ -109,10 +109,9 @@ export default function SignupOnboarding() {
                   }
                 }}
               />
+              {/* 일반 회원가입(/signup)은 front/dev 에서 제거됨 — 가입 경로는 온보딩 하나로 통일 */}
               <div className="au-foot">
-                이미 등록된 단지 소속이신가요? <Link to="/signup">일반 회원가입 →</Link>
-                {' '}·{' '}
-                <Link to="/login">로그인 →</Link>
+                이미 계정이 있으신가요? <Link to="/login">로그인 →</Link>
               </div>
             </>
           )}

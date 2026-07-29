@@ -4,6 +4,13 @@ import { R0KiShell } from '../components/layout/R0KiShell'
 import { R0KiDropdown } from '../components/ui/R0KiDropdown'
 import { useEvents } from '../features/events/useEvents'
 import type { PatrolEvent } from '../types/domain'
+import type {
+  EventPeriodCode,
+  EventTypeCode,
+  ProcessingStatusCode,
+} from '../api/contracts'
+// 담당자는 처리중/처리완료일 때만 표시 (백엔드 제공)
+const hasAssignee = (e: PatrolEvent) => e.status === '처리중' || e.status === '처리완료'
 
 /* R0-Ki 이벤트 목록 — 시안 R0Kievents 그대로.
    유리 테이블 + 커스텀 드롭다운 4종 필터. 데이터는 기존 useEvents 그대로.
@@ -21,37 +28,52 @@ const RISK_DOT: Record<string, string> = {
   낮음: 'var(--offline)',
 }
 
-const TYPE_OPTIONS = ['불법주차', '쓰레기', '위험구역', '응급상황', '화재 의심', '침입'].map((v) => ({ value: v, label: v }))
-const RISK_OPTIONS = ['긴급', '보통', '낮음'].map((v) => ({ value: v, label: v }))
-const STATE_OPTIONS = ['탐지', '처리중', '처리완료'].map((v) => ({ value: v, label: v }))
-const PERIOD_OPTIONS = [
-  { value: 'today', label: '오늘' },
-  { value: '7d', label: '최근 7일' },
+const TYPE_OPTIONS = [
+  { value: 'ILLEGAL_PARKING', label: '불법주차' },
+  { value: 'UNREGISTERED_VEHICLE', label: '미등록 차량' },
+  { value: 'TRASH_DETECTED', label: '쓰레기' },
+  { value: 'RECYCLING_AREA_FULL', label: '분리수거장' },
+  { value: 'EMERGENCY', label: '응급상황' },
 ]
 
-/** 담당자는 처리중/처리완료일 때만 표시 (백엔드 제공) */
-const hasAssignee = (e: PatrolEvent) => e.status === '처리중' || e.status === '처리완료'
+const STATE_OPTIONS = [
+  { value: 'DETECTED', label: '탐지' },
+  { value: 'PROCESSING', label: '처리중' },
+  { value: 'COMPLETED', label: '처리완료' },
+]
+
+const PERIOD_OPTIONS = [
+  { value: 'ALL', label: '전체' },
+  { value: 'TODAY', label: '오늘' },
+  { value: 'LAST_7_DAYS', label: '최근 7일' },
+]
+
+// const RISK_OPTIONS = [
+//   { value: 'EMERGENCY', label: '긴급' },
+//   { value: 'NORMAL', label: '보통' },
+//   { value: 'LOW', label: '낮음' },
+// ]
 
 export default function EventList() {
   const navigate = useNavigate()
   // 입력 중 필터 / 적용된 필터 분리 — 검색 버튼으로 확정
-  const [draft, setDraft] = useState({ type: '', risk: '', status: '', period: '' })
-  const [applied, setApplied] = useState({ type: '', risk: '', status: '', period: '' })
+  const [draft, setDraft] = useState<{
+    type: EventTypeCode | ''
+    status: ProcessingStatusCode | ''
+    period: EventPeriodCode | ''
+  }>({ type: '', status: '', period: '' })
+  const [applied, setApplied] = useState(draft)
 
   const { data: events, isLoading, error, refetch } = useEvents({
     type: applied.type || undefined,
     status: applied.status || undefined,
-    risk: applied.risk || undefined,
     period: applied.period || undefined,
+    page: 0,
+    size: 10,
+    sort: ['occurredAt,DESC'],
   })
 
-  // 서버가 유형·위험도 필터를 아직 지원하지 않아 화면에서도 한 번 더 거른다
-  const rows = (events ?? []).filter(
-    (e) =>
-      (!applied.type || e.type === applied.type) &&
-      (!applied.risk || e.riskLevel === applied.risk) &&
-      (!applied.status || e.status === applied.status),
-  )
+  const rows = events ?? []
   const urgentCount = rows.filter((e) => e.riskLevel === '긴급').length
 
   const set = (key: keyof typeof draft) => (value: string) =>
@@ -69,7 +91,6 @@ export default function EventList() {
           </div>
           <div className="headtools tight">
             <R0KiDropdown allLabel="유형 전체" options={TYPE_OPTIONS} value={draft.type} onChange={set('type')} />
-            <R0KiDropdown allLabel="위험도 전체" options={RISK_OPTIONS} value={draft.risk} onChange={set('risk')} />
             <R0KiDropdown allLabel="상태 전체" options={STATE_OPTIONS} value={draft.status} onChange={set('status')} />
             <R0KiDropdown allLabel="기간 전체" options={PERIOD_OPTIONS} value={draft.period} onChange={set('period')} />
             <button type="button" className="btn btn-p" onClick={() => setApplied(draft)}>검색</button>
