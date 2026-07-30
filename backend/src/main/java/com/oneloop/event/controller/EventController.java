@@ -8,6 +8,7 @@ import com.oneloop.event.dto.response.EventDetailResponse;
 import com.oneloop.event.dto.response.EventListResponse;
 import com.oneloop.event.dto.response.EventStatusChangeResponse;
 import com.oneloop.event.service.EventService;
+import com.oneloop.event.service.EventSseService;
 import com.oneloop.global.response.ApiResponse;
 import com.oneloop.global.response.PageResponse;
 import com.oneloop.global.security.CustomUserDetails;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.springframework.data.domain.Sort.Direction.DESC;
 
@@ -35,6 +37,19 @@ import static org.springframework.data.domain.Sort.Direction.DESC;
 public class EventController {
 
     private final EventService eventService;
+    private final EventSseService eventSseService;
+
+    @Operation(summary = "응급 이벤트 구독", description = "소속 단지에서 새로 발생한 응급 이벤트를 실시간으로 구독합니다.")
+    @GetMapping("/subscribe/emergency")
+    public SseEmitter subscribeEmergency(@AuthenticationPrincipal CustomUserDetails principal) {
+        return eventSseService.subscribeEmergency(principal.getApartmentComplexId());
+    }
+
+    @Operation(summary = "일반 이벤트 생성 알림 구독", description = "소속 단지의 일반 이벤트 생성 알림을 실시간으로 구독합니다.")
+    @GetMapping("/subscribe/general")
+    public SseEmitter subscribeGeneral(@AuthenticationPrincipal CustomUserDetails principal) {
+        return eventSseService.subscribeGeneral(principal.getApartmentComplexId());
+    }
 
     @Operation(summary = "이벤트 목록 조회", description = "소속 단지의 탐지 이벤트를 유형·상태·기간으로 필터링하여 최신순으로 조회합니다.")
     @GetMapping
