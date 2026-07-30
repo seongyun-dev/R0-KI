@@ -10,12 +10,16 @@ import com.oneloop.event.dto.request.EventCreateRequest;
 import com.oneloop.event.dto.request.EvidenceUploadRequest;
 import com.oneloop.event.dto.request.VehicleCheckItemRequest;
 import com.oneloop.event.dto.request.VehicleCheckRequest;
+import com.oneloop.event.dto.response.EmergencyEventSseResponse;
 import com.oneloop.event.dto.response.EventBatchCreateResponse;
 import com.oneloop.event.dto.response.EventBatchCreatedItem;
 import com.oneloop.event.dto.response.EventCreateResponse;
 import com.oneloop.event.dto.response.EvidenceUploadResponse;
+import com.oneloop.event.dto.response.GeneralEventsCreatedSseResponse;
 import com.oneloop.event.dto.response.VehicleCheckResponse;
 import com.oneloop.event.dto.response.VehicleViolationResponse;
+import com.oneloop.event.event.EmergencyEventCreatedEvent;
+import com.oneloop.event.event.GeneralEventsCreatedEvent;
 import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.event.repository.EventEvidenceRepository;
 import com.oneloop.global.exception.BusinessException;
@@ -41,6 +45,7 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,6 +66,7 @@ public class EventCreationService {
     private final CheckpointLocator checkpointLocator;
     private final FileStorageService fileStorageService;
     private final NotificationService notificationService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 로봇이 응급상황을 감지했을 때 호출하는 단건 이벤트 생성.
@@ -86,6 +92,7 @@ public class EventCreationService {
                         request.getRiskLevel(),
                         request.getRecognizedLicensePlate());
         patrol.increaseDetectedEventCount();
+        publishEmergencyEvent(event);
 
         return EventCreateResponse.of(event.getId());
     }
@@ -105,6 +112,7 @@ public class EventCreationService {
                 request.getEvents().stream()
                         .map(item -> createBatchItem(patrol, robot, item))
                         .toList();
+        publishGeneralEventsCreated(patrol, createdItems.size());
 
         return EventBatchCreateResponse.of(createdItems);
     }
@@ -146,6 +154,7 @@ public class EventCreationService {
                         .map(vehicle -> checkVehicle(patrol, robot, vehicle, parkingCheckpoints))
                         .filter(Objects::nonNull)
                         .toList();
+        publishGeneralEventsCreated(patrol, violations.size());
 
         return VehicleCheckResponse.of(violations);
     }
@@ -267,5 +276,53 @@ public class EventCreationService {
         }
         Matcher matcher = CONFIDENCE_PATTERN.matcher(eventDetails);
         return matcher.find() ? new BigDecimal(matcher.group(1)) : null;
+    }
+
+    private void publishEmergencyEvent(DetectedEvent event) {
+        if (event.getType() != EventType.EMERGENCY) {
+            publishGeneralEventsCreated(event.getPatrol(), 1);
+            return;
+        }
+
+        PatrolRobot robot = event.getRobot();
+        Long apartmentComplexId = robot.getApartmentComplex().getId();
+        Optional<PatrolMap> patrolMap =
+                patrolMapRepository.findByApartmentComplexId(apartmentComplexId);
+        List<Checkpoint> checkpoints =
+                patrolMap
+                        .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
+                        .orElseGet(List::of);
+        String location =
+                checkpointLocator
+                        .findContaining(checkpoints, event.getX(), event.getY())
+                        .map(Checkpoint::getName)
+                        .orElse(null);
+
+        EmergencyEventSseResponse response =
+                EmergencyEventSseResponse.builder()
+                        .eventId(event.getId())
+                        .eventType(event.getType())
+                        .title(event.getTitle())
+                        .occurredAt(event.getOccurredAt())
+                        .location(location)
+                        .robotName(robot.getName())
+                        .riskLevel(event.getRiskLevel())
+                        .processingStatus(event.getProcessingStatus())
+                        .mapId(patrolMap.map(PatrolMap::getId).orElse(null))
+                        .x(event.getX())
+                        .y(event.getY())
+                        .build();
+        eventPublisher.publishEvent(new EmergencyEventCreatedEvent(apartmentComplexId, response));
+    }
+
+    private void publishGeneralEventsCreated(Patrol patrol, int createdCount) {
+        if (createdCount == 0) {
+            return;
+        }
+
+        eventPublisher.publishEvent(
+                new GeneralEventsCreatedEvent(
+                        patrol.getRobot().getApartmentComplex().getId(),
+                        GeneralEventsCreatedSseResponse.of(patrol.getId(), createdCount)));
     }
 }

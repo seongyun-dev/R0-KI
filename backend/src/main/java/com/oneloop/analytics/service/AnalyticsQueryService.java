@@ -848,6 +848,34 @@ public class AnalyticsQueryService {
     }
 
     /**
+     * LLM 인사이트 표 생성 전용: 기간 내 이벤트 원본 조회.
+     *
+     * <p>화면 API로는 노출하지 않는다. 유형별 미처리·구역별 미처리·지연 표 계산에만 쓴다.
+     * 집계 규칙(단지 스코프, occurredAt 기간)은 overview/handling과 동일하다.
+     */
+    public List<DetectedEvent> findEventsForInsight(
+            Long apartmentComplexId, LocalDateTime from, LocalDateTime to) {
+        validateRange(from, to);
+        return findEvents(apartmentComplexId, from, to, null, null, null);
+    }
+
+    /**
+     * LLM 인사이트 표 생성 전용: overview와 같은 이전 동기간.
+     *
+     * @return [0]=previousFrom, [1]=previousTo
+     */
+    public LocalDateTime[] resolvePreviousPeriod(LocalDateTime from, LocalDateTime to) {
+        validateRange(from, to);
+        DateRange previous = previousRange(from, to);
+        return new LocalDateTime[] {previous.from(), previous.to()};
+    }
+
+    /** LLM 인사이트 표 생성 전용: 단지 체크포인트 목록. */
+    public List<Checkpoint> findCheckpointsForInsight(Long apartmentComplexId) {
+        return findCheckpoints(apartmentComplexId);
+    }
+
+    /**
      * 조회 기간 유효성 검사.
      * from/to가 없거나 from >= to 이면 INVALID_INPUT(COMMON_001)을 던진다.
      */

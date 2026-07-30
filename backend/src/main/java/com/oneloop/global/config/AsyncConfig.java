@@ -35,6 +35,25 @@ public class AsyncConfig {
         return executor;
     }
 
+    /**
+     * 통계 AI 인사이트 전용 풀.
+     *
+     * <p>순찰 요약 풀과 분리한 이유: 인사이트는 집계 쿼리 여러 번 + GMS 호출이라
+     * 순찰 요약보다 오래 걸릴 수 있다. 한 풀을 쓰면 순찰 종료 직후 요약이 밀릴 수 있다.
+     */
+    @Bean(name = "analyticsInsightExecutor")
+    public Executor analyticsInsightExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("analytics-insight-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+
     // SMS 발송(solapi 호출)이 일반 요청 처리에 영향을 주지 않도록 전용 스레드 풀을 쓴다.
     @Bean(name = "notificationExecutor")
     public Executor notificationExecutor() {
