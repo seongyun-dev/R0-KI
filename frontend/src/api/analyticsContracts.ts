@@ -6,6 +6,7 @@
  * - GET /api/analytics/events/trend
  * - GET /api/analytics/events/handling
  * - GET /api/analytics/events/by-zone
+ * - GET /api/analytics/insights
  *
  * 공통 래퍼 { success, code, message, data }는 apiRequest가 data만 꺼내 주므로
  * 여기 타입은 data 본문만 정의한다.
@@ -89,4 +90,25 @@ export type AnalyticsByZoneItem = {
   patrolCount: number
   eventRatePerPatrol: number | null
   topEventType: string | null
+}
+
+/** insights — 직전 완료 주/월 AI 리포트 */
+export type AnalyticsInsightPeriodType = 'WEEK' | 'MONTH'
+
+export type AnalyticsInsightGenerationStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'FAILED'
+
+export type AnalyticsInsightResponse = {
+  insightId: number
+  periodType: AnalyticsInsightPeriodType
+  periodKey: string
+  periodFrom: string
+  periodTo: string
+  timezone: string
+  generationStatus: AnalyticsInsightGenerationStatus
+  /** COMPLETED 일 때만 채워짐. 마크다운 본문 */
+  insightContent: string | null
 }
