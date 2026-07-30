@@ -21,7 +21,8 @@ import type {
   MapDetailResponse,
   MappingStartResponse,
   MappingStatusEventResponse,
-  NotificationHistoryItemResponse,
+  NotificationDetailResponse,
+  NotificationHistoryResponse,
   PatrolCreateRequest,
   PatrolCreateResponse,
   PatrolDetailResponse,
@@ -155,7 +156,11 @@ export const robotEventsApi = {
 
 export const notificationsApi = {
   list: () =>
-    apiRequest<NotificationHistoryItemResponse[]>('/api/notifications'),
+    apiRequest<NotificationHistoryResponse>('/api/notifications'),
+  detail: (notificationId: number) =>
+    apiRequest<NotificationDetailResponse>(
+      `/api/notifications/${encodeURIComponent(String(notificationId))}`,
+    ),
 }
 
 export const patrolsApi = {
