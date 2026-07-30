@@ -14,6 +14,9 @@ public class GmsChatResponse {
     @NoArgsConstructor
     public static class Choice {
         private Message message;
+
+        @com.fasterxml.jackson.annotation.JsonProperty("finish_reason")
+        private String finishReason;
     }
 
     @Getter
