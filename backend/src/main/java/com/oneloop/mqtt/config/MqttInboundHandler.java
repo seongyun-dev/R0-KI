@@ -1,8 +1,14 @@
 package com.oneloop.mqtt.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.oneloop.robot.repository.RobotRepository;
+import com.oneloop.mapping.service.MappingCommandAckService;
+import com.oneloop.mqtt.dto.CommandAck;
+import com.oneloop.patrol.service.PatrolCommandAckService;
+import com.oneloop.robot.dto.mqtt.RobotPoseMessage;
+import com.oneloop.robot.dto.mqtt.RobotStatusMessage;
+import com.oneloop.robot.service.RobotTelemetryService;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -22,17 +28,33 @@ class MqttInboundHandler implements MqttCallbackExtended {
         "hanbakwi/v1/robots/+/command/ack"
     };
     private static final int QOS = 1;
+    private static final String START_MAPPING = "START_MAPPING";
+    private static final String START_PATROL = "START_PATROL";
+    private static final String STOP_PATROL = "STOP_PATROL";
 
     private final IMqttClient client;
-    private final RobotRepository robotRepository;
+    private final RobotTelemetryService robotTelemetryService;
+    private final MappingCommandAckService mappingCommandAckService;
+    private final PatrolCommandAckService patrolCommandAckService;
     // Spring이 관리하는 ObjectMapper 빈이 없어서, 단순 Map 파싱용으로 직접 생성
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper =
+            new ObjectMapper()
+                    .findAndRegisterModules()
+                    // 로봇이 보낸 +09:00 같은 원래 오프셋을 UTC로 강제 변환하지 않고 그대로 보존합니다.
+                    .disable(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE);
 
-    MqttInboundHandler(IMqttClient client, RobotRepository robotRepository) {
+    MqttInboundHandler(
+            IMqttClient client,
+            RobotTelemetryService robotTelemetryService,
+            MappingCommandAckService mappingCommandAckService,
+            PatrolCommandAckService patrolCommandAckService) {
         this.client = client;
-        this.robotRepository = robotRepository;
+        this.robotTelemetryService = robotTelemetryService;
+        this.mappingCommandAckService = mappingCommandAckService;
+        this.patrolCommandAckService = patrolCommandAckService;
     }
 
+    // 최초 연결/재연결 시마다 호출됨 - 구독
     @Override
     public void connectComplete(boolean reconnect, String serverURI) {
         log.info("[MQTT] 브로커 연결 완료 (재연결={}, serverURI={})", reconnect, serverURI);
@@ -46,16 +68,24 @@ class MqttInboundHandler implements MqttCallbackExtended {
         }
     }
 
+    // 연결 끊김 콜백 - automaticReconnect가 재연결 시도
     @Override
     public void connectionLost(Throwable cause) {
         log.warn("[MQTT] 연결 끊김, 자동 재연결 대기", cause);
     }
 
+    // 메시지 수신 진입점 - 토픽 기준으로 각 전용 핸들러에 위임
     @Override
     public void messageArrived(String topic, MqttMessage message) {
         String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
 
-        // 이번 단계는 엔티티 갱신 없이, 역직렬화/robotKey 매칭까지만 확인 (실제 반영은 다음 단계)
+        // command/ack는 PING/START_MAPPING/START_PATROL/STOP_PATROL 공통 스펙(CommandAck)이라
+        // 먼저 이 스펙으로 파싱한 뒤 ack.command() 값으로 도메인 서비스에 위임한다.
+        if (topic.endsWith("/command/ack")) {
+            handleCommandAck(topic, payload);
+            return;
+        }
+
         Map<String, Object> parsed;
         try {
             parsed = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
@@ -64,11 +94,59 @@ class MqttInboundHandler implements MqttCallbackExtended {
             return;
         }
 
-        Object robotKey = parsed.get("robotKey");
-        boolean known =
-                robotKey != null
-                        && robotRepository.findBySerialNumber(String.valueOf(robotKey)).isPresent();
-        log.info("[MQTT] topic={}, robotKey={}, known={}, payload={}", topic, robotKey, known, parsed);
+        if (topic.endsWith("/pose")) {
+            handlePose(topic, payload);
+        } else if (topic.endsWith("/status")) {
+            handleStatus(topic, payload);
+        } else {
+            log.info("[MQTT] 처리 대상이 아닌 토픽, 로그만 남김. topic={}, payload={}", topic, parsed);
+        }
+    }
+
+    // pose payload를 RobotPoseMessage로 역직렬화해서 좌표 갱신 서비스에 위임
+    private void handlePose(String topic, String payload) {
+        try {
+            robotTelemetryService.updatePose(objectMapper.readValue(payload, RobotPoseMessage.class));
+        } catch (Exception e) {
+            log.warn("[MQTT] pose 처리 실패. topic={}, payload={}", topic, payload, e);
+        }
+    }
+
+    // status payload를 RobotStatusMessage로 역직렬화해서 상태/장애물 갱신 서비스에 위임
+    private void handleStatus(String topic, String payload) {
+        try {
+            robotTelemetryService.updateStatus(objectMapper.readValue(payload, RobotStatusMessage.class));
+        } catch (Exception e) {
+            log.warn("[MQTT] status 처리 실패. topic={}, payload={}", topic, payload, e);
+        }
+    }
+
+    // 공용 CommandAck로 파싱한 뒤 robotKey(토픽 4번째 구간)와 command 값으로 도메인 서비스에 위임
+    private void handleCommandAck(String topic, String payload) {
+        try {
+            CommandAck ack = objectMapper.readValue(payload, CommandAck.class);
+            String[] topicSegments = topic.split("/");
+            // 정상 토픽: hanbakwi/v1/robots/{robotKey}/command/ack
+            if (topicSegments.length != 6) {
+                log.warn("[MQTT] 잘못된 커맨드 ACK 토픽을 무시합니다. topic={}", topic);
+                return;
+            }
+            routeCommandAck(topicSegments[3], ack);
+        } catch (Exception exception) {
+            log.warn("[MQTT] 커맨드 ACK 처리 실패. topic={}, payload={}", topic, payload, exception);
+        }
+    }
+
+    private void routeCommandAck(String robotKey, CommandAck ack) {
+        String command = ack.command();
+        if (START_MAPPING.equals(command)) {
+            mappingCommandAckService.handle(robotKey, ack);
+        } else if (START_PATROL.equals(command) || STOP_PATROL.equals(command)) {
+            patrolCommandAckService.handle(robotKey, ack);
+        } else {
+            // PING 등 아직 처리 대상이 아닌 커맨드 ACK는 로그만 남김
+            log.info("[MQTT] 처리 대상이 아닌 커맨드 ACK, 로그만 남김. robotKey={}, ack={}", robotKey, ack);
+        }
     }
 
     @Override

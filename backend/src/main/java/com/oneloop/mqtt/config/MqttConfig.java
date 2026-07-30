@@ -1,6 +1,8 @@
 package com.oneloop.mqtt.config;
 
-import com.oneloop.robot.repository.RobotRepository;
+import com.oneloop.mapping.service.MappingCommandAckService;
+import com.oneloop.patrol.service.PatrolCommandAckService;
+import com.oneloop.robot.service.RobotTelemetryService;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,7 +34,9 @@ public class MqttConfig {
             @Value("${app.mqtt.client-id}") String clientIdPrefix,
             @Value("${mqtt.username:}") String username,
             @Value("${mqtt.password:}") String password,
-            RobotRepository robotRepository)
+            RobotTelemetryService robotTelemetryService,
+            MappingCommandAckService mappingCommandAckService,
+            PatrolCommandAckService patrolCommandAckService)
             throws MqttException {
         // Jetson과 clientId가 겹치면 브로커가 한쪽 연결을 끊어버리므로 UUID로 유일성 보장
         String clientId = clientIdPrefix + "-" + UUID.randomUUID();
@@ -48,7 +52,9 @@ public class MqttConfig {
             options.setPassword(password.toCharArray());
         }
 
-        client.setCallback(new MqttInboundHandler(client, robotRepository));
+        client.setCallback(
+                new MqttInboundHandler(
+                        client, robotTelemetryService, mappingCommandAckService, patrolCommandAckService));
         connectWithRetry(client, options);
         return client;
     }

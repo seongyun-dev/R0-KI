@@ -1,6 +1,10 @@
 spring:
   application:
     name: oneloop
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 210MB
   config:
     import: optional:classpath:application-secret.yml
   jpa:
@@ -28,9 +32,13 @@ springdoc:
 
 app:
   cors:
-    allowed-origins: http://localhost:3000
+    allowed-origins: http://localhost:3000,http://localhost:5173
   mqtt:
     client-id: oneloop-backend
+  file-storage:
+    upload-dir: ${UPLOAD_DIR:uploads}
+    url-prefix: /uploads
+    map-subdirectory: maps
 
 gms:
   base-url: ${GMS_BASE_URL:https://gms.ssafy.io/gmsapi/api.openai.com/v1}
@@ -38,3 +46,6 @@ gms:
   model: ${GMS_MODEL:gpt-5.4-mini}
   chat-completions-path: ${GMS_CHAT_COMPLETIONS_PATH:/chat/completions}
   timeout-seconds: ${GMS_TIMEOUT_SECONDS:30}
+  # gpt-5-nano: 추론+본문 합산 예산. 너무 낮으면 content 빈 응답 → 충분히 크게.
+  summary-max-completion-tokens: ${GMS_SUMMARY_MAX_COMPLETION_TOKENS:4096}
+  insight-max-completion-tokens: ${GMS_INSIGHT_MAX_COMPLETION_TOKENS:16384}

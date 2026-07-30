@@ -9,8 +9,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @Slf4j
 @RestControllerAdvice
@@ -40,8 +42,34 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<ErrorResponse>> handleInvalidJson(
             HttpMessageNotReadableException exception) {
+        log.warn("요청 본문 파싱 실패: {}", exception.getMessage());
         return buildResponse(
                 ErrorCode.INVALID_JSON, ErrorCode.INVALID_JSON.getMessage(), ErrorResponse.now());
+    }
+
+    /** 필수 쿼리 파라미터 누락 (예: trend API의 bucket) */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<ErrorResponse>> handleMissingParameter(
+            MissingServletRequestParameterException exception) {
+        log.warn("필수 요청 파라미터 누락: {}", exception.getParameterName());
+        return buildResponse(
+                ErrorCode.INVALID_INPUT,
+                ErrorCode.INVALID_INPUT.getMessage(),
+                ErrorResponse.now());
+    }
+
+    /** enum 등 타입 변환 실패 (예: bucket=YEAR) */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<ErrorResponse>> handleArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException exception) {
+        log.warn(
+                "요청 파라미터 타입 불일치: name={}, value={}",
+                exception.getName(),
+                exception.getValue());
+        return buildResponse(
+                ErrorCode.INVALID_INPUT,
+                ErrorCode.INVALID_INPUT.getMessage(),
+                ErrorResponse.now());
     }
 
     @ExceptionHandler(Exception.class)

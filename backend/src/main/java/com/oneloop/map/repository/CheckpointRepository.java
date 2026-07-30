@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CheckpointRepository extends JpaRepository<Checkpoint, Long> {
     List<Checkpoint> findAllByPatrolMapId(Long mapId);
+
+    List<Checkpoint> findAllByPatrolMapIdOrderByIdAsc(Long mapId);
 }

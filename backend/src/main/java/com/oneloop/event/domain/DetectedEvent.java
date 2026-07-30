@@ -1,6 +1,5 @@
 package com.oneloop.event.domain;
 
-import com.oneloop.global.common.BaseEntity;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.robot.domain.PatrolRobot;
 import jakarta.persistence.*;
@@ -12,7 +11,7 @@ import lombok.*;
 @Entity
 @Table(name = "detected_events")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class DetectedEvent extends BaseEntity {
+public class DetectedEvent {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "event_id")
@@ -68,6 +67,7 @@ public class DetectedEvent extends BaseEntity {
             EventType type,
             String title,
             String details,
+            BigDecimal confidence,
             LocalDateTime occurredAt,
             BigDecimal x,
             BigDecimal y,
@@ -78,6 +78,7 @@ public class DetectedEvent extends BaseEntity {
         this.type = type;
         this.title = title;
         this.details = details;
+        this.confidence = confidence;
         this.occurredAt = occurredAt;
         this.x = x;
         this.y = y;
@@ -85,12 +86,9 @@ public class DetectedEvent extends BaseEntity {
         this.recognizedLicensePlate = recognizedLicensePlate;
     }
 
-    public void startProcessing() {
-        this.processingStatus = ProcessingStatus.PROCESSING;
-    }
-
-    public void completeProcessing() {
-        this.processingStatus = ProcessingStatus.COMPLETED;
-        this.processedAt = LocalDateTime.now();
+    // COMPLETED로 바뀔 때만 processedAt을 찍고, 그 외 상태로 바뀌면(재오픈 등) 다시 비운다
+    public void changeStatus(ProcessingStatus status) {
+        this.processingStatus = status;
+        this.processedAt = status == ProcessingStatus.COMPLETED ? LocalDateTime.now() : null;
     }
 }

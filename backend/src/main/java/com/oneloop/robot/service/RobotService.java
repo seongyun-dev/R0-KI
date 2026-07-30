@@ -6,9 +6,9 @@ import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.response.PageResponse;
 import com.oneloop.map.domain.Checkpoint;
-import com.oneloop.map.domain.CheckpointType;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.map.util.CheckpointLocator;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.dto.response.PatrolSummaryResponse;
 import com.oneloop.patrol.repository.PatrolRepository;
@@ -23,7 +23,6 @@ import com.oneloop.robot.dto.response.RobotRegisterResponse;
 import com.oneloop.robot.dto.response.RobotStatsResponse;
 import com.oneloop.robot.dto.response.RobotUpdateResponse;
 import com.oneloop.robot.repository.RobotRepository;
-import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -46,13 +45,16 @@ public class RobotService {
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final PatrolRepository patrolRepository;
+    private final CheckpointLocator checkpointLocator;
+    private final RobotServiceTokenPublisher robotServiceTokenPublisher;
 
     /**
-     * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다.
+     * 로그인한 관리자의 소속 단지에 새로운 순찰로봇을 등록한다. 등록과 동시에 로봇 전용 서비스 토큰(REST 인증용)을 발급하고,
+     * MQTT retained 메시지로 로봇에 전달한다.
      *
      * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @param request 로봇 이름과 시리얼 번호
-     * @return 등록된 로봇 정보
+     * @return 등록된 로봇 정보(서비스 토큰 포함, 이후엔 재조회 불가)
      * @throws BusinessException 시리얼 번호가 이미 등록되어 있는 경우
      */
     @Transactional
@@ -65,11 +67,16 @@ public class RobotService {
         ApartmentComplex apartmentComplex = apartmentComplexRepository.getReferenceById(apartmentComplexId);
         PatrolRobot robot =
                 new PatrolRobot(apartmentComplex, request.getName(), request.getSerialNumber());
-        return RobotRegisterResponse.from(robotRepository.save(robot));
+        String serviceToken = robotServiceTokenPublisher.generate();
+        robot.issueServiceToken(serviceToken);
+        robotRepository.save(robot);
+
+        robotServiceTokenPublisher.publish(robot.getSerialNumber(), serviceToken);
+        return RobotRegisterResponse.from(robot);
     }
 
     /**
-     * 로그인한 관리자의 소속 단지에 등록된 순찰로봇 목록을 조회한다. 각 로봇의 현재 좌표가 속한 체크포인트 유형을 함께 반환한다.
+     * 로그인한 관리자의 소속 단지에 등록된 순찰로봇 목록을 조회한다. 각 로봇의 현재 좌표가 속한 체크포인트 이름을 함께 반환한다.
      *
      * @param apartmentComplexId 로그인한 관리자의 소속 단지 식별자
      * @param pageable 페이지 정보
@@ -91,7 +98,10 @@ public class RobotService {
         Page<RobotListResponse> responses =
                 robots.map(
                         robot ->
-                                RobotListResponse.of(robot, matchCheckpointType(robot, checkpoints)));
+                                RobotListResponse.of(
+                                        robot,
+                                        checkpointLocator.resolveLocationName(
+                                                checkpoints, robot.getXCoordinate(), robot.getYCoordinate())));
         return PageResponse.from(responses);
     }
 
@@ -215,28 +225,5 @@ public class RobotService {
             return patrol.getTotalDuration();
         }
         return Duration.between(patrol.getStartedAt(), now).getSeconds();
-    }
-
-    // 로봇 좌표가 속한 체크포인트의 유형을 찾는다. 좌표가 없거나 어느 구역에도 속하지 않으면 null.
-    private CheckpointType matchCheckpointType(PatrolRobot robot, List<Checkpoint> checkpoints) {
-        BigDecimal x = robot.getXCoordinate();
-        BigDecimal y = robot.getYCoordinate();
-        if (x == null || y == null) {
-            return null;
-        }
-
-        return checkpoints.stream()
-                .filter(checkpoint -> contains(checkpoint, x, y))
-                .findFirst()
-                .map(Checkpoint::getType)
-                .orElse(null);
-    }
-
-    // 좌표(x, y)가 체크포인트의 사각 영역(minX~maxX, minY~maxY) 안에 있는지 판별한다.
-    private boolean contains(Checkpoint checkpoint, BigDecimal x, BigDecimal y) {
-        return x.compareTo(checkpoint.getMinX()) >= 0
-                && x.compareTo(checkpoint.getMaxX()) <= 0
-                && y.compareTo(checkpoint.getMinY()) >= 0
-                && y.compareTo(checkpoint.getMaxY()) <= 0;
     }
 }

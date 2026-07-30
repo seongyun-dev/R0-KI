@@ -4,21 +4,29 @@ import com.oneloop.global.response.ApiResponse;
 import com.oneloop.global.response.PageResponse;
 import com.oneloop.global.security.CustomUserDetails;
 import com.oneloop.patrol.dto.request.PatrolPeriodFilter;
+import com.oneloop.patrol.dto.request.PatrolStartRequest;
 import com.oneloop.patrol.dto.request.PatrolStatusFilter;
 import com.oneloop.patrol.dto.response.PatrolDetailResponse;
 import com.oneloop.patrol.dto.response.PatrolListResponse;
+import com.oneloop.patrol.dto.response.PatrolStartResponse;
+import com.oneloop.patrol.service.PatrolCommandService;
 import com.oneloop.patrol.service.PatrolService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import static org.springframework.data.domain.Sort.Direction.DESC;
@@ -29,6 +37,18 @@ import static org.springframework.data.domain.Sort.Direction.DESC;
 public class PatrolController {
 
     private final PatrolService patrolService;
+    private final PatrolCommandService patrolCommandService;
+
+    @Operation(summary = "순찰 시작", description = "지정한 로봇에 순찰 시작 명령을 전송합니다.")
+    @PostMapping
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ApiResponse<PatrolStartResponse> start(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Valid @RequestBody PatrolStartRequest request) {
+        return ApiResponse.success(
+                "순찰이 요청되었습니다.",
+                patrolCommandService.start(principal.getApartmentComplexId(), request));
+    }
 
     @Operation(
             summary = "순찰 목록 조회",
