@@ -159,7 +159,7 @@ export const notificationsApi = {
 }
 
 export const patrolsApi = {
-  create: (request: PatrolCreateRequest) =>
+  start: (request: PatrolCreateRequest) =>
     apiRequest<PatrolCreateResponse>('/api/patrols', {
       method: 'POST',
       body: jsonBody(request),
@@ -224,6 +224,7 @@ export const robotsApi = {
   stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
   detail: (robotId: string | number) =>
     apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
+
   create: (request: RobotRegisterRequest) =>
     apiRequest<RobotRegisterResponse>('/api/robots', {
       method: 'POST',
