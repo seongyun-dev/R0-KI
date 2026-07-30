@@ -32,6 +32,16 @@ export const complexMap: ComplexMapData = {
 /* 실시간 레이어 — 로봇 위치·이벤트 핀 (서버 연동 시 폴링/웹소켓으로 교체) */
 export const mapRobot: MapRobot = { id: 'R-01', name: 'R0-Ki 1호기', x: 13.2, y: 3.1, battery: 78 }
 
+/* 로봇별 지도 위치 — 대시보드 하단 로봇 목록에서 고른 로봇을 지도에 띄울 때 쓴다.
+   순찰중(R-01·R-04)은 경로 위, 대기·충전중(R-02·R-03)은 충전 스테이션(출발지) 근처의 마지막 위치.
+   좌표는 체크포인트 점·라벨과 겹치지 않도록 지점에서 살짝 비켜 둔다. */
+export const mapRobots: MapRobot[] = [
+  { id: 'R-01', name: 'R0-Ki 1호기', x: 13.2, y: 3.1, battery: 78 },
+  { id: 'R-02', name: 'R0-Ki 2호기', x: 1.9, y: 5.6, battery: 100 },
+  { id: 'R-03', name: 'R0-Ki 3호기', x: 1.2, y: 5.6, battery: 45 },
+  { id: 'R-04', name: 'R0-Ki 4호기', x: 4.6, y: 6.4, battery: 63 },
+]
+
 export const mapPins: MapPin[] = [
   {
     id: 'E-3313',
