@@ -1,12 +1,18 @@
 package com.oneloop.robot.service;
 
 import com.oneloop.patrol.service.PatrolCommandService;
+import com.oneloop.patrol.domain.PatrolStatus;
+import com.oneloop.patrol.domain.RoutePosition;
+import com.oneloop.patrol.repository.PatrolRepository;
+import com.oneloop.patrol.repository.RoutePositionRepository;
 import com.oneloop.robot.domain.ObstacleStatus;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
 import com.oneloop.robot.dto.mqtt.RobotPoseMessage;
 import com.oneloop.robot.dto.mqtt.RobotStatusMessage;
+import com.oneloop.robot.event.RobotLocationUpdatedEvent;
 import com.oneloop.robot.event.RobotObstacleEvent;
+import com.oneloop.robot.event.RobotStatusUpdatedEvent;
 import com.oneloop.robot.repository.RobotRepository;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +31,8 @@ public class RobotTelemetryService {
     private static final int SUPPORTED_SCHEMA_VERSION = 1;
 
     private final RobotRepository robotRepository;
+    private final PatrolRepository patrolRepository;
+    private final RoutePositionRepository routePositionRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final PatrolCommandService patrolCommandService;
 
@@ -39,16 +47,19 @@ public class RobotTelemetryService {
         robotRepository
                 .findBySerialNumber(message.robotKey())
                 .ifPresentOrElse(
-                        robot -> {
-                            robot.updatePose(
-                                    message.x(),
-                                    message.y(),
-                                    message.heading(),
-                                    message.timestamp().toLocalDateTime());
-                            // 도착지 도달 여부를 확인해 순찰 자동 종료를 시도
-                            patrolCommandService.autoCompleteIfArrived(robot, message.x(), message.y());
-                        },
+                        robot -> applyPose(robot, message),
                         () -> log.warn("[MQTT] 알 수 없는 robotKey={}, pose 갱신 무시", message.robotKey()));
+    }
+
+    private void applyPose(PatrolRobot robot, RobotPoseMessage message) {
+        LocalDateTime reportedAt = message.timestamp().toLocalDateTime();
+        robot.updatePose(message.x(), message.y(), message.heading(), reportedAt);
+
+        // pose는 1초마다 지도 마커를 움직이는 용도로 사용하고, 영구 경로 저장은 status 수신 시 처리합니다.
+        publishLocationUpdated(robot);
+
+        // 최신 위치 반영 후 도착지 도달 여부를 확인해 진행 중인 순찰의 자동 종료를 시도합니다.
+        patrolCommandService.autoCompleteIfArrived(robot, message.x(), message.y());
     }
 
     // status 메시지 처리 진입점 - robotKey로 로봇을 찾아 applyStatus로 위임
@@ -87,7 +98,49 @@ public class RobotTelemetryService {
                 direction,
                 reason);
 
+        // status heartbeat가 약 5초 주기이므로 그 시점의 최신 pose를 순찰 경로로 저장합니다.
+        saveRoutePosition(robot);
         publishObstacleTransition(robot.getId(), previousStatus, resolvedStatus, direction, reason);
+        publishStatusUpdated(robot);
+    }
+
+    private boolean isPatrolling(RobotStatus status) {
+        return status == RobotStatus.PATROLLING || status == RobotStatus.OBSTACLE_STOP;
+    }
+
+    private void saveRoutePosition(PatrolRobot robot) {
+        if (!isPatrolling(robot.getStatus())
+                || robot.getXCoordinate() == null
+                || robot.getYCoordinate() == null
+                || robot.getLocationUpdatedAt() == null) {
+            return;
+        }
+
+        patrolRepository
+                .findFirstByRobotIdAndStatusOrderByStartedAtDesc(
+                        robot.getId(), PatrolStatus.IN_PROGRESS)
+                .ifPresent(
+                        patrol ->
+                                routePositionRepository.save(
+                                        new RoutePosition(
+                                                patrol,
+                                                robot.getXCoordinate(),
+                                                robot.getYCoordinate(),
+                                                robot.getLocationUpdatedAt())));
+    }
+
+    private void publishLocationUpdated(PatrolRobot robot) {
+        eventPublisher.publishEvent(RobotLocationUpdatedEvent.from(robot));
+    }
+
+    private void publishStatusUpdated(PatrolRobot robot) {
+        eventPublisher.publishEvent(
+                new RobotStatusUpdatedEvent(
+                        robot.getApartmentComplex().getId(),
+                        robot.getId(),
+                        robot.getStatus(),
+                        robot.getBatteryLevel(),
+                        robot.getStatusReportedAt()));
     }
 
     // 매 heartbeat(5초)마다 이벤트를 쏘지 않도록, OBSTACLE_STOP으로 전환되거나 벗어나는 순간에만 발행

@@ -1,6 +1,7 @@
 package com.oneloop.mqtt.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oneloop.mapping.service.MappingCommandAckService;
 import com.oneloop.mqtt.dto.CommandAck;
@@ -36,7 +37,11 @@ class MqttInboundHandler implements MqttCallbackExtended {
     private final MappingCommandAckService mappingCommandAckService;
     private final PatrolCommandAckService patrolCommandAckService;
     // Spring이 관리하는 ObjectMapper 빈이 없어서, 단순 Map 파싱용으로 직접 생성
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper =
+            new ObjectMapper()
+                    .findAndRegisterModules()
+                    // 로봇이 보낸 +09:00 같은 원래 오프셋을 UTC로 강제 변환하지 않고 그대로 보존합니다.
+                    .disable(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE);
 
     MqttInboundHandler(
             IMqttClient client,
