@@ -3,14 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { R0KiDropdown } from '../components/ui/R0KiDropdown'
 import { useEvents } from '../features/events/useEvents'
-import type { PatrolEvent } from '../types/domain'
 import type {
   EventPeriodCode,
   EventTypeCode,
   ProcessingStatusCode,
 } from '../api/contracts'
-// 담당자는 처리중/처리완료일 때만 표시 (백엔드 제공)
-const hasAssignee = (e: PatrolEvent) => e.status === '처리중' || e.status === '처리완료'
 
 /* R0-Ki 이벤트 목록 — 시안 R0Kievents 그대로.
    유리 테이블 + 커스텀 드롭다운 4종 필터. 데이터는 기존 useEvents 그대로.
@@ -144,7 +141,7 @@ export default function EventList() {
                         </span>
                       </td>
                       <td className="who">
-                        {hasAssignee(e) ? (e.assignee ?? '—') : <span className="dash">—</span>}
+                        {e.assignee ?? <span className="dash">—</span>}
                       </td>
                       <td className="r">
                         <button type="button" className="golink">

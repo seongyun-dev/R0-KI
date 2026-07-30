@@ -66,8 +66,8 @@ export default function Stats() {
       ['구역별 이벤트 비율', '구역', '건수', '비율(%)'],
       ...data.zones.map((z) => ['', z.zone, z.count, z.pct]),
       [],
-      ['AI 인사이트', '내용'],
-      ...data.insights.map((t) =>
+      ['AI 요약', '내용'],
+      ...summaryInsights.map((t) =>
         typeof t === 'string'
           ? ['', t]
           : ['', `${t.title} — ${t.body}${t.action ? ` (권장: ${t.action})` : ''}`],
@@ -109,6 +109,47 @@ export default function Stats() {
       )
     }
     return parts.join(' ')
+  })()
+
+  const summaryInsights = (() => {
+    if (!data) return []
+
+    const insights = []
+    const busiestZone = data.zones.length
+      ? [...data.zones].sort((a, b) => b.count - a.count)[0]
+      : undefined
+    const handling = data.handling[0]
+
+    if (last) {
+      const direction = diff > 0 ? '증가' : diff < 0 ? '감소' : '동일'
+      insights.push({
+        title: '이벤트 추이',
+        body: `최근 집계일 ${last.date}에는 ${last.count}건이 발생해 직전 집계일보다 ${Math.abs(diff)}건 ${direction}했습니다.`,
+        action: diff > 0 ? '증가 원인과 집중 시간대를 확인하세요.' : '현재 순찰 주기를 유지하세요.',
+      })
+    }
+
+    if (busiestZone) {
+      insights.push({
+        title: '집중 관리 구역',
+        body: `${busiestZone.zone}에서 ${busiestZone.count}건이 발생해 전체의 ${busiestZone.pct}%를 차지했습니다.`,
+        action: '해당 구역의 순찰 빈도를 우선 조정하세요.',
+      })
+    }
+
+    if (handling) {
+      const total = handling.handled + handling.pending
+      insights.push({
+        title: '이벤트 처리 현황',
+        body: `전체 ${total}건 중 ${handling.handled}건을 처리해 현재 처리율은 ${handling.handledPct}%입니다.`,
+        action:
+          handling.handledPct < 70
+            ? '미처리 이벤트를 우선순위별로 점검하세요.'
+            : '현재 처리 체계를 유지하세요.',
+      })
+    }
+
+    return insights
   })()
 
   // KPI — 증감 화살표는 색이 아니라 방향으로 (모노크롬 규칙)
@@ -235,13 +276,13 @@ export default function Stats() {
               </div>
             </div>
 
-            {/* ── 하단: AI 인사이트 (API 미연동 — insights는 빈 배열, 레이아웃만 유지) ── */}
+            {/* ── 하단: 통계 API 수치를 기반으로 프론트에서 구성한 AI 요약 ── */}
             <div className="glass g2 st-ai">
               <div className="st-head">
-                <span className="bul" /><span className="ttl">AI 인사이트</span>
-                <span className="meta"><b>{data.insights.length}</b>건</span>
+                <span className="bul" /><span className="ttl">AI 요약</span>
+                <span className="meta"><b>{summaryInsights.length}</b>건</span>
               </div>
-              <AiInsights overview={overview} insights={data.insights} />
+              <AiInsights overview={overview} insights={summaryInsights} />
             </div>
           </div>
         )}

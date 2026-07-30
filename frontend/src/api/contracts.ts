@@ -159,12 +159,40 @@ export type EventNotificationResponse = {
 export type NotificationHistoryItemResponse = {
   notificationId: number
   eventId: number
-  recipientResidentId: number
-  notificationTitle: string
-  notificationContent: string
-  sendStatus: string
-  sentAt: string
-  createdAt: string
+  eventType: string
+  recipientName: string
+  buildingNumber: string
+  unitNumber: string
+  status: string
+  sentAt: string | null
+}
+
+export type NotificationHistoryResponse = {
+  content: NotificationHistoryItemResponse[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  first: boolean
+  last: boolean
+}
+
+// GET /api/notifications/{notificationId}
+export type NotificationDetailResponse = {
+  notificationId: number
+  eventId: number
+  eventType: string
+  title: string
+  content: string
+  recipientName: string
+  recipientPhoneNumber: string
+  buildingNumber: string
+  unitNumber: string
+  occurredAt: string
+  licensePlate: string
+  location: string
+  status: string
+  sentAt: string | null
 }
 
 // POST /api/robot/events/batch (로봇 전용 이벤트 일괄 등록)
