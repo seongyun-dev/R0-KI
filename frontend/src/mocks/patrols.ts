@@ -1,7 +1,27 @@
 import type { Patrol } from '../types/domain'
 
 // 와이어프레임 1d(목록)·1e(상세 보고서) 예시값 그대로
+// 맨 앞 P-1043 은 방금 끝난 순찰 — 대시보드 순찰 완료 모달이 이 건을 띄운다.
 export const patrols: Patrol[] = [
+  {
+    id: 'P-1043',
+    robotId: 'R-01',
+    date: '07/15',
+    start: '14:05',
+    end: '14:47',
+    routeZones: ['출발지', '101동', '102동', '103동', '지하주차장 B2', '출발지'],
+    routeSummary: '101동→102동→103동→지하주차장 B2',
+    eventCount: 2,
+    status: '완료',
+    batteryFrom: 92,
+    batteryTo: 78,
+    report: {
+      reportNo: 'RPT-1043',
+      createdAt: '2026/07/15 14:49',
+      aiSummary:
+        '07월 15일 오후 순찰(14:05~14:47)에서 총 2건이 탐지되었습니다. 101동 앞에서 불법주차 차량 1대(신뢰도 92%), 지하주차장 B2에서 응급상황(쓰러짐 의심, 신뢰도 92%)이 확인되어 긴급으로 승격되었습니다. 나머지 구간은 이상이 없습니다.',
+    },
+  },
   {
     id: 'P-1042',
     robotId: 'R-01',

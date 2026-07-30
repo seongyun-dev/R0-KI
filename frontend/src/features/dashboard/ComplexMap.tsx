@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useClockText } from '../../components/layout/R0KiShell'
 import { cn } from '../../lib/cn'
 import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneType } from '../../types/domain'
@@ -21,7 +21,7 @@ import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneT
      로봇 위치를 경로에 사영해 완료 구간(굵은 실선)과 예정 구간(점선)을 가른다.
    · 체크포인트: 통과(채운 점) / 대기(빈 점). 부가 설명(note)이 있으면
      물방울 마커 + 콜아웃 카드로 띄운다. 없는 데이터는 지어내지 않는다.
-   · 오버레이(줌·실시간 시각·범례)는 SVG 밖 HTML — 지도를 확대해도 크기가 고정된다. */
+   · 오버레이(줌·실시간 시각·범례·화면별 조작키)는 SVG 밖 HTML — 지도를 확대해도 크기가 고정된다. */
 
 const CELL = 30 // 그리드 1칸 → SVG 30px
 const SUB = 2 // 셀당 잔격자 분할 수 — 격자를 잘게 보이게 한다(좌표계는 셀 기준 그대로)
@@ -210,13 +210,28 @@ type Gate = { zone: Zone; edge: 'l' | 'r' | 't' | 'b'; gx: number; gy: number }
 export type ComplexMapProps = {
   map: ComplexMapData
   robot?: MapRobot
+  /** 여러 대를 한 번에 볼 때(순찰 중 로봇 전체 보기). 있으면 robot 대신 이 목록을 그린다 */
+  robots?: MapRobot[]
   pins?: MapPin[]
   /** 순찰 체크포인트 — 배열 순서가 곧 순찰 경로 */
   checkpoints?: MapCheckpoint[]
+  /** 로봇이 순찰 중인가. false 면 이동 경로·진행 방향을 그리지 않고 마지막 위치만 찍는다 */
+  patrolling?: boolean
+  /** 지도 우측 하단에 얹을 화면별 조작키 */
+  bottomRight?: ReactNode
   className?: string
 }
 
-export function ComplexMap({ map, robot, pins = [], checkpoints = [], className }: ComplexMapProps) {
+export function ComplexMap({
+  map,
+  robot,
+  robots,
+  pins = [],
+  checkpoints = [],
+  patrolling = true,
+  bottomRight,
+  className,
+}: ComplexMapProps) {
   const clock = useClockText()
   const W = map.cols * CELL
   const H = map.rows * CELL
@@ -312,10 +327,18 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
     if (i < checkpoints.length) cpIdx.push(at)
   })
 
+  /* 지도에 그릴 로봇 — 여러 대(robots)가 오면 그쪽이 우선 */
+  const shownRobots = robots && robots.length > 0 ? robots : robot ? [robot] : []
+  /* 진행률·스캔 콘은 한 대만 볼 때 계산한다 (여러 대는 누구 기준인지 정해지지 않는다) */
+  const soloRobot = shownRobots.length === 1 ? shownRobots[0] : undefined
+
+  /* 이동 경로는 순찰 중일 때만 — 대기·충전중이면 마지막 위치만 찍는다 */
+  const showRoute = patrolling && routePts.length > 1
+
   /* 진행률 — 로봇 위치를 경로에 사영해 완료 구간과 예정 구간을 가른다 */
   let prog: { seg: number; p: Pt } | null = null
-  if (robot && routePts.length > 1) {
-    const r = { x: px(robot.x), y: py(robot.y) }
+  if (showRoute && soloRobot) {
+    const r = { x: px(soloRobot.x), y: py(soloRobot.y) }
     let bestD = Infinity
     for (let i = 0; i < routePts.length - 1; i++) {
       const a = routePts[i]
@@ -342,6 +365,9 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
   const cpLabel = (c: MapCheckpoint, i: number) => (c.label ? `${i + 1}번 · ${c.label}` : `${i + 1}번`)
   const hasUrgentPin = pins.some((p) => p.tone === 'danger')
   const scaleLen = px(2) * view.k
+  /* 우측 하단에 조작키를 얹으면 축척을 그만큼 왼쪽으로 비켜 그린다.
+     조작키도 지도 폭에 비례(cqw)해 커지므로 viewBox 기준 고정값으로 맞아떨어진다 */
+  const scaleShift = bottomRight ? 118 : 0
 
   return (
     <div className={cn('cmwrap', view.k > 1 && 'zoomed', panning && 'pan', className)}>
@@ -349,7 +375,13 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
         ref={svgRef}
         viewBox={`0 0 ${VW} ${VH}`}
         role="img"
-        aria-label={`단지 실시간 지도 — 구역 ${map.zones.length}곳${robot ? `, 로봇 ${robot.name ?? robot.id} 순찰 중` : ''}, 체크포인트 ${checkpoints.length}곳, 이벤트 ${pins.length}건`}
+        aria-label={`단지 실시간 지도 — 구역 ${map.zones.length}곳${
+          shownRobots.length === 1
+            ? `, 로봇 ${shownRobots[0].name ?? shownRobots[0].id} ${patrolling ? '순찰 중' : '정지 · 마지막 위치'}`
+            : shownRobots.length > 1
+              ? `, 순찰 중 로봇 ${shownRobots.length}대`
+              : ''
+        }, 체크포인트 ${checkpoints.length}곳, 이벤트 ${pins.length}건`}
         className="cmap"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -507,8 +539,8 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
               )
             })}
 
-            {/* ── 순찰 경로 — 예정 점선 위에 완료 실선을 겹친다 ── */}
-            {routePts.length > 1 && (
+            {/* ── 순찰 경로 — 예정 점선 위에 완료 실선을 겹친다 (순찰 중일 때만) ── */}
+            {showRoute && (
               <g aria-hidden>
                 <path className="cmroute" d={roundedPath(routePts, CORNER)} />
                 {donePts.length > 1 && (
@@ -570,34 +602,41 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
               )
             })}
 
-            {/* ── 로봇 현재 위치 — 헤일로 + 진행 방향 스캔 콘 ── */}
-            {robot && (
-              <>
-                <g className="bot" transform={`translate(${px(robot.x)},${py(robot.y)}) rotate(${heading})`}>
-                  <circle r="30" fill="url(#cmapHalo)" />
-                  <path d="M0 0 L40 -19 A44 44 0 0 1 40 19 Z" fill="url(#cmapCone)" />
-                  <circle r="7" fill="none" stroke="var(--graphic)" strokeWidth="1.5">
-                    <animate attributeName="r" values="7;20;7" dur="2.8s" repeatCount="indefinite" />
-                    <animate attributeName="opacity" values=".8;0;.8" dur="2.8s" repeatCount="indefinite" />
-                  </circle>
+            {/* ── 로봇 위치 — 헤일로 + (한 대만 볼 때) 진행 방향 스캔 콘 ── */}
+            {shownRobots.map((r) => {
+              const rx = px(r.x)
+              const ry = py(r.y)
+              const solo = shownRobots.length === 1
+              return (
+                <g key={`bot-${r.id}`}>
+                  <g className="bot" transform={`translate(${rx},${ry}) rotate(${solo ? heading : 0})`}>
+                    <circle r="30" fill="url(#cmapHalo)" />
+                    {/* 진행 방향 스캔 콘 — 한 대를 이동 중으로 볼 때만 */}
+                    {solo && showRoute && <path d="M0 0 L40 -19 A44 44 0 0 1 40 19 Z" fill="url(#cmapCone)" />}
+                    <circle r="7" fill="none" stroke="var(--graphic)" strokeWidth="1.5">
+                      <animate attributeName="r" values="7;20;7" dur="2.8s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values=".8;0;.8" dur="2.8s" repeatCount="indefinite" />
+                    </circle>
+                  </g>
+                  <g className="cmbotdot" transform={`translate(${rx},${ry})`}>
+                    <circle r="6.4" />
+                    <circle className="core" r="2.6" />
+                  </g>
+                  {/* 라벨 — 오른쪽 끝에 붙으면 왼쪽으로 (시안과 같은 읽기 방식).
+                      위/아래는 체크포인트 라벨(점 기준 -10)과 겹치지 않게 24 만큼 띄운다 */}
+                  {rx > W * 0.72 ? (
+                    <text className="cmbot" x={rx - 13} y={ry + 2.8} textAnchor="end">
+                      {r.name ?? r.id}
+                    </text>
+                  ) : (
+                    <text className="cmbot" x={rx} y={ry < 34 ? ry + 26 : ry - 24} textAnchor="middle">
+                      {r.name ?? r.id}
+                    </text>
+                  )}
+                  <title>{`${r.name ?? r.id} ${patrolling ? '현재 위치' : '마지막 위치'}`}</title>
                 </g>
-                <g className="cmbotdot" transform={`translate(${px(robot.x)},${py(robot.y)})`}>
-                  <circle r="6.4" />
-                  <circle className="core" r="2.6" />
-                </g>
-                {/* 라벨 — 오른쪽 끝에 붙으면 왼쪽으로 (시안과 같은 읽기 방식) */}
-                {px(robot.x) > W * 0.72 ? (
-                  <text className="cmbot" x={px(robot.x) - 13} y={py(robot.y) + 2.8} textAnchor="end">
-                    {robot.name ?? robot.id}
-                  </text>
-                ) : (
-                  <text className="cmbot" x={px(robot.x)} y={py(robot.y) - 15} textAnchor="middle">
-                    {robot.name ?? robot.id}
-                  </text>
-                )}
-                <title>{`${robot.name ?? robot.id} 현재 위치`}</title>
-              </>
-            )}
+              )
+            })}
 
             {/* 무대 광원 — 유리와 같은 방향의 면광. 클릭을 막지 않도록 마지막에 얹는다 */}
             <rect className="cmlight" x="0" y="0" width={W} height={H} rx="10" fill="url(#cmapLight)" aria-hidden />
@@ -607,7 +646,11 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
         {/* 축척 — 확대해도 실제 거리를 유지하도록 배율만큼 늘린다.
            백엔드 resolution 이 있을 때만 그린다(지어내지 않음) */}
         {map.metersPerCell != null && (
-          <g className="cmscale" transform={`translate(${VW - PAD.r - scaleLen},${VH - 12})`} aria-hidden>
+          <g
+            className="cmscale"
+            transform={`translate(${VW - PAD.r - scaleLen - scaleShift},${VH - 12})`}
+            aria-hidden
+          >
             <line x1="0" y1="0" x2={scaleLen} y2="0" />
             <line x1="0" y1="-3" x2="0" y2="3" />
             <line x1={scaleLen} y1="-3" x2={scaleLen} y2="3" />
@@ -651,14 +694,28 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
 
       <div className="cmovl bl">
         <div className="cmlegend">
-          <span className="lg">
-            <i className="d on" />
-            완료 구간 · 통과 지점
-          </span>
-          <span className="lg">
-            <i className="d" />
-            예정 구간 · 대기 지점
-          </span>
+          {showRoute && prog ? (
+            <>
+              <span className="lg">
+                <i className="d on" />
+                완료 구간 · 통과 지점
+              </span>
+              <span className="lg">
+                <i className="d" />
+                예정 구간 · 대기 지점
+              </span>
+            </>
+          ) : showRoute ? (
+            <span className="lg">
+              <i className="d" />
+              순찰 경로 · 순찰 중 로봇 {shownRobots.length}대
+            </span>
+          ) : (
+            <span className="lg">
+              <i className="d" />
+              순찰 지점 · 경로 미표시
+            </span>
+          )}
           {hasUrgentPin && (
             <span className="lg">
               <i className="d u" />
@@ -667,6 +724,8 @@ export function ComplexMap({ map, robot, pins = [], checkpoints = [], className 
           )}
         </div>
       </div>
+
+      {bottomRight && <div className="cmovl br">{bottomRight}</div>}
     </div>
   )
 }
