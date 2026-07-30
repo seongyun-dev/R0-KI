@@ -4,6 +4,7 @@ import { R0KiShell } from '../components/layout/R0KiShell'
 import { RobotEditDrawer } from '../features/robots/RobotEditDrawer'
 import { useDeleteRobot, useRobot, useUpdateRobot } from '../features/robots/useRobot'
 import type { Robot } from '../types/domain'
+import { patrolsApi } from '../api/services'
 
 /* R0-Ki 로봇 상세 — 시안 R0Ki-robots-detail 무대형(rd-*) 그대로.
    중앙 로봇 히어로 + 타원 광원 받침 + 부위 콜아웃(지시선) + 궤도 카드.
@@ -62,6 +63,8 @@ export default function RobotDetail() {
   const [patch, setPatch] = useState<Partial<Robot> | null>(null)
   // 토스트
   const [toast, setToast] = useState<string>()
+  const [isStartingPatrol, setIsStartingPatrol] = useState(false)
+  const [patrolStarted, setPatrolStarted] = useState(false)
 
   useEffect(() => {
     if (!toast) return
@@ -70,7 +73,26 @@ export default function RobotDetail() {
   }, [toast])
 
   const robot: Robot | undefined = loaded ? { ...loaded, ...patch } : undefined
+  const isPatrolling = robot?.status === '순찰중' || patrolStarted
+  const parsedRobotId = Number(robot?.backendId ?? robot?.id)
+  const patrolRobotId = Number.isFinite(parsedRobotId) ? parsedRobotId : undefined
   const recent = robot?.recentPatrols?.slice(0, 3) ?? []
+
+  const handlePatrolStart = async (robotId: number) => {
+    if (isStartingPatrol || isPatrolling) return
+
+    setIsStartingPatrol(true)
+    try {
+      await patrolsApi.start({ robotId })
+      setPatrolStarted(true)
+      setToast('순찰을 시작했습니다.')
+      void refetch()
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '순찰 시작에 실패했습니다.')
+    } finally {
+      setIsStartingPatrol(false)
+    }
+  }
 
   return (
     <R0KiShell active="robots">
@@ -99,10 +121,17 @@ export default function RobotDetail() {
             {robot && (
               <button type="button" className="btn btn-s" onClick={() => setDrawerOpen(true)}>수정</button>
             )}
-            <Link to="/app/robots/new" className="btn btn-p btn-add">
+            <button
+              type="button"
+              className="btn btn-p btn-add"
+              disabled={patrolRobotId == null || isStartingPatrol || isPatrolling}
+              onClick={() => {
+                if (patrolRobotId != null) void handlePatrolStart(patrolRobotId)
+              }}
+            >
               <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
-              로봇 등록
-            </Link>
+              {isStartingPatrol ? '시작 중…' : isPatrolling ? '순찰 중' : '순찰 시작'}
+            </button>
           </div>
         </div>
 
@@ -137,7 +166,10 @@ export default function RobotDetail() {
                     <span className="u">%</span>
                   </>
                 ) : (
-                  <span className="v">확인 불가</span>
+                  <>
+                    <span className="v unknown" aria-label="배터리 잔량 미수신">--</span>
+                    <span className="u">%</span>
+                  </>
                 )}
               </div>
             </div>

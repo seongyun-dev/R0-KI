@@ -116,12 +116,12 @@ export default function RobotList() {
                         </span>
                       </td>
                       <td>
-                        <span className="bat">
-                          <span className="bar">
-                            <i style={{ width: `${r.battery ?? 0}%` }} />
+                        <span className={`bat${r.battery == null ? ' unknown' : ''}`}>
+                          <span className="bar" aria-hidden>
+                            {r.battery != null && <i style={{ width: `${r.battery}%` }} />}
                           </span>
                           <span className="pct">
-                            {r.battery != null ? `${r.battery}%` : '확인 불가'}
+                            {r.battery != null ? `${r.battery}%` : '--%'}
                           </span>
                         </span>
                       </td>

@@ -110,23 +110,36 @@ export default function Dashboard() {
             {/* 로봇 요약 — 지도 아래 한 줄. 이름·상태·배터리, 클릭 시 로봇 상세로 */}
             {(robots ?? []).length > 0 && (
               <div className="botlist">
-                {(robots ?? []).map((r) => (
-                  <Link key={r.id} to={`/app/robots/${r.id}`} className="botitem">
-                    <MiniBot />
-                    <span className="d" style={{ background: statusColor(r.status) }} />
-                    <span className="nm">{r.name}</span>
-                    <span className="st" style={{ color: statusColor(r.status) }}>{r.status}</span>
-                    <span className="bar" aria-hidden>
-                      <i
-                        style={{
-                          width: `${r.battery}%`,
-                          ...(r.battery <= 25 ? { background: 'var(--urgent)' } : null),
-                        }}
-                      />
-                    </span>
-                    <b className="pct num">{r.battery}%</b>
-                  </Link>
-                ))}
+                {(robots ?? []).map((r) => {
+                  const battery = r.battery
+                  const hasBattery = battery != null
+
+                  return (
+                    <Link key={r.id} to={`/app/robots/${r.id}`} className="botitem">
+                      <MiniBot />
+                      <span className="d" style={{ background: statusColor(r.status) }} />
+                      <span className="nm">{r.name}</span>
+                      <span className="st" style={{ color: statusColor(r.status) }}>{r.status}</span>
+                      <span
+                        className={`bar${hasBattery ? '' : ' unknown'}`}
+                        aria-label={hasBattery ? `배터리 ${battery}%` : '배터리 잔량 미수신'}
+                        role="img"
+                      >
+                        {battery != null && (
+                          <i
+                            style={{
+                              width: `${battery}%`,
+                              ...(battery <= 25 ? { background: 'var(--urgent)' } : null),
+                            }}
+                          />
+                        )}
+                      </span>
+                      <b className={`pct${hasBattery ? ' num' : ' unknown'}`}>
+                        {hasBattery ? `${battery}%` : '--%'}
+                      </b>
+                    </Link>
+                  )
+                })}
               </div>
             )}
           </div>

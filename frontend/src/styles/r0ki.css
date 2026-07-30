@@ -435,6 +435,11 @@
   background:var(--track);border:1px solid var(--hair)}
 .r0ki .botitem .bar i{display:block;height:100%;border-radius:3px;background:var(--graphic)}
 .r0ki .botitem .pct{font-size:12.5px;font-weight:700;color:var(--text-2)}
+.r0ki .botitem .bar.unknown,.r0ki .bat.unknown .bar{
+  background:repeating-linear-gradient(135deg,var(--track) 0 4px,var(--edge) 4px 7px);
+  border-color:var(--edge)}
+.r0ki .botitem .pct.unknown{padding:3px 7px;border:1px solid var(--edge);border-radius:var(--r-pill);
+  background:var(--track);color:var(--text-3);font-size:10.5px;font-weight:700;white-space:nowrap}
 /* 미니 로봇 — 안테나 + 바이저(LED 눈) + 바퀴. 전부 토큰 색 */
 .r0ki .botitem .mini{width:26px;height:26px;flex:none}
 .r0ki .botitem .mini .ant{stroke:var(--graphic);stroke-width:1.4;stroke-linecap:round}
@@ -900,6 +905,7 @@
 .r0ki .bat .bar{width:74px;height:10px;border-radius:5px;background:var(--track);border:1px solid var(--hair);overflow:hidden}
 .r0ki .bat .bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--graphic),var(--accent-fill-2))}
 .r0ki .bat .pct{font-family:var(--mono);font-size:14px;font-weight:700;min-width:40px}
+.r0ki .bat.unknown .pct{font-family:var(--sans);font-size:12px;color:var(--text-3);white-space:nowrap}
 
 /* ── 목록: 행 액션 ── */
 .r0ki .rowacts{display:flex;align-items:center;gap:4px;justify-content:flex-end}
@@ -943,6 +949,7 @@
 .r0ki .rd-batt{display:flex;align-items:baseline;gap:2px}
 .r0ki .rd-batt .v{font-family:var(--mono);font-size:56px;font-weight:700;line-height:.92;letter-spacing:-.045em;color:var(--text-1)}
 .r0ki .rd-batt .u{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--text-2)}
+.r0ki .rd-batt .v.unknown{color:var(--text-3)}
 
 /* 궤도 카드 */
 .r0ki .rd-card{
