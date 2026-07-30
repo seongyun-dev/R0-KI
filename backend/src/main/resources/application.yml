@@ -46,3 +46,8 @@ gms:
   model: ${GMS_MODEL:gpt-5.4-mini}
   chat-completions-path: ${GMS_CHAT_COMPLETIONS_PATH:/chat/completions}
   timeout-seconds: ${GMS_TIMEOUT_SECONDS:30}
+
+solapi:
+  api-key: ${SOLAPI_API_KEY:}
+  api-secret: ${SOLAPI_API_SECRET:}
+  sender-number: ${SOLAPI_SENDER_NUMBER:}

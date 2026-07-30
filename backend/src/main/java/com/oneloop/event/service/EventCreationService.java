@@ -27,6 +27,7 @@ import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.notification.service.NotificationService;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.resident.domain.RegisteredVehicle;
@@ -59,6 +60,7 @@ public class EventCreationService {
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
     private final FileStorageService fileStorageService;
+    private final NotificationService notificationService;
 
     /**
      * 로봇이 응급상황을 감지했을 때 호출하는 단건 이벤트 생성.
@@ -179,6 +181,12 @@ public class EventCreationService {
                         RiskLevel.NORMAL,
                         vehicle.getLicensePlate());
         patrol.increaseDetectedEventCount();
+
+        // 불법주차일 경우, sms 알림 전송
+        if (violationType == EventType.ILLEGAL_PARKING) {
+            notificationService.requestIllegalParkingNotification(
+                    event, registeredVehicle.get().getResident());
+        }
 
         return VehicleViolationResponse.of(vehicle.getTempId(), event.getId());
     }
