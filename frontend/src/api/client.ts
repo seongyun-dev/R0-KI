@@ -32,13 +32,28 @@ async function readResponse(response: Response) {
   return text || undefined
 }
 
+// 백엔드 공통 응답 래퍼(ApiResponse<T> = { success, code, message, data })를 벗긴다.
+// 래퍼 형태가 아니면(구버전/외부 응답) 원본을 그대로 반환한다.
+function unwrapEnvelope(body: unknown): unknown {
+  if (
+    body &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    'success' in body &&
+    'data' in body
+  ) {
+    return (body as { data: unknown }).data
+  }
+  return body
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isFormData = init.body instanceof FormData
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
   if (!isFormData && init.body) headers.set('Content-Type', 'application/json')
   const auth = authHeaders()
-  if (auth) headers.set('Authorization', auth.Authorization)
+  if (auth && !headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
   const response = await fetch(apiUrl(path), {
     ...init,
     headers,
@@ -54,12 +69,24 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     throw new ApiError(response.status, message, body)
   }
 
-  return body as T
+  return unwrapEnvelope(body) as T
+}
+
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const headers = new Headers()
+  const auth = authHeaders()
+  if (auth) headers.set('Authorization', auth.Authorization)
+  const response = await fetch(apiUrl(path), { headers, signal })
+  if (!response.ok) {
+    if (response.status === 401) useAuthStore.getState().logout()
+    throw new ApiError(response.status, `이미지를 불러오지 못했습니다 (${response.status})`)
+  }
+  return response.blob()
 }
 
 export async function consumeSse<T>(
   path: string,
-  onMessage: (data: T) => void,
+  onMessage: (data: T, eventName?: string) => void,
   signal: AbortSignal,
 ) {
   const headers = new Headers({ Accept: 'text/event-stream' })
@@ -86,6 +113,11 @@ export async function consumeSse<T>(
     while (boundary >= 0) {
       const block = buffer.slice(0, boundary)
       buffer = buffer.slice(boundary + 2)
+      const eventName = block
+        .split('\n')
+        .find((line) => line.startsWith('event:'))
+        ?.slice(6)
+        .trim()
       const payload = block
         .split('\n')
         .filter((line) => line.startsWith('data:'))
@@ -93,7 +125,7 @@ export async function consumeSse<T>(
         .join('\n')
       if (payload) {
         try {
-          onMessage(JSON.parse(payload) as T)
+          onMessage(JSON.parse(payload) as T, eventName)
         } catch {
           // 서버 heartbeat 또는 JSON이 아닌 SSE 데이터는 화면 상태에 반영하지 않는다.
         }

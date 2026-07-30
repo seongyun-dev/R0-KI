@@ -1,12 +1,18 @@
 import type {
   ComplexResponse,
-  EventResponse,
+  EventDetailResponse,
+  EventListItemResponse,
   MapInfoResponse,
   MapMonitoringResponse,
-  PatrolPathPointResponse,
-  PatrolResponse,
+  NotificationDetailResponse,
+  NotificationHistoryItemResponse,
+  PatrolDetailResponse,
+  PatrolListResponse,
+  PatrolRouteCheckpointResponse,
+  PatrolTimelineResponse,
+  RobotDetailResponse,
+  RobotListResponse,
   RobotLocationEvent,
-  RobotResponse,
   ZoneResponse,
 } from './contracts'
 import type {
@@ -16,6 +22,9 @@ import type {
   MapCheckpoint,
   MapPin,
   MapRobot,
+  NotificationDetailRecord,
+  NotificationRecord,
+  NotificationSendStatus,
   Patrol,
   PatrolEvent,
   PatrolPoint,
@@ -63,22 +72,37 @@ function formatDate(value?: string | null) {
 }
 
 function eventType(value: string): EventType {
-  const aliases: Record<string, EventType> = {
+  const map: Record<string, EventType> = {
+    // 백엔드 enum 코드
+    ILLEGAL_PARKING: '불법주차',
+    UNREGISTERED_VEHICLE: '불법주차',
+    TRASH_DETECTED: '쓰레기',
+    RECYCLING_AREA_FULL: '쓰레기',
+    EMERGENCY: '응급상황',
+    // 한글 별칭(하위호환)
     미등록차량: '불법주차',
     쓰레기탐지: '쓰레기',
     분리수거장포화: '쓰레기',
     화재의심: '화재 의심',
   }
-  return aliases[value] ?? (value as EventType)
+  return map[value] ?? (value as EventType)
 }
 
 function processingStatus(value: string): ProcessingStatus {
+  const map: Record<string, ProcessingStatus> = {
+    DETECTED: '탐지',
+    PROCESSING: '처리중',
+    COMPLETED: '처리완료',
+  }
+  if (map[value]) return map[value]
   if (value === '처리중' || value === '처리완료') return value
   return '탐지'
 }
 
 function riskLevel(value: string): RiskLevel {
-  if (value === '긴급' || value === '보통') return value
+  const map: Record<string, RiskLevel> = { LOW: '낮음', NORMAL: '보통', EMERGENCY: '긴급' }
+  if (map[value]) return map[value]
+  if (value === '긴급' || value === '보통' || value === '낮음') return value
   return '낮음'
 }
 
@@ -91,126 +115,286 @@ export function complexResponseToDomain(value: ComplexResponse): Complex {
   }
 }
 
-export function eventResponseToDomain(value: EventResponse): PatrolEvent {
-  const risk = riskLevel(value.riskLevel)
-  const processing = processingStatus(value.processingStatus)
-  const { time } = dateParts(value.occurredAt)
-  const x = value.xCoordinate == null ? undefined : toNumber(value.xCoordinate)
-  const y = value.yCoordinate == null ? undefined : toNumber(value.yCoordinate)
-  const coordinateLabel =
-    x !== undefined && y !== undefined ? `좌표 ${x.toFixed(1)}, ${y.toFixed(1)}` : undefined
-
+/** 목록 항목(EventListResponse) → 도메인 (1f) */
+export function eventListItemToDomain(value: EventListItemResponse): PatrolEvent {
+  const processing = processingStatus(value.status)
   return {
     id: String(value.eventId),
     backendId: value.eventId,
-    patrolId: value.patrolId == null ? undefined : String(value.patrolId),
-    time,
+    time: dateParts(value.occurredAt).time,
     occurredAt: value.occurredAt,
-    type: eventType(value.eventType),
-    location:
-      value.locationLabel ??
-      value.checkpointLabel ??
-      (value.checkpointId == null ? coordinateLabel ?? '위치 미확인' : `체크포인트 ${value.checkpointId}`),
-    robotId: String(value.robotId),
-    status: risk === '긴급' ? '긴급' : processing,
-    riskLevel: risk,
+    type: eventType(value.type),
+    location: value.location ?? '위치 미확인',
+    robotId: value.robotName, // 백엔드는 로봇 이름을 제공(id 아님) — 표시용
+    status: processing,
+    riskLevel: riskLevel(value.riskLevel),
     processingStatus: processing,
-    confidence:
-      value.detectionConfidence == null ? undefined : toNumber(value.detectionConfidence),
-    evidenceImageUrl: value.evidences?.find((e) => e.mediaType === '이미지')?.fileUrl,
-    memo: value.processingNote ?? undefined,
-    subType: value.eventTitle || undefined,
-    emergencyReason: risk === '긴급' ? value.eventDetails ?? undefined : undefined,
-    x,
-    y,
+    assignee: value.assignee ?? undefined,
   }
 }
 
-function patrolPoint(value: PatrolPathPointResponse): PatrolPoint {
+/** 상세(EventDetailResponse) → 도메인 (1g) */
+export function eventDetailToDomain(value: EventDetailResponse): PatrolEvent {
+  const processing = processingStatus(value.status)
+  return {
+    id: String(value.eventId),
+    backendId: value.eventId,
+    time: dateParts(value.occurredAt).time,
+    occurredAt: value.occurredAt,
+    type: eventType(value.type),
+    location: value.location ?? '위치 미확인',
+    robotId: value.robotName, // 표시용(백엔드는 이름 제공)
+    status: processing,
+    riskLevel: riskLevel(value.riskLevel),
+    processingStatus: processing,
+    processedAt: value.processedAt ? dateParts(value.processedAt).time : undefined,
+    // 백엔드 confidence는 0~1 → % 로 표시
+    confidence: value.confidence == null ? undefined : Math.round(toNumber(value.confidence) * 100),
+    evidenceImageUrl: value.evidence?.fileUrl,
+    memo: value.processingNote ?? undefined,
+  }
+}
+
+/* ── 알림 기록 ─────────────────────────────────────────────── */
+
+/** 발송 시각 표기 — 07/30 14:20. 미발송(null)이면 '—' */
+function stampLabel(value?: string | null) {
+  if (!value) return '—'
+  const { date, time } = dateParts(value)
+  if (!date) return time || '—'
+  return `${date} ${time}`
+}
+
+/** 101동 1502호. 값이 없으면 '—', 이미 동/호가 붙어 있으면 그대로 쓴다. */
+function unitLabel(building?: string | null, unit?: string | null) {
+  const b = building?.trim()
+  const u = unit?.trim()
+  const parts = [
+    b ? (b.endsWith('동') ? b : `${b}동`) : '',
+    u ? (u.endsWith('호') ? u : `${u}호`) : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : '—'
+}
+
+/** 발송 상태 코드 → 한글. 코드가 비면 발송 시각 유무로 판단한다. */
+function notificationStatus(value: string, sentAt?: string | null): NotificationSendStatus {
+  const map: Record<string, NotificationSendStatus> = {
+    SUCCESS: '발송완료',
+    SENT: '발송완료',
+    DELIVERED: '발송완료',
+    COMPLETED: '발송완료',
+    PENDING: '발송대기',
+    WAITING: '발송대기',
+    QUEUED: '발송대기',
+    READY: '발송대기',
+    PROCESSING: '발송대기',
+    FAILED: '발송실패',
+    FAIL: '발송실패',
+    ERROR: '발송실패',
+  }
+  const code = (value ?? '').trim().toUpperCase()
+  if (map[code]) return map[code]
+  if (value) return value as NotificationSendStatus
+  return sentAt ? '발송완료' : '발송대기'
+}
+
+/** 목록 항목(NotificationHistoryItemResponse) → 도메인 */
+export function notificationListItemToDomain(
+  value: NotificationHistoryItemResponse,
+): NotificationRecord {
+  return {
+    id: String(value.notificationId),
+    backendId: value.notificationId,
+    eventId: String(value.eventId),
+    eventType: eventType(value.eventType),
+    recipientName: value.recipientName || '—',
+    address: unitLabel(value.buildingNumber, value.unitNumber),
+    status: notificationStatus(value.status, value.sentAt),
+    sentAt: value.sentAt ?? undefined,
+    sentAtLabel: stampLabel(value.sentAt),
+  }
+}
+
+/** 상세(NotificationDetailResponse) → 도메인 */
+export function notificationDetailToDomain(
+  value: NotificationDetailResponse,
+): NotificationDetailRecord {
+  return {
+    id: String(value.notificationId),
+    backendId: value.notificationId,
+    eventId: String(value.eventId),
+    eventType: eventType(value.eventType),
+    recipientName: value.recipientName || '—',
+    address: unitLabel(value.buildingNumber, value.unitNumber),
+    status: notificationStatus(value.status, value.sentAt),
+    sentAt: value.sentAt ?? undefined,
+    sentAtLabel: stampLabel(value.sentAt),
+    title: value.title || '알림',
+    content: value.content ?? '',
+    recipientPhone: value.recipientPhoneNumber || '—',
+    occurredAt: value.occurredAt ?? undefined,
+    occurredAtLabel: stampLabel(value.occurredAt),
+    location: value.location || '위치 미확인',
+    licensePlate: value.licensePlate || undefined,
+  }
+}
+
+function patrolStatus(value: string): StatusLabel {
+  const map: Record<string, StatusLabel> = {
+    IN_PROGRESS: '진행중',
+    COMPLETED: '완료',
+    STOPPED: '중단',
+    FAILED: '실패',
+  }
+  return map[value] ?? (value as StatusLabel)
+}
+
+/** route(체크포인트 방문) → 순서대로 구역 이름 배열. 연속 중복은 제거. */
+function routeZoneNames(route: PatrolRouteCheckpointResponse[] = []): string[] {
+  return [...route]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((checkpoint) => checkpoint.checkpointName)
+    .filter((name): name is string => Boolean(name))
+    .filter((name, index, names) => index === 0 || name !== names[index - 1])
+}
+
+function timelinePoint(value: PatrolTimelineResponse): PatrolPoint {
   const { time } = dateParts(value.recordedAt)
   return {
     time,
     type: value.eventType ? eventType(value.eventType) : '정기 점검',
-    location: value.checkpointLabel ?? `좌표 ${toNumber(value.xCoordinate).toFixed(1)}, ${toNumber(value.yCoordinate).toFixed(1)}`,
+    location: value.checkpointName ?? '위치 미확인',
     status: (value.processingStatus ? processingStatus(value.processingStatus) : '이상무') as StatusLabel,
-    note: value.note ?? undefined,
     eventId: value.eventId == null ? undefined : String(value.eventId),
   }
 }
 
-export function patrolResponseToDomain(
-  value: PatrolResponse,
-  path: PatrolPathPointResponse[] = [],
-): Patrol {
-  const started = dateParts(value.patrolStartedAt)
-  const ended = dateParts(value.patrolEndedAt)
-  const routeZones = path
-    .map((point) => point.checkpointLabel)
-    .filter((label): label is string => Boolean(label))
-    .filter((label, index, values) => index === 0 || label !== values[index - 1])
-
+/** 목록 항목(PatrolListResponse) → 도메인 (1d) */
+export function patrolListItemToDomain(value: PatrolListResponse): Patrol {
+  const started = dateParts(value.startedAt)
+  const ended = dateParts(value.endedAt)
+  const zones = routeZoneNames(value.route)
   return {
     id: String(value.patrolId),
     backendId: value.patrolId,
-    robotId: String(value.robotId),
+    robotId: value.robotName, // 백엔드 목록은 로봇 이름만 제공(id 아님) — 표시용
+    robotName: value.robotName,
     date: started.date,
     start: started.time,
-    end: value.patrolEndedAt ? ended.time : null,
-    routeZones: routeZones.length > 0 ? routeZones : ['경로 정보 없음'],
-    routeSummary: routeZones.length > 0 ? routeZones.join('→') : undefined,
+    end: value.endedAt ? ended.time : null,
+    routeZones: zones.length > 0 ? zones : ['경로 정보 없음'],
+    routeSummary: zones.length > 0 ? zones.join('→') : undefined,
     eventCount: value.detectedEventCount,
-    status: value.patrolStatus as StatusLabel,
-    batteryFrom: value.batteryFrom == null ? undefined : toNumber(value.batteryFrom),
-    batteryTo: value.batteryTo == null ? undefined : toNumber(value.batteryTo),
-    report: value.report
-      ? {
-          reportNo: String(value.report.reportId),
-          createdAt: value.report.createdAt,
-          aiSummary: value.report.patrolSummary ?? value.report.reportContent ?? '',
-          anomalyComment: value.report.anomalyComment ?? undefined,
-        }
-      : undefined,
-    points: path.length > 0 ? path.map(patrolPoint) : undefined,
+    status: patrolStatus(value.patrolStatus),
   }
 }
 
-function patrolRange(value: RobotResponse['lastPatrol']) {
-  if (!value?.startedAt) return undefined
-  const start = dateParts(value.startedAt).time
-  const end = value.endedAt ? dateParts(value.endedAt).time : ''
-  return `${start}–${end}`
+/** 상세(PatrolDetailResponse) → 도메인 (1e). 응답에 patrolId가 없어 id는 인자로 받는다. */
+export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): Patrol {
+  const started = dateParts(value.startedAt)
+  const ended = dateParts(value.endedAt)
+  const zones = routeZoneNames(value.route)
+  const timeline = value.timeline ?? []
+  const summaryContent = value.aiSummary?.summaryContent
+  return {
+    id,
+    backendId: id,
+    robotId: value.robotName, // 상세엔 robotId 없음 — 이름을 표시용으로
+    robotName: value.robotName,
+    date: started.date,
+    start: started.time,
+    end: value.endedAt ? ended.time : null,
+    routeZones: zones.length > 0 ? zones : ['경로 정보 없음'],
+    routeSummary: zones.length > 0 ? zones.join('→') : undefined,
+    eventCount: timeline.filter((point) => point.eventId != null).length,
+    status: patrolStatus(value.patrolStatus),
+    batteryFrom: value.battery?.startLevel == null ? undefined : toNumber(value.battery.startLevel),
+    batteryTo: value.battery?.endLevel == null ? undefined : toNumber(value.battery.endLevel),
+    // AI 요약이 실제 생성(내용 존재)된 경우에만 보고서 노출
+    report: summaryContent
+      ? {
+          reportNo: id,
+          createdAt: value.endedAt ?? value.startedAt,
+          aiSummary: summaryContent,
+        }
+      : undefined,
+    points: timeline.length > 0 ? timeline.map(timelinePoint) : undefined,
+  }
 }
 
-export function robotResponseToDomain(value: RobotResponse): Robot {
-  const x = value.xCoordinate == null ? undefined : toNumber(value.xCoordinate)
-  const y = value.yCoordinate == null ? undefined : toNumber(value.yCoordinate)
+function robotStatusLabel(value: string): StatusLabel {
+  const map: Record<string, StatusLabel> = {
+    IDLE: '대기',
+    PATROLLING: '순찰중',
+    CHARGING: '충전중',
+    ERROR: '오류',
+    OFFLINE: '오프라인',
+    OBSTACLE_STOP: '중단',
+    DELETED: '오프라인',
+  }
+  return map[value] ?? (value as StatusLabel)
+}
+
+function sensorStatusLabel(value: string): StatusLabel {
+  const map: Record<string, StatusLabel> = {
+    NORMAL: '정상',
+    NEEDS_INSPECTION: '점검필요',
+    ERROR: '오류',
+    DISCONNECTED: '오프라인',
+  }
+  return map[value] ?? (value as StatusLabel)
+}
+
+/** 목록 항목(RobotListResponse) → 도메인 (1i). 축소형이라 상세 필드는 플레이스홀더. */
+export function robotListItemToDomain(value: RobotListResponse): Robot {
   return {
     id: String(value.robotId),
     backendId: value.robotId,
     name: value.robotName,
-    registrationNo: value.registrationCode ?? value.robotSerialNumber,
+    registrationNo: '-',
+    introducedAt: '-',
+    zone: '미지정',
+    status: robotStatusLabel(value.robotStatus),
+    battery: value.batteryLevel == null ? undefined : toNumber(value.batteryLevel),
+    location: value.location ?? '위치 미확인',
+    parts: [],
+  }
+}
+
+/** 상세(RobotDetailResponse) → 도메인 (1i). 센서 3필드 → parts 배열. */
+export function robotDetailToDomain(value: RobotDetailResponse): Robot {
+  const sensors: { name: string; status?: string | null }[] = [
+    { name: '카메라 모듈', status: value.cameraStatus },
+    { name: '라이다 센서', status: value.lidarStatus },
+    { name: '휠 모터', status: value.motorStatus },
+  ]
+  return {
+    id: String(value.robotId),
+    backendId: value.robotId,
+    name: value.robotName,
+    registrationNo: value.robotSerialNumber,
     serialNo: value.robotSerialNumber,
-    model: value.model ?? '미등록',
     introducedAt: formatDate(value.registeredAt),
-    zone: value.assignedZone ?? '미지정',
-    status: value.robotStatus as StatusLabel,
-    battery: toNumber(value.batteryLevel),
-    location:
-      value.currentLocationLabel ??
-      (x !== undefined && y !== undefined ? `좌표 ${x.toFixed(1)}, ${y.toFixed(1)}` : '위치 미확인'),
-    lastPatrol: patrolRange(value.lastPatrol),
-    parts:
-      value.parts?.map((part) => ({
-        name: part.name,
-        status: part.status as StatusLabel,
-      })) ?? [],
-    odometerKm: value.odometerKm == null ? undefined : toNumber(value.odometerKm),
-    weeklyUptime: value.weeklyUptime == null ? undefined : toNumber(value.weeklyUptime),
+    zone: '미지정',
+    status: robotStatusLabel(value.robotStatus),
+    battery: value.batteryLevel == null ? undefined : toNumber(value.batteryLevel),
+    parts: sensors
+      .filter((s) => s.status != null)
+      .map((s) => ({ name: s.name, status: sensorStatusLabel(s.status as string) })),
+    weeklyUptime:
+      value.weeklyOperationRate == null ? undefined : toNumber(value.weeklyOperationRate),
+    recentPatrols: value.recentPatrols,
   }
 }
 
 function zoneType(value: string): ZoneType {
-  if (value === '주차장' || value === '분리수거장' || value === '위험구역' || value === '출입구') {
+  if (
+    value === '주차장' ||
+    value === '분리수거장' ||
+    value === '위험구역' ||
+    value === '출입구' ||
+    value === '도착지'
+  ) {
     return value
   }
   return '기타'
@@ -353,15 +537,14 @@ export function locationEventToMapRobot(
   monitoring: MapMonitoringResponse,
 ): MapRobot {
   const point = mapPointToGrid(
-    event.xCoordinate,
-    event.yCoordinate,
+    event.x ?? monitoring.robot.xCoordinate,
+    event.y ?? monitoring.robot.yCoordinate,
     monitoring.map,
     responseBounds(monitoring),
   )
   return {
-    id: event.robotName || String(event.robotId),
+    id: String(event.robotId),
     ...point,
-    battery: event.batteryLevel == null ? undefined : toNumber(event.batteryLevel),
-    updatedAt: event.updatedAt ?? event.locationUpdatedAt,
+    updatedAt: event.updatedAt ?? undefined,
   }
 }

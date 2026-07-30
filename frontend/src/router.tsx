@@ -5,7 +5,6 @@ import { RequireAuth } from './features/auth/RequireAuth'
 import Dashboard from './pages/Dashboard'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
-import Signup from './pages/Signup'
 import SignupOnboarding from './pages/SignupOnboarding'
 import PatrolList from './pages/PatrolList'
 import PatrolDetail from './pages/PatrolDetail'
@@ -14,6 +13,8 @@ import EventDetail from './pages/EventDetail'
 import RobotDetail from './pages/RobotDetail'
 import RobotList from './pages/RobotList'
 import RobotNew from './pages/RobotNew'
+import NotificationList from './pages/NotificationList'
+import NotificationDetail from './pages/NotificationDetail'
 import MapFull from './pages/MapFull'
 import NotFound from './pages/NotFound'
 import RouteError from './pages/RouteError'
@@ -26,7 +27,7 @@ const Stats = lazy(() => import('./pages/Stats'))
 export const router = createBrowserRouter([
   { path: '/', element: <Landing />, errorElement: <RouteError /> },
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
-  { path: '/signup', element: <Signup />, errorElement: <RouteError /> },
+  // { path: '/signup', element: <Signup />, errorElement: <RouteError /> },
   { path: '/signup/onboarding', element: <SignupOnboarding />, errorElement: <RouteError /> },
   // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 AppShell 밖에 둔다
   {
@@ -40,30 +41,102 @@ export const router = createBrowserRouter([
   },
   {
     path: '/app',
-    // 비로그인 접근 시 /login으로
-    element: (
-      <RequireAuth>
-        <AppShell />
-      </RequireAuth>
-    ),
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: 'patrol', element: <PatrolList /> },
-      { path: 'patrol/:id', element: <PatrolDetail /> },
-      { path: 'events', element: <EventList /> },
-      { path: 'events/:id', element: <EventDetail /> },
-      // 로봇관리 (1i 목록 → 1i-r01 상세)
-      { path: 'robots', element: <RobotList /> },
-      { path: 'robots/new', element: <RobotNew /> },
-      { path: 'robots/:id', element: <RobotDetail /> },
+      // R0-Ki 리디자인 화면 — 자체 상단바 레이아웃(R0KiShell)이라 AppShell 밖 독립 렌더
+      {
+        index: true,
+        element: (
+          <RequireAuth>
+            <Dashboard />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'patrol',
+        element: (
+          <RequireAuth>
+            <PatrolList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'patrol/:id',
+        element: (
+          <RequireAuth>
+            <PatrolDetail />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'events',
+        element: (
+          <RequireAuth>
+            <EventList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'events/:id',
+        element: (
+          <RequireAuth>
+            <EventDetail />
+          </RequireAuth>
+        ),
+      },
+      // 알림 기록 (목록 → 상세) — 상단바 알림 버튼 목적지
+      {
+        path: 'notifications',
+        element: (
+          <RequireAuth>
+            <NotificationList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'notifications/:id',
+        element: (
+          <RequireAuth>
+            <NotificationDetail />
+          </RequireAuth>
+        ),
+      },
+      // 로봇관리 (1i 목록 → 1i-r01 상세) — R0KiShell 자체 상단바라 AppShell 밖 독립 렌더
+      {
+        path: 'robots',
+        element: (
+          <RequireAuth>
+            <RobotList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'robots/:id',
+        element: (
+          <RequireAuth>
+            <RobotDetail />
+          </RequireAuth>
+        ),
+      },
+      // 통계 — R0KiShell 자체 상단바라 AppShell 밖 독립 렌더 (recharts 청크 지연 로드)
       {
         path: 'stats',
         element: (
-          <Suspense fallback={null}>
-            <Stats />
-          </Suspense>
+          <RequireAuth>
+            <Suspense fallback={null}>
+              <Stats />
+            </Suspense>
+          </RequireAuth>
         ),
+      },
+      {
+        // 비로그인 접근 시 /login으로 — 나머지 화면은 기존 셸 유지
+        element: (
+          <RequireAuth>
+            <AppShell />
+          </RequireAuth>
+        ),
+        children: [{ path: 'robots/new', element: <RobotNew /> }],
       },
     ],
   },

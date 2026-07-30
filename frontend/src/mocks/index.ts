@@ -1,6 +1,7 @@
 export { complexes } from './complexes'
 export { complexMap, mapCheckpoints, mapPins, mapRobot } from './map'
 export { events } from './events'
+export { notifications } from './notifications'
 export { patrols } from './patrols'
 export { robots } from './robots'
 export {

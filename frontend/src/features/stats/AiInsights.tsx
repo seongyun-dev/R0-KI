@@ -1,23 +1,35 @@
-import { Card } from '../../components/ui'
+import type { AiInsight } from '../../types/domain'
 
-/** AI 인사이트 (1m) — 기간 통계에서 도출한 권장 사항 */
-export function AiInsights({ insights }: { insights: string[] }) {
+/* AI 인사이트 — 리포트 형식.
+   종합 요약 문단(st-sum) + 번호·제목·권장 조치가 붙은 소견 카드(st-in) 2열.
+   서버가 문자열 배열만 주는 경우를 대비해 body로 정규화한다. */
+
+const normalize = (item: string | AiInsight): AiInsight =>
+  typeof item === 'string' ? { title: 'AI 분석', body: item } : item
+
+export function AiInsights({
+  overview,
+  insights,
+}: {
+  /** 종합 요약 문단 — 통계 수치로 화면에서 조립 */
+  overview?: string
+  insights: (string | AiInsight)[]
+}) {
   return (
-    <Card className="p-5 sm:p-6">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-muted">
-        <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent" />
-        AI 인사이트
-      </h2>
-      <ul className="flex flex-col gap-3">
-        {insights.map((text) => (
-          <li
-            key={text}
-            className="rounded-card-sm border-l-4 border-accent bg-surface px-5 py-4 text-sm leading-relaxed"
-          >
-            “{text}”
-          </li>
+    <>
+      {overview && <p className="st-sum">{overview}</p>}
+      <div className="st-ins">
+        {insights.map(normalize).map((it, i) => (
+          <article key={it.title + it.body} className="st-in">
+            <div className="hd">
+              <span className="no num">{String(i + 1).padStart(2, '0')}</span>
+              <b className="tt">{it.title}</b>
+              {it.action && <span className="act">권장 · {it.action}</span>}
+            </div>
+            <p className="bd">{it.body}</p>
+          </article>
         ))}
-      </ul>
-    </Card>
+      </div>
+    </>
   )
 }

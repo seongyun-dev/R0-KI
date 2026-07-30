@@ -1,16 +1,53 @@
-import { env } from '../config/env'
-import { apiRequest, consumeSse, jsonBody } from './client'
+import { apiBlob, apiRequest, consumeSse, jsonBody } from './client'
+import type {
+  AnalyticsByZoneResponse,
+  AnalyticsHandlingResponse,
+  AnalyticsOverviewResponse,
+  AnalyticsTrendResponse,
+} from './analyticsContracts'
 import type {
   ComplexResponse,
-  EventResponse,
+  EventBatchCreateRequest,
+  EventBatchCreateResponse,
+  EventDetailResponse,
+  EvidenceUploadRequest,
+  EvidenceUploadResponse,
+  EventListRequest,
+  EventListResponse,
+  EventNotificationResponse,
+  EventStatusChangeRequest,
+  EventStatusChangeResponse,
   ListResponse,
-  MapMonitoringResponse,
-  PatrolPathPointResponse,
-  PatrolResponse,
+  MapDetailResponse,
+  MappingStartResponse,
+  MappingStatusEventResponse,
+  NotificationDetailResponse,
+  NotificationHistoryResponse,
+  PatrolCreateRequest,
+  PatrolCreateResponse,
+  PatrolDetailResponse,
+  PatrolEndRequest,
+  PatrolEndResponse,
+  PatrolListPageResponse,
+  PatrolPathResponse,
+  RobotDeleteResponse,
+  RobotDetailResponse,
+  RobotListPageResponse,
   RobotLocationEvent,
-  RobotResponse,
+  RobotObstacleEvent,
+  RobotRegisterRequest,
+  RobotRegisterResponse,
+  RobotStatsResponse,
+  RobotUpdateRequest,
+  RobotUpdateResponse,
   SignInRequest,
   SignInResponse,
+  SignUpRequest,
+  SignUpResponse,
+  VehicleCheckRequest,
+  VehicleCheckResponse,
+  ZoneCreateRequest,
+  ZoneCreateResponse,
 } from './contracts'
 
 export function unwrapList<T>(response: ListResponse<T>): T[] {
@@ -29,17 +66,12 @@ function withQuery(path: string, params: Record<string, string | number | undefi
 
 export const authApi = {
   signIn: (request: SignInRequest) =>
-    apiRequest<SignInResponse>('/api/auth/signin', {
+    apiRequest<SignInResponse['data']>('/api/auth/signin', {
       method: 'POST',
       body: jsonBody(request),
     }),
-  signUp: (request: unknown) =>
-    apiRequest<unknown>('/api/auth/signup', {
-      method: 'POST',
-      body: jsonBody(request),
-    }),
-  initialSignUp: (request: unknown) =>
-    apiRequest<SignInResponse>('/api/auth/initial-signup', {
+  signUp: (request: SignUpRequest) =>
+    apiRequest<SignUpResponse['data']>('/api/auth/signup', {
       method: 'POST',
       body: jsonBody(request),
     }),
@@ -50,67 +82,304 @@ export const authApi = {
 }
 
 export const eventsApi = {
-  list: (params: { eventType?: string; processingStatus?: string; period?: string } = {}) =>
-    apiRequest<ListResponse<EventResponse>>(withQuery('/api/events', params)).then(unwrapList),
+  // 백엔드 GET /api/events 쿼리: type / status / period (+ page,size,sort). 위험도 필터는 미지원.
+  list: (request: EventListRequest = {}) => {
+    const query = new URLSearchParams()
+    const { sort, ...filters } = request
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined) query.set(key, String(value))
+    })
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<EventListResponse>(suffix ? `/api/events?${suffix}` : '/api/events')
+  },
+  
   detail: (eventId: string | number) =>
-    apiRequest<EventResponse>(`/api/events/${encodeURIComponent(eventId)}`),
-  updateStatus: (eventId: string | number, processingStatus: string, processingNote?: string) =>
-    apiRequest<unknown>(`/api/events/${encodeURIComponent(eventId)}/status`, {
+    apiRequest<EventDetailResponse>(`/api/events/${encodeURIComponent(eventId)}`),
+
+  updateStatus: (eventId: string | number, request: EventStatusChangeRequest) =>
+    apiRequest<EventStatusChangeResponse>(`/api/events/${encodeURIComponent(eventId)}/status`, {
       method: 'PATCH',
-      body: jsonBody({ processingStatus, processingNote }),
+      body: jsonBody(request),
     }),
+
+  notify: (eventId: string | number) =>
+    apiRequest<EventNotificationResponse>(
+      `/api/events/${encodeURIComponent(String(eventId))}/notify`,
+      {
+        method: 'POST',
+      },
+    ),
+}
+
+export const robotEventsApi = {
+  createBatch: (robotServiceToken: string, request: EventBatchCreateRequest) =>
+    apiRequest<EventBatchCreateResponse>('/api/robot/events/batch', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${robotServiceToken}`,
+      },
+      body: jsonBody(request),
+    }),
+  checkVehicles: (robotServiceToken: string, request: VehicleCheckRequest) =>
+    apiRequest<VehicleCheckResponse>('/api/robot/vehicle-checks', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${robotServiceToken}`,
+      },
+      body: jsonBody(request),
+    }),
+  uploadEvidence: (
+    robotServiceToken: string,
+    eventId: string | number,
+    request: EvidenceUploadRequest,
+  ) => {
+    const formData = new FormData()
+    formData.append('file', request.file)
+    formData.append('mediaType', request.mediaType)
+    if (request.capturedAt) formData.append('capturedAt', request.capturedAt)
+
+    return apiRequest<EvidenceUploadResponse>(
+      `/api/events/${encodeURIComponent(String(eventId))}/evidence`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${robotServiceToken}`,
+        },
+        body: formData,
+      },
+    )
+  },
+}
+
+export const notificationsApi = {
+  list: () =>
+    apiRequest<NotificationHistoryResponse>('/api/notifications'),
+  detail: (notificationId: number) =>
+    apiRequest<NotificationDetailResponse>(
+      `/api/notifications/${encodeURIComponent(String(notificationId))}`,
+    ),
 }
 
 export const patrolsApi = {
-  list: (params: { robotId?: string | number; period?: string; status?: string } = {}) =>
-    apiRequest<ListResponse<PatrolResponse>>(withQuery('/api/patrols', params)).then(unwrapList),
+  start: (request: PatrolCreateRequest) =>
+    apiRequest<PatrolCreateResponse>('/api/patrols', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  end: (patrolId: string | number, request: PatrolEndRequest) =>
+    apiRequest<PatrolEndResponse>(
+      `/api/patrols/${encodeURIComponent(String(patrolId))}/end`,
+      {
+        method: 'PATCH',
+        body: jsonBody(request),
+      },
+    ),
+  // 백엔드 GET /api/patrols 쿼리: period / status (+ page,size,sort). robotId 필터는 미지원.
+  list: (
+    params: {
+      period?: string
+      status?: string
+      page?: number
+      size?: number
+      sort?: string[]
+    } = {},
+  ) => {
+    const query = new URLSearchParams()
+    const { sort, ...filters } = params
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== '' && value !== 'all') {
+        query.set(key, String(value))
+      }
+    })
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<PatrolListPageResponse>(
+      suffix ? `/api/patrols?${suffix}` : '/api/patrols',
+    )
+  },
+  // 상세 응답에 경로·타임라인이 포함됨(별도 /path 엔드포인트 없음)
   detail: (patrolId: string | number) =>
-    apiRequest<PatrolResponse>(`/api/patrols/${encodeURIComponent(patrolId)}`),
+    apiRequest<PatrolDetailResponse>(`/api/patrols/${encodeURIComponent(patrolId)}`),
   path: (patrolId: string | number) =>
-    apiRequest<ListResponse<PatrolPathPointResponse>>(
-      `/api/patrols/${encodeURIComponent(patrolId)}/path`,
-    ).then(unwrapList),
+    apiRequest<PatrolPathResponse>(
+      `/api/patrols/${encodeURIComponent(String(patrolId))}/path`,
+    ),
 }
 
 export const robotsApi = {
-  list: () => apiRequest<ListResponse<RobotResponse>>('/api/robots').then(unwrapList),
+  list: (params: { page?: number; size?: number; sort?: string[] } = {}) => {
+    const query = new URLSearchParams()
+    const { sort, ...pagination } = params
+
+    Object.entries(pagination).forEach(([key, value]) => {
+      if (value !== undefined) query.set(key, String(value))
+    })
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<RobotListPageResponse>(
+      suffix ? `/api/robots?${suffix}` : '/api/robots',
+    )
+  },
+  stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
   detail: (robotId: string | number) =>
-    apiRequest<RobotResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
-  create: (request: unknown) =>
-    apiRequest<RobotResponse>('/api/robots', {
+    apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
+
+  create: (request: RobotRegisterRequest) =>
+    apiRequest<RobotRegisterResponse>('/api/robots', {
       method: 'POST',
       body: jsonBody(request),
     }),
-  update: (robotId: string | number, request: unknown) =>
-    apiRequest<RobotResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
+  update: (robotId: string | number, request: RobotUpdateRequest) =>
+    apiRequest<RobotUpdateResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
       method: 'PATCH',
       body: jsonBody(request),
     }),
-}
-
-export const mapApi = {
-  monitoring: (mapId: string | number, robotId: string | number) =>
-    apiRequest<MapMonitoringResponse>(
-      `/api/map/${encodeURIComponent(mapId)}/monitoring?robotId=${encodeURIComponent(robotId)}`,
-    ),
-  registerZones: (mapId: string | number, zones: unknown[]) =>
-    apiRequest<unknown>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
-      method: 'POST',
-      body: jsonBody({ zones }),
+  delete: (robotId: string | number) =>
+    apiRequest<RobotDeleteResponse>(`/api/robots/${encodeURIComponent(robotId)}`, {
+      method: 'DELETE',
     }),
-  subscribeRobotLocation: (
-    robotId: string | number,
-    onMessage: (data: RobotLocationEvent) => void,
+  subscribeLocations: (
+    onInitial: (locations: RobotLocationEvent[]) => void,
+    onLocation: (location: RobotLocationEvent) => void,
     signal: AbortSignal,
   ) =>
-    consumeSse<RobotLocationEvent>(
-      `/api/robots/${encodeURIComponent(robotId)}/location/events`,
-      onMessage,
+    consumeSse<RobotLocationEvent[] | RobotLocationEvent>(
+      '/api/robots/location/events',
+      (data, eventName) => {
+        if (eventName === 'robot-location-initial' && Array.isArray(data)) {
+          onInitial(data)
+        } else if (eventName === 'robot-location' && !Array.isArray(data)) {
+          onLocation(data)
+        }
+      },
+      signal,
+    ),
+  subscribeObstacleEvents: (
+    onObstacle: (event: RobotObstacleEvent) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<RobotObstacleEvent>(
+      '/api/robots/obstacle-events',
+      (data, eventName) => {
+        if (eventName === 'robot-obstacle') onObstacle(data)
+      },
       signal,
     ),
 }
 
+export const mapApi = {
+  startMapping: (robotId: string | number) =>
+    apiRequest<MappingStartResponse>('/api/map/mapping-sessions', {
+      method: 'POST',
+      body: jsonBody({ robotId }),
+    }),
+  subscribeMapping: (
+    mappingSessionId: string | number,
+    onMessage: (data: MappingStatusEventResponse) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<MappingStatusEventResponse>(
+      `/api/map/mapping-sessions/${encodeURIComponent(mappingSessionId)}/events`,
+      onMessage,
+      signal,
+    ),
+  detail: (mapId: string | number) =>
+    apiRequest<MapDetailResponse>(`/api/map/${encodeURIComponent(mapId)}`),
+  file: (mapUrl: string, signal?: AbortSignal) => apiBlob(mapUrl, signal),
+  registerZones: (mapId: string | number, zones: ZoneCreateRequest[]) =>
+    apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
+      method: 'POST',
+      body: jsonBody({ zones }),
+    }),
+  zones: (mapId: string | number) =>
+    apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`),
+}
+
 export const statsApi = {
-  get: (params: { period?: string; zone?: string } = {}) =>
-    apiRequest<unknown>(withQuery(env.statsEndpoint, params)),
+  /**
+   * 드롭다운 구역 키(parking/recycle/danger)를 by-zone 결과의 zoneId 목록으로 변환한다.
+   *
+   * <p>백엔드는 checkpoint_type 필터 파라미터가 아직 없으므로,
+   * 1차는 zoneName 키워드 매칭으로 zoneIds를 만든 뒤 기존 zoneIds 필터 API를 재사용한다.
+   * (예: parking -> "주차", recycle -> "분리수거", danger -> "위험")
+   */
+  resolveZoneIds: (
+    byZone: AnalyticsByZoneResponse,
+    zone: string,
+  ): number[] | undefined => {
+    if (!zone || zone === 'all') return undefined
+    const keywordByZone: Record<string, string> = {
+      parking: '주차',
+      recycle: '분리수거',
+      danger: '위험',
+    }
+    const keyword = keywordByZone[zone]
+    if (!keyword) return undefined
+    const ids = (byZone.items ?? [])
+      .filter((item) => item.zoneName?.includes(keyword))
+      .map((item) => item.zoneId)
+    return ids.length > 0 ? ids : undefined
+  },
+
+  /**
+   * 통계 대시보드용 Analytics API 묶음 호출.
+   *
+   * 예전 단일 `/api/statistics` 가정은 폐기하고,
+   * 백엔드 확정 엔드포인트 4(+trend 2회)를 병렬로 부른 뒤
+   * assembleStatsDashboard 매퍼가 Stats 화면 형태로 합친다.
+   *
+   * @param range resolveAnalyticsRange() 결과 (from/to, +09:00)
+   * @param zone 구역 드롭다운 값. parking/recycle/danger를 zoneIds로 변환해 함께 적용한다.
+   */
+  fetchDashboard: async (range: { from: string; to: string }, zone?: string) => {
+    const base = {
+      from: range.from,
+      to: range.to,
+    }
+    // 1) 기간 필터만 적용된 by-zone을 먼저 조회해 zoneId 후보를 얻는다.
+    //    이후 구역 선택값을 zoneIds로 변환해 나머지 API에 공통 적용한다.
+    const byZoneAll = await apiRequest<AnalyticsByZoneResponse>(
+      withQuery('/api/analytics/events/by-zone', base),
+    )
+    const zoneIds = statsApi.resolveZoneIds(byZoneAll, zone ?? 'all')
+    const zoneIdsCsv = zoneIds?.join(',')
+    const scoped = { ...base, zoneIds: zoneIdsCsv }
+
+    const [overview, dailyTrend, hourlyTrend, handling] = await Promise.all([
+      // KPI: 순찰수·이벤트·평균처리시간 + 증감
+      apiRequest<AnalyticsOverviewResponse>(
+        withQuery('/api/analytics/events/overview', { ...scoped, compare: 'true' }),
+      ),
+      // 일자별 추이 차트
+      apiRequest<AnalyticsTrendResponse>(
+        withQuery('/api/analytics/events/trend', { ...scoped, bucket: 'day' }),
+      ),
+      // 시간대×유형 차트 (3시간×8칸)
+      apiRequest<AnalyticsTrendResponse>(
+        withQuery('/api/analytics/events/trend', { ...scoped, bucket: 'hour3' }),
+      ),
+      // 처리/미처리 현황
+      apiRequest<AnalyticsHandlingResponse>(
+        withQuery('/api/analytics/events/handling', scoped),
+      ),
+    ])
+
+    // 2) by-zone은 백엔드 zoneIds 필터가 없어 프론트에서 동일 zoneIds로 후필터한다.
+    //    이렇게 하면 "기간 + 구역" 조건이 모든 패널에 동일하게 적용된다.
+    const byZone =
+      zoneIds && zoneIds.length > 0
+        ? {
+            ...byZoneAll,
+            items: byZoneAll.items.filter((item) => zoneIds.includes(item.zoneId)),
+          }
+        : byZoneAll
+
+    return [overview, dailyTrend, hourlyTrend, handling, byZone] as const
+  },
 }

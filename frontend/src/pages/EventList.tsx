@@ -1,99 +1,180 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { PageHeader } from '../components/layout/PageHeader'
-import {
-  Button,
-  Card,
-  DataTable,
-  Select,
-  StatusBadge,
-  QueryErrorState,
-  type Column,
-} from '../components/ui'
+import { Link, useNavigate } from 'react-router-dom'
+import { R0KiShell } from '../components/layout/R0KiShell'
+import { R0KiDropdown } from '../components/ui/R0KiDropdown'
 import { useEvents } from '../features/events/useEvents'
-import type { PatrolEvent } from '../types/domain'
+import type {
+  EventPeriodCode,
+  EventTypeCode,
+  ProcessingStatusCode,
+} from '../api/contracts'
 
-const columns: Column<PatrolEvent>[] = [
-  { key: 'id', header: 'ID', render: (e) => <span className="font-mono font-bold tabular">{e.id}</span> },
-  { key: 'time', header: '시간', render: (e) => <span className="font-mono tabular">{e.time}</span> },
-  { key: 'type', header: '유형', render: (e) => <span className="font-semibold">{e.type}</span> },
-  { key: 'location', header: '위치', render: (e) => e.location },
-  { key: 'robot', header: '로봇', render: (e) => <span className="font-mono tabular">{e.robotId}</span> },
-  { key: 'status', header: '상태', render: (e) => <StatusBadge label={e.status} bracket /> },
-  {
-    key: 'detail',
-    header: '',
-    align: 'right',
-    render: (e) => (
-      <Link to={`/app/events/${e.id}`} className="font-semibold text-accent underline-offset-4 hover:underline">
-        상세 →
-      </Link>
-    ),
-  },
+/* R0-Ki 이벤트 목록 — 시안 R0Kievents 그대로.
+   유리 테이블 + 커스텀 드롭다운 4종 필터. 데이터는 기존 useEvents 그대로.
+   위험도는 긴급만 --urgent(모노크롬 예외), 나머지는 명도 램프. */
+
+/* 처리 상태 점 색 — 명도 램프 */
+const STATE_DOT: Record<string, string> = {
+  탐지: 'var(--detect)',
+  처리중: 'var(--charge)',
+  처리완료: 'var(--offline)',
+}
+/* 위험도 점 색 (긴급은 .st.u 로 별도 처리) */
+const RISK_DOT: Record<string, string> = {
+  보통: 'var(--detect)',
+  낮음: 'var(--offline)',
+}
+
+const TYPE_OPTIONS = [
+  { value: 'ILLEGAL_PARKING', label: '불법주차' },
+  { value: 'UNREGISTERED_VEHICLE', label: '미등록 차량' },
+  { value: 'TRASH_DETECTED', label: '쓰레기' },
+  { value: 'RECYCLING_AREA_FULL', label: '분리수거장' },
+  { value: 'EMERGENCY', label: '응급상황' },
 ]
 
-/** 이벤트 관리 목록 (1f) */
+const STATE_OPTIONS = [
+  { value: 'DETECTED', label: '탐지' },
+  { value: 'PROCESSING', label: '처리중' },
+  { value: 'COMPLETED', label: '처리완료' },
+]
+
+const PERIOD_OPTIONS = [
+  { value: 'ALL', label: '전체' },
+  { value: 'TODAY', label: '오늘' },
+  { value: 'LAST_7_DAYS', label: '최근 7일' },
+]
+
+// const RISK_OPTIONS = [
+//   { value: 'EMERGENCY', label: '긴급' },
+//   { value: 'NORMAL', label: '보통' },
+//   { value: 'LOW', label: '낮음' },
+// ]
+
 export default function EventList() {
-  const [type, setType] = useState('all')
-  const [status, setStatus] = useState('all')
-  const [period, setPeriod] = useState('all')
-  const [applied, setApplied] = useState({ type: 'all', status: 'all', period: 'all' })
-  const { data: events, isLoading, error, refetch } = useEvents(applied)
+  const navigate = useNavigate()
+  // 입력 중 필터 / 적용된 필터 분리 — 검색 버튼으로 확정
+  const [draft, setDraft] = useState<{
+    type: EventTypeCode | ''
+    status: ProcessingStatusCode | ''
+    period: EventPeriodCode | ''
+  }>({ type: '', status: '', period: '' })
+  const [applied, setApplied] = useState(draft)
+
+  const { data: events, isLoading, error, refetch } = useEvents({
+    type: applied.type || undefined,
+    status: applied.status || undefined,
+    period: applied.period || undefined,
+    page: 0,
+    size: 10,
+    sort: ['occurredAt,DESC'],
+  })
 
   const rows = events ?? []
+  const urgentCount = rows.filter((e) => e.riskLevel === '긴급').length
+
+  const set = (key: keyof typeof draft) => (value: string) =>
+    setDraft((prev) => ({ ...prev, [key]: value }))
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        breadcrumb={[{ label: 'Dashboard', to: '/app' }, { label: '이벤트관리' }]}
-        title="이벤트 목록"
-      />
+    <R0KiShell active="events">
+      <div className="pcol">
+        <div className="pagehead">
+          <div>
+            <div className="crumb">
+              <Link to="/app">대시보드</Link><i>›</i><b>이벤트 관리</b>
+            </div>
+            <div className="ptitle">이벤트 목록</div>
+          </div>
+          <div className="headtools tight">
+            <R0KiDropdown allLabel="유형 전체" options={TYPE_OPTIONS} value={draft.type} onChange={set('type')} />
+            <R0KiDropdown allLabel="상태 전체" options={STATE_OPTIONS} value={draft.status} onChange={set('status')} />
+            <R0KiDropdown allLabel="기간 전체" options={PERIOD_OPTIONS} value={draft.period} onChange={set('period')} />
+            <button type="button" className="btn btn-p" onClick={() => setApplied(draft)}>검색</button>
+          </div>
+        </div>
 
-      <Card className="p-5 sm:p-6">
-        {/* 필터: 유형 전체 ▾ / 상태 전체 ▾ / 기간 ▾ / [검색] */}
-        <form
-          className="mb-4 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            setApplied({ type, status, period })
-          }}
-        >
-          <Select aria-label="유형" value={type} onChange={(e) => setType(e.target.value)} className="w-36">
-            <option value="all">유형 전체</option>
-            <option value="불법주차">불법주차</option>
-            <option value="쓰레기">쓰레기</option>
-            <option value="위험구역">위험구역</option>
-            <option value="응급상황">응급상황</option>
-            <option value="화재 의심">화재 의심</option>
-            <option value="침입">침입</option>
-          </Select>
-          <Select aria-label="상태" value={status} onChange={(e) => setStatus(e.target.value)} className="w-32">
-            <option value="all">상태 전체</option>
-            <option value="긴급">긴급</option>
-            <option value="탐지">탐지</option>
-            <option value="처리중">처리중</option>
-            <option value="처리완료">처리완료</option>
-          </Select>
-          <Select aria-label="기간" value={period} onChange={(e) => setPeriod(e.target.value)} className="w-36">
-            <option value="all">기간 전체</option>
-            <option value="today">오늘</option>
-            <option value="7d">최근 7일</option>
-          </Select>
-          <Button type="submit" variant="dark" size="sm">검색</Button>
-        </form>
+        <div className="glass g2 tblwrap">
+          {error ? (
+            <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
+              <span>이벤트를 불러오지 못했습니다</span>
+              <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
+            </div>
+          ) : (
+            <>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>이벤트 ID</th>
+                    <th>시간</th>
+                    <th>유형</th>
+                    <th>위치</th>
+                    <th>로봇</th>
+                    <th>위험도</th>
+                    <th>상태</th>
+                    <th>담당자</th>
+                    <th className="r" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((e) => (
+                    <tr key={e.id} onClick={() => navigate(`/app/events/${e.id}`)}>
+                      <td className="id">{e.id}</td>
+                      <td className="tm">{e.time}</td>
+                      <td className="ty">{e.type}</td>
+                      <td className="loc">{e.location}</td>
+                      <td className="bot">{e.robotId}</td>
+                      <td>
+                        {e.riskLevel === '긴급' ? (
+                          <span className="st u"><i />긴급</span>
+                        ) : (
+                          <span className="st">
+                            <i style={{ background: RISK_DOT[e.riskLevel ?? ''] ?? 'var(--detect)' }} />
+                            {e.riskLevel ?? '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className="st">
+                          <i style={{ background: STATE_DOT[e.status] ?? 'var(--detect)' }} />
+                          {e.status}
+                        </span>
+                      </td>
+                      <td className="who">
+                        {e.assignee ?? <span className="dash">—</span>}
+                      </td>
+                      <td className="r">
+                        <button type="button" className="golink">
+                          상세
+                          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
 
-        {error ? (
-          <QueryErrorState error={error} onRetry={refetch} />
-        ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(e) => e.id}
-            loading={isLoading}
-            emptyMessage="조건에 맞는 이벤트가 없습니다"
-          />
-        )}
-      </Card>
-    </div>
+              {rows.length === 0 && !isLoading && (
+                <div className="empty">
+                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+                  <span>조건에 맞는 이벤트가 없습니다</span>
+                </div>
+              )}
+
+              <div className="tfoot">
+                <span>
+                  {isLoading
+                    ? '불러오는 중…'
+                    : rows.length === 0
+                      ? '결과 없음'
+                      : `전체 ${rows.length}건 · 긴급 ${urgentCount}건`}
+                </span>
+                <span>최신순</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </R0KiShell>
   )
 }

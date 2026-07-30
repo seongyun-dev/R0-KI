@@ -1,21 +1,49 @@
-import { useState } from 'react'
-import { PageHeader } from '../components/layout/PageHeader'
-import { DownloadIcon } from '../components/icons'
-import { Button, Card, QueryErrorState, Select, Skeleton, StatTile, useToast } from '../components/ui'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { R0KiShell } from '../components/layout/R0KiShell'
+import { R0KiDropdown } from '../components/ui/R0KiDropdown'
 import { AiInsights } from '../features/stats/AiInsights'
+import { RAMP } from '../features/stats/chartTheme'
 import { EventTrendChart } from '../features/stats/EventTrendChart'
-import { HandlingChart } from '../features/stats/HandlingChart'
-import { HourlyTypeChart } from '../features/stats/HourlyTypeChart'
+import { HandlingChart, HANDLING_OPACITIES } from '../features/stats/HandlingChart'
+import { HourlyTypeChart, HOURLY_SERIES } from '../features/stats/HourlyTypeChart'
 import { ZonePieChart } from '../features/stats/ZonePieChart'
 import { useStats } from '../features/stats/useStats'
 import { downloadCsv } from '../lib/downloadCsv'
 
-/** 통계 대시보드 (1m) — KPI 4 + 추이 + 시간대별 + 처리 현황 + 구역 비율 + AI 인사이트 */
+/* R0-Ki 통계 — 시안 R0Ki-stats 그대로.
+   3단 관제 구성: 좌 KPI 스택 / 중앙 주력 차트 2단 / 우 보조 패널 / 하단 AI 인사이트.
+   한 화면 고정. 데이터·CSV 내보내기는 기존 훅/로직 그대로. */
+
+// 기본값(이번 달/전체)은 allLabel 로 두어 미선택 상태로 보이게 한다
+// period → resolveAnalyticsRange → analytics from/to (디자인은 그대로, 기간만 API에 반영)
+const PERIOD_OPTIONS = [
+  { value: 'week', label: '이번 주' },
+  { value: 'quarter', label: '이번 분기' },
+]
+// 구역 드롭다운은 화면 값을 zoneId(checkpoint_id) 목록으로 변환해 API 필터에 반영한다.
+// (현재는 zoneName 키워드 기반 매핑: parking=주차, recycle=분리수거, danger=위험)
+const ZONE_OPTIONS = [
+  { value: 'parking', label: '구역: 주차장' },
+  { value: 'recycle', label: '구역: 분리수거장' },
+  { value: 'danger', label: '구역: 위험구역' },
+]
+
 export default function Stats() {
-  const toast = useToast()
-  const [period, setPeriod] = useState('month')
-  const [zone, setZone] = useState('all')
-  const { data, isLoading, error, refetch } = useStats({ period, zone })
+  const [period, setPeriod] = useState('')
+  const [zone, setZone] = useState('')
+  const { data, isLoading, error, refetch } = useStats({
+    period: period || 'month',
+    zone: zone || 'all',
+  })
+  // 토스트
+  const [toast, setToast] = useState<string>()
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(undefined), 2600)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const onExport = () => {
     if (!data) return
@@ -29,8 +57,8 @@ export default function Stats() {
       ['일자별 이벤트 추이', '일자', '건수'],
       ...data.daily.map((d) => ['', d.date, d.count]),
       [],
-      ['시간대별 이벤트(유형별)', '시간대', '주차', '쓰레기', '위험구역'],
-      ...data.hourly.map((h) => ['', h.slot, h.주차, h.쓰레기, h.위험구역]),
+      ['시간대별 이벤트(유형별)', '시간대', '주차', '쓰레기'],
+      ...data.hourly.map((h) => ['', h.slot, h.주차, h.쓰레기]),
       [],
       ['처리 현황', '항목', '처리(건)', '미처리(건)', '처리율(%)'],
       ...data.handling.map((h) => ['', h.label, h.handled, h.pending, h.handledPct]),
@@ -38,96 +66,233 @@ export default function Stats() {
       ['구역별 이벤트 비율', '구역', '건수', '비율(%)'],
       ...data.zones.map((z) => ['', z.zone, z.count, z.pct]),
       [],
-      ['AI 인사이트', '내용'],
-      ...data.insights.map((t) => ['', t]),
+      ['AI 요약', '내용'],
+      ...summaryInsights.map((t) =>
+        typeof t === 'string'
+          ? ['', t]
+          : ['', `${t.title} — ${t.body}${t.action ? ` (권장: ${t.action})` : ''}`],
+      ),
     ]
     downloadCsv('patrol-stats.csv', rows)
-    toast('✓ CSV를 내보냈습니다')
+    setToast('CSV를 내보냈습니다')
   }
 
+  // 일자별 추이 메타 — 07/15 6건 · 전일 −4건 ▼
+  const last = data?.daily[data.daily.length - 1]
+  const prev = data?.daily[data.daily.length - 2]
+  const diff = last && prev ? last.count - prev.count : 0
+
+  // 시간대별 피크 — 15-18시 20건
+  const hourly = (data?.hourly ?? []).map((h) => ({ ...h, total: h.주차 + h.쓰레기 }))
+  const peak = hourly.length ? hourly.reduce((a, b) => (b.total > a.total ? b : a)) : undefined
+
+  const zoneTotal = (data?.zones ?? []).reduce((s, z) => s + z.count, 0)
+
+  // AI 인사이트 리포트 도입부 — 통계 수치로 조립하는 종합 요약 문단
+  const overview = (() => {
+    if (!data) return undefined
+    const parts: string[] = []
+    const delta = data.summary.deltas?.events
+    parts.push(`분석 기간 동안 총 ${data.summary.totalEvents}건의 이벤트가 탐지되었습니다${delta ? ` (${delta})` : ''}.`)
+    if (peak) {
+      const topZone = data.zones.length
+        ? [...data.zones].sort((a, b) => b.count - a.count)[0]
+        : undefined
+      parts.push(
+        `발생은 ${peak.slot} 시간대(${peak.total}건)${topZone ? `와 ${topZone.zone}(${topZone.count}건 · ${topZone.pct}%)` : ''}에 집중되었습니다.`,
+      )
+    }
+    const allHandling = data.handling.find((h) => h.label === '전체')
+    if (allHandling) {
+      parts.push(
+        `전체 처리율은 ${allHandling.handledPct}%(${allHandling.handled}/${allHandling.handled + allHandling.pending}건)입니다.`,
+      )
+    }
+    return parts.join(' ')
+  })()
+
+  const summaryInsights = (() => {
+    if (!data) return []
+
+    const insights = []
+    const busiestZone = data.zones.length
+      ? [...data.zones].sort((a, b) => b.count - a.count)[0]
+      : undefined
+    const handling = data.handling[0]
+
+    if (last) {
+      const direction = diff > 0 ? '증가' : diff < 0 ? '감소' : '동일'
+      insights.push({
+        title: '이벤트 추이',
+        body: `최근 집계일 ${last.date}에는 ${last.count}건이 발생해 직전 집계일보다 ${Math.abs(diff)}건 ${direction}했습니다.`,
+        action: diff > 0 ? '증가 원인과 집중 시간대를 확인하세요.' : '현재 순찰 주기를 유지하세요.',
+      })
+    }
+
+    if (busiestZone) {
+      insights.push({
+        title: '집중 관리 구역',
+        body: `${busiestZone.zone}에서 ${busiestZone.count}건이 발생해 전체의 ${busiestZone.pct}%를 차지했습니다.`,
+        action: '해당 구역의 순찰 빈도를 우선 조정하세요.',
+      })
+    }
+
+    if (handling) {
+      const total = handling.handled + handling.pending
+      insights.push({
+        title: '이벤트 처리 현황',
+        body: `전체 ${total}건 중 ${handling.handled}건을 처리해 현재 처리율은 ${handling.handledPct}%입니다.`,
+        action:
+          handling.handledPct < 70
+            ? '미처리 이벤트를 우선순위별로 점검하세요.'
+            : '현재 처리 체계를 유지하세요.',
+      })
+    }
+
+    return insights
+  })()
+
+  // KPI — 증감 화살표는 색이 아니라 방향으로 (모노크롬 규칙)
+  const kpis = data
+    ? [
+        { k: '총 순찰 횟수', v: data.summary.totalPatrols, u: '회', d: data.summary.deltas?.patrols, ar: '▲' },
+        { k: '총 이벤트', v: data.summary.totalEvents, u: '건', d: data.summary.deltas?.events, ar: '▲' },
+        { k: '평균 처리시간', v: data.summary.avgHandleMin, u: '분', d: data.summary.deltas?.handle, ar: '▼' },
+      ]
+    : []
+
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        breadcrumb={[{ label: 'Dashboard', to: '/app' }, { label: '통계' }]}
-        title="기간별 통계 & 인사이트"
-        actions={
-          <>
-            <Select aria-label="기간" value={period} onChange={(e) => setPeriod(e.target.value)} className="w-32">
-              <option value="month">이번 달</option>
-              <option value="week">이번 주</option>
-              <option value="quarter">이번 분기</option>
-            </Select>
-            <Select aria-label="구역" value={zone} onChange={(e) => setZone(e.target.value)} className="w-36">
-              <option value="all">구역: 전체</option>
-              <option value="parking">구역: 주차장</option>
-              <option value="recycle">구역: 분리수거장</option>
-              <option value="danger">구역: 위험구역</option>
-            </Select>
-            <Button variant="outline" size="sm" onClick={onExport} disabled={!data}>
-              <DownloadIcon />
+    <R0KiShell active="stats">
+      <div className="pcol">
+        <div className="pagehead">
+          <div>
+            <div className="crumb">
+              <Link to="/app">대시보드</Link><i>›</i><b>통계</b>
+            </div>
+            <div className="ptitle">기간별 통계 &amp; 인사이트</div>
+          </div>
+          <div className="headtools tight">
+            <R0KiDropdown allLabel="이번 달" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+            <R0KiDropdown allLabel="구역: 전체" options={ZONE_OPTIONS} value={zone} onChange={setZone} />
+            <button type="button" className="btn btn-s btn-add" onClick={onExport} disabled={!data}>
+              <svg viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 19h16" /></svg>
               CSV 내보내기
-            </Button>
-          </>
-        }
-      />
-
-      {error && <QueryErrorState error={error} onRetry={refetch} />}
-
-      {/* KPI 카드 4 */}
-      {!error && (isLoading || !data) ? (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-28 w-full rounded-card-sm" />
-          ))}
+            </button>
+          </div>
         </div>
-      ) : !error && data ? (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatTile
-            value={`${data.summary.totalPatrols}회`}
-            label="총 순찰 횟수"
-            delta={{ text: data.summary.deltas?.patrols ?? '', direction: 'up' }}
-          />
-          <StatTile
-            value={`${data.summary.totalEvents}건`}
-            label="총 이벤트"
-            delta={{ text: data.summary.deltas?.events ?? '', direction: 'up' }}
-          />
-          <StatTile
-            value={`${data.summary.avgHandleMin}분`}
-            label="평균 처리시간"
-            delta={{ text: data.summary.deltas?.handle ?? '', direction: 'down' }}
-          />
-          <StatTile
-            value={`${data.summary.uptime}%`}
-            label="가동률"
-            delta={{ text: data.summary.deltas?.uptime ?? '', direction: 'neutral' }}
-            tone="dark"
-          />
-        </div>
-      ) : null}
 
-      {/* 일자별 추이 · 시간대별 유형별 */}
-      {!error && <div className="grid gap-6 xl:grid-cols-2">
-        <Card className="p-5 sm:p-6">
-          {isLoading || !data ? <Skeleton className="h-72 w-full" /> : <EventTrendChart data={data.daily} />}
-        </Card>
-        <Card className="p-5 sm:p-6">
-          {isLoading || !data ? <Skeleton className="h-72 w-full" /> : <HourlyTypeChart data={data.hourly} />}
-        </Card>
-      </div>}
+        {error ? (
+          <div className="glass g2 aisum">
+            <div className="zh2"><span className="zn">통계를 불러오지 못했습니다</span></div>
+            <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
+          </div>
+        ) : !data ? (
+          <div className="glass g2 aisum">
+            <div className="zh2">
+              <span className="zn">{isLoading ? '불러오는 중…' : '통계 데이터가 없습니다'}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="st-grid">
+            {/* ── 좌: KPI 스택 ── */}
+            <div className="st-col c1">
+              {kpis.map((k) => (
+                <div className="st-kpi" key={k.k}>
+                  <div className="st-kb">
+                    <span className="k">{k.k}</span>
+                    <span className="v">{k.v}<span className="u">{k.u}</span></span>
+                    {k.d && <span className="d"><span className="ar" aria-hidden>{k.ar}</span>{k.d}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-      {/* 처리 현황 · 구역별 비율 */}
-      {!error && <div className="grid gap-6 xl:grid-cols-2">
-        <Card className="p-5 sm:p-6">
-          {isLoading || !data ? <Skeleton className="h-64 w-full" /> : <HandlingChart data={data.handling} />}
-        </Card>
-        <Card className="p-5 sm:p-6">
-          {isLoading || !data ? <Skeleton className="h-64 w-full" /> : <ZonePieChart data={data.zones} />}
-        </Card>
-      </div>}
+            {/* ── 중앙: 주력 차트 2단 ── */}
+            <div className="st-col c2">
+              <div className="glass g2 st-panel" style={{ flex: 1.22 }}>
+                <div className="st-head">
+                  <span className="bul" /><span className="ttl">일자별 이벤트 추이</span>
+                  {last && (
+                    <span className="meta">
+                      <b>{last.date}</b> {last.count}건 · 전일 {diff > 0 ? `+${diff}` : diff}건{' '}
+                      {diff > 0 ? '▲' : diff < 0 ? '▼' : ''}
+                    </span>
+                  )}
+                </div>
+                <div className="st-rule" />
+                <EventTrendChart data={data.daily} />
+              </div>
 
-      {/* AI 인사이트 */}
-      {!error && (isLoading || !data ? <Skeleton className="h-40 w-full rounded-card" /> : <AiInsights insights={data.insights} />)}
-    </div>
+              <div className="glass g2 st-panel">
+                <div className="st-head">
+                  <span className="bul" /><span className="ttl">시간대별 이벤트 발생</span>
+                  <span className="sub">유형별</span>
+                  {peak && <span className="meta"><b>{peak.slot}</b> {peak.total}건</span>}
+                </div>
+                <div className="st-leg">
+                  {HOURLY_SERIES.map((s) => (
+                    <span key={s.key}>
+                      <i style={{ background: 'var(--graphic)', opacity: s.opacity }} />{s.key}
+                    </span>
+                  ))}
+                </div>
+                <HourlyTypeChart data={data.hourly} />
+              </div>
+            </div>
+
+            {/* ── 우: 보조 패널 ── */}
+            <div className="st-col c3">
+              <div className="glass g2 st-panel">
+                <div className="st-head">
+                  <span className="bul" /><span className="ttl">구역별 이벤트 비율</span>
+                  <span className="meta"><b>{zoneTotal}</b>건 전체</span>
+                </div>
+                <div className="st-rule" />
+                <div className="st-donut">
+                  <ZonePieChart data={data.zones} />
+                  <div className="st-rank">
+                    {data.zones.map((z, i) => (
+                      <div className="st-rk" key={z.zone}>
+                        <i style={{ opacity: RAMP[i % RAMP.length] }} />
+                        <span className="n">{z.zone}</span>
+                        <span className="c">{z.count}건</span>
+                        <span className="p">{z.pct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="glass g2 st-panel" style={{ flex: 1.1 }}>
+                <div className="st-head">
+                  <span className="bul" /><span className="ttl">처리 현황</span>
+                  <span className="sub">100% 기준</span>
+                </div>
+                <div className="st-leg">
+                  <span><i style={{ background: 'var(--graphic)', opacity: HANDLING_OPACITIES.처리 }} />처리</span>
+                  <span><i style={{ background: 'var(--graphic)' }} />미처리</span>
+                </div>
+                <HandlingChart data={data.handling} />
+              </div>
+            </div>
+
+            {/* ── 하단: 통계 API 수치를 기반으로 프론트에서 구성한 AI 요약 ── */}
+            <div className="glass g2 st-ai">
+              <div className="st-head">
+                <span className="bul" /><span className="ttl">AI 요약</span>
+                <span className="meta"><b>{summaryInsights.length}</b>건</span>
+              </div>
+              <AiInsights overview={overview} insights={summaryInsights} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 토스트 */}
+      <div className={`toast${toast ? ' on' : ''}`} role="status" aria-live="polite">
+        <svg viewBox="0 0 24 24"><path d="M4 12.5 9.5 18 20 6.5" /></svg>
+        <span>{toast}</span>
+      </div>
+    </R0KiShell>
   )
 }
