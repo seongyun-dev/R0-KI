@@ -4,6 +4,8 @@ import type {
   EventListItemResponse,
   MapInfoResponse,
   MapMonitoringResponse,
+  NotificationDetailResponse,
+  NotificationHistoryItemResponse,
   PatrolDetailResponse,
   PatrolListResponse,
   PatrolRouteCheckpointResponse,
@@ -20,6 +22,9 @@ import type {
   MapCheckpoint,
   MapPin,
   MapRobot,
+  NotificationDetailRecord,
+  NotificationRecord,
+  NotificationSendStatus,
   Patrol,
   PatrolEvent,
   PatrolPoint,
@@ -147,6 +152,90 @@ export function eventDetailToDomain(value: EventDetailResponse): PatrolEvent {
     confidence: value.confidence == null ? undefined : Math.round(toNumber(value.confidence) * 100),
     evidenceImageUrl: value.evidence?.fileUrl,
     memo: value.processingNote ?? undefined,
+  }
+}
+
+/* ── 알림 기록 ─────────────────────────────────────────────── */
+
+/** 발송 시각 표기 — 07/30 14:20. 미발송(null)이면 '—' */
+function stampLabel(value?: string | null) {
+  if (!value) return '—'
+  const { date, time } = dateParts(value)
+  if (!date) return time || '—'
+  return `${date} ${time}`
+}
+
+/** 101동 1502호. 값이 없으면 '—', 이미 동/호가 붙어 있으면 그대로 쓴다. */
+function unitLabel(building?: string | null, unit?: string | null) {
+  const b = building?.trim()
+  const u = unit?.trim()
+  const parts = [
+    b ? (b.endsWith('동') ? b : `${b}동`) : '',
+    u ? (u.endsWith('호') ? u : `${u}호`) : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : '—'
+}
+
+/** 발송 상태 코드 → 한글. 코드가 비면 발송 시각 유무로 판단한다. */
+function notificationStatus(value: string, sentAt?: string | null): NotificationSendStatus {
+  const map: Record<string, NotificationSendStatus> = {
+    SUCCESS: '발송완료',
+    SENT: '발송완료',
+    DELIVERED: '발송완료',
+    COMPLETED: '발송완료',
+    PENDING: '발송대기',
+    WAITING: '발송대기',
+    QUEUED: '발송대기',
+    READY: '발송대기',
+    PROCESSING: '발송대기',
+    FAILED: '발송실패',
+    FAIL: '발송실패',
+    ERROR: '발송실패',
+  }
+  const code = (value ?? '').trim().toUpperCase()
+  if (map[code]) return map[code]
+  if (value) return value as NotificationSendStatus
+  return sentAt ? '발송완료' : '발송대기'
+}
+
+/** 목록 항목(NotificationHistoryItemResponse) → 도메인 */
+export function notificationListItemToDomain(
+  value: NotificationHistoryItemResponse,
+): NotificationRecord {
+  return {
+    id: String(value.notificationId),
+    backendId: value.notificationId,
+    eventId: String(value.eventId),
+    eventType: eventType(value.eventType),
+    recipientName: value.recipientName || '—',
+    address: unitLabel(value.buildingNumber, value.unitNumber),
+    status: notificationStatus(value.status, value.sentAt),
+    sentAt: value.sentAt ?? undefined,
+    sentAtLabel: stampLabel(value.sentAt),
+  }
+}
+
+/** 상세(NotificationDetailResponse) → 도메인 */
+export function notificationDetailToDomain(
+  value: NotificationDetailResponse,
+): NotificationDetailRecord {
+  return {
+    id: String(value.notificationId),
+    backendId: value.notificationId,
+    eventId: String(value.eventId),
+    eventType: eventType(value.eventType),
+    recipientName: value.recipientName || '—',
+    address: unitLabel(value.buildingNumber, value.unitNumber),
+    status: notificationStatus(value.status, value.sentAt),
+    sentAt: value.sentAt ?? undefined,
+    sentAtLabel: stampLabel(value.sentAt),
+    title: value.title || '알림',
+    content: value.content ?? '',
+    recipientPhone: value.recipientPhoneNumber || '—',
+    occurredAt: value.occurredAt ?? undefined,
+    occurredAtLabel: stampLabel(value.occurredAt),
+    location: value.location || '위치 미확인',
+    licensePlate: value.licensePlate || undefined,
   }
 }
 

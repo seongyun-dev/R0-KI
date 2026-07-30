@@ -13,6 +13,8 @@ import EventDetail from './pages/EventDetail'
 import RobotDetail from './pages/RobotDetail'
 import RobotList from './pages/RobotList'
 import RobotNew from './pages/RobotNew'
+import NotificationList from './pages/NotificationList'
+import NotificationDetail from './pages/NotificationDetail'
 import MapFull from './pages/MapFull'
 import NotFound from './pages/NotFound'
 import RouteError from './pages/RouteError'
@@ -79,6 +81,23 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <EventDetail />
+          </RequireAuth>
+        ),
+      },
+      // 알림 기록 (목록 → 상세) — 상단바 알림 버튼 목적지
+      {
+        path: 'notifications',
+        element: (
+          <RequireAuth>
+            <NotificationList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'notifications/:id',
+        element: (
+          <RequireAuth>
+            <NotificationDetail />
           </RequireAuth>
         ),
       },
