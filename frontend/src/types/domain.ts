@@ -166,6 +166,31 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   emergencyReason?: string;         // 긴급 판단 사유 (1o)
 }
 
+// ---- 알림 기록 (입주민 발송 내역) ----
+export type NotificationSendStatus = '발송완료' | '발송대기' | '발송실패';
+
+export interface NotificationRecord { // 알림 목록 항목
+  id: string;                       // 알림 ID
+  backendId: number;
+  eventId: string;                  // 연결된 이벤트 ID
+  eventType: EventType;
+  recipientName: string;            // 수신자 (입주민)
+  address: string;                  // 101동 1502호
+  status: NotificationSendStatus;
+  sentAt?: string;                  // 원본 ISO — 최신순 정렬용
+  sentAtLabel: string;              // 07/30 14:20 (미발송이면 —)
+}
+
+export interface NotificationDetailRecord extends NotificationRecord {
+  title: string;                    // 알림 제목
+  content: string;                  // 발송 본문
+  recipientPhone: string;           // 010-1234-5678
+  occurredAt?: string;
+  occurredAtLabel: string;          // 이벤트 발생 시각
+  location: string;                 // 지하주차장 B2
+  licensePlate?: string;            // 12가 3456 (차량 이벤트만)
+}
+
 export interface StatSummary {      // 통계 KPI (1m)
   totalPatrols: number;             // 142
   totalEvents: number;              // 83

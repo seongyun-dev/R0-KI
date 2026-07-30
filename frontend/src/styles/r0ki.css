@@ -1380,6 +1380,34 @@
 .r0ki .srow .btn{height:38px;padding:0 16px;font-size:13.5px}
 .r0ki .srchbusy{display:flex;justify-content:center;padding:var(--s8) 0}
 
+/* ══════════════════════════════════════════════════════════════
+   알림 기록 — 상단바 알림 버튼 활성 / 상세 발송 메시지 카드
+   ══════════════════════════════════════════════════════════════ */
+/* 알림 화면에서는 주 메뉴 대신 알림 버튼이 활성 표시를 가져간다 (.nv[aria-pressed] 와 같은 톤) */
+.r0ki .alarmbtn[aria-current="page"]{color:var(--accent-ink);font-weight:700;border-color:transparent;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(5,42,71,.22),
+    0 2px 5px rgba(6,48,88,.42),0 8px 20px var(--accent-glow)}
+.r0ki[data-theme="nocturne"] .alarmbtn[aria-current="page"]{color:#0B1220}
+
+/* 입주민에게 나간 메시지 원문 — 본문만 내부 스크롤 */
+.r0ki .ntmsg{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
+  padding:var(--s5);border-radius:var(--r-inner);background:var(--track);border:1px solid var(--edge);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}
+.r0ki[data-theme="nocturne"] .ntmsg{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .ntmsg::-webkit-scrollbar{width:5px}
+.r0ki .ntmsg::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .ntmsg::-webkit-scrollbar-track{background:transparent}
+.r0ki .ntmsg .tt{flex:none;font-size:19px;font-weight:700;letter-spacing:-.015em;color:var(--text-1)}
+.r0ki .ntmsg .bd{flex:1;margin-top:var(--s4);font-size:15px;line-height:1.7;color:var(--text-2);
+  white-space:pre-wrap;word-break:break-word}
+.r0ki .ntmsg .ft{flex:none;display:flex;align-items:center;justify-content:space-between;gap:var(--s3);
+  margin-top:var(--s5);padding-top:var(--s3);border-top:1px solid var(--hair);
+  font-size:12.5px;font-weight:600;color:var(--text-3)}
+
+.r0ki .ntact{display:flex;gap:var(--s2)}
+.r0ki .ntact .btn{flex:1;height:46px;justify-content:center;font-size:15px}
+
 /* ── 세로가 좁으면 여백부터 회수 (au-wrap 이 스크롤을 열기 전 단계) ── */
 @media(max-height:1010px){
   .r0ki .au-card{padding:var(--s6) var(--s8)}

@@ -39,7 +39,8 @@ function formatClock(d: Date) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-export type R0KiNavKey = 'dashboard' | 'patrol' | 'events' | 'robots' | 'stats'
+// notifications 는 주 메뉴가 아닌 상단바 알림 버튼이 활성 표시를 가져간다
+export type R0KiNavKey = 'dashboard' | 'patrol' | 'events' | 'robots' | 'stats' | 'notifications'
 
 const NAV_ITEMS: { key: R0KiNavKey; label: string; to: string }[] = [
   { key: 'dashboard', label: '대시보드', to: '/app' },
@@ -92,7 +93,12 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             </nav>
             <div className="sp" />
             {statusChip}
-            <Link to="/app/events" className="alarmbtn" aria-label={`긴급 알림 ${urgentCount}건`}>
+            <Link
+              to="/app/notifications"
+              className="alarmbtn"
+              aria-current={active === 'notifications' ? 'page' : undefined}
+              aria-label={`알림 기록 · 긴급 ${urgentCount}건`}
+            >
               알림{urgentCount > 0 && <span className="badge num">{urgentCount}</span>}
             </Link>
             <div className="clock num">
