@@ -14,5 +14,5 @@ public class FileStorageProperties {
 
     private String uploadDir = "uploads";
     private String urlPrefix = "/uploads";
-    private String mapSubdirectory = "maps";
+    private String mapDir = "uploads/maps";
 }
