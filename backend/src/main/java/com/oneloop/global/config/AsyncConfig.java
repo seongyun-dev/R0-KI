@@ -53,4 +53,18 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    // SMS 발송(solapi 호출)이 일반 요청 처리에 영향을 주지 않도록 전용 스레드 풀을 쓴다.
+    @Bean(name = "notificationExecutor")
+    public Executor notificationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("notification-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }
