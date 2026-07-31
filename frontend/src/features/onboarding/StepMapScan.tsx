@@ -98,9 +98,17 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
       )}
 
       <div className="au-act">
-        <button type="button" className="btn btn-s btn-add" onClick={onPrev} disabled={isRunning}>
+        {/* 맵은 등록된 로봇이 주행하며 그린다. 로봇을 바꾸거나 다시 등록해야 할 때
+            여기서 곧장 로봇 등록으로 돌아간다(스텝 되돌리기와 같은 동작). */}
+        <button
+          type="button"
+          className="btn btn-s btn-add"
+          onClick={onPrev}
+          disabled={isRunning}
+          title={isRunning ? '지도 파악 중에는 이동할 수 없습니다' : undefined}
+        >
           <svg viewBox="0 0 24 24"><path d="M19 12H6M13 5l-7 7 7 7" /></svg>
-          이전
+          로봇 등록
         </button>
         <span className="grow" />
         <button
