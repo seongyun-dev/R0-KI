@@ -25,9 +25,6 @@ public class Notification extends BaseEntity {
     @JoinColumn(name = "recipient_resident_id", nullable = false)
     private Resident recipient;
 
-    @Column(name = "notification_title", nullable = false, length = 200)
-    private String title;
-
     @Column(name = "notification_content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
@@ -38,10 +35,9 @@ public class Notification extends BaseEntity {
     @Column(name = "sent_at")
     private LocalDateTime sentAt;
 
-    public Notification(DetectedEvent event, Resident recipient, String title, String content) {
+    public Notification(DetectedEvent event, Resident recipient, String content) {
         this.event = event;
         this.recipient = recipient;
-        this.title = title;
         this.content = content;
     }
 

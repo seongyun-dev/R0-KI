@@ -49,3 +49,8 @@ gms:
   # gpt-5-nano: 추론+본문 합산 예산. 너무 낮으면 content 빈 응답 → 충분히 크게.
   summary-max-completion-tokens: ${GMS_SUMMARY_MAX_COMPLETION_TOKENS:4096}
   insight-max-completion-tokens: ${GMS_INSIGHT_MAX_COMPLETION_TOKENS:16384}
+
+solapi:
+  api-key: ${SOLAPI_API_KEY:}
+  api-secret: ${SOLAPI_API_SECRET:}
+  sender-number: ${SOLAPI_SENDER_NUMBER:}
