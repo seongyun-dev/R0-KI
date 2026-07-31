@@ -60,12 +60,22 @@ export default function EventList() {
     period: EventPeriodCode | ''
   }>({ type: '', status: '', period: '' })
   const [applied, setApplied] = useState(draft)
+  const [page, setPage] = useState(0)
 
-  const { data: events, isLoading, error, refetch } = useEvents({
+  const {
+    data: events,
+    isLoading,
+    error,
+    refetch,
+    totalElements,
+    totalPages,
+    first,
+    last,
+  } = useEvents({
     type: applied.type || undefined,
     status: applied.status || undefined,
     period: applied.period || undefined,
-    page: 0,
+    page,
     size: 10,
     sort: ['occurredAt,DESC'],
   })
@@ -90,7 +100,16 @@ export default function EventList() {
             <R0KiDropdown allLabel="유형 전체" options={TYPE_OPTIONS} value={draft.type} onChange={set('type')} />
             <R0KiDropdown allLabel="상태 전체" options={STATE_OPTIONS} value={draft.status} onChange={set('status')} />
             <R0KiDropdown allLabel="기간 전체" options={PERIOD_OPTIONS} value={draft.period} onChange={set('period')} />
-            <button type="button" className="btn btn-p" onClick={() => setApplied(draft)}>검색</button>
+            <button
+              type="button"
+              className="btn btn-p"
+              onClick={() => {
+                setPage(0)
+                setApplied({ ...draft })
+              }}
+            >
+              검색
+            </button>
           </div>
         </div>
 
@@ -170,6 +189,31 @@ export default function EventList() {
                       : `전체 ${rows.length}건 · 긴급 ${urgentCount}건`}
                 </span>
                 <span>최신순</span>
+              </div>
+              <div
+                className="tfoot"
+                style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  disabled={first || isLoading}
+                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                >
+                  이전
+                </button>
+                <span>
+                  {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  disabled={last || isLoading}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  다음
+                </button>
+                <span>전체 {totalElements}건</span>
               </div>
             </>
           )}
