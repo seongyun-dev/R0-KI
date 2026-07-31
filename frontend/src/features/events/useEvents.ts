@@ -1,6 +1,6 @@
 import { events } from '../../mocks'
 import { useCallback, useEffect } from 'react'
-import { eventsApi } from '../../api/services'
+import { eventsApi, unwrapList } from '../../api/services'
 import { eventDetailToDomain, eventListItemToDomain } from '../../api/mappers'
 import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
@@ -57,7 +57,8 @@ export function useEvents(params: EventListRequest = {})
         sort: params.sort,
       })
         // 유형·위험도 필터는 백엔드 미지원 → 보류 (확장 후 연결)
-      return response.content.map(eventListItemToDomain)
+      // 목록 응답이 배열로 오면 response.content 는 undefined 라 .map 에서 터진다.
+      return unwrapList(response).map(eventListItemToDomain)
     },
     [
       params.type,
