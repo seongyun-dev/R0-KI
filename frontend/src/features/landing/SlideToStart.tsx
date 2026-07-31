@@ -15,7 +15,7 @@ const KEY_STEP = 0.25
 
 /**
  * 밀어서 시작하는 버튼.
- * 손잡이를 오른쪽 끝까지 끌면 완료 — 그 전까지는 반투명 흰색, 완료되면 오렌지로 채워진다.
+ * 손잡이를 오른쪽 끝까지 끌면 완료 — 그 전까지는 반투명 흰색, 완료되면 액센트로 채워진다.
  * 드래그만으로는 키보드·보조기기에서 쓸 수 없어 slider 역할을 주고
  * 화살표/Home·End/Enter로도 같은 동작을 할 수 있게 했다.
  */
@@ -43,7 +43,7 @@ export function SlideToStart({ onComplete, label = '밀어서 순찰 시작' }: 
     doneRef.current = true
     setDone(true)
     setProgress(1)
-    // 오렌지로 꽉 찬 완료 상태를 잠깐 보여준 뒤 다음 단계로 넘긴다
+    // 액센트로 꽉 찬 완료 상태를 잠깐 보여준 뒤 다음 단계로 넘긴다
     // (바로 넘기면 애써 만든 색 전환이 보이지 않는다)
     timerRef.current = window.setTimeout(onComplete, 620)
   }, [onComplete])
@@ -121,7 +121,7 @@ export function SlideToStart({ onComplete, label = '밀어서 순찰 시작' }: 
         moveTo(e.clientX)
       }}
     >
-      {/* 진행한 만큼 오렌지가 차오른다 */}
+      {/* 진행한 만큼 액센트가 차오른다 */}
       <span className="slide-start__fill" aria-hidden />
       <span className="slide-start__label" aria-hidden>
         {done ? '순찰 시작' : label}
