@@ -26,7 +26,6 @@ const Stats = lazy(() => import('./pages/Stats'))
 export const router = createBrowserRouter([
   { path: '/', element: <Landing />, errorElement: <RouteError /> },
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
-  // { path: '/signup', element: <Signup />, errorElement: <RouteError /> },
   { path: '/signup/onboarding', element: <SignupOnboarding />, errorElement: <RouteError /> },
   // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 AppShell 밖에 둔다
   {

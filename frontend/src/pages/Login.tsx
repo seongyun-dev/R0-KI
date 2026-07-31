@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { R0KiAuthShell } from '../components/layout/R0KiAuthShell'
-import { useAuthStore } from '../features/auth/useAuthStore'
-import { authApi } from '../api/services'
-import { env } from '../config/env'
+import { setAuthPersistence, useAuthStore } from '../features/auth/useAuthStore'
+import { authApi, robotsApi } from '../api/services'
+import { ApiError } from '../api/client'
 
 /** 로그인 (1a) — R0Kiauth 시안 pLogin */
 export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const login = useAuthStore((s) => s.login)
+  const setMapContext = useAuthStore((s) => s.setMapContext)
   const [loginId, setLoginId] = useState('')
   const [password, setPassword] = useState('')
   // 목업 — 세션은 zustand persist 로 항상 유지된다. 서버 만료 정책 연동 시 값 사용
@@ -29,15 +30,29 @@ export default function Login() {
             setPending(true)
             setError(undefined)
             try {
-              if (env.useMocks) {
-                login(loginId)
-              } else {
-                const response = await authApi.signIn({ username: loginId, password })
-                login(loginId, response.accessToken)
-              }
+              const response = await authApi.signIn({
+                username: loginId,
+                password,
+              })
+
+              setAuthPersistence(remember)
+              login(loginId, response.accessToken)
+
               navigate(from, { replace: true })
+              void robotsApi
+                .list({ page: 0, size: 1 })
+                .then(({ content }) => {
+                  setMapContext({ robotId: content[0]?.robotId ?? null })
+                })
+                .catch(() => undefined)
             } catch (reason) {
-              setError(reason instanceof Error ? reason.message : '로그인에 실패했습니다')
+              setError(
+                reason instanceof ApiError && reason.status === 401
+                  ? '아이디 또는 비밀번호가 올바르지 않습니다.'
+                  : reason instanceof Error
+                    ? reason.message
+                    : '로그인에 실패했습니다.',
+              )
             } finally {
               setPending(false)
             }

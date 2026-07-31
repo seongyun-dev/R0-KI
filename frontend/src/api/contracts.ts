@@ -115,6 +115,7 @@ export type MediaTypeCode = 'IMAGE' | 'VIDEO' | string
 export type EventEvidenceResponse = {
   mediaType: MediaTypeCode
   fileUrl: string
+  capturedAt: string
 }
 
 // GET /api/events/{id} (상세)
@@ -250,7 +251,7 @@ export type EvidenceUploadRequest = {
 
 // apiRequest가 공통 응답 래퍼를 벗기므로 data 내부 구조만 선언한다.
 export type EvidenceUploadResponse = {
-  eventId: number
+  evidenceId: number
 }
 
 
