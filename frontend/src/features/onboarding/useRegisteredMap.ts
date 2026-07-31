@@ -19,6 +19,17 @@ export const useRegisteredMap = create<RegisteredMapState>()(
       setZones: (zones) => set({ zones }),
       reset: () => set({ zones: [] }),
     }),
-    { name: 'patrol-registered-map' },
+    {
+      name: 'patrol-registered-map',
+      version: 1,
+      migrate: (persistedState) => {
+        const previous =
+          persistedState && typeof persistedState === 'object'
+            ? (persistedState as Partial<RegisteredMapState>)
+            : {}
+        return { zones: Array.isArray(previous.zones) ? previous.zones : [] }
+      },
+      partialize: ({ zones }) => ({ zones }),
+    },
   ),
 )

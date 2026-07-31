@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
-import { useEvent, useUpdateEventStatus } from '../features/events/useEvents'
+import { useEvent, useEvidenceImage, useUpdateEventStatus } from '../features/events/useEvents'
 import { useElapsed } from '../lib/useElapsed'
 import type { ProcessingStatus } from '../types/domain'
 
@@ -25,6 +25,12 @@ const RISK_DOT: Record<string, string> = {
 export default function EventDetail() {
   const { id } = useParams()
   const { data: event, isLoading, error, refetch } = useEvent(id)
+  const {
+    data: evidenceImageUrl,
+    isLoading: isEvidenceLoading,
+    error: evidenceError,
+    refetch: refetchEvidence,
+  } = useEvidenceImage(event?.evidenceImageUrl)
   const updateStatus = useUpdateEventStatus()
 
   // 처리 상태 — 서버 값으로 초기화 후 낙관적 갱신
@@ -49,6 +55,14 @@ export default function EventDetail() {
     const t = setTimeout(() => setToast(undefined), 2600)
     return () => clearTimeout(t)
   }, [toast])
+
+  useEffect(() => {
+    if (!event || event.evidenceImageUrl || error) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refetch()
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [error, event, refetch])
 
   // 경과시간 — 탐지/처리중일 때만 실시간 카운트. 메모 모달 중엔 멈춤(포커스 튐 방지)
   const isOngoing = proc === '탐지' || proc === '처리중'
@@ -125,7 +139,6 @@ export default function EventDetail() {
             </div>
           </div>
         </div>
-
         {error ? (
           <div className="glass g2 aisum">
             <div className="zh2"><span className="zn">이벤트를 불러오지 못했습니다</span></div>
@@ -147,15 +160,26 @@ export default function EventDetail() {
                 <span className="zsub">로봇 카메라 캡처 · {event.robotId}</span>
               </div>
               <div className="ev">
-                {event.evidenceImageUrl ? (
-                  <img src={event.evidenceImageUrl} alt={`${event.type} 증거 이미지`} />
+                {evidenceImageUrl ? (
+                  <img src={evidenceImageUrl} alt={`${event.type} 증거 이미지`} />
                 ) : (
                   <div className="mid">
                     <svg viewBox="0 0 24 24">
                       <path d="M3 8.5a2 2 0 0 1 2-2h2.2l1.3-2h6.9l1.3 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
                       <circle cx="12" cy="12.8" r="3.6" />
                     </svg>
-                    <span>증거 이미지 (로봇 카메라 캡처)</span>
+                    <span>
+                      {evidenceError
+                        ? '증거 이미지를 불러오지 못했습니다.'
+                        : isEvidenceLoading
+                          ? '증거 이미지를 불러오는 중입니다.'
+                          : '로봇의 증거 이미지 업로드를 기다리는 중입니다.'}
+                    </span>
+                    {evidenceError && (
+                      <button type="button" className="btn btn-s" onClick={refetchEvidence}>
+                        다시 시도
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="hud">

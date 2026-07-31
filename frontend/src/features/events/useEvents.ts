@@ -1,5 +1,5 @@
 import { events } from '../../mocks'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { eventsApi } from '../../api/services'
 import { eventDetailToDomain, eventListItemToDomain } from '../../api/mappers'
 import { env } from '../../config/env'
@@ -83,6 +83,29 @@ export function useEvent(id: string | undefined) {
     [id],
     { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },
   )
+}
+
+export function useEvidenceImage(fileUrl: string | undefined) {
+  const query = useApiQuery(
+    async () => {
+      if (!fileUrl) return undefined
+      if (env.useMocks) return fileUrl
+      const blob = await eventsApi.evidenceFile(fileUrl)
+      return URL.createObjectURL(blob)
+    },
+    [fileUrl],
+    { enabled: Boolean(fileUrl) },
+  )
+
+  const objectUrl = query.data
+  useEffect(
+    () => () => {
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl)
+    },
+    [objectUrl],
+  )
+
+  return query
 }
 
 const STATUS_CODE: Record<ProcessingStatus, ProcessingStatusCode> = {

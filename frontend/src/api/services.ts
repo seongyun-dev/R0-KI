@@ -101,6 +101,8 @@ export const eventsApi = {
   detail: (eventId: string | number) =>
     apiRequest<EventDetailResponse>(`/api/events/${encodeURIComponent(eventId)}`),
 
+  evidenceFile: (fileUrl: string, signal?: AbortSignal) => apiBlob(fileUrl, signal),
+
   updateStatus: (eventId: string | number, request: EventStatusChangeRequest) =>
     apiRequest<EventStatusChangeResponse>(`/api/events/${encodeURIComponent(eventId)}/status`, {
       method: 'PATCH',

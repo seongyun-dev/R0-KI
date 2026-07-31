@@ -3,6 +3,10 @@ import { useComplexSearch } from '../auth/useComplexSearch'
 import { formatPhone } from '../../lib/formatters'
 import type { SignUpRequest } from '../../api/contracts'
 import { openPostcodeSearch } from '../../lib/daumPostcode'
+import {
+  isPasswordValid,
+  PASSWORD_VALIDATION_MESSAGE,
+} from '../auth/passwordPolicy'
 
 export type StepAccountProps = {
   onNext: (data: SignUpRequest) => void
@@ -11,15 +15,13 @@ export type StepAccountProps = {
 }
 
 // 목업 중복 데이터 — 서버 연동 시 API 교체 (Signup 과 동일 기준)
-const TAKEN_IDS = ['admin', 'manager']
-
 const normalize = (s: string) => s.trim().replace(/\s+/g, '')
 
 /** Step 1/3 — 계정·단지 (1u). R0Kiauth 시안 pNew: 이미 등록된 단지면 안내 배너 */
 export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountProps) {
   const [username, setUsername] = useState('')
-  const [idCheck, setIdCheck] = useState<'idle' | 'ok' | 'taken'>('idle')
   const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState<string>()
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [zipcode, setZipcode] = useState('')
@@ -37,18 +39,18 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
   })
   const matched = candidates?.find((c) => normalize(c.name) === normalize(complexName))
 
-  const checkId = () => {
-    if (!username) return
-    setIdCheck(TAKEN_IDS.includes(username.toLowerCase()) ? 'taken' : 'ok')
-  }
-
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (isSubmitting) {
       return
     }
+    if (!isPasswordValid(password)) {
+      setPasswordError(PASSWORD_VALIDATION_MESSAGE)
+      return
+    }
+    setPasswordError(undefined)
     const request: SignUpRequest = {
-      username,
+      username: username.trim(),
       password,
       name,
       phoneNumber: phone,
@@ -79,43 +81,40 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
     <form onSubmit={onSubmit}>
       <div className="au-sec">계정</div>
       <div className="au-grid">
-        <div className={idCheck === 'taken' ? 'au-row bad' : 'au-row'}>
-          <label className="au-lab" htmlFor="ob-id">아이디<span className="req">*</span></label>
-          <div className="au-pair">
-            <input
-              className={idCheck === 'taken' ? 'au-in bad' : 'au-in'}
-              id="ob-id"
-              value={username}
-              onChange={(e) => {
-                setUsername(e.target.value)
-                setIdCheck('idle')
-              }}
-              placeholder="아이디 입력"
-              pattern="[A-Za-z0-9]{4,20}"
-              autoComplete="username"
-              required
-            />
-            <button type="button" className="btn btn-s" onClick={checkId}>중복확인</button>
-          </div>
-          {idCheck === 'idle' && <p className="au-help">4~20자 영문/숫자</p>}
-          {idCheck === 'taken' && <p className="au-err" role="alert">이미 사용중인 아이디입니다</p>}
-          {idCheck === 'ok' && <p className="au-ok">✓ 사용 가능한 아이디입니다</p>}
-        </div>
-
         <div className="au-row">
-          <label className="au-lab" htmlFor="ob-pw">비밀번호<span className="req">*</span></label>
+          <label className="au-lab" htmlFor="ob-id">아이디<span className="req">*</span></label>
           <input
             className="au-in"
+            id="ob-id"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="아이디 입력"
+            pattern="[A-Za-z0-9]{4,20}"
+            autoComplete="username"
+            required
+          />
+          <p className="au-help">4~20자 영문/숫자 · 중복 여부는 가입 시 서버에서 확인합니다.</p>
+        </div>
+
+        <div className={passwordError ? 'au-row bad' : 'au-row'}>
+          <label className="au-lab" htmlFor="ob-pw">비밀번호<span className="req">*</span></label>
+          <input
+            className={passwordError ? 'au-in bad' : 'au-in'}
             id="ob-pw"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              setPasswordError(undefined)
+            }}
             placeholder="비밀번호 입력"
             autoComplete="new-password"
             minLength={8}
+            pattern="(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d\s]).{8,}"
             required
           />
           <p className="au-help">8자 이상, 영문+숫자+특수문자 조합</p>
+          {passwordError && <p className="au-err" role="alert">{passwordError}</p>}
         </div>
 
         <div className="au-row">

@@ -94,7 +94,6 @@ export function useUpdateRobot() {
 export function useCreateRobot() {
   const create = useCallback(
     async (variables: { serialNumber: string; name: string }) => {
-      if (env.useMocks) return undefined
       return robotsApi.create({ name: variables.name, serialNumber: variables.serialNumber })
     },
     [],
