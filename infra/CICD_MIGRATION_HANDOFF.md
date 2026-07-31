@@ -349,28 +349,32 @@ rollback.sh release <release-id>
 
 ## 9. AI·IoT와 Jetson
 
-현재 Jetson OTA 골격은 유지하되, 실제 코드 준비 후 다음 구조로 확장한다.
+2026-07-31 기준 AI는 Jetson에 검증된 baseline으로 이미 설치되어 있고, Robot runtime
+계약이 준비됐다. 현재 적용 구조는 AI와 IoT의 lifecycle을 분리한다.
 
 ```text
-ai/master
--> ai-vX.Y.Z package + checksum + compatibility metadata
+/home/e103/yolo-pipeline
+-> aiot-ai.service
+-> ROS 2 JSON contract v1
+-> IoT OTA에서 변경하지 않음
 
 iot/master
--> iot-vX.Y.Z package + checksum + compatibility metadata
-
-develop integration approval
--> AI/IoT 조합 stable manifest 게시
+-> protected iot-vX.Y.Z tag
+-> Robot-only package + checksum + required_ai_contract_version
+-> protected manual iot_publish
+-> IoT stable manifest 게시
 
 Jetson boot
--> stable manifest 확인
--> 필요한 package만 download
+-> AI baseline service 시작
+-> IoT stable manifest 확인
+-> 새 Robot package만 download
 -> checksum/compatibility/smoke
--> atomic current switch
+-> /opt/aiot/iot/current atomic switch
 -> 실패 시 previous 유지
 ```
 
 GPU 학습·TensorRT 변환은 비용과 시간이 크므로 protected manual Job으로 유지한다.
-승인되지 않은 파트 master merge가 Jetson stable manifest를 변경하면 안 된다.
+AI 모델 변경은 별도 승인 절차로 수행하며 `iot-v*` release에 포함하지 않는다.
 
 ## 10. 안전한 적용 순서
 
@@ -424,8 +428,11 @@ GPU 학습·TensorRT 변환은 비용과 시간이 크므로 protected manual Jo
 
 ### Phase 7: AI·IoT 후속
 
-- 코드 계약이 생긴 뒤 개별 package와 통합 stable manifest 구현
-- 실제 Jetson에서 정상/동일/offline/checksum/smoke/rollback 검증
+- [x] Robot ROS 2 JSON v1 계약과 무구동 runtime 준비
+- [x] `aiot-ai.service`, ROS setup wrapper, 실제 READY startup probe 구현
+- [x] Robot-only `iot-v*` package, checksum, compatibility manifest 구현
+- [x] AI 장애 시 Robot LIMITED mode를 위한 Wants/After 결합
+- [ ] 실제 Jetson에서 AI service READY와 정상/동일/offline/checksum/smoke/rollback 검증
 
 ## 11. 예상 수정 파일
 
@@ -473,18 +480,19 @@ Frontend/Backend 전환 완료 조건:
 
 AI/IoT 후속 완료 조건:
 
-- [ ] 파트별 version, checksum, compatibility metadata가 생성된다.
-- [ ] 승인 전에는 stable manifest가 변경되지 않는다.
-- [ ] Jetson이 부팅 시 필요한 파트만 갱신한다.
-- [ ] network/checksum/compatibility/smoke 실패 시 마지막 정상 버전을 유지한다.
+- [x] IoT version, checksum, AI contract compatibility metadata가 생성된다.
+- [x] protected manual 승인 전에는 stable manifest가 변경되지 않는다.
+- [x] IoT archive가 AI runtime과 모델을 포함하지 않는다.
+- [x] Jetson updater가 부팅 시 Robot component만 갱신하도록 분리됐다.
+- [ ] 실제 Jetson에서 network/checksum/compatibility/smoke 실패 시 마지막 정상 버전 유지 검증
 
 ## 13. 다음 작업자가 가장 먼저 할 일
 
 1. `infra/CICD_V2_OPERATIONS.md`의 통합 마일스톤 절차로 첫 `develop` 통합 MR을 만든다.
 2. 파괴적인 Flyway migration을 만들기 전에 별도 실패 migration으로 자동 중단을 검증한다.
-3. AI/IoT 실제 코드 계약이 확정되면 파트별 package와 checksum metadata를 구현한다.
-4. 승인된 AI+IoT 조합만 stable manifest로 게시한다.
-5. 실제 Jetson에서 boot/update/offline/checksum/smoke/rollback을 검증한다.
+3. `iot/feat/robot-runtime`을 `iot/dev`와 `iot/master`로 MR 병합한다.
+4. AI `yolo_pipeline.main`에 ROS JSON v1 publisher/control adapter를 연결한다.
+5. 실제 Jetson에서 AI READY와 IoT boot/update/offline/checksum/smoke/rollback을 검증한다.
 
 ## 14. 하지 말아야 할 것
 

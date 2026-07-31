@@ -2,34 +2,35 @@
 set -euo pipefail
 
 aiot_root="${AIOT_ROOT:-/opt/aiot}"
+iot_root="${AIOT_IOT_ROOT:-${aiot_root}/iot}"
 config_file="${AIOT_PACKAGE_ENV:-${aiot_root}/secrets/package-read.env}"
-lock_file="${aiot_root}/state/update.lock"
-current_link="${aiot_root}/current"
-previous_link="${aiot_root}/previous"
+lock_file="${iot_root}/state/update.lock"
+current_link="${iot_root}/current"
+previous_link="${iot_root}/previous"
 
 log() {
-  printf 'aiot-update release=%s phase=%s result=%s\n' \
+  printf 'aiot-update component=iot release=%s phase=%s result=%s\n' \
     "${release:-unknown}" "$1" "$2"
 }
 
-run_current() {
+keep_current() {
   local phase="$1"
   shift
-  log "${phase}" "${*:-run-current}"
+  log "${phase}" "${*:-keep-current}"
   exit 0
 }
 
 install -d -m 0750 \
-  "${aiot_root}/releases" \
-  "${aiot_root}/.staging" \
-  "${aiot_root}/state" \
+  "${iot_root}/releases" \
+  "${iot_root}/.staging" \
+  "${iot_root}/state" \
   "${aiot_root}/secrets"
 
 exec 9>"${lock_file}"
-flock -n 9 || run_current lock busy
+flock -n 9 || keep_current lock busy
 
 if [ ! -r "${config_file}" ]; then
-  run_current config missing
+  keep_current config missing
 fi
 # shellcheck disable=SC1090
 source "${config_file}"
@@ -39,17 +40,27 @@ package_registry_user="${PACKAGE_REGISTRY_USER:-}"
 package_registry_token="${PACKAGE_REGISTRY_TOKEN:-}"
 device_jetpack="${JETPACK_VERSION:-}"
 device_architecture="${AIOT_DEVICE_ARCH_OVERRIDE:-$(uname -m)}"
+ai_contract_version="${AI_CONTRACT_VERSION:-}"
+allowed_artifact_host="${ALLOWED_ARTIFACT_HOST:-}"
+allowed_artifact_path_prefix="${ALLOWED_ARTIFACT_PATH_PREFIX:-}"
 
 if [[ ! "${stable_manifest_url}" =~ ^https:// ]]; then
-  run_current config invalid-manifest-url
+  keep_current config invalid-manifest-url
 fi
 if [ -z "${device_jetpack}" ]; then
-  run_current compatibility jetpack-unknown
+  keep_current compatibility jetpack-unknown
+fi
+if [[ ! "${ai_contract_version}" =~ ^[0-9]+$ ]]; then
+  keep_current compatibility ai-contract-unknown
+fi
+if [ -z "${allowed_artifact_host}" ] || \
+   [[ "${allowed_artifact_path_prefix}" != /* ]]; then
+  keep_current config invalid-artifact-allowlist
 fi
 
-work_dir="$(mktemp -d "${aiot_root}/.staging/update.XXXXXX")"
+work_dir="$(mktemp -d "${iot_root}/.staging/update.XXXXXX")"
 cleanup() {
-  if [[ "${work_dir}" == "${aiot_root}/.staging/"* ]] && [ -d "${work_dir}" ]; then
+  if [[ "${work_dir}" == "${iot_root}/.staging/"* ]] && [ -d "${work_dir}" ]; then
     find "${work_dir}" -depth -delete
   fi
 }
@@ -59,25 +70,27 @@ manifest_path="${work_dir}/manifest.json"
 if ! curl --fail --silent --show-error --location \
   --connect-timeout 10 --max-time 30 --retry 2 \
   "${stable_manifest_url}" --output "${manifest_path}"; then
-  run_current manifest unavailable
+  keep_current manifest unavailable
 fi
 
 values_path="${work_dir}/manifest.values"
-if ! python3 - "${manifest_path}" >"${values_path}" <<'PY'
+if ! python3 - "${manifest_path}" "${allowed_artifact_host}" \
+  "${allowed_artifact_path_prefix}" >"${values_path}" <<'PY'
 import json
 import re
 import sys
 from urllib.parse import urlparse
 
-with open(sys.argv[1], encoding="utf-8") as stream:
+path, allowed_host, allowed_path_prefix = sys.argv[1:]
+with open(path, encoding="utf-8") as stream:
     data = json.load(stream)
 
 required = {
     "schema_version",
+    "component",
     "release",
-    "robot_commit",
-    "ai_commit",
-    "model_version",
+    "iot_commit",
+    "required_ai_contract_version",
     "jetpack",
     "architecture",
     "artifact_url",
@@ -86,58 +99,86 @@ required = {
     "published_at",
 }
 if set(data) != required:
-    raise ValueError("manifest field set does not match schema v1")
-if data["schema_version"] != 1:
-    raise ValueError("unsupported manifest schema")
-if not re.fullmatch(r"jetson-v\d+\.\d+\.\d+", data["release"]):
+    raise ValueError("manifest field set does not match IoT schema v1")
+if data["schema_version"] != 1 or data["component"] != "iot":
+    raise ValueError("unsupported manifest schema or component")
+if not re.fullmatch(r"iot-v\d+\.\d+\.\d+", data["release"]):
     raise ValueError("invalid release")
+if not re.fullmatch(r"[0-9a-f]{40}", data["iot_commit"]):
+    raise ValueError("invalid iot_commit")
+if (
+    isinstance(data["required_ai_contract_version"], bool)
+    or not isinstance(data["required_ai_contract_version"], int)
+    or data["required_ai_contract_version"] < 1
+):
+    raise ValueError("invalid required_ai_contract_version")
 if not re.fullmatch(r"[0-9a-f]{64}", data["sha256"]):
     raise ValueError("invalid sha256")
-if urlparse(data["artifact_url"]).scheme != "https":
+artifact = urlparse(data["artifact_url"])
+if artifact.scheme != "https":
     raise ValueError("artifact URL must use HTTPS")
+if artifact.hostname != allowed_host:
+    raise ValueError("artifact host is not allowlisted")
+if not artifact.path.startswith(allowed_path_prefix):
+    raise ValueError("artifact path is not allowlisted")
+if "/packages/generic/aiot-iot/" not in artifact.path:
+    raise ValueError("artifact is not an aiot-iot package")
 if not isinstance(data["artifact_size_bytes"], int) or data["artifact_size_bytes"] < 1:
     raise ValueError("invalid artifact size")
-for key in ("release", "jetpack", "architecture", "artifact_url", "sha256"):
+for key in (
+    "release",
+    "iot_commit",
+    "jetpack",
+    "architecture",
+    "artifact_url",
+    "sha256",
+):
     value = str(data[key])
     if "\n" in value or "\r" in value:
         raise ValueError(f"invalid newline in {key}")
     print(value)
 print(data["artifact_size_bytes"])
+print(data["required_ai_contract_version"])
 PY
 then
-  run_current manifest invalid
+  keep_current manifest invalid
 fi
 
 mapfile -t manifest_values <"${values_path}"
-if [ "${#manifest_values[@]}" -ne 6 ]; then
-  run_current manifest invalid-values
+if [ "${#manifest_values[@]}" -ne 8 ]; then
+  keep_current manifest invalid-values
 fi
 release="${manifest_values[0]}"
-required_jetpack="${manifest_values[1]}"
-required_architecture="${manifest_values[2]}"
-artifact_url="${manifest_values[3]}"
-artifact_sha256="${manifest_values[4]}"
-artifact_size_bytes="${manifest_values[5]}"
+iot_commit="${manifest_values[1]}"
+required_jetpack="${manifest_values[2]}"
+required_architecture="${manifest_values[3]}"
+artifact_url="${manifest_values[4]}"
+artifact_sha256="${manifest_values[5]}"
+artifact_size_bytes="${manifest_values[6]}"
+required_ai_contract="${manifest_values[7]}"
 
 installed_version=""
-if [ -r "${aiot_root}/state/VERSION" ]; then
-  installed_version="$(tr -d '\r\n' <"${aiot_root}/state/VERSION")"
+if [ -r "${iot_root}/state/VERSION" ]; then
+  installed_version="$(tr -d '\r\n' <"${iot_root}/state/VERSION")"
 fi
 if [ "${installed_version}" = "${release}" ]; then
   log compare already-current
   exit 0
 fi
 if [ "${device_architecture}" != "${required_architecture}" ]; then
-  run_current compatibility architecture-mismatch
+  keep_current compatibility architecture-mismatch
 fi
 if [ "${device_jetpack}" != "${required_jetpack}" ]; then
-  run_current compatibility jetpack-mismatch
+  keep_current compatibility jetpack-mismatch
+fi
+if [ "${ai_contract_version}" != "${required_ai_contract}" ]; then
+  keep_current compatibility ai-contract-mismatch
 fi
 
-available_bytes="$(df -PB1 "${aiot_root}" | awk 'NR == 2 {print $4}')"
+available_bytes="$(df -PB1 "${iot_root}" | awk 'NR == 2 {print $4}')"
 required_bytes=$((artifact_size_bytes * 3))
 if [ "${available_bytes}" -lt "${required_bytes}" ]; then
-  run_current storage insufficient
+  keep_current storage insufficient
 fi
 
 artifact_path="${work_dir}/release.tar.gz"
@@ -148,10 +189,10 @@ fi
 if ! curl --fail --silent --show-error --location \
   --connect-timeout 10 --max-time 1800 --retry 3 \
   "${curl_auth[@]}" "${artifact_url}" --output "${artifact_path}"; then
-  run_current download failed
+  keep_current download failed
 fi
-printf '%s  %s\n' "${artifact_sha256}" "${artifact_path}" | sha256sum --check --status || \
-  run_current checksum mismatch
+printf '%s  %s\n' "${artifact_sha256}" "${artifact_path}" | \
+  sha256sum --check --status || keep_current checksum mismatch
 
 extract_dir="${work_dir}/payload"
 install -d -m 0750 "${extract_dir}"
@@ -160,65 +201,120 @@ import pathlib
 import sys
 import tarfile
 
+allowed_roots = {"robot", "scripts", "VERSION", "manifest.json", "CHECKSUMS.sha256"}
 with tarfile.open(sys.argv[1], "r:gz") as archive:
     for member in archive.getmembers():
         path = pathlib.PurePosixPath(member.name)
-        if path.is_absolute() or ".." in path.parts or member.isdev():
-            raise ValueError(f"unsafe archive member: {member.name}")
+        normalized = pathlib.PurePosixPath(*[part for part in path.parts if part != "."])
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or member.isdev()
+            or not normalized.parts
+            or normalized.parts[0] not in allowed_roots
+        ):
+            raise ValueError(f"unsafe or unexpected archive member: {member.name}")
         if member.issym() or member.islnk():
             target = pathlib.PurePosixPath(member.linkname)
             if target.is_absolute() or ".." in target.parts:
                 raise ValueError(f"unsafe archive link: {member.name}")
 PY
 then
-  run_current extract unsafe-archive
+  keep_current extract unsafe-archive
 fi
 tar --no-same-owner --no-same-permissions -xzf "${artifact_path}" -C "${extract_dir}"
 
 test "$(tr -d '\r\n' <"${extract_dir}/VERSION")" = "${release}" || \
-  run_current extract version-mismatch
-test -x "${extract_dir}/scripts/install.sh" || run_current extract missing-installer
-test -x "${extract_dir}/scripts/smoke-test.sh" || run_current extract missing-smoke
+  keep_current extract version-mismatch
+test -x "${extract_dir}/scripts/install.sh" || \
+  keep_current extract missing-installer
+test -x "${extract_dir}/scripts/smoke-test.sh" || \
+  keep_current extract missing-smoke
+test -x "${extract_dir}/robot/scripts/run.sh" || \
+  keep_current extract missing-runtime
+test ! -e "${extract_dir}/ai" || keep_current extract contains-ai
+if ! python3 - "${extract_dir}/manifest.json" "${release}" "${iot_commit}" \
+  "${required_ai_contract}" <<'PY'
+import json
+import sys
+
+path, release, iot_commit, contract_version = sys.argv[1:]
+with open(path, encoding="utf-8") as stream:
+    manifest = json.load(stream)
+expected = {
+    "schema_version": 1,
+    "component": "iot",
+    "release": release,
+    "iot_commit": iot_commit,
+    "required_ai_contract_version": int(contract_version),
+    "jetpack": "6.2",
+    "architecture": "aarch64",
+}
+for key, value in expected.items():
+    if manifest.get(key) != value:
+        raise ValueError(f"payload manifest mismatch: {key}")
+PY
+then
+  keep_current extract payload-manifest-mismatch
+fi
+if find "${extract_dir}" -type f \
+  \( -name '*.engine' -o -name '*.onnx' -o -name '*.pt' \) -print -quit | grep -q .; then
+  keep_current extract contains-model
+fi
+(
+  cd "${extract_dir}"
+  sha256sum --check --strict CHECKSUMS.sha256
+) >/dev/null || keep_current checksum payload-mismatch
 
 if ! "${extract_dir}/scripts/install.sh"; then
-  run_current install failed
+  keep_current install failed
 fi
 if ! "${extract_dir}/scripts/smoke-test.sh" pre-activate; then
-  run_current smoke pre-activate-failed
+  keep_current smoke pre-activate-failed
 fi
 
-release_dir="${aiot_root}/releases/${release}"
+release_dir="${iot_root}/releases/${release}"
 if [ -e "${release_dir}" ]; then
-  run_current activate immutable-release-exists
+  quarantine="${iot_root}/.staging/stale-${release}-$(date -u +%Y%m%dT%H%M%SZ)"
+  mv "${release_dir}" "${quarantine}"
+  log activate stale-release-quarantined
 fi
 mv "${extract_dir}" "${release_dir}"
+
+if getent group aiot >/dev/null 2>&1; then
+  chown -R root:aiot "${release_dir}"
+fi
+find "${release_dir}" -type d -exec chmod 0750 {} +
+find "${release_dir}" -type f -exec chmod 0640 {} +
+find "${release_dir}/scripts" "${release_dir}/robot/scripts" \
+  -type f -name '*.sh' -exec chmod 0750 {} +
 
 old_current=""
 if [ -L "${current_link}" ]; then
   old_current="$(readlink -f "${current_link}")"
 fi
 if [ -n "${old_current}" ]; then
-  previous_next="${aiot_root}/.previous.next.$$"
+  previous_next="${iot_root}/.previous.next.$$"
   ln -s "${old_current}" "${previous_next}"
   mv -Tf "${previous_next}" "${previous_link}"
 fi
 
-current_next="${aiot_root}/.current.next.$$"
+current_next="${iot_root}/.current.next.$$"
 ln -s "${release_dir}" "${current_next}"
 mv -Tf "${current_next}" "${current_link}"
 
 if ! "${current_link}/scripts/smoke-test.sh" post-activate; then
   if [ -n "${old_current}" ]; then
-    rollback_next="${aiot_root}/.current.rollback.$$"
+    rollback_next="${iot_root}/.current.rollback.$$"
     ln -s "${old_current}" "${rollback_next}"
     mv -Tf "${rollback_next}" "${current_link}"
   else
     unlink "${current_link}"
   fi
-  run_current smoke post-activate-rollback
+  keep_current smoke post-activate-rollback
 fi
 
-version_tmp="${aiot_root}/state/VERSION.tmp.$$"
+version_tmp="${iot_root}/state/VERSION.tmp.$$"
 printf '%s\n' "${release}" >"${version_tmp}"
-mv -f "${version_tmp}" "${aiot_root}/state/VERSION"
+mv -f "${version_tmp}" "${iot_root}/state/VERSION"
 log complete activated

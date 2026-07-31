@@ -204,12 +204,14 @@ git push -u origin release/integration-20260723
 ## 9. 아직 남은 범위
 
 - `infra/master` 공통 설정 수동 승인 정책 확정
-- AI/IOT 실제 코드 계약 확정 후 파트별 package/checksum 게시
-- 승인된 AI+IoT 조합만 Jetson stable manifest로 승격
+- AI `yolo_pipeline.main`에 ROS JSON v1 status/control/detection adapter 연결
+- Robot runtime MR을 `iot/dev`, `iot/master`로 병합
+- protected `iot-v*` tag와 수동 `iot_publish`로 Robot stable manifest 최초 게시
 - Jetson 실장비 boot/update/offline/checksum/smoke/rollback 검증
 
-AI/IOT master merge는 EC2 앱을 배포하지 않고 artifact만 만든다. Jetson은 승인된
-stable manifest를 부팅 시 확인해 필요한 package만 Pull OTA로 갱신한다.
+AI/IOT master merge는 EC2 앱을 배포하지 않는다. 현재 AI는 Jetson의 고정 baseline을
+`aiot-ai.service`로 실행하고, Robot만 승인된 IoT stable manifest를 부팅 시 확인해
+Pull OTA로 갱신한다. IoT package는 AI venv와 모델·engine을 포함하지 않는다.
 
 ## 10. 비밀값과 긴급 중지
 
