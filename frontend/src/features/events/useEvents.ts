@@ -1,6 +1,6 @@
 import { events } from '../../mocks'
 import { useCallback, useEffect } from 'react'
-import { eventsApi } from '../../api/services'
+import { eventsApi, unwrapList } from '../../api/services'
 import { eventDetailToDomain, eventListItemToDomain } from '../../api/mappers'
 import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'

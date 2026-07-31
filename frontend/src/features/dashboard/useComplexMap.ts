@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { MapDetailResponse, ZoneCreateResponse, ZoneTypeCode } from '../../api/contracts'
 import type { MapViewData } from '../../api/mappers'
 import { mapApi } from '../../api/services'
@@ -110,6 +110,8 @@ export function useComplexMap() {
   const mapId = useAuthStore((state) => state.mapId) ?? env.defaultMapId
   const robotId = useAuthStore((state) => state.robotId) ?? env.defaultRobotId
   const registeredZones = useRegisteredMap((state) => state.zones)
+  // 이 훅이 만든 objectURL 전부 — 화면에 못 올라간 것까지 회수하기 위해 들고 있는다
+  const createdUrls = useRef<string[]>([])
 
   const query = useApiQuery<{ view: MapViewData }>(
     async () => {
@@ -129,6 +131,7 @@ export function useComplexMap() {
       const [detail, zones] = await Promise.all([mapApi.detail(mapId), mapApi.zones(mapId)])
       const blob = await mapApi.file(detail.mapUrl)
       const mapImageUrl = URL.createObjectURL(blob)
+      createdUrls.current.push(mapImageUrl)
       return {
         view: registeredMapToView(detail, zones, mapImageUrl, robotId ?? '로봇'),
       }
@@ -137,12 +140,24 @@ export function useComplexMap() {
     { delayMs: env.useMocks ? 350 : 0 },
   )
 
+  /* objectURL 회수 — state 에 들어온 것만 보고 지우면 누수가 남는다.
+     조회 중 화면을 벗어나면 blob 은 이미 받아 URL 까지 만들어졌는데
+     useApiQuery 가 결과를 버려서(active=false) 회수 대상에서 빠지기 때문이다.
+     그래서 만든 URL 을 전부 ref 에 적어두고, 지금 쓰는 것만 남긴다. */
   const imageUrl = query.data?.view.map.mapImageUrl
+  useEffect(() => {
+    createdUrls.current = createdUrls.current.filter((url) => {
+      if (url === imageUrl) return true
+      URL.revokeObjectURL(url)
+      return false
+    })
+  }, [imageUrl])
   useEffect(
     () => () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl)
+      createdUrls.current.forEach((url) => URL.revokeObjectURL(url))
+      createdUrls.current = []
     },
-    [imageUrl],
+    [],
   )
 
   return {

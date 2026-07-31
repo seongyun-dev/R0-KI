@@ -1,6 +1,6 @@
 import { patrols } from '../../mocks'
 import { patrolDetailToDomain, patrolListItemToDomain } from '../../api/mappers'
-import { patrolsApi } from '../../api/services'
+import { patrolsApi, unwrapList } from '../../api/services'
 import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
 
@@ -54,9 +54,10 @@ export function usePatrols(
         size: params.size,
         sort: params.sort,
       })
+      // 목록 응답이 배열로 오면 response.content 는 undefined 라 .map 에서 터진다.
       return {
         ...response,
-        content: response.content.map(patrolListItemToDomain),
+        content: unwrapList(response).map(patrolListItemToDomain),
       }
     },
     [
