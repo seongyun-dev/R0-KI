@@ -141,12 +141,9 @@ export default function SignupOnboarding() {
               onPrev={() => navigate('/login')}
               onNext={({ robotId: registeredRobotId }) => {
                 setMapContext({ robotId: registeredRobotId })
-                /* 로봇 등록까지 마치면 대시보드로 보낸다.
-                   지도는 아직 없으므로 관제 지도는 비어 보이고, 다음 로그인 때
-                   서버가 mapRegistered=false 로 알려주면 맵 등록 단계로 다시 들어온다.
-                   진행 상태를 지우지 않으면 RequireAuth 가 온보딩으로 되돌린다. */
-                resetOnboarding()
-                navigate('/app', { replace: true })
+                /* 로봇 등록을 마치면 곧바로 맵 등록으로 넘어간다.
+                   지도가 없으면 관제 화면이 비어 있어, 여기서 끊지 않고 이어서 받는다. */
+                moveToScan(registeredRobotId)
               }}
             />
           )}
