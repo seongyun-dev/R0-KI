@@ -28,10 +28,7 @@ public class MapFileStorage {
 
     public MapFileStorage(FileStorageProperties properties) {
         storageDirectory =
-                Path.of(properties.getUploadDir())
-                        .resolve(properties.getMapSubdirectory())
-                        .toAbsolutePath()
-                        .normalize();
+                Path.of(properties.getMapDir()).toAbsolutePath().normalize();
     }
 
     public StoredMapFile store(MultipartFile file) {

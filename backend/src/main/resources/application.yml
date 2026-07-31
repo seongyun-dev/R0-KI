@@ -38,7 +38,7 @@ app:
   file-storage:
     upload-dir: ${UPLOAD_DIR:uploads}
     url-prefix: /uploads
-    map-subdirectory: maps
+    map-dir: ${MAP_DIR:uploads/maps}
 
 gms:
   base-url: ${GMS_BASE_URL:https://gms.ssafy.io/gmsapi/api.openai.com/v1}
