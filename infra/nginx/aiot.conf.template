@@ -31,10 +31,14 @@ server {
         return 200 "ok\n";
     }
 
-    location = /jetson/releases/stable/manifest.json {
-        alias /srv/aiot/releases/jetson/stable/manifest.json;
+    location = /jetson/releases/iot/stable/manifest.json {
+        alias /srv/aiot/releases/jetson/iot/stable/manifest.json;
         default_type application/json;
         add_header Cache-Control "no-store" always;
+    }
+
+    location ^~ /jetson/releases/ {
+        return 404;
     }
 
     location /api/ {

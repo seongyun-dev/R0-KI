@@ -34,7 +34,7 @@ Gerrit on 8988/29418 and Apache on 8989 are unrelated services. Do not modify th
 | `/srv/aiot/secrets` | Runtime credentials; never commit or print |
 | `/srv/aiot/deploy` | Root-installed deployment scripts and state |
 | `/srv/aiot/backups/runtime` | Daily local backups |
-| `/srv/aiot/releases/jetson/stable` | Public stable manifest only; artifacts remain private in GitLab |
+| `/srv/aiot/releases/jetson/iot/stable` | Public Robot stable manifest only; artifacts remain private in GitLab |
 
 The Jetson connection file is `/srv/aiot/secrets/robot-mqtt.env`. Transfer it only through an authenticated channel after the Jetson address and account are confirmed.
 
@@ -50,11 +50,12 @@ back/dev  -> back/master  --automatic Back only----> EC2
 verified part releases -> develop --no deployment--> root master --manual
 ```
 
-Jetson release publishing is intentionally separate from merge deployment. A
-`jetson-vX.Y.Z` tag creates a versioned Robot/AI bundle, and the protected
-manual `jetson_publish` job uploads it to the Generic Package Registry and
-atomically updates the public stable manifest. The device pulls and validates
-the release at boot. See [jetson/](jetson/) and [HANDOFF.md](HANDOFF.md).
+Jetson release publishing is intentionally separate from merge deployment. An
+`iot-vX.Y.Z` tag on a commit contained in `iot/master` creates a versioned
+Robot-only bundle. The protected manual `iot_publish` job uploads it to the
+Generic Package Registry and atomically updates the public IoT manifest. The
+device pulls and validates the release at boot. `aiot-ai.service` manages the
+existing AI baseline separately. See [jetson/README.md](jetson/README.md).
 
 The project runner uses the `aiot-ec2` tag, Shell executor, one concurrent job, and a 30-minute maximum job timeout. Because Docker group access is equivalent to host root access, keep the runner locked to this project, keep untagged jobs disabled, protect release branches, and require infrastructure review for `.gitlab-ci.yml` and `infra/**`.
 
@@ -129,19 +130,21 @@ environment detection are documented in [GPU_RUNNER.md](GPU_RUNNER.md).
 
 Jetson release procedure:
 
-1. Merge compatible AI and Robot code with their install/run/smoke contracts.
-2. Create a protected `jetson-vX.Y.Z` tag.
-3. Verify `jetson_package`, then manually approve `jetson_publish`.
+1. Merge Robot code with its install/run/test/smoke contracts into `iot/master`.
+2. Create a protected `iot-vX.Y.Z` tag on a commit contained in `iot/master`.
+3. Verify `iot_package`, then manually approve `iot_publish`.
 4. Create a read-only Package Registry Deploy Token for the Jetson.
 5. On the Jetson, create `/opt/aiot/secrets/package-read.env` and run
    `sudo bash infra/jetson/install.sh` from an authenticated source checkout.
-6. Start `aiot-update.service`, verify `current`, `previous`, and `state/VERSION`,
-   then start `aiot-robot.service`.
+6. Start `aiot-ai.service` and verify `/run/aiot/ai-ready.json`.
+7. Start `aiot-update.service`, verify `/opt/aiot/iot/current`, `previous`, and
+   `state/VERSION`, then start `aiot-robot.service`.
 
-Do not install the updater until the device runtime entrypoint and its backup
-have been confirmed. A missing network, invalid manifest, incompatible
-JetPack/architecture, checksum failure, or smoke failure must leave the last
-healthy release active.
+`aiot-robot.service` only Wants/After AI, so an AI failure leaves Robot alive in
+limited mode. A missing network, invalid manifest, incompatible AI contract,
+JetPack/architecture, checksum failure, or stationary smoke failure must leave
+the last healthy Robot release active. IoT OTA must not modify the AI venv,
+models, engines, logs, or evidence.
 
 ## MQTT migration
 
