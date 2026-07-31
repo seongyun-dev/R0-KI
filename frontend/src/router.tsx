@@ -1,6 +1,5 @@
 import { Suspense, lazy } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
-import { AppShell } from './components/layout/AppShell'
 import { RequireAuth } from './features/auth/RequireAuth'
 import Dashboard from './pages/Dashboard'
 import Landing from './pages/Landing'
@@ -101,12 +100,20 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
       },
-      // 로봇관리 (1i 목록 → 1i-r01 상세) — R0KiShell 자체 상단바라 AppShell 밖 독립 렌더
+      // 로봇관리 (1i 목록 → 1j 등록 → 1i-r01 상세) — 모두 R0KiShell 자체 상단바
       {
         path: 'robots',
         element: (
           <RequireAuth>
             <RobotList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'robots/new',
+        element: (
+          <RequireAuth>
+            <RobotNew />
           </RequireAuth>
         ),
       },
@@ -128,15 +135,6 @@ export const router = createBrowserRouter([
             </Suspense>
           </RequireAuth>
         ),
-      },
-      {
-        // 비로그인 접근 시 /login으로 — 나머지 화면은 기존 셸 유지
-        element: (
-          <RequireAuth>
-            <AppShell />
-          </RequireAuth>
-        ),
-        children: [{ path: 'robots/new', element: <RobotNew /> }],
       },
     ],
   },

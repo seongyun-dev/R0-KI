@@ -1467,6 +1467,20 @@
 .r0ki .ntact{display:flex;gap:var(--s2)}
 .r0ki .ntact .btn{flex:1;height:46px;justify-content:center;font-size:15px}
 
+/* ══════════════ 로봇 등록 (1j) ══════════════ */
+/* 입력이 일련번호·로봇명 둘뿐이라 좁은 카드 하나를 중앙에 세운다.
+   폼은 au-* 문법(온보딩 StepRobot)을 그대로 재사용한다 — 같은 로봇을
+   등록하는 화면이므로 라벨·입력·도움말 리듬이 어긋나면 안 된다. */
+.r0ki .rnwrap{flex:1;min-height:0;display:flex;overflow-y:auto}
+.r0ki .rnwrap::-webkit-scrollbar{width:6px}
+.r0ki .rnwrap::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .rnwrap::-webkit-scrollbar-track{background:transparent}
+.r0ki .rncard{margin:auto;width:100%;max-width:560px;padding:var(--s8) var(--s10)}
+@media(max-width:640px){.r0ki .rncard{padding:var(--s6)}}
+
+.r0ki .rnform .au-row:last-of-type{margin-bottom:0}
+.r0ki .rnform .au-act{margin-top:var(--s8)}
+
 /* ── 세로가 좁으면 여백부터 회수 (au-wrap 이 스크롤을 열기 전 단계) ── */
 @media(max-height:1010px){
   .r0ki .au-card{padding:var(--s6) var(--s8)}
@@ -1482,4 +1496,7 @@
   .r0ki .au-act{margin-top:var(--s5)}
   .r0ki .au-act .btn{height:48px}
   .r0ki .au-foot{margin-top:var(--s4);padding-top:var(--s3);font-size:12.5px}
+  /* 로봇 등록 — 카드 여백부터 줄인다 */
+  .r0ki .rncard{padding:var(--s6) var(--s8)}
+  .r0ki .rnform .au-act{margin-top:var(--s6)}
 }
