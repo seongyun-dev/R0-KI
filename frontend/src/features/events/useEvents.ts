@@ -1,6 +1,6 @@
 import { events } from '../../mocks'
 import { useCallback, useEffect } from 'react'
-import { eventsApi, unwrapList } from '../../api/services'
+import { eventsApi } from '../../api/services'
 import { eventDetailToDomain, eventListItemToDomain } from '../../api/mappers'
 import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
@@ -33,7 +33,7 @@ const MOCK_RISK: Record<string, RiskLevel> = {
 /** 이벤트 목록 (1f). 서버 연동 시 useQuery(['events'])로 교체. */
 export function useEvents(params: EventListRequest = {})
 {
-  return useApiQuery(
+  const query = useApiQuery(
     async () => {
       if (env.useMocks) {
         // 기간(period) 필터는 목업에 날짜가 없어 적용하지 않는다 — 유형·상태·위험도만
@@ -44,7 +44,16 @@ export function useEvents(params: EventListRequest = {})
           .sort((a, b) => b.time.localeCompare(a.time)) // 최신순
         const page = params.page ?? 0
         const size = params.size ?? filtered.length
-        return filtered.slice(page * size, page * size + size)
+        const start = page * size
+        return {
+          content: filtered.slice(start, start + size),
+          page,
+          size,
+          totalElements: filtered.length,
+          totalPages: size > 0 ? Math.ceil(filtered.length / size) : 0,
+          first: page === 0,
+          last: start + size >= filtered.length,
+        }
       }
 
       const response = await eventsApi.list({
@@ -57,8 +66,10 @@ export function useEvents(params: EventListRequest = {})
         sort: params.sort,
       })
         // 유형·위험도 필터는 백엔드 미지원 → 보류 (확장 후 연결)
-      // 목록 응답이 배열로 오면 response.content 는 undefined 라 .map 에서 터진다.
-      return unwrapList(response).map(eventListItemToDomain)
+      return {
+        ...response,
+        content: response.content.map(eventListItemToDomain),
+      }
     },
     [
       params.type,
@@ -71,6 +82,17 @@ export function useEvents(params: EventListRequest = {})
     ],
     { delayMs: env.useMocks ? 350 : 0 },
   )
+
+  return {
+    ...query,
+    data: query.data?.content,
+    page: query.data?.page ?? params.page ?? 0,
+    size: query.data?.size ?? params.size ?? 10,
+    totalElements: query.data?.totalElements ?? 0,
+    totalPages: query.data?.totalPages ?? 0,
+    first: query.data?.first ?? true,
+    last: query.data?.last ?? true,
+  }
 }
 
 /** 이벤트 상세 (1g). 서버 연동 시 useQuery(['event', id])로 교체. */
