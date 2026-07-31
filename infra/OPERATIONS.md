@@ -14,7 +14,7 @@ Internet / Jetson
   └─ MQTT TLS 8883 -> aiot-mosquitto
 
 Docker network: aiot-network
-  ├─ aiot-mysql:3306       (not published to the host)
+  ├─ aiot-mysql:3306       (host loopback 127.0.0.1:3306 only)
   ├─ aiot-mosquitto:1883   (backend-only listener)
   ├─ aiot-mosquitto:8883   (published for Jetson)
   ├─ aiot-backend          (added when its Dockerfile exists)
@@ -90,6 +90,26 @@ Each completed backup contains checksums, a `COMPLETED` marker, metadata, and an
 atomic `latest` symlink. Backups older than seven days are listed but never
 deleted automatically. They remain on the same EC2 disk, so an external
 encrypted destination is still required for instance or volume failure.
+
+## MySQL access through an SSH tunnel
+
+MySQL is published only on the EC2 loopback interface. Do not add an AWS
+Security Group or UFW rule for port 3306. Operators can use MySQL Workbench with
+`Standard TCP/IP over SSH` and the following connection:
+
+| Setting | Value |
+| --- | --- |
+| SSH hostname | `i15e103.p.ssafy.io:22` |
+| SSH username | `ubuntu` |
+| SSH key | Operator-local `I15E103T.pem` path |
+| MySQL hostname | `127.0.0.1` |
+| MySQL port | `3306` |
+| MySQL username | `root` |
+
+Read `MYSQL_ROOT_PASSWORD` from `/srv/aiot/secrets/runtime.env` through an
+approved secret-sharing channel. Never commit, print, or send it to a team chat.
+The root account can modify and delete every table, so use this connection only
+for authorized operational inspection.
 
 ## Application activation
 
