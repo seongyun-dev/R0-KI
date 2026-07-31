@@ -52,6 +52,16 @@ for required_file in \
   [ -f "${required_file}" ] || fail "${required_file} is required"
 done
 
+nginx_template=infra/nginx/aiot.conf.template
+for required_route in \
+  'location = /swagger-ui.html {' \
+  'location ^~ /swagger-ui/ {' \
+  'location = /v3/api-docs {' \
+  'location ^~ /v3/api-docs/ {'; do
+  grep -Fq "${required_route}" "${nginx_template}" || \
+    fail "${nginx_template} must proxy ${required_route}"
+done
+
 if [ "${errors}" -ne 0 ]; then
   echo "${errors} component contract error(s) found" >&2
   exit 1
