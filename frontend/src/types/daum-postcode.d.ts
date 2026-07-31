@@ -10,6 +10,13 @@ declare global {
   }
 
   interface Window {
+    kakao?: {
+      Postcode: new (options: {
+        oncomplete: (data: KakaoPostcodeData) => void
+      }) => {
+        open: () => void
+      }
+    }
     daum?: {
       Postcode: new (options: {
         oncomplete: (data: KakaoPostcodeData) => void

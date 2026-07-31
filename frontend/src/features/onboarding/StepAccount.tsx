@@ -63,9 +63,9 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
     onNext(request)
   }
 
-  const handlePostcodeSearch = () => {
+  const handlePostcodeSearch = async () => {
     try {
-      openPostcodeSearch(({ postalCode, apartmentName, roadAddress }) => {
+      await openPostcodeSearch(({ postalCode, apartmentName, roadAddress }) => {
         setZipcode(postalCode)
         setComplexName(apartmentName)
         setAddress(roadAddress)
@@ -224,6 +224,7 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
           <svg viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></svg>
         </button>
       </div>
+
     </form>
   )
 }
