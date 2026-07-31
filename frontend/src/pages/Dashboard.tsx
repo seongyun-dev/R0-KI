@@ -62,6 +62,26 @@ export default function Dashboard() {
   const normalEvents = detectedEvents.filter((e) => e.riskLevel !== '긴급')
   const hasUrgent = urgentEvents.length > 0
 
+  /* 탐지 영상 아래 요약 — 전부 실데이터에서 뽑는다.
+     예전엔 "출입문 1 / 정확도 96%"가 리터럴로 박혀 있어 상시 같은 값이 떴다.
+     근거가 없는 값은 아예 표시하지 않는다(관제 화면에서 고정 숫자는 오독을 부른다). */
+  // 긴급 세부 유형 — subType(“쓰러짐 의심”)이 있으면 그걸, 없으면 이벤트 유형
+  const urgentLabel = urgentEvents[0]?.subType ?? urgentEvents[0]?.type
+  // 긴급 외 탐지 중 가장 많은 유형 한 건
+  const topNormal = Object.entries(
+    normalEvents.reduce<Record<string, number>>((acc, e) => {
+      acc[e.type] = (acc[e.type] ?? 0) + 1
+      return acc
+    }, {}),
+  ).sort((a, b) => b[1] - a[1])[0]
+  // 평균 신뢰도 — confidence 가 있는 건만
+  const confidences = detectedEvents
+    .map((e) => e.confidence)
+    .filter((v): v is number => typeof v === 'number')
+  const avgConfidence = confidences.length
+    ? Math.round(confidences.reduce((sum, v) => sum + v, 0) / confidences.length)
+    : undefined
+
   // 상단바 상태칩 — 첫 로봇 기준 (백엔드 연동 시 그대로 값만 교체)
   const lead = (robots ?? [])[0]
 
@@ -221,11 +241,13 @@ export default function Dashboard() {
               </div>
               <R0KiLiveCam urgent={hasUrgent} />
               <div className="camnow">
-                {hasUrgent && (
-                  <span className="cn cnu"><i className="dot" style={{ background: 'var(--urgent)' }} />쓰러짐 <b>{urgentEvents.length}</b></span>
+                {hasUrgent && urgentLabel && (
+                  <span className="cn cnu"><i className="dot" style={{ background: 'var(--urgent)' }} />{urgentLabel} <b>{urgentEvents.length}</b></span>
                 )}
-                <span className="cn"><i className="dot" style={{ background: 'var(--detect)' }} />출입문 <b>1</b></span>
-                <span className="cn cnr">정확도 96%</span>
+                {topNormal && (
+                  <span className="cn"><i className="dot" style={{ background: 'var(--detect)' }} />{topNormal[0]} <b>{topNormal[1]}</b></span>
+                )}
+                {avgConfidence != null && <span className="cn cnr">평균 신뢰도 {avgConfidence}%</span>}
               </div>
             </div>
 

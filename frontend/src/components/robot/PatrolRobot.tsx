@@ -3,21 +3,25 @@ import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
-import { animateRobotLife, buildRobot } from './robotModel'
+import { ROBOT_ACCENT_LANDING, animateRobotLife, buildRobot } from './robotModel'
 import { gridTexture, shadowTexture } from './sceneTextures'
 
 /* ============================================================
    랜딩 히어로 3D 순찰 로봇 — docs/reference/landing.html의 Three.js
-   씬(맵·순찰 경로·커서 추적·주황 트레일)을 R3F로 포팅.
+   씬(맵·순찰 경로·커서 추적·액센트 트레일)을 R3F로 포팅.
    로봇 본체 지오메트리는 robotModel.ts에서 공유. 수치는 프로토타입 그대로.
    ============================================================ */
 
 const TRAIL_COUNT = 34
-const COOL = new THREE.Color(0x5f6f9e)
-const WARM = new THREE.Color(0xff6a30)
-// 문제 지점 상태색 — 미해결(danger) → 해결(success)
-const UNSOLVED = new THREE.Color(0xe5484d)
-const SOLVED = new THREE.Color(0x16a34a)
+/* 대기 상태 체크포인트 — 쿨톤 남색. 진하지 않게 눌러둬야 로봇이 지나며 켜지는
+   LIT(밝은 하늘색)와 명도가 갈려 "꺼짐 → 켜짐"이 읽힌다. */
+const COOL = new THREE.Color(0x5b729f)
+/* 로봇이 지나며 점등되는 색 — 랜딩 액센트(#38BDF8)와 같은 계열 (S15P11E103-276) */
+const LIT = new THREE.Color(0x38bdf8)
+// 문제 지점 상태색 — 미해결(danger) → 해결(파랑).
+// 해결은 초록 대신 진한 파랑. LIT(밝은 파랑)와 명도가 갈려 점등 연출이 그대로 살아난다.
+const UNSOLVED = new THREE.Color(0xe11d48)
+const SOLVED = new THREE.Color(0x0284c7)
 
 /** 로봇이 문제를 하나씩 처리하는 진행 상태 (해결하는 문제 섹션) */
 export type ProblemPhase = {
@@ -49,7 +53,8 @@ function buildScene() {
   const root = new THREE.Group()
 
   // ---- 로봇 본체 (robotModel.ts 공유) ----
-  const model = buildRobot()
+  // 랜딩은 액센트가 블루라 눈·글로우도 블루로 넘긴다. 관제 화면은 기본값(주황) 유지.
+  const model = buildRobot(ROBOT_ACCENT_LANDING)
   const { robot, head, visorMat, glow, glow2 } = model
 
   robot.position.y = 1.55
@@ -59,9 +64,13 @@ function buildScene() {
   root.add(rig)
 
   // ---- ground map + contact shadow ----
+  // 지면은 조명·톤매핑을 타지 않는 basic 재질로 둔다.
+  // ACES 톤매핑(gl.toneMapping)은 밝은 값을 눌러서, standard 재질이면 텍스처에 넣은 색보다
+  // 어둡게 렌더된다 — 페이지 배경과 캔버스 영역이 한 줄로 갈리는 원인.
+  // toneMapped:false + 무광 basic 이면 gridTexture 의 색이 그대로 나와 배경과 정확히 이어진다.
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(120, 120),
-    new THREE.MeshStandardMaterial({ color: 0xf4f2ef, roughness: 1, metalness: 0, map: gridTexture() }),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, map: gridTexture(), toneMapped: false }),
   )
   ground.rotation.x = -Math.PI / 2
   root.add(ground)
@@ -73,10 +82,12 @@ function buildScene() {
   shadow.position.y = 0.03
   root.add(shadow)
 
-  // ---- orange patrol trail ----
+  // ---- 순찰 트레일 (액센트 블루) ----
   const trailGeo = new THREE.CircleGeometry(0.16, 18)
   const trail = Array.from({ length: TRAIL_COUNT }, () => {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff6a30, transparent: true, opacity: 0, depthWrite: false })
+    // 트레일은 --accent(#38BDF8) 하늘색 — 로봇 눈·순찰 경로선과 같은 브랜드 파랑이라
+    // 씬 전체가 한 계열로 묶인다. 지면(GROUND_TINT)이 옅은 하늘이라 대비도 충분하다.
+    const mat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0, depthWrite: false })
     const mesh = new THREE.Mesh(trailGeo, mat)
     mesh.rotation.x = -Math.PI / 2
     mesh.position.y = 0.02
@@ -97,11 +108,11 @@ function buildScene() {
   const checkpoints = cpPos.map((p) => {
     const grp = new THREE.Group()
     grp.position.set(p.x, 0.05, p.z)
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x5f6f9e, transparent: true, opacity: 0.5 })
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x5f6f9e, transparent: true, opacity: 0.3 })
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 36), ringMat)
     ring.rotation.x = -Math.PI / 2
     grp.add(ring)
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0x5f6f9e })
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x5f6f9e, transparent: true, opacity: 0.6 })
     const dot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 24), dotMat)
     dot.rotation.x = -Math.PI / 2
     dot.position.y = 0.01
@@ -114,11 +125,11 @@ function buildScene() {
   // ---- event ping (불법주차 칩과 호응) ----
   const evGrp = new THREE.Group()
   evGrp.position.set(-1.5, 0.06, -2.0)
-  const evRingMat = new THREE.MeshBasicMaterial({ color: 0xe5484d, transparent: true, opacity: 0.5 })
+  const evRingMat = new THREE.MeshBasicMaterial({ color: 0xe11d48, transparent: true, opacity: 0.3 })
   const evRing = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.26, 28), evRingMat)
   evRing.rotation.x = -Math.PI / 2
   evGrp.add(evRing)
-  const evDot = new THREE.Mesh(new THREE.CircleGeometry(0.15, 20), new THREE.MeshBasicMaterial({ color: 0xe5484d }))
+  const evDot = new THREE.Mesh(new THREE.CircleGeometry(0.15, 20), new THREE.MeshBasicMaterial({ color: 0xe11d48, transparent: true, opacity: 0.55 }))
   evDot.rotation.x = -Math.PI / 2
   evDot.position.y = 0.01
   evGrp.add(evDot)
@@ -149,7 +160,7 @@ function buildScene() {
   root.add(plannedLine)
   const doneGeo = new THREE.BufferGeometry().setFromPoints(routePts)
   doneGeo.setDrawRange(0, 0)
-  const doneMat = new THREE.LineBasicMaterial({ color: 0xff6a30, transparent: true, opacity: 0 })
+  const doneMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0 })
   root.add(new THREE.Line(doneGeo, doneMat))
 
   // 각 체크포인트를 지나는 경로 진행률 (카드 전환 타이밍의 기준)
@@ -227,7 +238,11 @@ function RobotScene({
     const pmrem = new THREE.PMREMGenerator(gl)
     const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     scene.environment = envTex
-    scene.fog = new THREE.Fog(0xece9e6, 15, 42)
+    // 안개는 먼 지면을 배경색으로 녹인다 — 하늘 톤이 아니면 화면 전체가 그 색으로 읽힌다.
+    // 문제·기능 구간은 지면이 시야를 가득 채우므로 이 값이 사실상 그 화면의 배경색이다.
+    // 페이지 하늘(--page 계열)보다 밝으면 무대가 끝나는 지점에서 경계가 한 줄로 드러나므로
+    // 하늘 중간 톤에 맞춘다.
+    scene.fog = new THREE.Fog(0xe1edfa, 15, 42)
     return () => {
       scene.environment = null
       scene.fog = null
@@ -377,7 +392,7 @@ function RobotScene({
     S.rig.position.set(st.botPos.x, Math.sin(t * 3) * 0.03, st.botPos.z)
     S.shadow.position.set(st.botPos.x, 0.03, st.botPos.z)
 
-    // 주황 트레일
+    // 액센트 트레일
     if (st.botPos.distanceTo(st.lastDrop) > 0.5) {
       const s = S.trail[st.trailIdx % TRAIL_COUNT]
       st.trailIdx++
@@ -386,10 +401,12 @@ function RobotScene({
       s.mesh.visible = true
       s.age = 0
     }
+    // 색을 중간 톤으로 내렸으므로 불투명도는 다시 낮춘다 — 진한 색은 같은 알파에서
+    // 훨씬 무겁게 읽힌다. 대신 잔존 시간은 길게 둬 자취가 이어져 보이게 한다.
     S.trail.forEach((s) => {
       s.age += dt
-      const a = Math.max(0, 1 - s.age / 1.8)
-      s.mat.opacity = a * 0.55
+      const a = Math.max(0, 1 - s.age / 2.4)
+      s.mat.opacity = a * 0.6
       s.mesh.scale.setScalar(0.6 + a * 0.6)
       if (a <= 0) s.mesh.visible = false
     })
@@ -420,11 +437,12 @@ function RobotScene({
       cp.lit += ((near ? 1 : 0) - cp.lit) * 0.12
 
       if (onRoute) {
-        // 기능 순회 모드 — 네 지점은 이미 해결된 상태(초록), 로봇이 지나는 곳만 주황으로 점등
+        // 기능 순회 모드 — 대기 지점은 쿨톤 남색(COOL), 로봇이 지나는 곳만 액센트로 점등.
+        // 여기서 SOLVED(파랑)를 쓰면 네 지점이 전부 켜진 것처럼 보여 점등 연출이 죽는다.
         cp.solvedAmt += (1 - cp.solvedAmt) * 0.09
         const focus = st.botPos.distanceTo(cp.pos) < 2.2 ? 1 : 0
         cp.lit += (focus - cp.lit) * 0.12
-        const col = SOLVED.clone().lerp(WARM, cp.lit)
+        const col = COOL.clone().lerp(LIT, cp.lit)
         cp.ringMat.color.copy(col)
         cp.dotMat.color.copy(col)
         cp.ring.scale.setScalar(1 + cp.lit * (0.55 + Math.sin(t * 5) * 0.06))
@@ -435,12 +453,13 @@ function RobotScene({
         const col = UNSOLVED.clone().lerp(SOLVED, cp.solvedAmt)
         cp.ringMat.color.copy(col)
         cp.dotMat.color.copy(col)
-        // 미해결일수록 크게 경고 펄스, 해결되면 잔잔해진다
+        // 미해결일수록 크게 경고 펄스, 해결되면 잔잔해진다.
+        // 진폭은 낮게 — 빨강은 이 화면에서 유일한 난색이라 같은 세기여도 훨씬 강하게 읽힌다.
         const alarm = (1 - cp.solvedAmt) * (Math.sin(t * 4.2 + i) * 0.5 + 0.5)
-        cp.ring.scale.setScalar(1 + alarm * 0.55 + cp.lit * 0.35)
-        cp.ringMat.opacity = 0.35 + alarm * 0.45 + cp.solvedAmt * 0.35
+        cp.ring.scale.setScalar(1 + alarm * 0.4 + cp.lit * 0.35)
+        cp.ringMat.opacity = 0.2 + alarm * 0.22 + cp.solvedAmt * 0.4
       } else {
-        const col = COOL.clone().lerp(WARM, cp.lit)
+        const col = COOL.clone().lerp(LIT, cp.lit)
         cp.ringMat.color.copy(col)
         cp.dotMat.color.copy(col)
         cp.ring.scale.setScalar(1 + cp.lit * 0.6 + (near ? Math.sin(t * 6) * 0.05 : 0))
@@ -451,7 +470,7 @@ function RobotScene({
     // 이벤트 핑 펄스
     const k = Math.sin(t * 3.4) * 0.5 + 0.5
     S.evRing.scale.setScalar(1 + k * 0.9)
-    S.evRingMat.opacity = 0.55 * (1 - k)
+    S.evRingMat.opacity = 0.32 * (1 - k)
   })
 
   return (
@@ -459,7 +478,7 @@ function RobotScene({
       <primitive object={S.root} />
       <hemisphereLight args={[0xffffff, 0x8a8a8a, 0.65]} />
       <directionalLight color={0xffffff} intensity={2.1} position={[-3, 4, 5]} />
-      <directionalLight color={0xff7a45} intensity={1.4} position={[4, -1, -3]} />
+      <directionalLight color={0x7dd3fc} intensity={1.4} position={[4, -1, -3]} />
       <directionalLight color={0xdfe6ff} intensity={0.5} position={[3, 2, 4]} />
     </>
   )

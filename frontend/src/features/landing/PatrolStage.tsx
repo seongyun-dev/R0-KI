@@ -208,7 +208,7 @@ function NarrativeStage({ ready }: { ready: boolean }) {
               </p>
               <div className="journey-tags">
                 {s.tags.map((t) => (
-                  <Tag key={t} tone="dark">{t}</Tag>
+                  <Tag key={t} tone="light">{t}</Tag>
                 ))}
               </div>
             </article>

@@ -20,8 +20,17 @@ export function apiUrl(path: string) {
 }
 
 function authHeaders() {
-  const token = useAuthStore.getState().accessToken
-  return token ? { Authorization: `Bearer ${token}` } : undefined
+  const state = useAuthStore.getState()
+  const isValid =
+    state.accessToken != null &&
+    state.accessTokenExpiresAt != null &&
+    state.accessTokenExpiresAt > Date.now()
+
+  if (!isValid) {
+    if (state.accessToken) state.logout()
+    return undefined
+  }
+  return { Authorization: `Bearer ${state.accessToken}` }
 }
 
 async function readResponse(response: Response) {
@@ -47,6 +56,35 @@ function unwrapEnvelope(body: unknown): unknown {
   return body
 }
 
+const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
+  AUTH_001: '로그인이 필요합니다.',
+  AUTH_002: '요청을 수행할 권한이 없습니다.',
+  AUTH_003: '아이디 또는 비밀번호가 올바르지 않습니다.',
+  AUTH_004: '사용할 수 없는 계정입니다.',
+  AUTH_005: '이미 사용 중인 아이디입니다.',
+  COMMON_001: '입력값을 확인해 주세요.',
+  COMMON_002: '요청 형식이 올바르지 않습니다.',
+  COMMON_003: '요청한 정보를 찾을 수 없습니다.',
+  ROBOT_001: '로봇을 찾을 수 없습니다.',
+  ROBOT_002: '이미 등록된 시리얼 번호입니다.',
+}
+
+function apiErrorMessage(status: number, body: unknown) {
+  const code =
+    typeof body === 'object' && body && 'code' in body
+      ? String((body as { code: unknown }).code)
+      : undefined
+
+  if (code && ERROR_MESSAGES_BY_CODE[code]) return ERROR_MESSAGES_BY_CODE[code]
+  if (status === 400) return '요청 내용을 확인해 주세요.'
+  if (status === 401) return '로그인이 필요합니다.'
+  if (status === 403) return '요청을 수행할 권한이 없습니다.'
+  if (status === 404) return '요청한 정보를 찾을 수 없습니다.'
+  if (status === 409) return '현재 상태에서는 요청을 처리할 수 없습니다.'
+  if (status >= 500) return '서버에 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+  return `요청을 처리하지 못했습니다. (${status})`
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isFormData = init.body instanceof FormData
   const headers = new Headers(init.headers)
@@ -62,11 +100,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
 
   if (!response.ok) {
     if (response.status === 401) useAuthStore.getState().logout()
-    const message =
-      typeof body === 'object' && body && 'message' in body
-        ? String((body as { message: unknown }).message)
-        : `요청에 실패했습니다 (${response.status})`
-    throw new ApiError(response.status, message, body)
+    throw new ApiError(response.status, apiErrorMessage(response.status, body), body)
   }
 
   return unwrapEnvelope(body) as T
@@ -97,6 +131,7 @@ export async function consumeSse<T>(
     signal,
   })
   if (!response.ok || !response.body) {
+    if (response.status === 401) useAuthStore.getState().logout()
     throw new ApiError(response.status, `실시간 연결에 실패했습니다 (${response.status})`)
   }
 

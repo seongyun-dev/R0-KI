@@ -1481,6 +1481,37 @@
 .r0ki .rnform .au-row:last-of-type{margin-bottom:0}
 .r0ki .rnform .au-act{margin-top:var(--s8)}
 
+/* ══════════════ 부팅 스크린 (로그인·회원가입 진입) ══════════════ */
+/* .r0ki 직계 자식으로 렌더한다 — .stage 안에 넣으면 stage>* z-index 규칙에 걸려
+   무대 좌표계에 갇힌다. 테마와 무관하게 항상 어두운 화면이라 색은 리터럴로 둔다
+   (야간 모드 팔레트 값과 같은 계열). */
+.r0ki .boot{position:fixed;inset:0;z-index:130;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s8);
+  color:#fff;
+  background:
+    radial-gradient(1200px 900px at 50% -20%,rgba(150,190,255,.14),transparent 70%),
+    linear-gradient(176deg,#1B2739 0%,#151F2F 44%,#101A28 100%);
+  transform:translateY(0);
+  transition:transform .52s var(--e-glass)}
+.r0ki .boot.exit{transform:translateY(-100%)}
+.r0ki .boot__center{display:flex;flex-direction:column;align-items:center;gap:var(--s3);text-align:center;
+  transition:opacity .4s var(--e-glass),transform .4s var(--e-glass)}
+.r0ki .boot.exit .boot__center{opacity:0;transform:translateY(-12px)}
+.r0ki .boot__brand{display:flex;align-items:center;gap:10px;font-size:26px;font-weight:700;letter-spacing:-.01em}
+.r0ki .boot__brand .mk{width:32px;height:32px;color:#7DD3FC}
+.r0ki .boot__tag{max-width:30ch;font-size:14px;line-height:1.6;color:rgba(255,255,255,.55)}
+.r0ki .boot__progress{width:min(30rem,72vw);display:flex;flex-direction:column;gap:var(--s3)}
+.r0ki .boot__track{height:2px;width:100%;border-radius:2px;overflow:hidden;background:rgba(255,255,255,.15)}
+.r0ki .boot__fill{height:100%;background:linear-gradient(90deg,#7DD3FC,#38BDF8);
+  transition:width .1s linear}
+.r0ki .boot__row{display:flex;justify-content:space-between;
+  font-size:11.5px;font-weight:600;letter-spacing:.1em;color:rgba(255,255,255,.45)}
+.r0ki .boot__count{color:rgba(255,255,255,.85)}
+/* 모션 최소화 — 걷히는 연출 없이 즉시 사라진다 */
+@media(prefers-reduced-motion:reduce){
+  .r0ki .boot,.r0ki .boot__center{transition:none}
+}
+
 /* ── 세로가 좁으면 여백부터 회수 (au-wrap 이 스크롤을 열기 전 단계) ── */
 @media(max-height:1010px){
   .r0ki .au-card{padding:var(--s6) var(--s8)}

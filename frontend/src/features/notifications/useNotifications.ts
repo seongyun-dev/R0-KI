@@ -1,5 +1,5 @@
 import { notifications } from '../../mocks'
-import { notificationsApi } from '../../api/services'
+import { notificationsApi, unwrapList } from '../../api/services'
 import {
   notificationDetailToDomain,
   notificationListItemToDomain,
@@ -28,7 +28,8 @@ export function useNotifications() {
     async () => {
       if (env.useMocks) return [...notifications].sort(byLatest)
       const response = await notificationsApi.list()
-      return (response.content ?? []).map(notificationListItemToDomain).sort(byLatest)
+      // ?? [] 만으로는 배열 응답에서 조용히 빈 목록이 된다 — unwrapList 로 형태를 흡수한다.
+      return unwrapList(response).map(notificationListItemToDomain).sort(byLatest)
     },
     [],
     { delayMs: env.useMocks ? 350 : 0 },

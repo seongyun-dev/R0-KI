@@ -6,10 +6,14 @@ import { StepMapScan } from '../features/onboarding/StepMapScan'
 import { StepRobot } from '../features/onboarding/StepRobot'
 import { StepZones } from '../features/onboarding/StepZones'
 import { useRegisteredMap } from '../features/onboarding/useRegisteredMap'
+import {
+  useOnboardingProgress,
+  type OnboardingPhase,
+} from '../features/onboarding/useOnboardingProgress'
 import { authApi } from '../api/services'
 import { useAuthStore } from '../features/auth/useAuthStore'
 
-type Phase = 'account' | 'robot' | 'scan' | 'zones'
+type Phase = 'account' | OnboardingPhase
 
 // 화면별 제목/설명 (R0Kiauth 시안 문구)
 const copy: Record<Phase, { title: string; description: string }> = {
@@ -64,17 +68,28 @@ function AuthStepper({ current }: { current: number }) {
 export default function SignupOnboarding() {
   const navigate = useNavigate()
   const login = useAuthStore((state) => state.login)
-  const [phase, setPhase] = useState<Phase>('account')
-  // 로봇 등록 입력값(이름) — 서버 연동 시 최종 제출(등록 API)로 전송. 일련번호는 등록 API 연동 시 함께 캡처
-  const [robotId, setRobotId] = useState<string | number>()
-  const [mapId, setMapId] = useState<string | number>()
+  const currentLoginId = useAuthStore((state) => state.loginId)
+  const onboardingOwner = useOnboardingProgress((state) => state.ownerLoginId)
+  const storedPhase = useOnboardingProgress((state) => state.phase)
+  const ownsStoredProgress =
+    currentLoginId != null && onboardingOwner === currentLoginId
+  const phase: Phase = ownsStoredProgress && storedPhase ? storedPhase : 'account'
+  const storedRobotId = useOnboardingProgress((state) => state.robotId)
+  const storedMapId = useOnboardingProgress((state) => state.mapId)
+  const robotId = ownsStoredProgress ? storedRobotId : null
+  const mapId = ownsStoredProgress ? storedMapId : null
+  const beginOnboarding = useOnboardingProgress((state) => state.begin)
+  const moveToRobot = useOnboardingProgress((state) => state.moveToRobot)
+  const moveToScan = useOnboardingProgress((state) => state.moveToScan)
+  const moveToZones = useOnboardingProgress((state) => state.moveToZones)
+  const resetOnboarding = useOnboardingProgress((state) => state.reset)
   const setRegisteredZones = useRegisteredMap((s) => s.setZones)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>()
   const setMapContext = useAuthStore((s) => s.setMapContext)
 
   return (
-    <R0KiAuthShell>
+    <R0KiAuthShell bootTagline="관리자 계정 등록을 준비하고 있습니다.">
       <div className="au-wrap">
         <div className={`glass g2 au-card ${cardWidth[phase]}`}>
           <h1 className="au-h">{copy[phase].title}</h1>
@@ -96,8 +111,9 @@ export default function SignupOnboarding() {
                     login(data.username, response.accessToken)
                     // 이미 등록된 단지면 소속 회원으로 가입 완료 → 바로 대시보드
                     if (response.isNewApartment) {
-                      setPhase('robot')
+                      beginOnboarding(data.username)
                     } else {
+                      resetOnboarding()
                       navigate('/app', { replace: true })
                     }
                   } catch (error) {
@@ -117,31 +133,32 @@ export default function SignupOnboarding() {
           )}
           {phase === 'robot' && (
             <StepRobot
-              onPrev={() => setPhase('account')}
+              onPrev={() => navigate('/login')}
               onNext={({ robotId: registeredRobotId }) => {
-                setRobotId(registeredRobotId)
                 setMapContext({ robotId: registeredRobotId })
-                setPhase('scan')
+                moveToScan(registeredRobotId)
               }}
             />
           )}
           {phase === 'scan' && robotId != null && (
             <StepMapScan
               robotId={robotId}
-              onPrev={() => setPhase('robot')}
+              onPrev={moveToRobot}
               onNext={(completedMapId) => {
-                setMapId(completedMapId)
                 setMapContext({ mapId: completedMapId, robotId })
-                setPhase('zones')
+                moveToZones(completedMapId)
               }}
             />
           )}
           {phase === 'zones' && mapId != null && (
             <StepZones
               mapId={mapId}
-              onPrev={() => setPhase('scan')}
+              onPrev={() => {
+                if (robotId != null) moveToScan(robotId)
+              }}
               onComplete={(zones) => {
                 setRegisteredZones(zones) // 대시보드 지도에 반영
+                resetOnboarding()
                 // 가입 완료 → 바로 대시보드 (StepAccount 에서 이미 로그인됨)
                 navigate('/app', { replace: true })
               }}

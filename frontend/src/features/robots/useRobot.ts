@@ -1,7 +1,7 @@
 import { robots } from '../../mocks'
 import { useCallback } from 'react'
 import { robotDetailToDomain, robotListItemToDomain } from '../../api/mappers'
-import { robotsApi } from '../../api/services'
+import { robotsApi, unwrapList } from '../../api/services'
 import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
 import { useApiQuery } from '../../lib/useApiQuery'
@@ -27,9 +27,10 @@ export function useRobots(
         }
       }
       const response = await robotsApi.list(params)
+      // 목록 응답이 배열로 오면 response.content 는 undefined 라 .map 에서 터진다.
       return {
         ...response,
-        content: response.content.map(robotListItemToDomain),
+        content: unwrapList(response).map(robotListItemToDomain),
       }
     },
     [params.page, params.size, params.sort?.join(',')],
@@ -94,7 +95,6 @@ export function useUpdateRobot() {
 export function useCreateRobot() {
   const create = useCallback(
     async (variables: { serialNumber: string; name: string }) => {
-      if (env.useMocks) return undefined
       return robotsApi.create({ name: variables.name, serialNumber: variables.serialNumber })
     },
     [],

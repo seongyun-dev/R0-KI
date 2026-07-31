@@ -9,14 +9,48 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 
 export type RobotModel = ReturnType<typeof buildRobot>
 
-function glowTexture() {
+/** 로봇 발광부 색 — 바이저(눈)와 그 주변 글로우.
+    글로우 스프라이트는 텍스처 × color 로 곱해지므로 둘의 색조가 어긋나면 탁해진다.
+    그래서 텍스처 그라데이션까지 한 묶음으로 받는다. */
+export type RobotAccent = {
+  /** 바이저 발광색 */
+  emissive: number
+  /** 글로우 스프라이트 색 */
+  glow: number
+  /** 바이저 본체(비발광) 바탕 — 발광색과 같은 계열의 어두운 톤 */
+  visorBase: number
+  /** 글로우 텍스처 중심 'r,g,b' */
+  glowInner: string
+  /** 글로우 텍스처 바깥 'r,g,b' */
+  glowOuter: string
+}
+
+/** 관제 화면(로봇 상세·대시보드 지도) 기본값 — 프로토타입 주황 그대로 */
+export const ROBOT_ACCENT_DEFAULT: RobotAccent = {
+  emissive: 0xff5a26,
+  glow: 0xff6a30,
+  visorBase: 0x120400,
+  glowInner: '255,150,90',
+  glowOuter: '255,90,38',
+}
+
+/** 랜딩 전용 — 랜딩 액센트(#38BDF8)에 맞춘 블루 (S15P11E103-276) */
+export const ROBOT_ACCENT_LANDING: RobotAccent = {
+  emissive: 0x38bdf8,
+  glow: 0x7dd3fc,
+  visorBase: 0x00131f,
+  glowInner: '186,230,253',
+  glowOuter: '56,189,248',
+}
+
+function glowTexture(inner: string, outer: string) {
   const c = document.createElement('canvas')
   c.width = c.height = 128
   const g = c.getContext('2d')!
   const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-  grd.addColorStop(0, 'rgba(255,150,90,1)')
-  grd.addColorStop(0.35, 'rgba(255,90,38,0.65)')
-  grd.addColorStop(1, 'rgba(255,90,38,0)')
+  grd.addColorStop(0, `rgba(${inner},1)`)
+  grd.addColorStop(0.35, `rgba(${outer},0.65)`)
+  grd.addColorStop(1, `rgba(${outer},0)`)
   g.fillStyle = grd
   g.fillRect(0, 0, 128, 128)
   return new THREE.CanvasTexture(c)
@@ -42,12 +76,12 @@ function logoTexture() {
   return t
 }
 
-export function buildRobot() {
+export function buildRobot(accent: RobotAccent = ROBOT_ACCENT_DEFAULT) {
   // ---- materials ----
   const bodyMat = new THREE.MeshPhysicalMaterial({ color: 0x0c0c10, metalness: 0.55, roughness: 0.32, clearcoat: 0.9, clearcoatRoughness: 0.28, envMapIntensity: 1.0 })
   const headMat = new THREE.MeshPhysicalMaterial({ color: 0x0a0a0d, metalness: 0.5, roughness: 0.12, clearcoat: 1.0, clearcoatRoughness: 0.08, envMapIntensity: 1.25 })
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x1a1a20, metalness: 0.7, roughness: 0.4, envMapIntensity: 0.8 })
-  const visorMat = new THREE.MeshStandardMaterial({ color: 0x120400, emissive: 0xff5a26, emissiveIntensity: 5.0, roughness: 0.35, metalness: 0.2 })
+  const visorMat = new THREE.MeshStandardMaterial({ color: accent.visorBase, emissive: accent.emissive, emissiveIntensity: 5.0, roughness: 0.35, metalness: 0.2 })
   const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x050506, metalness: 0.2, roughness: 0.05, clearcoat: 1, transmission: 0.1, envMapIntensity: 1.4 })
 
   const robot = new THREE.Group()
@@ -68,7 +102,7 @@ export function buildRobot() {
   visor.rotation.z = Math.PI / 2
   visor.position.set(0, -0.02, 1.24)
   head.add(visor)
-  const glowMat = new THREE.SpriteMaterial({ map: glowTexture(), color: 0xff6a30, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+  const glowMat = new THREE.SpriteMaterial({ map: glowTexture(accent.glowInner, accent.glowOuter), color: accent.glow, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
   const glow = new THREE.Sprite(glowMat)
   glow.scale.set(2.1, 0.66, 1)
   glow.position.set(0, -0.02, 1.28)
