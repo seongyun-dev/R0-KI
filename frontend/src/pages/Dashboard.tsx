@@ -4,22 +4,23 @@ import { R0KiShell, useClockText } from '../components/layout/R0KiShell'
 import { R0KiLiveCam } from '../features/dashboard/R0KiLiveCam'
 import { R0KiPatrolMap } from '../features/dashboard/R0KiPatrolMap'
 import { ComplexMap } from '../features/dashboard/ComplexMap'
+import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
 import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
 import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
+import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
+import {
+  usePatrolComplete,
+  isPatrolDoneSeen,
+  markPatrolDoneSeen,
+} from '../features/dashboard/usePatrolComplete'
 import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
-import type { PatrolEvent } from '../types/domain'
+import type { Patrol, PatrolEvent } from '../types/domain'
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
-   공용 셸(R0KiShell: 상단바·테마·시계) + 순찰 지도 + 실시간 탐지 영상 + 최근 순찰 이력.
+   공용 셸(R0KiShell: 상단바·테마·시계) + 순찰 지도 + 실시간 탐지 영상 + 이벤트 이력.
    데이터는 기존 훅(useEvents/useRobots) 연결 — API 연동 시 값만 바뀐다. */
-
-/* 이력 상태점 색 — 명도 램프 (처리완료=순찰, 그 외 감지) */
-function dotColor(e: PatrolEvent) {
-  if (e.status === '처리완료') return 'var(--patrol)'
-  return 'var(--detect)'
-}
 
 /* 로봇 상태 색 — 상태 팔레트(--st-*). 색상만 다르고 톤은 같은 계열 */
 const STATUS_COLOR: Record<string, string> = {
@@ -50,17 +51,40 @@ function MiniBot() {
 export default function Dashboard() {
   const navigate = useNavigate()
   const clock = useClockText()
-  const { data: events } = useEvents()
+  const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useEvents()
   const { data: robots } = useRobots()
   const { data: mapData } = useComplexMap()
 
-  // 긴급(발견 즉시 기록) — 목록 맨 위 고정 / 정상(일괄 기록) — 아래 그룹
-  const urgentEvents = (events ?? []).filter((e) => e.riskLevel === '긴급')
-  const normalEvents = (events ?? []).filter((e) => e.riskLevel !== '긴급')
+  /* 이벤트 이력 — 아직 처리하지 않은 '탐지' 상태만 띄운다 (처리중·처리완료 제외).
+     긴급(발견 즉시 기록)은 목록 맨 위 고정 / 나머지는 아래 그룹 */
+  const detectedEvents = (events ?? []).filter((e) => e.status === '탐지')
+  const urgentEvents = detectedEvents.filter((e) => e.riskLevel === '긴급')
+  const normalEvents = detectedEvents.filter((e) => e.riskLevel !== '긴급')
   const hasUrgent = urgentEvents.length > 0
 
   // 상단바 상태칩 — 첫 로봇 기준 (백엔드 연동 시 그대로 값만 교체)
   const lead = (robots ?? [])[0]
+
+  /* 지도에 띄울 로봇 — 하단 로봇 목록에서 고른다.
+     기본값은 순찰중인 로봇(없으면 첫 로봇). 순찰중이면 위치 + 이동 경로,
+     대기·충전중이면 마지막 위치만 그린다. */
+  const [pickedRobotId, setPickedRobotId] = useState<string>()
+  // 순찰 중 로봇 전체 보기 — 켜면 개별 선택 대신 순찰 중인 로봇을 모두 띄운다
+  const [showAllPatrolling, setShowAllPatrolling] = useState(false)
+  const robotList = robots ?? []
+  const patrollingRobots = robotList.filter((r) => r.status === '순찰중')
+  const selectedRobot =
+    robotList.find((r) => r.id === pickedRobotId) ?? patrollingRobots[0] ?? robotList[0]
+  const isPatrolling = showAllPatrolling || selectedRobot?.status === '순찰중'
+  const mapRobot = robotMapPosition(selectedRobot, mapData?.robot)
+  const mapRobots = patrollingRobots
+    .map((r) => robotMapPosition(r, mapData?.robot))
+    .filter((r): r is NonNullable<typeof r> => Boolean(r))
+
+  const pickRobot = (id: string) => {
+    setShowAllPatrolling(false)
+    setPickedRobotId(id)
+  }
 
   // 긴급 알림 모달 — push 도착 시에만 (기존 동작 유지)
   const [alertEvent, setAlertEvent] = useState<PatrolEvent | null>(null)
@@ -70,6 +94,18 @@ export default function Dashboard() {
   const dismissAlert = () => {
     if (alertEvent) markEmergencySeen(alertEvent.id)
     setAlertEvent(null)
+  }
+
+  /* 순찰 완료 모달 — 순찰이 끝나면 뜨고, [확인] 을 누르면 이벤트 이력을 다시 불러온다
+     (순찰 중 탐지된 이벤트가 이력에 반영되도록) */
+  const [donePatrol, setDonePatrol] = useState<Patrol | null>(null)
+  usePatrolComplete((patrol) => {
+    if (!isPatrolDoneSeen(patrol.id)) setDonePatrol(patrol)
+  })
+  const confirmPatrolDone = () => {
+    if (donePatrol) markPatrolDoneSeen(donePatrol.id)
+    setDonePatrol(null)
+    refetchEvents()
   }
 
   return (
@@ -95,9 +131,28 @@ export default function Dashboard() {
               {mapData ? (
                 <ComplexMap
                   map={mapData.map}
-                  robot={mapData.robot}
+                  robot={showAllPatrolling ? undefined : mapRobot}
+                  robots={showAllPatrolling ? mapRobots : undefined}
                   pins={mapData.pins}
                   checkpoints={mapData.checkpoints}
+                  patrolling={isPatrolling}
+                  bottomRight={
+                    patrollingRobots.length > 0 ? (
+                      <button
+                        type="button"
+                        className="botall"
+                        aria-pressed={showAllPatrolling}
+                        onClick={() => setShowAllPatrolling(true)}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden>
+                          <circle cx="7" cy="8" r="2.6" />
+                          <circle cx="17" cy="8" r="2.6" />
+                          <circle cx="12" cy="16.5" r="2.6" />
+                        </svg>
+                        순찰 중 로봇 전체 보기
+                      </button>
+                    ) : undefined
+                  }
                 />
               ) : (
                 <R0KiPatrolMap
@@ -107,15 +162,24 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* 로봇 요약 — 지도 아래 한 줄. 이름·상태·배터리, 클릭 시 로봇 상세로 */}
-            {(robots ?? []).length > 0 && (
+            {/* 로봇 요약 — 지도 아래 한 줄. 클릭하면 그 로봇을 지도에 띄운다
+                (순찰중: 위치 + 이동 경로 / 대기·충전중: 마지막 위치만) */}
+            {robotList.length > 0 && (
               <div className="botlist">
-                {(robots ?? []).map((r) => {
+                {robotList.map((r) => {
                   const battery = r.battery
                   const hasBattery = battery != null
+                  const picked = !showAllPatrolling && r.id === selectedRobot?.id
 
                   return (
-                    <Link key={r.id} to={`/app/robots/${r.id}`} className="botitem">
+                    <button
+                      key={r.id}
+                      type="button"
+                      className="botitem"
+                      aria-pressed={picked}
+                      aria-label={`${r.name} ${r.status} — 지도에 ${r.status === '순찰중' ? '위치와 이동 경로' : '마지막 위치'} 표시`}
+                      onClick={() => pickRobot(r.id)}
+                    >
                       <MiniBot />
                       <span className="d" style={{ background: statusColor(r.status) }} />
                       <span className="nm">{r.name}</span>
@@ -137,7 +201,7 @@ export default function Dashboard() {
                       <b className={`pct${hasBattery ? ' num' : ' unknown'}`}>
                         {hasBattery ? `${battery}%` : '--%'}
                       </b>
-                    </Link>
+                    </button>
                   )
                 })}
               </div>
@@ -165,11 +229,25 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 최근 순찰 이력 */}
+            {/* 이벤트 이력 */}
             <div className="zone glass g2 histzone">
               <div className="zh">
-                <span className="zl">최근 순찰 이력</span>
-                <span className="chip"><span className="d" style={{ background: 'var(--graphic)' }} />최신순</span>
+                <span className="zl">이벤트 이력</span>
+                <span className="zhtools">
+                  <button
+                    type="button"
+                    className="zrefresh"
+                    onClick={refetchEvents}
+                    disabled={eventsLoading}
+                    aria-label="이벤트 이력 새로고침"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden>
+                      <path d="M20 11.5a8 8 0 1 1-2.6-5.4" />
+                      <path d="M20 4v5h-5" />
+                    </svg>
+                  </button>
+                  <span className="chip"><span className="d" style={{ background: 'var(--graphic)' }} />최신순</span>
+                </span>
               </div>
 
               <div className="hist">
@@ -192,24 +270,31 @@ export default function Dashboard() {
                   </>
                 )}
 
-                <div className="hgrp">순찰 기록 · 최신순</div>
+                <div className="hgrp">탐지 이벤트 · 최신순</div>
                 {normalEvents.map((e) => (
                   <Link key={e.id} to={`/app/events/${e.id}`} className="hr">
                     <span className="tm">{e.time}</span>
-                    <span className="hb" style={{ background: dotColor(e) }} />
+                    <span className="hb" style={{ background: 'var(--detect)' }} />
                     <span className="hc">
-                      <span className="ht">{e.type}{e.status === '처리완료' ? ' · 처리 완료' : ' 감지'}</span>
+                      <span className="ht">{e.type} 탐지</span>
                       <span className="hs">{e.location} · {e.robotId}</span>
                     </span>
                   </Link>
                 ))}
-                {(events ?? []).length === 0 && (
-                  <div className="hgrp">기록된 이력이 없습니다</div>
+                {detectedEvents.length === 0 && (
+                  <div className="hgrp">탐지된 이벤트가 없습니다</div>
                 )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* 순찰 완료 모달 — 확인 시 이벤트 이력 새로고침.
+            긴급 알림이 떠 있으면 그쪽을 먼저 처리하도록 뒤로 미룬다.
+            r0ki CSS 는 .r0ki 하위로만 스코프되므로 반드시 셸 안에서 렌더한다 */}
+        {donePatrol && !alertEvent && (
+          <PatrolCompleteModal patrol={donePatrol} onConfirm={confirmPatrolDone} />
+        )}
       </R0KiShell>
 
       {/* 긴급 알림 모달 (기존 push 동작 유지) */}
