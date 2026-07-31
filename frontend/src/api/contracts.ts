@@ -39,12 +39,29 @@ export type SignInRequest = {
   password: string
 }
 
+/**
+ * 로그인 응답.
+ *
+ * 계정만 만들고 이탈한 사용자를 다시 온보딩으로 돌려보내야 해서,
+ * 백엔드가 로봇·지도 등록 여부를 함께 내려준다.
+ * 두 값이 모두 true 여야 대시보드로 진입한다.
+ *
+ * 필드가 아직 안 내려오는 동안에는 undefined 로 두고
+ * readOnboardingStatus() 가 로봇 목록 조회로 보완한다.
+ */
 export type SignInResponse = {
   success: boolean,
   code: string,
   message: string,
   data: {
     accessToken: string
+    /** 로봇 등록 여부 */
+    robotRegistered?: boolean
+    /** 지도(구역 포함) 등록 여부 */
+    mapRegistered?: boolean
+    /** 등록돼 있으면 이어갈 때 쓴다 — 없으면 목록 조회로 채운다 */
+    robotId?: Id | null
+    mapId?: Id | null
   }
 }
 

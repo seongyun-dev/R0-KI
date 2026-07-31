@@ -10,6 +10,12 @@ type OnboardingProgressState = {
   robotId: string | number | null
   mapId: string | number | null
   begin: (ownerLoginId: string) => void
+  /** 로그인 시 서버가 알려준 등록 상태로 이어가기 */
+  resume: (progress: {
+    ownerLoginId: string
+    phase: OnboardingPhase
+    robotId?: string | number | null
+  }) => void
   moveToRobot: () => void
   moveToScan: (robotId: string | number) => void
   moveToZones: (mapId: string | number) => void
@@ -28,6 +34,15 @@ export const useOnboardingProgress = create<OnboardingProgressState>()(
           ownerLoginId: ownerLoginId.trim(),
           phase: 'robot',
           robotId: null,
+          mapId: null,
+        }),
+      // 로그인 응답의 등록 여부로 이어갈 지점을 정한다.
+      // 계정만 만들고 이탈했다가 다시 로그인한 경우가 여기로 들어온다.
+      resume: ({ ownerLoginId, phase, robotId }) =>
+        set({
+          ownerLoginId: ownerLoginId.trim(),
+          phase,
+          robotId: robotId ?? null,
           mapId: null,
         }),
       moveToRobot: () => set({ phase: 'robot', mapId: null }),

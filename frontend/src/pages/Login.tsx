@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { R0KiAuthShell } from '../components/layout/R0KiAuthShell'
 import { setAuthPersistence, useAuthStore } from '../features/auth/useAuthStore'
-import { authApi, robotsApi } from '../api/services'
+import { authApi } from '../api/services'
 import { ApiError } from '../api/client'
+import { readOnboardingStatus } from '../features/auth/onboardingStatus'
+import { useOnboardingProgress } from '../features/onboarding/useOnboardingProgress'
 
 /** 로그인 (1a) — R0Kiauth 시안 pLogin */
 export default function Login() {
@@ -11,6 +13,7 @@ export default function Login() {
   const location = useLocation()
   const login = useAuthStore((s) => s.login)
   const setMapContext = useAuthStore((s) => s.setMapContext)
+  const resumeOnboarding = useOnboardingProgress((s) => s.resume)
   const [loginId, setLoginId] = useState('')
   const [password, setPassword] = useState('')
   // 목업 — 세션은 zustand persist 로 항상 유지된다. 서버 만료 정책 연동 시 값 사용
@@ -38,13 +41,23 @@ export default function Login() {
               setAuthPersistence(remember)
               login(loginId, response.accessToken)
 
-              navigate(from, { replace: true })
-              void robotsApi
-                .list({ page: 0, size: 1 })
-                .then(({ content }) => {
-                  setMapContext({ robotId: content[0]?.robotId ?? null })
+              /* 계정만 만들고 이탈한 사용자는 로봇·지도가 없다. 그대로 대시보드에 들여보내면
+                 지도도 로봇도 없는 빈 관제 화면이 뜨므로, 남은 단계로 되돌린다.
+                 판정 근거는 로그인 응답의 등록 여부(백엔드 제공) — 브라우저 저장소가 아니라
+                 서버 상태를 보므로 다른 기기·시크릿창에서 로그인해도 같게 동작한다. */
+              const status = await readOnboardingStatus(response)
+              setMapContext({ robotId: status.robotId })
+
+              if (status.nextPhase) {
+                resumeOnboarding({
+                  ownerLoginId: loginId,
+                  phase: status.nextPhase,
+                  robotId: status.robotId,
                 })
-                .catch(() => undefined)
+                navigate('/signup/onboarding', { replace: true })
+              } else {
+                navigate(from, { replace: true })
+              }
             } catch (reason) {
               setError(
                 reason instanceof ApiError && reason.status === 401

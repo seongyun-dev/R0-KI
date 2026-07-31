@@ -217,9 +217,11 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
 
       <div className="au-act">
         <span className="grow" />
+        {/* 이 버튼으로 계정 등록이 끝난다(POST /api/auth/signup).
+            로봇·지도는 이어지는 단계라 여기서 "다음"이 아니라 "완료"로 끊는다. */}
         <button type="submit" className="btn btn-p btn-add" disabled={isSubmitting}>
-          {isSubmitting ? '등록 중…' : '다음: 로봇 등록'}
-          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+          {isSubmitting ? '등록 중…' : '회원가입 완료'}
+          <svg viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></svg>
         </button>
       </div>
     </form>
