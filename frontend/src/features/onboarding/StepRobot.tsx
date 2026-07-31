@@ -87,11 +87,10 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
           이전
         </button>
         <span className="grow" />
-        {/* 등록을 마치면 대시보드로 간다 — 지도는 다음 로그인 때 이어서 등록한다.
-            "다음: 맵 파악하기"로 두면 실제 이동과 문구가 어긋난다. */}
+        {/* 등록을 마치면 맵 등록 단계로 이어진다 */}
         <button type="submit" className="btn btn-p btn-add" disabled={isSubmitting}>
-          {isSubmitting ? '등록 중…' : '로봇 등록 완료'}
-          <svg viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></svg>
+          {isSubmitting ? '등록 중…' : '다음: 맵 파악하기'}
+          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
         </button>
       </div>
     </form>
