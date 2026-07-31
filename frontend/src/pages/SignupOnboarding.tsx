@@ -74,7 +74,7 @@ export default function SignupOnboarding() {
   const setMapContext = useAuthStore((s) => s.setMapContext)
 
   return (
-    <R0KiAuthShell>
+    <R0KiAuthShell bootTagline="관리자 계정 등록을 준비하고 있습니다.">
       <div className="au-wrap">
         <div className={`glass g2 au-card ${cardWidth[phase]}`}>
           <h1 className="au-h">{copy[phase].title}</h1>
