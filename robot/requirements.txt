@@ -1,0 +1,3 @@
+# Runtime Python dependencies are supplied by the Jetson ROS 2 Humble install.
+# The robot venv is intentionally created with --system-site-packages so that
+# /opt/ros/humble Python packages, including rclpy, stay available.
