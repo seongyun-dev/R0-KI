@@ -55,6 +55,24 @@ The production environment template is in
 `config/robot.env.example`. The ROS JSON contract and integration points are in
 `docs/ai-ros-contract-v1.md`.
 
+## ESP32, drive, and MQTT implementation snapshot
+
+The assembled robot's verified hardware implementation is preserved separately
+from the no-movement OTA entrypoint:
+
+- `roki/`: ESP32 JSON protocol, odometry, safety, mission, and motion runtime;
+- `roki-iot/`: the existing MQTT publisher composed with `roki/`;
+- `hardware/`: ESP32 firmware 2.2.0 and bounded bench/drive tests.
+
+These directories mirror the live Jetson paths `/home/e103/roki`,
+`/home/e103/roki-iot`, and selected files from `/home/e103/robot-hw-test`.
+They are not yet the process started by `scripts/run.sh`.
+
+Read [the ESP32/MQTT runtime handoff](docs/esp32-mqtt-runtime-handoff.md)
+before changing the production entrypoint, systemd service, or OTA activation
+flow. It records the pin map, wire protocol, verified commands, safety
+invariants, test evidence, and remaining integration work.
+
 ## Mission integration
 
 The patrol pipeline must do three things:

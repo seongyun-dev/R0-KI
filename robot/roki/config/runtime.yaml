@@ -1,0 +1,3 @@
+runtime:
+  # Serial이 끊긴 동안 reconnect 여부를 확인하는 주기.
+  disconnected_poll_sec: 0.05

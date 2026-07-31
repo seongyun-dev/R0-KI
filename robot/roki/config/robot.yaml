@@ -1,0 +1,62 @@
+robot:
+  id: "ROKI-01"
+  name: "RO-KI"
+  timezone: "Asia/Seoul"
+
+control:
+  # ESP32의 8-bit PWM 물리 범위. 음수 명령은 후진을 뜻한다.
+  # 조립 완료 후 20% PWM(약 51)에서 좌우 구동이 확인되었다.
+  # 45는 ramp 중 정지구간을 짧게 넘기기 위한 보수적 최소 출력이다.
+  speed_min: 45
+  speed_max: 255
+  # ESP32 odometry 주기(100ms)마다 최대 8 PWM씩 증가한다.
+  speed_ramp_per_update: 8
+  # TODO(calibration): 좌우 엔코더 극성과 정상 편차를 확인한 뒤 결정한다.
+  straight_correction_kp_deg_per_tick: null
+  maximum_straight_correction_deg: null
+
+  servo_center_deg: 80
+  # 기존 안전 펌웨어의 검증 제한 범위를 우선 사용한다.
+  servo_min_deg: 60
+  servo_max_deg: 100
+
+odometry:
+  # 장착된 휠의 확정 지름: 65 mm.
+  wheel_diameter_m: 0.065
+  # TODO(calibration): 아래 두 원자료를 데이터시트/실측으로 확인한다.
+  motor_encoder_ticks_per_motor_revolution: null
+  gear_ratio: null
+  # TODO(calibration): 현재 펌웨어의 A상 RISING ISR 방식 기준으로
+  # 실제 바퀴 1회전당 tick 수를 실측해 입력한다.
+  encoder_ticks_per_revolution: null
+
+hardware:
+  computer: "Jetson Orin Nano"
+  controller: "ESP32 DevKit V1"
+  motor_driver: "BTS7960 x2"
+  drive_motor: "JGB37-520 Encoder Motor 12V 250RPM"
+  steering_servo: "MG996R"
+  line_sensor: "5-channel digital"
+  line_sensor_count: 5
+  battery: "3S LiPo"
+  # 핀맵, PWM 채널, 모터 방향 매핑은 ESP32 펌웨어 파일을 단일 기준으로
+  # 사용하며 이 설정 파일에 중복 정의하지 않는다.
+
+state:
+  initial: "IDLE"
+
+serial_protocol:
+  speed_percent:
+    min: 0
+    max: 100
+
+  steering_angle_deg:
+    min: -10
+    max: 10
+
+  battery_percent:
+    min: 0
+    max: 100
+
+  line_sensor:
+    count: 5

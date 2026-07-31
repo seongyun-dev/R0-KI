@@ -1,0 +1,11 @@
+model:
+  onnx_path: "/home/e103/roki/ai/models/onnx/model.onnx"
+  engine_path: "/home/e103/roki/ai/models/engines/model.engine"
+  input_width: 640
+  input_height: 640
+  confidence_threshold: 0.5
+
+camera:
+  device: 0
+  width: 1280
+  height: 720

@@ -1,0 +1,11 @@
+lidar:
+  scan_topic: "/scan"
+
+frames:
+  map: "map"
+  odom: "odom"
+  base: "base_link"
+
+obstacle:
+  front_angle_deg: 30
+  stop_distance_m: 0.6

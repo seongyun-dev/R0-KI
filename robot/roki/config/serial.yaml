@@ -1,0 +1,28 @@
+serial:
+  # ttyUSB 번호는 USB 재연결 순서에 따라 바뀔 수 있으므로 CP2102의
+  # 안정적인 by-id 경로를 사용한다.
+  port: "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+
+  # Jetson과 ESP32가 동일한 통신 속도를 사용해야 한다.
+  baudrate: 115200
+
+  # read()가 데이터를 기다리는 최대 시간이다.
+  timeout_sec: 0.05
+
+  # 연결이 끊긴 경우 재연결을 시도하는 간격이다.
+  reconnect_interval_sec: 2.0
+
+  # ESP32 운영 펌웨어 값과 같아야 한다.
+  telemetry_interval_ms: 100
+  command_timeout_ms: 400
+
+device:
+  # 특정 USB 장치만 선택해야 할 때 VID/PID를 지정한다.
+  # ESP32 실물이 없으므로 현재는 null로 유지한다.
+  preferred_vid: null
+  preferred_pid: null
+
+  # 자동 탐색 시 허용할 Linux 시리얼 포트 접두사이다.
+  allowed_port_prefixes:
+    - "/dev/ttyUSB"
+    - "/dev/ttyACM"
