@@ -1,0 +1,7 @@
+board_manager:
+    additional_urls:
+        - https://espressif.github.io/arduino-esp32/package_esp32_index.json
+directories:
+    data: /home/e103/robot-hw-test/arduino-data
+    downloads: /home/e103/robot-hw-test/arduino-downloads
+    user: /home/e103/robot-hw-test/arduino-user
