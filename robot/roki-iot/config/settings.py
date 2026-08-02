@@ -175,11 +175,11 @@ def load_settings() -> AppSettings:
         ),
         pipeline_source_a=os.getenv(
             "PIPELINE_SOURCE_A",
-            "0",
+            "/dev/roki_camera_front",
         ),
         pipeline_source_b=os.getenv(
             "PIPELINE_SOURCE_B",
-            "1",
+            "/dev/roki_camera_rear",
         ),
         pipeline_extra_args=os.getenv(
             "PIPELINE_EXTRA_ARGS",
@@ -195,13 +195,12 @@ def load_settings() -> AppSettings:
             name="PIPELINE_ENABLED",
             default=True,
         ),
-        # 51/255 is 20 percent duty, the lowest value already verified on
-        # the assembled rear drive. Steering 80 degrees is the measured
-        # straight-ahead position.
+        # PWM 45 is the lowest field-tested motion value. Steering 80 degrees
+        # is the measured straight-ahead position.
         patrol_drive_speed_pwm=int(
             os.getenv(
                 "PATROL_DRIVE_SPEED_PWM",
-                "51",
+                "45",
             )
         ),
         patrol_steering_degrees=int(

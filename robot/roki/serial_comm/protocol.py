@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -73,11 +74,13 @@ class SequenceCounter:
 
     def __init__(self) -> None:
         self._value = 0
+        self._lock = threading.Lock()
 
     def next(self) -> int:
-        value = self._value
-        self._value = 0 if value == SEQUENCE_MAX else value + 1
-        return value
+        with self._lock:
+            value = self._value
+            self._value = 0 if value == SEQUENCE_MAX else value + 1
+            return value
 
 
 def _json_line(payload: dict[str, object]) -> str:

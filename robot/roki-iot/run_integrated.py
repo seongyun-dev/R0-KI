@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import signal
+import os
 from pathlib import Path
 from typing import Any
 
@@ -36,18 +37,61 @@ def _build_final_runtime() -> Any:
     return runtime
 
 
+def _build_navigation_service(route_path: str | Path | None = None) -> Any:
+    """Load the local route and build a hardware-independent waypoint mission."""
+
+    selected_path = Path(
+        route_path
+        or os.getenv(
+            "ROKI_ROUTE_FILE",
+            str(FINAL_RUNTIME_ROOT / "config" / "route.local.yaml"),
+        )
+    )
+    if not selected_path.is_file():
+        raise RuntimeError(
+            "waypoint route file is missing; refusing fixed straight patrol: "
+            f"{selected_path}"
+        )
+    final_root = str(FINAL_RUNTIME_ROOT)
+    if final_root not in sys.path:
+        sys.path.insert(0, final_root)
+    from navigation.encoder_waypoint import (
+        EncoderWaypointSettings,
+        validate_straight_encoder_route,
+    )
+    from navigation.route import load_route
+    from navigation.service import WaypointNavigationService
+
+    route = load_route(selected_path)
+    validate_straight_encoder_route(
+        route,
+        EncoderWaypointSettings(
+            start_x_m=float(os.getenv("ROKI_ROUTE_START_X_M", "0.0")),
+            start_y_m=float(os.getenv("ROKI_ROUTE_START_Y_M", "0.0")),
+            maximum_travel_m=float(
+                os.getenv("ROKI_ROUTE_MAXIMUM_TRAVEL_M", "0.70")
+            ),
+        ),
+    )
+    return WaypointNavigationService(route)
+
+
 def create_integrated_application(
     *,
     final_runtime: Any | None = None,
+    navigation_service: Any | None = None,
 ) -> Any:
     """Final Runtime과 기존 Publisher가 사용할 객체를 조립한다."""
 
     runtime = final_runtime or _build_final_runtime()
 
     from config.settings import load_settings
+    from integration.encoder_waypoint_runtime_service import (
+        EncoderWaypointRuntimeService,
+    )
     from integration.runtime_state_backend_adapter import (
-        FinalRuntimeService,
         RuntimeStateBackendAdapter,
+        WaypointStateBackendAdapter,
     )
     from mqtt.client import MqttClient
     from mqtt.command_handler import PatrolCommandHandler
@@ -62,11 +106,26 @@ def create_integrated_application(
         backend_state_store=backend_state_store,
     )
     adapter.connect()
+    if navigation_service is not None:
+        WaypointStateBackendAdapter(
+            navigation_service,
+            backend_state_store,
+        ).connect()
 
-    runtime_service = FinalRuntimeService(
+    runtime_service = EncoderWaypointRuntimeService(
         runtime,
         patrol_drive_speed_pwm=settings.patrol_drive_speed_pwm,
         patrol_steering_degrees=settings.patrol_steering_degrees,
+        navigation_service=navigation_service,
+        navigation_start_x_m=float(
+            os.getenv("ROKI_ROUTE_START_X_M", "0.0")
+        ),
+        navigation_start_y_m=float(
+            os.getenv("ROKI_ROUTE_START_Y_M", "0.0")
+        ),
+        navigation_maximum_travel_m=float(
+            os.getenv("ROKI_ROUTE_MAXIMUM_TRAVEL_M", "0.70")
+        ),
     )
     mqtt_client = MqttClient(settings)
     pipeline_runner = PatrolPipelineRunner(
@@ -94,7 +153,9 @@ def create_integrated_application(
 
 
 def main() -> None:
-    application = create_integrated_application()
+    application = create_integrated_application(
+        navigation_service=_build_navigation_service()
+    )
 
     def stop_handler(_signum: int, _frame: object) -> None:
         raise KeyboardInterrupt

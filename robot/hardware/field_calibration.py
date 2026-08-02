@@ -8,7 +8,6 @@ It opens the ESP32 exclusively, sends STOP first, and sends STOP again on exit.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import re
 import time
@@ -23,12 +22,9 @@ from calibration_core import (
     summarize_records,
     ticks_per_revolution,
 )
+from esp32_port import Esp32PortError, resolve_esp32_port
 
 
-DEFAULT_PORT_GLOB = (
-    "/dev/serial/by-id/"
-    "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_*-if00-port0"
-)
 EXPECTED_FIRMWARE = "roki-operating"
 SUPPORTED_VERSIONS = frozenset({"2.2.0", "3.0.0"})
 LINE_SCENARIOS = (
@@ -48,15 +44,10 @@ class CalibrationError(RuntimeError):
 
 
 def find_port(explicit_port: str | None) -> str:
-    if explicit_port:
-        return explicit_port
-    matches = sorted(glob.glob(DEFAULT_PORT_GLOB))
-    if len(matches) != 1:
-        raise CalibrationError(
-            "Expected exactly one ESP32 by-id device; "
-            f"found {len(matches)}: {matches}. Pass --port explicitly."
-        )
-    return matches[0]
+    try:
+        return resolve_esp32_port(explicit_port)
+    except Esp32PortError as error:
+        raise CalibrationError(str(error)) from error
 
 
 def safe_label(value: str) -> str:

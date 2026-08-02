@@ -14,6 +14,9 @@ WorkingDirectory=/opt/aiot/iot/current
 EnvironmentFile=-/opt/aiot/secrets/robot.env
 Environment=ROS_LOCALHOST_ONLY=1
 Environment=ROS_DOMAIN_ID=0
+Environment=ROS_HOME=/var/lib/aiot/ros
+Environment=ROS_LOG_DIR=/var/lib/aiot/ros/log
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/aiot/iot/current/robot/scripts/run.sh
 Restart=on-failure
 RestartSec=5s

@@ -28,12 +28,16 @@ done
 
 echo '===== VIDEO DEVICES ====='
 v4l2-ctl --list-devices 2>/dev/null || true
+echo '--- stable video links'
+ls -l /dev/v4l/by-id /dev/v4l/by-path 2>/dev/null || true
 for device in /dev/video*; do
   [[ -e "$device" ]] || continue
   echo "--- $device"
   udevadm info --query=property --name="$device" 2>/dev/null \
-    | grep -E '^(DEVNAME|ID_VENDOR_ID|ID_MODEL_ID|ID_SERIAL|ID_SERIAL_SHORT|ID_PATH)=' \
+    | grep -E '^(DEVNAME|ID_VENDOR_ID|ID_MODEL_ID|ID_SERIAL|ID_SERIAL_SHORT|ID_PATH|ID_V4L_CAPABILITIES)=' \
     || true
+  index_path="/sys/class/video4linux/$(basename "${device}")/index"
+  [[ -r "${index_path}" ]] && echo "V4L_INDEX=$(<"${index_path}")"
 done
 
 echo '===== ROS 2 ====='

@@ -95,6 +95,12 @@ class RobotRuntime:
         self._stop_requested = True
         self._mission.emergency_stop()
 
+    def stop_patrol(self, reason: str = "PATROL_STOP") -> None:
+        """Clear the motion target and send STOP without waiting for telemetry."""
+
+        self._mission.stop_patrol()
+        self._send_stop(reason)
+
     def run_forever(self) -> None:
         logger.info("RO-KI headless runtime started")
         try:
@@ -220,7 +226,13 @@ class RobotRuntime:
             )
             return
         latest_decision = self._evaluate_safety(self._clock())
-        if not latest_decision.allowed or command.speed == 0:
+        latest_mission = self._mission.current()
+        if (
+            not latest_decision.allowed
+            or command.speed == 0
+            or latest_mission.speed == 0
+            or latest_mission.emergency_stop
+        ):
             self._send_stop(latest_decision.fault)
             return
         if not self._bridge.write_line(

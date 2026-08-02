@@ -3,17 +3,14 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import time
-from pathlib import Path
 
 import serial
 
+from esp32_port import Esp32PortError, resolve_esp32_port
 
-PORT = Path(
-    "/dev/serial/by-id/"
-    "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
-)
 EXPECTED_FIRMWARE_NAME = "roki-operating"
 SUPPORTED_FIRMWARE_VERSIONS = {"2.2.0", "3.0.0"}
 
@@ -25,8 +22,16 @@ def send(port: serial.Serial, payload: dict[str, object]) -> None:
 
 
 def main() -> int:
-    if not PORT.exists():
-        raise SystemExit(f"ERROR: ESP32 serial path is missing: {PORT}")
+    parser = argparse.ArgumentParser(
+        description="No-movement ESP32 operating protocol preflight"
+    )
+    parser.add_argument("--port", help="explicit ESP32 serial device path")
+    args = parser.parse_args()
+    try:
+        port_name = resolve_esp32_port(args.port)
+    except Esp32PortError as error:
+        raise SystemExit(f"ERROR: {error}") from error
+    print(f"ESP32_PORT={port_name}")
 
     seen = {
         "stopAck": False,
@@ -38,7 +43,7 @@ def main() -> int:
     }
 
     with serial.Serial(
-        str(PORT),
+        port_name,
         115200,
         timeout=0.1,
         exclusive=True,

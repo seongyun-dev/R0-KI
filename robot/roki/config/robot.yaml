@@ -20,15 +20,52 @@ control:
   servo_min_deg: 60
   servo_max_deg: 100
 
+line_following:
+  # 2026-08-02 현장 시험에서 센서 보드가 선을 벗어나기 전에 조향할 시간이
+  # 부족함을 확인했다. 원시 진단값만 보존하고 주행 제어에는 사용하지 않는다.
+  enabled: false
+  # 2026-08-02 정지 측정 기준: 검은색=0, 물리적 왼쪽에서 오른쪽 순서.
+  black_value: 0
+  weights: [-2, -1, 0, 1, 2]
+  drive_speed_pwm: 45
+  steering_center_deg: 80
+  # 실물 정지 시험에서 60=왼쪽, 80=정면, 100=오른쪽을 확인했다.
+  steering_min_deg: 60
+  steering_max_deg: 100
+  # 현재 관찰상 큰 각도가 오른쪽 조향. 첫 통합 시험에서 한 번 확인한다.
+  steering_sign: 1
+  kp_deg_per_error: 10.0
+  kd_deg_per_error_delta: 1.0
+  maximum_correction_deg: 20
+  # 라인이 한 프레임이라도 사라지면 즉시 속도 0, 두 프레임이면 유실 확정.
+  lost_confirm_frames: 2
+  # 종료 마커는 첫 이동 로그를 보고 확정할 수 있도록 조정 가능한 후보값이다.
+  destination_min_black_sensors: 4
+  destination_confirm_frames: 3
+  destination_arm_after_follow_frames: 10
+
+navigation:
+  mode: "waypoint"
+  map_creation: "manual_drive_slam"
+  route_file: "config/route.local.yaml"
+  # 자동차형 차체는 제자리 회전이 불가능하므로 waypoint 사이를 연속 곡선으로 잇는다.
+  allow_in_place_rotation: false
+  waypoint_acceptance_radius_m: 0.30
+  destination_acceptance_radius_m: 0.20
+  # 곡선 cmd_vel은 아래 두 실측값이 채워질 때까지 fail-closed로 정지한다.
+  wheelbase_m: null
+  maximum_road_wheel_angle_deg: null
+  maximum_linear_speed_mps: 0.40
+
 odometry:
   # 장착된 휠의 확정 지름: 65 mm.
   wheel_diameter_m: 0.065
   # TODO(calibration): 아래 두 원자료를 데이터시트/실측으로 확인한다.
   motor_encoder_ticks_per_motor_revolution: null
   gear_ratio: null
-  # TODO(calibration): 현재 펌웨어의 A상 RISING ISR 방식 기준으로
-  # 실제 바퀴 1회전당 tick 수를 실측해 입력한다.
-  encoder_ticks_per_revolution: null
+  # 2026-08-02 수동 1회전 각 3회 실측: LEFT 329.0, RIGHT 328.0 ticks/rev.
+  # 런타임은 단일 정수값을 사용하므로 전체 평균 328.5를 329로 반올림한다.
+  encoder_ticks_per_revolution: 329
 
 hardware:
   computer: "Jetson Orin Nano"

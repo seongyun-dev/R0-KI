@@ -21,7 +21,11 @@ source "${ros_setup}"
 set -u
 
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
+export ROS_HOME="${ROS_HOME:-/var/lib/aiot/ros}"
+export ROS_LOG_DIR="${ROS_LOG_DIR:-${ROS_HOME}/log}"
+mkdir -p "${ROS_LOG_DIR}"
 export PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}"
-"${python_bin}" -m aiot_robot.smoke
-"${python_bin}" -m aiot_robot.ros_smoke
+export PYTHONDONTWRITEBYTECODE=1
+"${python_bin}" -B -m aiot_robot.smoke
+"${python_bin}" -B -m aiot_robot.ros_smoke
 echo "Robot ${phase} smoke passed; no actuator command was sent"

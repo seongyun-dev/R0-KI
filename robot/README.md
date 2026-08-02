@@ -51,6 +51,10 @@ Run the checks with:
 ./scripts/smoke-test.sh pre-activate
 ```
 
+The assembled Jetson must expose the ESP32 as `/dev/roki_esp32`. The ESP32 and
+LiDAR CP2102 adapters both report serial `0001`, so `/dev/serial/by-id/...0001`
+is ambiguous and is intentionally not used by the Robot runtime.
+
 The production environment template is in
 `config/robot.env.example`. The ROS JSON contract and integration points are in
 `docs/ai-ros-contract-v1.md`.

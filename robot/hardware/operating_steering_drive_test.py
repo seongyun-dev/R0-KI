@@ -6,15 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from pathlib import Path
 
 import serial
 
+from esp32_port import Esp32PortError, resolve_esp32_port
 
-PORT = Path(
-    "/dev/serial/by-id/"
-    "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
-)
 MAX_TEST_SPEED_PWM = 51
 MIN_ANGLE = 60
 MAX_ANGLE = 100
@@ -50,6 +46,7 @@ def read_messages(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--port", help="explicit ESP32 serial device path")
     parser.add_argument("--confirm", required=True)
     parser.add_argument("--speed", type=int, default=51)
     parser.add_argument("--segment-ms", type=int, default=600)
@@ -63,13 +60,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if args.confirm != "DRIVE_AREA_CLEAR":
+    expected_confirmation = (
+        "STEERING_CLEAR" if args.speed == 0 else "DRIVE_AREA_CLEAR"
+    )
+    if args.confirm != expected_confirmation:
         raise SystemExit(
-            "ERROR: use --confirm DRIVE_AREA_CLEAR only after lifting/checking "
-            "the robot and clearing the test area."
+            f"ERROR: use --confirm {expected_confirmation} only after "
+            "clearing the steering linkage and test area."
         )
-    if not 1 <= args.speed <= MAX_TEST_SPEED_PWM:
-        raise SystemExit(f"ERROR: speed must be 1..{MAX_TEST_SPEED_PWM}")
+    if not 0 <= args.speed <= MAX_TEST_SPEED_PWM:
+        raise SystemExit(f"ERROR: speed must be 0..{MAX_TEST_SPEED_PWM}")
     if not 200 <= args.segment_ms <= 1000:
         raise SystemExit("ERROR: segment-ms must be 200..1000")
 
@@ -83,12 +83,15 @@ def main() -> int:
         raise SystemExit(f"ERROR: every angle must be {MIN_ANGLE}..{MAX_ANGLE}")
     if args.segment_ms * len(angles) > 5000:
         raise SystemExit("ERROR: total powered test time must not exceed 5 seconds")
-    if not PORT.exists():
-        raise SystemExit(f"ERROR: ESP32 serial path is missing: {PORT}")
+    try:
+        port_name = resolve_esp32_port(args.port)
+    except Esp32PortError as error:
+        raise SystemExit(f"ERROR: {error}") from error
+    print(f"ESP32_PORT={port_name}")
 
     sequence = 0
     with serial.Serial(
-        str(PORT),
+        port_name,
         115200,
         timeout=0.03,
         exclusive=True,
@@ -131,6 +134,8 @@ def main() -> int:
                 )
 
             heartbeat_interval = 0.1
+            if args.speed == 0:
+                print("STEERING_ONLY: motor PWM remains zero")
             for angle in angles:
                 print(f"CONTROL speed={args.speed} steering={angle}")
                 segment_deadline = (

@@ -1,5 +1,11 @@
 # RO-KI 라인트레이싱 현장 통합 계획
 
+> [!CAUTION]
+> **2026-08-02 중단 결정**: 실주행에서 중앙 패턴 `11011` 이후 조향이 차체에
+> 반영되기 전에 `11111`로 이탈했다. 서보의 `60=왼쪽, 80=정면, 100=오른쪽`과
+> 제어 명령 자체는 정상임을 별도로 확인했다. 라인센서는 원시 진단용으로만 남기고,
+> 현재 주행 기준은 [수동 SLAM + waypoint 계획](robot-demo-integration-plan.md)이다.
+
 > **Project**: S15P11E103 한바퀴
 > **Version**: 0.1
 > **Date**: 2026-08-02
@@ -29,7 +35,9 @@
 ## 2. 2026-08-02 Jetson 점검 결과
 
 - Jetson: Ubuntu 22.04, L4T R36.4.7, ROS 2 Humble, Python 3.10.12.
-- ESP32: CP2102 `/dev/ttyUSB0`, by-id 경로 정상, 점유 프로세스 없음.
+- ESP32: CP2102 `/dev/roki_esp32`, LiDAR는 `/dev/roki_lidar`로 고정.
+- 두 CP2102가 같은 serial `0001`을 보고하므로 `/dev/serial/by-id`는
+  충돌하며 사용 금지. Jetson 물리 USB path 2.4/2.2 기반 udev 별칭을 사용한다.
 - Jetson 실기 운영 펌웨어: 프로토콜 1, 버전 3.0.0, watchdog 400ms.
 - GitLab 하드웨어 시험본 2.2.0과 실기본 3.0.0은 같은 프로토콜 1 범위에서
   검사 도구가 모두 허용한다.
@@ -43,7 +51,9 @@
 - YDLIDAR X4 Pro 드라이버와 설정, RF2O, `slam_toolbox` 설정은 존재함.
 - 설치된 Nav2는 일부 패키지만 있으며 전체 Navigation2 실행 환경은 아님.
 - `roki_ros2_ws`의 `roki_bridge` 노드 파일은 비어 있어 실제 통합 코드로 볼 수 없음.
-- LiDAR 설정도 `/dev/ttyUSB0`를 사용하므로 두 USB 장치 연결 후 고정 별칭이 필수.
+- ESP32와 LiDAR의 고정 별칭 적용 및 운영 JSON preflight 재검증 완료.
+- 카메라 2대도 `/dev/videoN` 대신 물리 USB path와 capture node index를 확인해
+  `/dev/roki_camera_front`, `/dev/roki_camera_rear` 별칭으로 고정해야 한다.
 - `aiot-robot`, `roki-iot` 등의 systemd 자동 실행 서비스는 아직 없음.
 - Jetson의 `roki`, `roki-iot`, `robot-hw-test`는 Git 저장소가 아닌 실기본임.
 - GitLab 공통 파일은 실기본과 일치하지만 Jetson에만 있는 예전 보조 코드가 다수 존재함.

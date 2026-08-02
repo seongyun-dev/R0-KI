@@ -314,6 +314,27 @@ class RobotRuntimeTest(unittest.TestCase):
         self.assertNotIn("control", types)
         self.assertEqual(types[-1], "stop")
 
+    def test_listener_normal_stop_is_rechecked_before_control_write(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        runtime.mission.submit(MissionCommand(30, 80))
+        bridge.connected = True
+        runtime._on_connected()
+        complete_handshake(runtime)
+        runtime._handle_hardware_status(
+            HardwareStatus(82.5, MotorStatus.NORMAL, LineSensorStatus.NORMAL)
+        )
+        runtime._handle_odometry(Odometry(1, 100, 0, 0))
+
+        runtime.add_odometry_listener(
+            lambda _odometry, _state: runtime.stop_patrol("DESTINATION_REACHED")
+        )
+        runtime._handle_odometry(Odometry(2, 200, 1, 1))
+
+        types = [message["type"] for message in bridge.written]
+        self.assertNotIn("control", types)
+        self.assertEqual(types[-1], "stop")
+
     def test_firmware_error_latches_fault_and_stops(self) -> None:
         bridge = FakeBridge([
             json.dumps({"type": "error", "fault": "COMMAND_TIMEOUT"})

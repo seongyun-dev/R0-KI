@@ -41,7 +41,9 @@ install -d -m 0700 -o root -g root /opt/aiot/secrets
 install -d -m 2770 -o aiot -g aiot \
   /var/lib/aiot \
   /var/lib/aiot/evidence \
-  /var/lib/aiot/outbox
+  /var/lib/aiot/outbox \
+  /var/lib/aiot/ros \
+  /var/lib/aiot/ros/log
 install -m 0755 -o root -g root "${source_dir}/aiot-update.sh" /opt/aiot/bin/aiot-update
 install -m 0755 -o root -g root "${source_dir}/aiot-ai-preflight.sh" \
   /opt/aiot/bin/aiot-ai-preflight
@@ -57,6 +59,10 @@ install -m 0644 -o root -g root "${source_dir}/aiot-ai.service" \
   /etc/systemd/system/aiot-ai.service
 install -m 0644 -o root -g root "${source_dir}/aiot-robot.service" \
   /etc/systemd/system/aiot-robot.service
+install -m 0644 -o root -g root "${source_dir}/99-roki-serial.rules" \
+  /etc/udev/rules.d/99-roki-serial.rules
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=tty
 
 if [ ! -e /opt/aiot/secrets/package-read.env ]; then
   install -m 0600 -o root -g root "${source_dir}/package-read.env.example" \

@@ -31,6 +31,10 @@ AI failure does not terminate Robot. Robot's live gate uses the two-second
 `/ai/status` heartbeat, not the operations readiness file, and stays in LIMITED
 mode when AI is missing, stale, or degraded.
 
+The `aiot` system user writes ROS 2 logs below `/var/lib/aiot/ros`, not below
+the read-only `/opt/aiot` release root. Python bytecode generation is disabled
+for immutable Robot releases.
+
 ## AI runtime requirements
 
 The existing entrypoint is:
@@ -104,6 +108,27 @@ sudo install -m 0600 -o root -g root \
 
 Fill the read-only GitLab Deploy Token only in `package-read.env`. Review AI
 paths and optional camera/engine checks in `ai.env`.
+
+The installer also creates stable serial aliases for this assembled Jetson USB
+topology:
+
+```text
+/dev/roki_esp32  -> ESP32 CP2102 on physical USB path 2.4
+/dev/roki_lidar  -> LiDAR CP2102 on physical USB path 2.2
+```
+
+Both adapters report the same factory serial number `0001`, so their
+`/dev/serial/by-id` name must not be used. Keep the labelled devices in the
+recorded USB sockets and verify both aliases after any cable-layout change.
+
+Two USB cameras require the same treatment. A single UVC camera can create
+multiple `/dev/video*` nodes, and their numbers are not stable. After both
+cameras are physically connected, record `ID_PATH`, `ID_V4L_CAPABILITIES`, and
+the video4linux `index` using `robot/hardware/jetson_field_audit.sh`; then add
+udev aliases `/dev/roki_camera_front` and `/dev/roki_camera_rear` for the two
+capture nodes. Configure those aliases in `ai.env`, never numeric video nodes.
+`aiot-ai-run` forwards them to the current pipeline as `--source-a` and
+`--source-b`.
 
 Manual validation:
 

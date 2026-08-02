@@ -8,7 +8,11 @@ ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ready_file="${AIOT_AI_READY_FILE:-/run/aiot/ai-ready.json}"
 evidence_dir="${AIOT_AI_EVIDENCE_DIR:-/var/lib/aiot/evidence}"
 required_engines="${AIOT_AI_REQUIRED_ENGINE_PATHS:-}"
-camera_device="${AIOT_AI_CAMERA_DEVICE:-}"
+camera_devices=(
+  "${AIOT_AI_CAMERA_DEVICE:-}"
+  "${AIOT_AI_CAMERA_FRONT_DEVICE:-}"
+  "${AIOT_AI_CAMERA_REAR_DEVICE:-}"
+)
 
 if [ "${ROS_LOCALHOST_ONLY:-1}" != "1" ]; then
   echo "ROS_LOCALHOST_ONLY must be 1 for Jetson-local AI/Robot traffic" >&2
@@ -39,10 +43,12 @@ if [ ! -d "$(dirname "${ready_file}")" ] || \
   echo "AI readiness directory is not writable: $(dirname "${ready_file}")" >&2
   exit 1
 fi
-if [ -n "${camera_device}" ] && [ ! -r "${camera_device}" ]; then
-  echo "Configured AI camera device is not readable: ${camera_device}" >&2
-  exit 1
-fi
+for camera_device in "${camera_devices[@]}"; do
+  if [ -n "${camera_device}" ] && [ ! -r "${camera_device}" ]; then
+    echo "Configured AI camera device is not readable: ${camera_device}" >&2
+    exit 1
+  fi
+done
 
 if [ -n "${required_engines}" ]; then
   IFS=: read -r -a engine_paths <<<"${required_engines}"
