@@ -99,6 +99,45 @@ iot_ota_validate:
       trap cleanup_ota_test EXIT
       output="$(AIOT_ROOT="${ota_root}" bash infra/jetson/aiot-update.sh)"
       printf '%s\n' "${output}" | grep -q 'phase=config result=missing'
+    - |
+      (
+        package_test_root="$(mktemp -d /tmp/aiot-iot-package-test.XXXXXX)"
+        cleanup_iot_package_test() {
+          find "${package_test_root}" -depth -delete
+        }
+        trap cleanup_iot_package_test EXIT
+
+        test_commit="${CI_COMMIT_SHA:-$(git rev-parse HEAD)}"
+        IOT_COMMIT="${test_commit}" \
+          IOT_ARTIFACT_URL="https://example.invalid/aiot-iot-v0.0.0.tar.gz" \
+          bash infra/scripts/package-iot-release.sh \
+            iot-v0.0.0 "${package_test_root}"
+
+        python3 - "${package_test_root}/aiot-iot-v0.0.0.tar.gz" <<'PY'
+      import pathlib
+      import sys
+      import tarfile
+
+      allowed_roots = {"robot", "scripts", "VERSION", "manifest.json", "CHECKSUMS.sha256"}
+      seen_roots = set()
+      with tarfile.open(sys.argv[1], "r:gz") as archive:
+          for member in archive.getmembers():
+              path = pathlib.PurePosixPath(member.name)
+              normalized = pathlib.PurePosixPath(*[part for part in path.parts if part != "."])
+              if (
+                  path.is_absolute()
+                  or ".." in path.parts
+                  or member.isdev()
+                  or not normalized.parts
+                  or normalized.parts[0] not in allowed_roots
+              ):
+                  raise ValueError(f"unsafe or unexpected archive member: {member.name}")
+              seen_roots.add(normalized.parts[0])
+          if seen_roots != allowed_roots:
+              missing = sorted(allowed_roots - seen_roots)
+              raise ValueError(f"missing archive roots: {missing}")
+      PY
+      )
 
 frontend_ci:
   stage: test
