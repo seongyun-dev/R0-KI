@@ -3,7 +3,9 @@ set -euo pipefail
 
 ai_root="${AIOT_AI_ROOT:-/home/e103/yolo-pipeline}"
 python_bin="${AIOT_AI_PYTHON:-${ai_root}/venv/bin/python}"
-entrypoint="${AIOT_AI_ENTRYPOINT:-yolo_pipeline.main}"
+pipeline_main="${AIOT_AI_PIPELINE_MAIN:-${ai_root}/yolo_pipeline/main.py}"
+robot_root="${AIOT_IOT_CURRENT:-/opt/aiot/iot/current}/robot"
+robot_adapter="${robot_root}/src/aiot_robot/ai_runtime.py"
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ready_file="${AIOT_AI_READY_FILE:-/run/aiot/ai-ready.json}"
 evidence_dir="${AIOT_AI_EVIDENCE_DIR:-/var/lib/aiot/evidence}"
@@ -30,8 +32,12 @@ if [ ! -r "${ros_setup}" ]; then
   echo "ROS 2 setup is missing: ${ros_setup}" >&2
   exit 1
 fi
-if [[ ! "${entrypoint}" =~ ^[A-Za-z_][A-Za-z0-9_.]*$ ]]; then
-  echo "AIOT_AI_ENTRYPOINT is not a safe Python module name" >&2
+if [ ! -r "${pipeline_main}" ]; then
+  echo "AI pipeline main.py is missing: ${pipeline_main}" >&2
+  exit 1
+fi
+if [ ! -r "${robot_adapter}" ]; then
+  echo "Robot AI adapter is missing: ${robot_adapter}" >&2
   exit 1
 fi
 if [ ! -d "${evidence_dir}" ] || [ ! -w "${evidence_dir}" ]; then
@@ -67,18 +73,21 @@ set +u
 # shellcheck disable=SC1090
 source "${ros_setup}"
 set -u
+export PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
-"${python_bin}" - "${entrypoint}" <<'PY'
-import importlib.util
+"${python_bin}" - "${pipeline_main}" "${robot_adapter}" <<'PY'
+import py_compile
 import sys
 
 import rclpy
+import cv2
+import tensorrt
+import aiot_robot.ai_runtime
 from std_msgs.msg import String
 
-entrypoint = sys.argv[1]
-if importlib.util.find_spec(entrypoint) is None:
-    raise SystemExit(f"AI entrypoint module is not importable: {entrypoint}")
-print("AI preflight passed: ROS 2 and entrypoint are importable")
+for path in sys.argv[1:]:
+    py_compile.compile(path, doraise=True)
+print("AI preflight passed: ROS 2, TensorRT and script entrypoints are ready")
 PY
 
 rm -f "${ready_file}"

@@ -40,10 +40,20 @@ install -d -m 0750 -o aiot -g aiot \
 install -d -m 0700 -o root -g root /opt/aiot/secrets
 install -d -m 2770 -o aiot -g aiot \
   /var/lib/aiot \
+  /var/lib/aiot/config \
   /var/lib/aiot/evidence \
   /var/lib/aiot/outbox \
+  /var/lib/aiot/secrets \
+  /var/lib/aiot/state \
   /var/lib/aiot/ros \
   /var/lib/aiot/ros/log
+if [ ! -e /var/lib/aiot/state/patrol-deploy.lock ]; then
+  install -m 0660 -o aiot -g aiot /dev/null \
+    /var/lib/aiot/state/patrol-deploy.lock
+else
+  chown aiot:aiot /var/lib/aiot/state/patrol-deploy.lock
+  chmod 0660 /var/lib/aiot/state/patrol-deploy.lock
+fi
 install -m 0755 -o root -g root "${source_dir}/aiot-update.sh" /opt/aiot/bin/aiot-update
 install -m 0755 -o root -g root "${source_dir}/aiot-ai-preflight.sh" \
   /opt/aiot/bin/aiot-ai-preflight
@@ -55,6 +65,8 @@ install -m 0755 -o root -g root "${source_dir}/aiot-ai-wait-ready.py" \
   /opt/aiot/bin/aiot-ai-wait-ready.py
 install -m 0644 -o root -g root "${source_dir}/aiot-update.service" \
   /etc/systemd/system/aiot-update.service
+install -m 0644 -o root -g root "${source_dir}/aiot-update.timer" \
+  /etc/systemd/system/aiot-update.timer
 install -m 0644 -o root -g root "${source_dir}/aiot-ai.service" \
   /etc/systemd/system/aiot-ai.service
 install -m 0644 -o root -g root "${source_dir}/aiot-robot.service" \
@@ -79,6 +91,7 @@ systemctl daemon-reload
 if command -v systemd-analyze >/dev/null 2>&1; then
   verify_units=(
     /etc/systemd/system/aiot-update.service
+    /etc/systemd/system/aiot-update.timer
     /etc/systemd/system/aiot-ai.service
   )
   if [ -x /opt/aiot/iot/current/robot/scripts/run.sh ]; then
@@ -87,7 +100,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   systemd-analyze verify "${verify_units[@]}"
 fi
 if [ "${enable_services}" = true ]; then
-  systemctl enable aiot-update.service aiot-ai.service aiot-robot.service
+  systemctl enable aiot-update.timer aiot-ai.service aiot-robot.service
   echo "Jetson services enabled. Start them only after environment review."
 else
   echo "Jetson units installed but not newly enabled."

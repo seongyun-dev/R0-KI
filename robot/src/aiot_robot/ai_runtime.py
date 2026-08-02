@@ -1,0 +1,350 @@
+"""ROS adapter around the existing script-style Jetson AI pipeline.
+
+The model and inference code remain untouched.  This wrapper replaces only the
+pipeline's REST sink so Robot is the single owner of backend delivery.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import shutil
+import sys
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+import rclpy
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
+
+from .ai_adapter_core import build_detection_message
+
+
+class AiAdapterNode(Node):
+    def __init__(self, evidence_root: Path) -> None:
+        super().__init__("aiot_ai_adapter")
+        self._evidence_root = evidence_root
+        self._evidence_root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._active_patrol_id: int | None = None
+        self._state = "STARTING"
+        self._camera_ready = False
+        self._engine_ready = False
+        self._inference_ready = False
+        self._error_code: str | None = None
+        self._message: str | None = None
+
+        control_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        status_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=5,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+        detection_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=100,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+        self._status_publisher = self.create_publisher(
+            String, os.getenv("AIOT_AI_STATUS_TOPIC", "/ai/status"), status_qos
+        )
+        self._detection_publisher = self.create_publisher(
+            String,
+            os.getenv("AIOT_AI_DETECTIONS_TOPIC", "/ai/detections"),
+            detection_qos,
+        )
+        self.create_subscription(
+            String,
+            os.getenv("AIOT_AI_CONTROL_TOPIC", "/ai/control"),
+            self._on_control,
+            control_qos,
+        )
+        self.create_timer(2.0, self.publish_status)
+        self.publish_status()
+
+    def mark_engine_ready(self) -> None:
+        with self._lock:
+            self._engine_ready = True
+        self.publish_status()
+
+    def mark_camera_ready(self) -> None:
+        with self._lock:
+            self._camera_ready = True
+        self.publish_status()
+
+    def mark_inference_ready(self) -> None:
+        with self._lock:
+            self._inference_ready = True
+            if self._camera_ready and self._engine_ready:
+                self._state = "READY"
+                self._error_code = None
+                self._message = None
+        self.publish_status()
+
+    def mark_error(self, code: str, message: str) -> None:
+        with self._lock:
+            self._state = "ERROR"
+            self._error_code = code[:128]
+            self._message = message[:512]
+        self.publish_status()
+
+    def mark_stopped(self) -> None:
+        with self._lock:
+            self._state = "STOPPED"
+            self._active_patrol_id = None
+        self.publish_status()
+
+    def publish_status(self) -> None:
+        with self._lock:
+            ready = (
+                self._state == "READY"
+                and self._camera_ready
+                and self._engine_ready
+                and self._inference_ready
+            )
+            payload = {
+                "schemaVersion": 1,
+                "state": self._state,
+                "ready": ready,
+                "cameraReady": self._camera_ready,
+                "engineReady": self._engine_ready,
+                "inferenceReady": self._inference_ready,
+                "modelVersion": os.getenv("AIOT_AI_MODEL_VERSION") or None,
+                "heartbeatAt": _utc_now(),
+                "errorCode": self._error_code,
+                "message": self._message,
+            }
+        message = String()
+        message.data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        self._status_publisher.publish(message)
+
+    def publish_detection(
+        self,
+        payload: dict[str, Any],
+        image_path: str | os.PathLike[str] | None,
+        *,
+        vehicle: bool = False,
+    ) -> None:
+        with self._lock:
+            patrol_id = self._active_patrol_id
+            ready = self._state == "READY"
+        if patrol_id is None or not ready or image_path is None:
+            return
+        source = Path(image_path)
+        if not source.is_file():
+            return
+        event_id = uuid4().hex
+        evidence = self._evidence_root / f"{event_id}{source.suffix or '.jpg'}"
+        try:
+            message_payload = build_detection_message(
+                payload,
+                evidence_path=evidence.as_posix(),
+                patrol_id=patrol_id,
+                event_id=event_id,
+                observed_at_fallback=_utc_now(),
+                vehicle=vehicle,
+            )
+        except ValueError as exc:
+            self.get_logger().warning(f"Dropped unsupported AI event: {exc}")
+            return
+        if source.resolve() != evidence.resolve():
+            shutil.copy2(source, evidence)
+        message = String()
+        message.data = json.dumps(
+            message_payload, ensure_ascii=False, separators=(",", ":")
+        )
+        self._detection_publisher.publish(message)
+
+    def _on_control(self, message: String) -> None:
+        try:
+            payload = json.loads(message.data)
+            if not isinstance(payload, dict) or payload.get("schemaVersion") != 1:
+                raise ValueError("unsupported control schema")
+            command = payload.get("command")
+            patrol_id = payload.get("patrolId")
+            if command == "ENABLE":
+                if (
+                    isinstance(patrol_id, bool)
+                    or not isinstance(patrol_id, int)
+                    or patrol_id <= 0
+                ):
+                    raise ValueError("ENABLE requires patrolId")
+                with self._lock:
+                    self._active_patrol_id = patrol_id
+            elif command == "DISABLE":
+                with self._lock:
+                    self._active_patrol_id = None
+            else:
+                raise ValueError("unsupported control command")
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.get_logger().warning(f"Rejected AI control: {exc}")
+
+
+class RosEventSink:
+    """Drop-in replacement for the AI pipeline's direct REST client."""
+
+    def __init__(self, node: AiAdapterNode) -> None:
+        self._node = node
+
+    def connect(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    def flush_all(self) -> int:
+        return 0
+
+    def retry_pending_evidence(self) -> int:
+        return 0
+
+    def send_urgent(self, payload: dict[str, Any], image_path: Any) -> None:
+        self._node.publish_detection(payload, image_path)
+
+    def enqueue_batch(self, payload: dict[str, Any], image_path: Any) -> None:
+        self._node.publish_detection(payload, image_path)
+
+    def enqueue_vehicle(
+        self, payload: dict[str, Any], image_path: Any = None
+    ) -> None:
+        self._node.publish_detection(payload, image_path, vehicle=True)
+
+    def create_emergency_event(self, payload: dict[str, Any]) -> None:
+        # The ROS contract requires evidence. Events without a frame are skipped.
+        del payload
+        return None
+
+
+def _load_pipeline(module_path: Path) -> Any:
+    source_dir = module_path.parent
+    sys.path.insert(0, str(source_dir))
+    specification = importlib.util.spec_from_file_location(
+        "aiot_external_pipeline_main", module_path
+    )
+    if specification is None or specification.loader is None:
+        raise RuntimeError(f"cannot load AI pipeline: {module_path}")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def run_pipeline(
+    node: AiAdapterNode,
+    pipeline_main: Path,
+    pipeline_args: list[str],
+) -> int:
+    try:
+        module = _load_pipeline(pipeline_main)
+        sink = RosEventSink(node)
+        module.RestEventClient = lambda: sink
+
+        original_detector = module.DualCamTensorRTBotSortDetector
+
+        class DetectorProxy:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self._delegate = original_detector(*args, **kwargs)
+                node.mark_engine_ready()
+
+            def track_pair(self, *args: Any, **kwargs: Any) -> Any:
+                result = self._delegate.track_pair(*args, **kwargs)
+                node.mark_inference_ready()
+                return result
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._delegate, name)
+
+        module.DualCamTensorRTBotSortDetector = DetectorProxy
+        original_open_capture = module.open_capture
+        camera_count = 0
+
+        def open_capture(source: Any) -> Any:
+            nonlocal camera_count
+            capture = original_open_capture(source)
+            camera_count += 1
+            if camera_count >= 2:
+                node.mark_camera_ready()
+            return capture
+
+        module.open_capture = open_capture
+        original_argv = sys.argv
+        sys.argv = [str(pipeline_main), *pipeline_args]
+        try:
+            module.main()
+        finally:
+            sys.argv = original_argv
+        node.mark_error("PIPELINE_EXITED", "AI pipeline returned unexpectedly")
+        return 1
+    except Exception as exc:
+        node.mark_error(type(exc).__name__, str(exc))
+        node.get_logger().error(f"AI pipeline failed: {type(exc).__name__}: {exc}")
+        return 1
+
+
+def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
+    parser = argparse.ArgumentParser(description="AIoT ROS adapter for Jetson AI")
+    parser.add_argument(
+        "--pipeline-main",
+        default=os.getenv(
+            "AIOT_AI_PIPELINE_MAIN",
+            "/home/e103/yolo-pipeline/yolo_pipeline/main.py",
+        ),
+    )
+    parser.add_argument(
+        "--evidence-root",
+        default=os.getenv("AIOT_AI_EVIDENCE_DIR", "/var/lib/aiot/evidence"),
+    )
+    return parser.parse_known_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args, pipeline_args = parse_args(argv)
+    pipeline_main = Path(args.pipeline_main)
+    if not pipeline_main.is_file():
+        raise FileNotFoundError(f"AI pipeline main.py is missing: {pipeline_main}")
+
+    rclpy.init(args=None)
+    node = AiAdapterNode(Path(args.evidence_root))
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    result: list[int] = []
+    pipeline_thread = threading.Thread(
+        target=lambda: result.append(run_pipeline(node, pipeline_main, pipeline_args)),
+        name="ai-model-pipeline",
+        daemon=True,
+    )
+    pipeline_thread.start()
+    try:
+        while pipeline_thread.is_alive() and rclpy.ok():
+            executor.spin_once(timeout_sec=0.1)
+    except KeyboardInterrupt:
+        node.mark_stopped()
+    finally:
+        pipeline_thread.join(timeout=10.0)
+        executor.remove_node(node)
+        node.destroy_node()
+        executor.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
+    return result[0] if result else 0
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

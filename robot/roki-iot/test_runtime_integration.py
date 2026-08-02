@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 import time
 import unittest
+import os
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -64,6 +66,41 @@ class FakeRuntime:
 
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
+    def test_publisher_exits_when_single_serial_runtime_dies(self) -> None:
+        from mqtt.publisher import RokiPublisherApplication
+
+        serial_service = Mock()
+        serial_service.is_running.return_value = False
+        store = Mock()
+        application = RokiPublisherApplication(
+            settings=Mock(),
+            serial_reader=serial_service,
+            state_store=store,
+            mqtt_client=Mock(),
+            command_handler=Mock(),
+            pipeline_runner=Mock(),
+        )
+        application._serial_reader_started = True
+
+        with self.assertRaisesRegex(RuntimeError, "stopped unexpectedly"):
+            application._run_publish_loop()
+
+        store.update_robot_state.assert_called_once_with("ERROR")
+
+    def test_patrol_holds_ota_guard_until_stop(self) -> None:
+        runtime = FakeRuntime()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(runtime, deployment_guard=guard)
+        service.start()
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+
+        service.send_command("START_PATROL", patrolId=7)
+        guard.release.assert_not_called()
+        service.send_command("STOP_PATROL")
+        guard.release.assert_called_once_with()
+        service.stop()
+
     def test_listener_updates_only_legacy_hardware_fields(self) -> None:
         runtime = FakeRuntime()
         store = RobotStateStore()
@@ -89,7 +126,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         status = store.get_status()
         self.assertEqual(status.battery, 82.5)
         self.assertEqual(status.motor, "NORMAL")
-        self.assertEqual(status.line_sensor, "FAULT")
+        self.assertEqual(status.line_sensor, "DISCONNECTED")
         self.assertEqual(status.camera, "DISCONNECTED")
         self.assertEqual(status.lidar, "DISCONNECTED")
         self.assertEqual(status.obstacle.status, "CLEAR")
@@ -204,7 +241,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             },
         )
 
-    def test_status_is_published_only_on_five_second_monotonic_gate(self) -> None:
+    def test_status_is_published_immediately_on_change_and_every_five_seconds(self) -> None:
         from mqtt.publisher import RokiPublisherApplication
 
         settings = SimpleNamespace(
@@ -242,11 +279,12 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             )
         )
         application._publish_status_if_needed(100.1)
-        application._publish_status_if_needed(104.999)
-        self.assertEqual(client.publish.call_count, 1)
-
-        application._publish_status_if_needed(105.0)
         self.assertEqual(client.publish.call_count, 2)
+        application._publish_status_if_needed(104.999)
+        self.assertEqual(client.publish.call_count, 2)
+
+        application._publish_status_if_needed(105.1)
+        self.assertEqual(client.publish.call_count, 3)
 
     def test_lidar_bridge_is_injected_without_changing_camera(self) -> None:
         from run_integrated import create_integrated_application
@@ -344,7 +382,19 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         from run_integrated import create_integrated_application
 
         runtime = FakeRuntime()
-        application = create_integrated_application(final_runtime=runtime)
+        with patch.dict(
+            os.environ,
+            {
+                "AIOT_AI_REQUIRED_FOR_PATROL": "false",
+                "AIOT_LIDAR_REQUIRED_FOR_PATROL": "false",
+            },
+        ):
+            deployment_guard = Mock()
+            deployment_guard.acquire.return_value = (True, "READY")
+            application = create_integrated_application(
+                final_runtime=runtime,
+                deployment_guard=deployment_guard,
+            )
         application._pipeline_runner.is_running = Mock(return_value=False)
         application._pipeline_runner.start = Mock()
         application._pipeline_runner.stop = Mock()
@@ -353,12 +403,16 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         application._serial_reader.start()
         self.addCleanup(application._serial_reader.stop)
 
+        now = datetime.now().astimezone()
         application._command_handler.handle(
             application._settings.command_topic,
             {
+                "schemaVersion": 1,
                 "command": "START_PATROL",
                 "commandId": "command-start",
                 "patrolId": 17,
+                "issuedAt": now.isoformat(),
+                "expiresAt": (now + timedelta(seconds=10)).isoformat(),
             },
         )
 
@@ -369,7 +423,12 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             "PATROLLING",
         )
         application._pipeline_runner.start.assert_called_once()
-        start_ack = application._mqtt_client.publish.call_args.kwargs
+        start_ack = next(
+            call.kwargs
+            for call in application._mqtt_client.publish.call_args_list
+            if call.kwargs["topic"]
+            == application._settings.command_response_topic
+        )
         self.assertEqual(
             start_ack["topic"],
             application._settings.command_response_topic,
@@ -393,8 +452,11 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         application._command_handler.handle(
             application._settings.command_topic,
             {
+                "schemaVersion": 1,
                 "command": "STOP_PATROL",
                 "commandId": "command-stop",
+                "issuedAt": now.isoformat(),
+                "expiresAt": (now + timedelta(seconds=10)).isoformat(),
             },
         )
 

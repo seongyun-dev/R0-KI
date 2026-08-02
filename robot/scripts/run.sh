@@ -23,6 +23,6 @@ export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
 export ROS_HOME="${ROS_HOME:-/var/lib/aiot/ros}"
 export ROS_LOG_DIR="${ROS_LOG_DIR:-${ROS_HOME}/log}"
 mkdir -p "${ROS_LOG_DIR}"
-export PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${robot_root}/src:${robot_root}/roki:${robot_root}/roki-iot${PYTHONPATH:+:${PYTHONPATH}}"
 export PYTHONDONTWRITEBYTECODE=1
-exec "${python_bin}" -B -m aiot_robot.main "$@"
+exec "${python_bin}" -B "${robot_root}/roki-iot/run_integrated.py" "$@"

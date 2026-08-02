@@ -70,6 +70,7 @@ class RokiPublisherApplication:
         pipeline_runner: PatrolPipelineRunner,
         pose_source: Any | None = None,
         lidar_health_source: Any | None = None,
+        runtime_components: tuple[Any, ...] = (),
         start_serial_reader: bool = True,
     ) -> None:
         self._settings = settings
@@ -80,6 +81,8 @@ class RokiPublisherApplication:
         self._pipeline_runner = pipeline_runner
         self._pose_source = pose_source
         self._lidar_health_source = lidar_health_source
+        self._runtime_components = runtime_components
+        self._started_runtime_components: list[Any] = []
         self._start_serial_reader = start_serial_reader
         self._serial_reader_started = False
         self._pose_source_started = False
@@ -109,6 +112,9 @@ class RokiPublisherApplication:
         if self._lidar_health_source is not None:
             self._lidar_health_source.start()
             self._lidar_health_source_started = True
+        for component in self._runtime_components:
+            component.start()
+            self._started_runtime_components.append(component)
         if self._start_serial_reader:
             self._serial_reader.start()
             self._serial_reader_started = True
@@ -121,19 +127,24 @@ class RokiPublisherApplication:
         """Serial, 파이프라인, MQTT를 안전하게 종료한다."""
 
         self._stop_event.set()
-        self._mqtt_client.disconnect()
-
         try:
-            self._pipeline_runner.stop()
+            self._command_handler.shutdown()
         except Exception as exc:
-            print(
-                "[SYSTEM] 종료 중 파이프라인 중지 오류: "
-                f"{exc}"
-            )
+            print(f"[SYSTEM] safe shutdown error: {type(exc).__name__}")
 
         if self._serial_reader_started:
             self._serial_reader.stop()
             self._serial_reader_started = False
+
+        for component in reversed(self._started_runtime_components):
+            try:
+                component.stop()
+            except Exception as exc:
+                print(
+                    "[SYSTEM] runtime component stop error: "
+                    f"{type(exc).__name__}"
+                )
+        self._started_runtime_components.clear()
 
         if self._lidar_health_source_started:
             self._lidar_health_source.stop()
@@ -143,6 +154,8 @@ class RokiPublisherApplication:
             self._pose_source.stop()
             self._pose_source_started = False
 
+        self._mqtt_client.disconnect()
+
     def _run_publish_loop(self) -> None:
         """
         RobotStateStore 상태를 확인하고
@@ -151,6 +164,14 @@ class RokiPublisherApplication:
 
         while not self._stop_event.is_set():
             current_time = time.monotonic()
+
+            if self._serial_reader_started:
+                is_running = getattr(self._serial_reader, "is_running", None)
+                if callable(is_running) and not is_running():
+                    self._state_store.update_robot_state("ERROR")
+                    raise RuntimeError("Robot serial runtime stopped unexpectedly")
+
+            self._command_handler.tick()
 
             self._publish_status_if_needed(
                 current_time
@@ -165,6 +186,8 @@ class RokiPublisherApplication:
     def _publish_status_if_needed(
         self,
         current_time: float,
+        *,
+        force: bool = False,
     ) -> None:
         """
         Status는 상태 변경 빈도와 무관하게 정기 주기로만 발행한다.
@@ -177,16 +200,11 @@ class RokiPublisherApplication:
             .status_publish_interval_seconds
         )
 
-        if not periodic_publish_due:
+        changed = self._state_store.has_status_changed()
+        if not force and not periodic_publish_due and not changed:
             return
 
         status = self._state_store.get_status()
-
-        # ESP32에서 최초 하드웨어 상태를 받기 전에는
-        # battery가 None이므로 MQTT로 발행하지 않는다.
-        if status.battery is None:
-            self._print_hardware_wait_log()
-            return
 
         self._hardware_wait_log_printed = False
 
@@ -212,6 +230,8 @@ class RokiPublisherApplication:
     def _publish_pose_if_needed(
         self,
         current_time: float,
+        *,
+        force: bool = False,
     ) -> None:
         """
         실제 Pose가 존재하고 발행 주기가 지난 경우
@@ -225,7 +245,7 @@ class RokiPublisherApplication:
             .pose_publish_interval_seconds
         )
 
-        if not publish_due:
+        if not force and not publish_due:
             return
 
         pose = self._state_store.get_pose()
@@ -254,6 +274,13 @@ class RokiPublisherApplication:
         )
 
         self._pose_wait_log_printed = False
+
+    def publish_now(self) -> None:
+        """Best-effort final telemetry while MQTT is still connected."""
+
+        now = time.monotonic()
+        self._publish_pose_if_needed(now, force=True)
+        self._publish_status_if_needed(now, force=True)
 
     def _print_startup_information(self) -> None:
         """현재 실행 설정을 터미널에 출력한다."""

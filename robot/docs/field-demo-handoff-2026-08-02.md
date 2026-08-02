@@ -1,5 +1,10 @@
 # RO-KI waypoint 현장 시연 인수인계
 
+> **2026-08-03 상태:** 이 문서의 소프트웨어 통합 TODO는 완료됐다. 현재 운영
+> 절차와 남은 실물 검증은 `integrated-runtime-operations.md`, 최신 Robot-AI
+> 계약은 `ai-ros-contract-v1.md`를 따른다. 이 문서는 0.60 m 직선 시험과 실측
+> 근거를 보존하는 기록이다.
+
 > 소프트웨어·백엔드·AI·OTA를 이어서 완성하는 작업자는 먼저
 > [`goal-mode-integration-handoff-2026-08-02.md`](goal-mode-integration-handoff-2026-08-02.md)를
 > 읽는다. 이 문서는 실측 및 현장 waypoint 증거로 유지한다.
@@ -103,6 +108,9 @@ GitLab 브랜치에 보존했다. 다만 Jetson 활성 경로에는 아직 설�
 검증된 병합 commit과 정식 OTA 절차를 사용한다.
 
 ## 7. 남은 필수 작업
+
+> 2026-08-03 갱신: Gate A의 소프트웨어 항목은 모두 완료됐다. 아래 내용은 당시
+> TODO의 근거를 보존한다. 현재 남은 작업은 Gate B 이후의 실물 검증뿐이다.
 
 ### Gate A — 상태 송신 병합본을 production entrypoint로 승격
 

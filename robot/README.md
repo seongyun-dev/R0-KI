@@ -1,114 +1,45 @@
 # Hanbakwi Robot runtime
 
-This directory is the Jetson-side Robot runtime contract for the `iot/*`
-branches. It deliberately starts without commanding motors or steering.
+`robot/`은 Jetson에서 실행되는 IoT 운영 소스다. 운영 진입점은
+`robot/scripts/run.sh`이며, 이 스크립트는 `roki-iot/run_integrated.py` 하나만
+실행한다. 해당 프로세스만 ESP32 시리얼 포트를 소유한다.
 
-The initial runtime provides:
+## 현재 구성
 
-- a real `robot/scripts/run.sh` entrypoint for `aiot-robot.service`;
-- ROS 2 subscriptions for AI status and detections;
-- a latched AI `ENABLE` / `DISABLE` control publisher;
-- an AI readiness gate that rejects patrol start while AI is missing, stale, or
-  degraded;
-- a durable local detection outbox for later backend REST delivery;
-- an HTTPS Robot backend client matching the current `/api/robot/events`,
-  `/events/batch`, `/vehicle-checks`, and evidence upload endpoints;
-- install, test, and OTA smoke-test entrypoints.
+- `roki/`: operating-json 시리얼, 안전 제어, odometry, waypoint/Nav2 연동
+- `roki-iot/`: 백엔드 MQTT 명령·ACK·pose·status와 통합 composition root
+- `src/aiot_robot/`: AI ROS 계약, readiness, 이벤트 outbox/REST 전달, OTA 잠금
+- `hardware/`: 승인 후에만 실행하는 실물 진단·제한 주행 도구
+- `scripts/`: 설치, 운영 실행, 비이동 smoke, 전체 테스트
 
-The mission/drive owner can compose `AiRosBridge` into the real Robot process.
-Until that integration happens, the standalone entrypoint remains stationary,
-publishes `DISABLE`, monitors AI, and safely spools any received detections.
+운영 흐름은 `START_PATROL` 검증 → AI ENABLE → ESP32 시작 → waypoint 이동 →
+pose/status 및 AI 이벤트 전달 → 로컬 DESTINATION 즉시 STOP → 백엔드
+`STOP_PATROL` 재확인·ACK → IDLE이다. LiDAR 장애물, 오래된 LiDAR/AI 상태,
+ESP32 안전 오류는 fail-closed로 정지시킨다.
 
-## Why no separate ROS bridge process is required
+위치 소스는 `map -> base_link` ROS TF를 우선한다. Nav2에 필요한 실측값이나
+패키지가 없으면 `encoder_limited` 모드만 허용하며, 이 모드는 짧고 직선인 현장
+검증 경로만 받는다. 기본 보정은 65 mm 바퀴, LEFT 329 / RIGHT 328 ticks/rev,
+조향 60/80/100도, PWM 45다.
 
-On the target Jetson, the AI venv uses Python 3.10 and
-`include-system-site-packages = true`. `rclpy` is available inside that venv
-after ROS 2 is sourced:
+## 비이동 검증
 
-```bash
-source /opt/ros/humble/setup.bash
-/home/e103/yolo-pipeline/venv/bin/python -c \
-  'import rclpy; rclpy.init(); n=rclpy.create_node("probe"); n.destroy_node(); rclpy.shutdown()'
-```
-
-Therefore the AI service should source ROS before starting its existing venv.
-A separate bridge is only a fallback if the Python/ROS ABI changes later.
-
-## Local Jetson execution
-
-This is a no-movement runtime:
+다음 명령은 시리얼, MQTT, ROS 노드 및 모터를 열지 않는다.
 
 ```bash
-cd robot
-./scripts/install.sh
-AIOT_EVENT_OUTBOX_DIR="$HOME/.local/state/aiot/outbox" ./scripts/run.sh
+./robot/scripts/test.sh
+ROKI_ROUTE_FILE=robot/roki/maps/dummy_rectangle/route.short-straight.yaml \
+  ./robot/scripts/smoke-test.sh pre-activate
 ```
 
-Run the checks with:
+운영 설정 예시는 `config/robot.env.example`에 있다. 실제 `.env`, MQTT 비밀번호,
+서비스 토큰과 현장 `route.local.yaml`은 Git에 넣지 않는다.
 
-```bash
-./scripts/test.sh
-./scripts/smoke-test.sh pre-activate
-```
-
-The assembled Jetson must expose the ESP32 as `/dev/roki_esp32`. The ESP32 and
-LiDAR CP2102 adapters both report serial `0001`, so `/dev/serial/by-id/...0001`
-is ambiguous and is intentionally not used by the Robot runtime.
-
-The production environment template is in
-`config/robot.env.example`. The ROS JSON contract and integration points are in
-`docs/ai-ros-contract-v1.md`.
-
-The physical robot integration order, calibration responsibilities, same-day
-gates, and demo acceptance criteria are documented in
-`docs/robot-demo-integration-plan.md`.
-
-For the complete continuation context, current Jetson audit, backend/MQTT/AI
-gaps, production composition order, software-only Goal scope, and Definition of
-Done, use
+배포·진단·복구와 현장 검증 순서는
+[`docs/integrated-runtime-operations.md`](docs/integrated-runtime-operations.md)를
+따른다. Robot-AI 메시지는
+[`docs/ai-ros-contract-v1.md`](docs/ai-ros-contract-v1.md), ESP32 시리얼은
+[`roki/docs/COMMUNICATION_CONTRACT.md`](roki/docs/COMMUNICATION_CONTRACT.md)가
+기준이다. 2026-08-02 Goal 인수인계의 구현 결과는
 [`docs/goal-mode-integration-handoff-2026-08-02.md`](docs/goal-mode-integration-handoff-2026-08-02.md)
-as the primary handoff document.
-
-## ESP32, drive, and MQTT implementation snapshot
-
-The assembled robot's verified hardware implementation is preserved separately
-from the no-movement OTA entrypoint:
-
-- `roki/`: ESP32 JSON protocol, odometry, safety, mission, and motion runtime;
-- `roki-iot/`: the existing MQTT publisher composed with `roki/`;
-- `hardware/`: ESP32 firmware 2.2.0 and bounded bench/drive tests.
-
-These directories mirror the live Jetson paths `/home/e103/roki`,
-`/home/e103/roki-iot`, and selected files from `/home/e103/robot-hw-test`.
-They are not yet the process started by `scripts/run.sh`.
-
-The live-source snapshot also preserves the legacy `roki/ai`, `roki/camera`,
-`roki/mqtt`, manual diagnostic scripts, and `roki-iot/esp32_serial` modules.
-They are source backup and integration reference only. They were syntax-checked
-during import, but production OTA must not invoke them until the mission owner reviews their
-hardware side effects and folds the required pieces into the stationary
-`scripts/run.sh` entrypoint.
-
-Read [the ESP32/MQTT runtime handoff](docs/esp32-mqtt-runtime-handoff.md)
-before changing the production entrypoint, systemd service, or OTA activation
-flow. It records the pin map, wire protocol, verified commands, safety
-invariants, test evidence, and remaining integration work.
-
-## Mission integration
-
-The patrol pipeline must do three things:
-
-1. Before accepting `START_PATROL`, call `bridge.gate.decision()` and reject the
-   command unless `allowed` is true.
-2. After a patrol is accepted, call
-   `bridge.set_detection_enabled(True, patrol_id, "PATROL_STARTED")`.
-3. On patrol stop, emergency stop, or shutdown, call
-   `bridge.set_detection_enabled(False, patrol_id, reason)`.
-
-The backend adapter should consume durable outbox files only after it can add
-the current `robotId`, `patrolId`, and robot pose required by the REST DTO.
-Successful REST delivery may then delete the corresponding outbox file.
-
-`RobotBackendClient` already implements the authenticated HTTP transport. The
-mission owner supplies the event DTO at the point where pose and patrol timing
-are known; secrets stay in `/opt/aiot/secrets/robot.env`.
+맨 위 완료 갱신을 우선해서 읽는다.

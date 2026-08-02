@@ -85,14 +85,18 @@ class RobotStateStore:
     def update_hardware_status(
         self, hardware_status: HardwareStatus
     ) -> None:
+        motor = hardware_status.motor.value
+        if motor == "FAULT":
+            motor = "ERROR"
         with self._lock:
             self._hardware_status = hardware_status
             self._set_status_if_changed(
                 replace(
                     self._status,
                     battery=hardware_status.battery_percent,
-                    motor=hardware_status.motor.value,
-                    line_sensor=hardware_status.line_sensor.value,
+                    motor=motor,
+                    # Line following is disabled for the map-waypoint product.
+                    line_sensor="DISCONNECTED",
                 )
             )
 

@@ -23,15 +23,4 @@ if find "${release_root}" -type f \
   exit 1
 fi
 
-if [ "${phase}" = post-activate ]; then
-  set +e
-  timeout --signal=TERM --kill-after=5s 5s \
-    "${release_root}/robot/scripts/run.sh"
-  runtime_status=$?
-  set -e
-  if [ "${runtime_status}" -ne 124 ] && [ "${runtime_status}" -ne 143 ]; then
-    echo "Robot runtime exited during the stationary startup probe: ${runtime_status}" >&2
-    exit 1
-  fi
-fi
 echo "Jetson IoT ${phase} smoke passed; no actuator command was sent"

@@ -1,5 +1,14 @@
 # RO-KI 완성 작업 인수인계서 — Goal 모드 실행본
 
+> **2026-08-03 구현 완료 갱신:** 아래 문서의 WP1~WP7은
+> `iot/feat/integrated-robot-runtime`에서 구현됐다. 운영 진입점은
+> `robot/scripts/run.sh -> roki-iot/run_integrated.py`이며, MQTT 상태 머신,
+> waypoint/Nav2·encoder 제한 모드, pose/status, AI ROS 어댑터, Robot 소유 REST
+> outbox, systemd, 5분 Pull OTA와 rollback이 연결됐다. fake ESP32/MQTT/route 전체
+> 시나리오를 포함한 비물리 테스트가 통과했다. 실제 Jetson에는 아직
+> 설치·활성화하지 않았다. 이후 작업자는 이 문서의 과거 TODO보다
+> `integrated-runtime-operations.md`의 현장 게이트와 현재 코드를 우선한다.
+
 기준 시각: 2026-08-02 23:00 KST
 
 대상: 다음 Codex Goal 작업자

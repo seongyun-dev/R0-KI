@@ -1,7 +1,8 @@
 [Unit]
 Description=AIoT Jetson AI runtime
-Wants=network-online.target
+Wants=network-online.target aiot-update.service
 After=network-online.target
+ConditionPathExists=/opt/aiot/iot/current/robot/src/aiot_robot/ai_runtime.py
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

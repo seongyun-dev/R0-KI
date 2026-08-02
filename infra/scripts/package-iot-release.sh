@@ -54,6 +54,14 @@ install -d -m 0750 "${stage_dir}/robot" "${stage_dir}/scripts"
 tar -C "${robot_source}" \
   --exclude='./.venv' \
   --exclude='./.env' \
+  --exclude='*/.env' \
+  --exclude='*/route.local.yaml' \
+  --exclude='*/robot_service_token' \
+  --exclude='*/robot-service-token' \
+  --exclude='*/command-cache.json' \
+  --exclude='*/patrol-deploy.lock' \
+  --exclude='*.pem' \
+  --exclude='*.key' \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   -cf - . | tar -C "${stage_dir}/robot" -xf -
@@ -91,6 +99,15 @@ if find "${stage_dir}" -type f \
 fi
 if [ -e "${stage_dir}/ai" ]; then
   echo "IoT release must not contain ai/" >&2
+  exit 1
+fi
+if find "${stage_dir}" -type f \
+  \( -name '.env' -o -name 'route.local.yaml' -o \
+     -name 'robot_service_token' -o -name 'robot-service-token' -o \
+     -name 'command-cache.json' -o -name 'patrol-deploy.lock' -o \
+     -name '*.pem' -o -name '*.key' \) \
+  -print -quit | grep -q .; then
+  echo "IoT release contains a local configuration or secret file" >&2
   exit 1
 fi
 

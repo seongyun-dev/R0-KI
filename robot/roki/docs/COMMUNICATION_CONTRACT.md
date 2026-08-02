@@ -1,5 +1,12 @@
 # RO-KI ESP32 ↔ Jetson Serial 계약
 
+> **운영 적용 (2026-08-03):** `robot/scripts/run.sh`가 시작하는
+> `roki-iot/run_integrated.py` 안의 `RobotRuntime`만 포트를 연다. legacy
+> `roki-iot/serial_reader.py`, 수동 hardware script, AI process가 같은 포트를
+> 동시에 열면 안 된다. 운영 alias는 `/dev/roki_esp32`다. 현재 보정은 바퀴 지름
+> 65 mm, LEFT 329 / RIGHT 328 ticks/rev, 서보 좌/중앙/우 60/80/100도, 현장 PWM
+> 45다. 라인 센서는 주행에 사용하지 않으므로 백엔드에는 `DISCONNECTED`로 보낸다.
+
 이 문서는 ESP32와 Jetson 내부 USB Serial JSON Lines 계약만 정의한다.
 Jetson ↔ Backend MQTT/REST 계약은 이 문서의 범위가 아니다.
 

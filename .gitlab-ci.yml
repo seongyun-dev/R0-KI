@@ -87,10 +87,15 @@ iot_ota_validate:
   script:
     - python3 -m py_compile infra/scripts/validate-jetson-manifest.py infra/scripts/test-jetson-manifest.py infra/jetson/aiot-ai-wait-ready.py
     - python3 infra/scripts/test-jetson-manifest.py
+    - bash infra/scripts/test-jetson-updater.sh
     - python3 -c 'import json; json.load(open("infra/jetson/manifest.schema.json", encoding="utf-8"))'
-    - grep -q 'Wants=aiot-ai.service' infra/jetson/aiot-robot.service
+    - grep -Eq '^Wants=.*aiot-ai.service' infra/jetson/aiot-robot.service
+    - '! grep -q ''^After=.*aiot-update.service'' infra/jetson/aiot-ai.service infra/jetson/aiot-robot.service'
     - grep -q 'ROS_LOCALHOST_ONLY=1' infra/jetson/aiot-ai.service
     - grep -q '/opt/aiot/iot/current/robot/scripts/run.sh' infra/jetson/aiot-robot.service
+    - grep -q 'OnUnitActiveSec=5min' infra/jetson/aiot-update.timer
+    - grep -q 'flock -n 8' infra/jetson/aiot-update.sh
+    - grep -q 'run_integrated.py' robot/scripts/run.sh
     - |
       ota_root="$(mktemp -d /tmp/aiot-ota-offline.XXXXXX)"
       cleanup_ota_test() {
@@ -132,6 +137,15 @@ iot_ota_validate:
                   or normalized.parts[0] not in allowed_roots
               ):
                   raise ValueError(f"unsafe or unexpected archive member: {member.name}")
+              if normalized.name in {
+                  ".env",
+                  "route.local.yaml",
+                  "robot_service_token",
+                  "robot-service-token",
+                  "command-cache.json",
+                  "patrol-deploy.lock",
+              } or normalized.suffix in {".pem", ".key"}:
+                  raise ValueError(f"secret or local state in archive: {member.name}")
               seen_roots.add(normalized.parts[0])
           if seen_roots != allowed_roots:
               missing = sorted(allowed_roots - seen_roots)
