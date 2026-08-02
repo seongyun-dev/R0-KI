@@ -104,7 +104,8 @@ fi
 archive_name="aiot-${release}.tar.gz"
 archive_path="${output_dir}/${archive_name}"
 manifest_path="${archive_path}.manifest.json"
-tar -C "${stage_dir}" -czf "${archive_path}" .
+tar -C "${stage_dir}" -czf "${archive_path}" \
+  robot scripts VERSION manifest.json CHECKSUMS.sha256
 
 artifact_sha256="$(sha256sum "${archive_path}" | awk '{print $1}')"
 artifact_size_bytes="$(stat -c '%s' "${archive_path}")"
