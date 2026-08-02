@@ -67,6 +67,13 @@ odometry:
   # 런타임은 단일 정수값을 사용하므로 전체 평균 328.5를 329로 반올림한다.
   encoder_ticks_per_revolution: 329
 
+localization:
+  map_frame: "map"
+  base_frame: "base_link"
+  # MQTT pose는 1초 주기이며 2초 이상 갱신되지 않은 TF는 발행하지 않는다.
+  map_pose_timeout_sec: 2.0
+  tf_poll_interval_sec: 0.1
+
 hardware:
   computer: "Jetson Orin Nano"
   controller: "ESP32 DevKit V1"

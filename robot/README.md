@@ -63,6 +63,12 @@ The physical robot integration order, calibration responsibilities, same-day
 gates, and demo acceptance criteria are documented in
 `docs/robot-demo-integration-plan.md`.
 
+For the complete continuation context, current Jetson audit, backend/MQTT/AI
+gaps, production composition order, software-only Goal scope, and Definition of
+Done, use
+[`docs/goal-mode-integration-handoff-2026-08-02.md`](docs/goal-mode-integration-handoff-2026-08-02.md)
+as the primary handoff document.
+
 ## ESP32, drive, and MQTT implementation snapshot
 
 The assembled robot's verified hardware implementation is preserved separately

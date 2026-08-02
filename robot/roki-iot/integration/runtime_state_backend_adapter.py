@@ -49,7 +49,7 @@ class FinalRuntimeService:
         self,
         runtime: Any,
         *,
-        patrol_drive_speed_pwm: int = 45,
+        patrol_drive_speed_pwm: int = 51,
         patrol_steering_degrees: int = 80,
         navigation_service: Any | None = None,
         navigation_start_x_m: float = 1.0,
@@ -187,6 +187,7 @@ class FinalRuntimeService:
         if self._navigation_service is not None:
             self._navigation_service.stop_patrol()
         self._stop_runtime_patrol("ENCODER_WAYPOINT_FAULT")
+        self._update_runtime_state("ERROR")
         print(f"[NAVIGATION ERROR] {reason}")
 
     def _stop_runtime_patrol(self, reason: str) -> None:
@@ -195,6 +196,11 @@ class FinalRuntimeService:
             stop_patrol(reason)
             return
         self._runtime.mission.stop_patrol()
+
+    def _update_runtime_state(self, state: str) -> None:
+        update = getattr(self._runtime.state_store, "update_robot_state", None)
+        if callable(update):
+            update(state)
 
     def _on_navigation_event(self, event: Any) -> None:
         event_type = getattr(event.mission_event.event_type, "value", "")
@@ -208,27 +214,5 @@ class FinalRuntimeService:
         if event_type == "DESTINATION_REACHED":
             if self._encoder_progress is not None:
                 self._encoder_progress.stop()
-            # 목적지 판정과 동시에 다음 odometry 주기를 기다리지 않고 STOP한다.
             self._stop_runtime_patrol("DESTINATION_REACHED")
-
-
-class WaypointStateBackendAdapter:
-    """Waypoint 완료를 기존 MQTT 상태 저장소의 IDLE로 반영한다."""
-
-    def __init__(self, navigation_service: Any, backend_state_store: RobotStateStore) -> None:
-        self._navigation_service = navigation_service
-        self._backend_state_store = backend_state_store
-        self._connected = False
-
-    def connect(self) -> None:
-        if self._connected:
-            return
-        self._navigation_service.add_event_listener(self._on_navigation_event)
-        self._connected = True
-
-    def _on_navigation_event(self, event: Any) -> None:
-        event_type = getattr(event.mission_event.event_type, "value", "")
-        if event_type == "STARTED":
-            self._backend_state_store.update_robot_state("PATROLLING")
-        elif event_type in {"STOPPED", "DESTINATION_REACHED"}:
-            self._backend_state_store.update_robot_state("IDLE")
+            self._update_runtime_state("IDLE")

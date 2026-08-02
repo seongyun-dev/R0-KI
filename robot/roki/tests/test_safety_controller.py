@@ -119,6 +119,19 @@ class SafetyControllerTest(unittest.TestCase):
             self.evaluate(status=hardware_status(battery=20.0)).allowed
         )
 
+    def test_calibrated_policy_rejects_missing_battery_percent(self) -> None:
+        status = HardwareStatus(
+            battery_percent=None,
+            battery_voltage=11.82,
+            motor=MotorStatus.NORMAL,
+            line_sensor=LineSensorStatus.NORMAL,
+        )
+
+        self.assertEqual(
+            self.evaluate(status=status).fault,
+            "BATTERY_PERCENT_UNAVAILABLE",
+        )
+
     def test_disconnected_emergency_stop_and_latched_fault(self) -> None:
         self.assertEqual(
             self.evaluate(connected=False).fault,

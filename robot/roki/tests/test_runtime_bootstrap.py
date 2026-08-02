@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import unittest
 
-from common.config_loader import load_safety_config
-from scripts.run_runtime import build_runtime, build_safety_settings
+from common.config_loader import load_robot_config, load_safety_config
+from scripts.run_runtime import (
+    build_localization_settings,
+    build_ros_lidar_health_bridge,
+    build_ros_tf_pose_bridge,
+    build_runtime,
+    build_safety_settings,
+)
 from state.robot_state import RobotStateStore
 
 
@@ -82,6 +88,25 @@ class RuntimeBootstrapTest(unittest.TestCase):
         runtime = build_runtime()
         self.assertIsInstance(runtime.state_store, RobotStateStore)
         self.assertIsNotNone(runtime.state_store.snapshot())
+        settings = build_localization_settings(load_robot_config())
+        self.assertEqual(settings.map_pose_timeout_sec, 2.0)
+        bridge = build_ros_tf_pose_bridge(runtime.state_store)
+        self.assertIs(bridge.state_store, runtime.state_store)
+        lidar_bridge = build_ros_lidar_health_bridge(runtime.state_store)
+        self.assertIs(lidar_bridge.state_store, runtime.state_store)
+
+    def test_invalid_localization_timeout_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "map_pose_timeout_sec"):
+            build_localization_settings(
+                {
+                    "localization": {
+                        "map_frame": "map",
+                        "base_frame": "base_link",
+                        "map_pose_timeout_sec": 0,
+                        "tf_poll_interval_sec": 0.1,
+                    }
+                }
+            )
 
     def test_actual_config_disables_low_battery_until_soc_calibration(
         self,

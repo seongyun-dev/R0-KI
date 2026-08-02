@@ -3,8 +3,6 @@ from __future__ import annotations
 import threading
 import time
 import unittest
-import tempfile
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -13,6 +11,7 @@ from integration.runtime_state_backend_adapter import (
     RuntimeStateBackendAdapter,
 )
 from state.robot_state_store import RobotStateStore
+from state.models import HardwareState, ObstacleState
 
 
 class FakeMissionController:
@@ -45,22 +44,10 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.hardware_listeners: list[object] = []
         self.odometry_listeners: list[object] = []
+        self.state_store = RobotStateStore()
         self.mission = FakeMissionController()
         self.started = threading.Event()
         self.stopped = threading.Event()
-        self.stop_reasons: list[str] = []
-        self.state_store = SimpleNamespace(
-            snapshot=lambda: SimpleNamespace(
-                motion_state=SimpleNamespace(
-                    left_distance_m=0.0,
-                    right_distance_m=0.0,
-                ),
-                safety_decision=SimpleNamespace(
-                    allowed=True,
-                    fault="NONE",
-                ),
-            )
-        )
 
     def add_hardware_status_listener(self, listener: object) -> None:
         self.hardware_listeners.append(listener)
@@ -75,69 +62,8 @@ class FakeRuntime:
     def request_stop(self) -> None:
         self.stopped.set()
 
-    def stop_patrol(self, reason: str = "PATROL_STOP") -> None:
-        self.stop_reasons.append(reason)
-        self.mission.stop_patrol()
-
-
-class FakeNavigationService:
-    def __init__(self) -> None:
-        self.listeners: list[object] = []
-        self.start_calls: list[int | None] = []
-        self.stop_calls = 0
-        self.pose_updates: list[object] = []
-
-    def add_event_listener(self, listener: object) -> None:
-        self.listeners.append(listener)
-
-    def start_patrol(self, *, patrol_id: int | None) -> None:
-        self.start_calls.append(patrol_id)
-
-    def stop_patrol(self) -> None:
-        self.stop_calls += 1
-
-    def update_pose(self, pose: object) -> tuple[object, ...]:
-        self.pose_updates.append(pose)
-        return ()
-
-    def emit(self, event_type: str) -> None:
-        event = SimpleNamespace(
-            mission_event=SimpleNamespace(
-                event_type=SimpleNamespace(value=event_type)
-            )
-        )
-        for listener in tuple(self.listeners):
-            listener(event)  # type: ignore[operator]
-
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
-    def test_navigation_builder_loads_route_and_rejects_missing_file(self) -> None:
-        from run_integrated import _build_navigation_service
-
-        with self.assertRaisesRegex(RuntimeError, "refusing fixed straight"):
-            _build_navigation_service("/definitely/missing/route.yaml")
-
-        with tempfile.TemporaryDirectory() as directory:
-            route_path = Path(directory) / "route.yaml"
-            route_path.write_text(
-                """schema_version: 1
-map_id: demo
-map_version: 1
-route_id: route
-frame_id: map
-waypoints:
-  - sequence: 1
-    x: 0.6
-    y: 0.0
-    yaw_deg: 0.0
-    acceptance_radius_m: 0.2
-    action: DESTINATION
-""",
-                encoding="utf-8",
-            )
-            service = _build_navigation_service(route_path)
-            self.assertEqual(service._route.route_id, "route")
-
     def test_listener_updates_only_legacy_hardware_fields(self) -> None:
         runtime = FakeRuntime()
         store = RobotStateStore()
@@ -187,7 +113,7 @@ waypoints:
         service.send_command("START_PATROL", patrolId=7)
         self.assertTrue(runtime.mission.patrol_active)
         self.assertEqual(runtime.mission.start_calls, 1)
-        self.assertEqual(runtime.mission.speed, 45)
+        self.assertEqual(runtime.mission.speed, 51)
         self.assertEqual(runtime.mission.steering_deg, 80)
 
         service.send_command("STOP_PATROL")
@@ -213,100 +139,43 @@ waypoints:
                 final_runtime=runtime
             )
 
-        self.assertEqual(len(runtime.hardware_listeners), 1)
+        self.assertEqual(len(runtime.hardware_listeners), 0)
+        self.assertIs(application._state_store, runtime.state_store)
         self.assertEqual(
             application._serial_reader.__class__.__name__,
-            "EncoderWaypointRuntimeService",
+            "FinalRuntimeService",
         )
 
-    def test_waypoint_navigation_replaces_fixed_straight_start(self) -> None:
+    def test_pose_bridge_and_publisher_share_final_runtime_store(self) -> None:
         from run_integrated import create_integrated_application
 
         runtime = FakeRuntime()
-        navigation = FakeNavigationService()
+        pose_bridge = SimpleNamespace(
+            state_store=runtime.state_store,
+            start=Mock(),
+            stop=Mock(),
+        )
         application = create_integrated_application(
             final_runtime=runtime,
-            navigation_service=navigation,
-        )
-        application._serial_reader.start()
-        self.addCleanup(application._serial_reader.stop)
-
-        application._serial_reader.send_command("START_PATROL", patrolId=17)
-        self.assertEqual(navigation.start_calls, [17])
-        self.assertTrue(runtime.mission.patrol_active)
-        self.assertEqual(
-            runtime.mission.speed,
-            application._settings.patrol_drive_speed_pwm,
+            pose_bridge=pose_bridge,
+            start_serial_runtime=False,
         )
 
-        odometry_listener = runtime.odometry_listeners[0]
-        odometry_listener(
-            SimpleNamespace(),
-            SimpleNamespace(
-                left_distance_m=0.2,
-                right_distance_m=0.2,
-            ),
-        )
-        self.assertGreater(len(navigation.pose_updates), 0)
-        self.assertAlmostEqual(navigation.pose_updates[-1].x, 0.2)
+        self.assertIs(application._state_store, runtime.state_store)
+        self.assertIs(application._pose_source, pose_bridge)
+        self.assertIs(pose_bridge.state_store, application._state_store)
+        self.assertFalse(application._start_serial_reader)
 
-        navigation.emit("DESTINATION_REACHED")
-        self.assertFalse(runtime.mission.patrol_active)
-        self.assertIn("DESTINATION_REACHED", runtime.stop_reasons)
-        self.assertEqual(application._state_store.get_status().state, "IDLE")
-
-        application._serial_reader.send_command("STOP_PATROL")
-        self.assertEqual(navigation.stop_calls, 1)
-
-    def test_real_short_route_stops_runtime_at_destination(self) -> None:
-        from run_integrated import (
-            _build_navigation_service,
-            create_integrated_application,
-        )
-
-        runtime = FakeRuntime()
-        route_path = (
-            Path(__file__).resolve().parents[1]
-            / "roki"
-            / "maps"
-            / "dummy_rectangle"
-            / "route.odom-demo.yaml"
-        )
-        navigation = _build_navigation_service(route_path)
-        application = create_integrated_application(
-            final_runtime=runtime,
-            navigation_service=navigation,
-        )
-        application._serial_reader.start()
-        self.addCleanup(application._serial_reader.stop)
-
-        application._serial_reader.send_command("START_PATROL", patrolId=18)
-        odometry_listener = runtime.odometry_listeners[0]
-        for distance_m in (0.20, 0.40, 0.60):
-            odometry_listener(
-                SimpleNamespace(),
-                SimpleNamespace(
-                    left_distance_m=distance_m,
-                    right_distance_m=distance_m,
-                ),
-            )
-
-        self.assertFalse(runtime.mission.patrol_active)
-        self.assertIn("DESTINATION_REACHED", runtime.stop_reasons)
-        self.assertEqual(navigation.state.value, "COMPLETED")
-        self.assertEqual(application._state_store.get_status().state, "IDLE")
-
-    def test_existing_publisher_reads_adapter_updated_backend_store(self) -> None:
+    def test_existing_publisher_reads_final_runtime_store_directly(self) -> None:
         from run_integrated import create_integrated_application
 
         runtime = FakeRuntime()
         application = create_integrated_application(final_runtime=runtime)
-        listener = runtime.hardware_listeners[0]
-        listener(  # type: ignore[operator]
-            SimpleNamespace(
-                battery_percent=74.5,
-                motor=SimpleNamespace(value="NORMAL"),
-                line_sensor=SimpleNamespace(value="NORMAL"),
+        runtime.state_store.update_hardware(
+            HardwareState(
+                battery=74.5,
+                motor="NORMAL",
+                line_sensor="NORMAL",
             )
         )
         application._mqtt_client.publish = Mock()
@@ -333,6 +202,140 @@ waypoints:
                 "obstacle",
                 "timestamp",
             },
+        )
+
+    def test_status_is_published_only_on_five_second_monotonic_gate(self) -> None:
+        from mqtt.publisher import RokiPublisherApplication
+
+        settings = SimpleNamespace(
+            status_publish_interval_seconds=5.0,
+            schema_version=1,
+            robot_key="ROKI-01",
+            status_topic="hanbakwi/v1/robots/ROKI-01/status",
+        )
+        store = RobotStateStore()
+        store.update_hardware(
+            HardwareState(
+                battery=80.0,
+                motor="NORMAL",
+                line_sensor="NORMAL",
+            )
+        )
+        client = Mock()
+        application = RokiPublisherApplication(
+            settings=settings,
+            serial_reader=Mock(),
+            state_store=store,
+            mqtt_client=client,
+            command_handler=Mock(),
+            pipeline_runner=Mock(),
+        )
+
+        application._publish_status_if_needed(100.0)
+        self.assertEqual(client.publish.call_count, 1)
+
+        store.update_hardware(
+            HardwareState(
+                battery=79.9,
+                motor="NORMAL",
+                line_sensor="NORMAL",
+            )
+        )
+        application._publish_status_if_needed(100.1)
+        application._publish_status_if_needed(104.999)
+        self.assertEqual(client.publish.call_count, 1)
+
+        application._publish_status_if_needed(105.0)
+        self.assertEqual(client.publish.call_count, 2)
+
+    def test_lidar_bridge_is_injected_without_changing_camera(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        lidar_bridge = SimpleNamespace(
+            state_store=runtime.state_store,
+            start=Mock(),
+            stop=Mock(),
+        )
+        application = create_integrated_application(
+            final_runtime=runtime,
+            lidar_health_bridge=lidar_bridge,
+        )
+
+        self.assertIs(application._lidar_health_source, lidar_bridge)
+        self.assertIs(lidar_bridge.state_store, application._state_store)
+        self.assertEqual(
+            application._state_store.get_status().camera,
+            "DISCONNECTED",
+        )
+
+    def test_existing_status_payload_reflects_obstacle_contract(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        application = create_integrated_application(final_runtime=runtime)
+        runtime.state_store.update_hardware(
+            HardwareState(80.0, "NORMAL", "NORMAL")
+        )
+        runtime.state_store.update_lidar_status("NORMAL")
+        runtime.state_store.update_obstacle(
+            ObstacleState(
+                status="STOP",
+                direction="FRONT",
+                reason_message="전방에 장애물이 있습니다.",
+            )
+        )
+        application._mqtt_client.publish = Mock()
+
+        application._publish_status_if_needed(100.0)
+
+        payload = application._mqtt_client.publish.call_args.kwargs["payload"]
+        self.assertEqual(
+            payload["obstacle"],
+            {
+                "status": "STOP",
+                "direction": "FRONT",
+                "reasonMessage": "전방에 장애물이 있습니다.",
+            },
+        )
+        self.assertEqual(payload["camera"], "DISCONNECTED")
+        self.assertEqual(payload["lidar"], "NORMAL")
+        self.assertEqual(payload["motor"], "NORMAL")
+        self.assertEqual(payload["lineSensor"], "NORMAL")
+
+    def test_pose_publisher_keeps_one_second_interval(self) -> None:
+        from mqtt.publisher import RokiPublisherApplication
+        from state.models import PoseState
+
+        settings = SimpleNamespace(
+            pose_publish_interval_seconds=1.0,
+            schema_version=1,
+            robot_key="ROKI-01",
+            pose_topic="hanbakwi/v1/robots/ROKI-01/pose",
+        )
+        store = Mock()
+        store.get_pose.return_value = PoseState(1.0, 2.0, 90.0)
+        client = Mock()
+        application = RokiPublisherApplication(
+            settings=settings,
+            serial_reader=Mock(),
+            state_store=store,
+            mqtt_client=client,
+            command_handler=Mock(),
+            pipeline_runner=Mock(),
+        )
+        application._last_pose_publish_time = 100.0
+
+        application._publish_pose_if_needed(100.9)
+        client.publish.assert_not_called()
+        application._publish_pose_if_needed(101.0)
+
+        client.publish.assert_called_once()
+        payload = client.publish.call_args.kwargs["payload"]
+        self.assertEqual(payload["heading"], 90.0)
+        self.assertEqual(
+            set(payload),
+            {"schemaVersion", "robotKey", "x", "y", "heading", "timestamp"},
         )
 
     def test_existing_command_handler_controls_final_mission_and_publishes_ack(
@@ -407,90 +410,6 @@ waypoints:
         self.assertEqual(stop_ack["payload"]["commandId"], "command-stop")
         self.assertEqual(stop_ack["payload"]["command"], "STOP_PATROL")
         self.assertEqual(stop_ack["payload"]["status"], "SUCCEEDED")
-
-    def test_mqtt_start_odometry_destination_then_stop_ack(self) -> None:
-        from run_integrated import _build_navigation_service, create_integrated_application
-
-        with tempfile.TemporaryDirectory() as directory:
-            route_path = Path(directory) / "route.yaml"
-            route_path.write_text(
-                """schema_version: 1
-map_id: dummy-rectangle
-map_version: 1
-route_id: mqtt-physical-demo
-frame_id: map
-waypoints:
-  - sequence: 1
-    name: CHECKPOINT_20CM
-    x: 0.2
-    y: 0.0
-    yaw_deg: 0.0
-    acceptance_radius_m: 0.04
-    action: PASS
-  - sequence: 2
-    name: SCAN_POINT_40CM
-    x: 0.4
-    y: 0.0
-    yaw_deg: 0.0
-    acceptance_radius_m: 0.04
-    action: SCAN
-  - sequence: 3
-    name: DESTINATION_60CM
-    x: 0.6
-    y: 0.0
-    yaw_deg: 0.0
-    acceptance_radius_m: 0.04
-    action: DESTINATION
-""",
-                encoding="utf-8",
-            )
-            runtime = FakeRuntime()
-            navigation = _build_navigation_service(route_path)
-            application = create_integrated_application(
-                final_runtime=runtime,
-                navigation_service=navigation,
-            )
-            application._pipeline_runner.start = Mock()
-            application._pipeline_runner.stop = Mock()
-            application._command_handler._pipeline_enabled = False
-            application._mqtt_client.publish = Mock()
-            application._serial_reader.start()
-            self.addCleanup(application._serial_reader.stop)
-
-            application._command_handler.handle(
-                application._settings.command_topic,
-                {
-                    "command": "START_PATROL",
-                    "commandId": "start-demo",
-                    "patrolId": 23,
-                },
-            )
-            self.assertTrue(runtime.mission.patrol_active)
-            listener = runtime.odometry_listeners[0]
-            for distance in (0.17, 0.37, 0.57):
-                listener(
-                    SimpleNamespace(),
-                    SimpleNamespace(
-                        left_distance_m=distance,
-                        right_distance_m=distance,
-                    ),
-                )
-
-            self.assertFalse(runtime.mission.patrol_active)
-            self.assertIn("DESTINATION_REACHED", runtime.stop_reasons)
-            self.assertEqual(application._state_store.get_status().state, "IDLE")
-
-            application._command_handler.handle(
-                application._settings.command_topic,
-                {
-                    "command": "STOP_PATROL",
-                    "commandId": "stop-demo",
-                },
-            )
-            self.assertIn("MQTT_STOP_PATROL", runtime.stop_reasons)
-            ack = application._mqtt_client.publish.call_args.kwargs["payload"]
-            self.assertEqual(ack["commandId"], "stop-demo")
-            self.assertEqual(ack["status"], "SUCCEEDED")
 
 
 if __name__ == "__main__":

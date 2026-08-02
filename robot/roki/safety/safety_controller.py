@@ -133,9 +133,9 @@ class SafetyController:
         if hardware_status.line_sensor is LineSensorStatus.DISCONNECTED:
             return "LINE_SENSOR_DISCONNECTED"
         cutoff = self._settings.low_battery_percent
-        if (
-            cutoff is not None
-            and hardware_status.battery_percent < cutoff
-        ):
-            return "LOW_BATTERY"
+        if cutoff is not None:
+            if hardware_status.battery_percent is None:
+                return "BATTERY_PERCENT_UNAVAILABLE"
+            if hardware_status.battery_percent < cutoff:
+                return "LOW_BATTERY"
         return None

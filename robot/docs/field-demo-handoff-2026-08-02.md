@@ -1,5 +1,9 @@
 # RO-KI waypoint 현장 시연 인수인계
 
+> 소프트웨어·백엔드·AI·OTA를 이어서 완성하는 작업자는 먼저
+> [`goal-mode-integration-handoff-2026-08-02.md`](goal-mode-integration-handoff-2026-08-02.md)를
+> 읽는다. 이 문서는 실측 및 현장 waypoint 증거로 유지한다.
+
 기준일: 2026-08-02
 대상: IoT/Robot 개발자, Jetson 배포 담당자
 
@@ -85,9 +89,9 @@ MQTT를 통해 동일 경로를 출발하는 최종 시험은 아직 수행하�
 
 ## 6. 아직 활성 Jetson에 설치하지 않은 이유
 
-다른 작업자가 pose/status 송신과 ROS TF/LiDAR health 연결을 진행하고 있다. 해당 Jetson
-소스가 현재 GitLab보다 최신이며, waypoint 코드를 그대로 덮어쓰면 상태 송신 변경을
-잃을 수 있다.
+다른 작업자가 만들었던 pose/status 송신과 ROS TF/LiDAR health 연결은 이후
+`goal-mode-integration-handoff-2026-08-02.md` 작성 시 waypoint 코드와 선별 병합해
+GitLab 브랜치에 보존했다. 다만 Jetson 활성 경로에는 아직 설치하지 않았다.
 
 현재 병합 후보는 다음 격리 경로에만 존재한다.
 
@@ -95,16 +99,17 @@ MQTT를 통해 동일 경로를 출발하는 최종 시험은 아직 수행하�
 /home/e103/waypoint-status-merge-stage-20260802-205644
 ```
 
-상태 송신 작업자가 최신 파일과 실행 방법을 넘기기 전에는 이 스테이징을 활성 경로에
-설치하지 않는다.
+이 스테이징은 이제 병합 출처 기록일 뿐이다. 활성 경로에 직접 설치하지 않고 GitLab의
+검증된 병합 commit과 정식 OTA 절차를 사용한다.
 
 ## 7. 남은 필수 작업
 
-### Gate A — 최신 상태 송신 코드 병합
+### Gate A — 상태 송신 병합본을 production entrypoint로 승격
 
-1. 작업자의 최신 `run_integrated.py`, pose/status store와 publisher를 확보한다.
-2. waypoint 스테이징에 다시 병합한다.
-3. pose 좌표계가 다음 route와 같은 `map` frame인지 확인한다.
+1. pose/status store, ROS TF/LiDAR bridge와 waypoint 소스 병합은 GitLab에 보존됐다.
+2. OTA의 `robot/scripts/run.sh`가 아직 정지 전용 entrypoint를 실행하므로 통합
+   `run_integrated.py`를 production composition에 연결한다.
+3. pose 좌표계가 다음 route와 같은 `map` frame인지 소프트웨어 fixture로 확인한다.
 
    ```text
    start       (1.0, 2.5)
@@ -113,7 +118,7 @@ MQTT를 통해 동일 경로를 출발하는 최종 시험은 아직 수행하�
    destination (1.6, 2.5)
    ```
 
-4. 비이동 통합 테스트를 다시 실행한다.
+4. 비이동 통합 테스트를 다시 실행한 뒤 정식 OTA 릴리스로만 Jetson에 설치한다.
 
 ### Gate B — MQTT 직선 물리 시험
 

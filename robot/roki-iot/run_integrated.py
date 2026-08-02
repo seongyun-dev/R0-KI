@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Final Serial Runtime과 기존 MQTT Publisher의 통합 진입점."""
+"""Final Serial Runtime과 기존 MQTT Publisher의 단일 실행 진입점.
+
+통합 운용에서는 legacy ``python3 -m mqtt.publisher``를 함께 실행하지 않는다.
+이 모듈만 Final RobotRuntime의 Serial 연결과 공용 Store를 사용한다.
+"""
 
 from __future__ import annotations
 
+import argparse
+import os
 import sys
 import signal
-import os
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 FINAL_RUNTIME_ROOT = PROJECT_ROOT.parent / "roki"
 
 
-def _build_final_runtime() -> Any:
-    """모듈명이 겹치는 두 프로젝트를 분리해 Final Runtime을 생성한다."""
+def _build_final_components() -> tuple[Any, Any, Any]:
+    """Final Runtime과 같은 Store를 쓰는 ROS bridges를 생성한다."""
 
     final_root = str(FINAL_RUNTIME_ROOT)
     original_sys_path = list(sys.path)
@@ -23,9 +28,17 @@ def _build_final_runtime() -> Any:
         *(path for path in original_sys_path if path != final_root),
     ]
     try:
-        from scripts.run_runtime import build_runtime
+        from scripts.run_runtime import (
+            build_ros_lidar_health_bridge,
+            build_ros_tf_pose_bridge,
+            build_runtime,
+        )
 
         runtime = build_runtime()
+        pose_bridge = build_ros_tf_pose_bridge(runtime.state_store)
+        lidar_health_bridge = build_ros_lidar_health_bridge(
+            runtime.state_store
+        )
     finally:
         sys.path = original_sys_path
 
@@ -34,11 +47,18 @@ def _build_final_runtime() -> Any:
     for module_name in tuple(sys.modules):
         if module_name == "state" or module_name.startswith("state."):
             del sys.modules[module_name]
+    return runtime, pose_bridge, lidar_health_bridge
+
+
+def _build_final_runtime() -> Any:
+    """기존 내부 호출 호환용 Final Runtime 생성 함수."""
+
+    runtime, _pose_bridge, _lidar_health_bridge = _build_final_components()
     return runtime
 
 
 def _build_navigation_service(route_path: str | Path | None = None) -> Any:
-    """Load the local route and build a hardware-independent waypoint mission."""
+    """Load and bound the temporary straight encoder waypoint route."""
 
     selected_path = Path(
         route_path
@@ -49,7 +69,7 @@ def _build_navigation_service(route_path: str | Path | None = None) -> Any:
     )
     if not selected_path.is_file():
         raise RuntimeError(
-            "waypoint route file is missing; refusing fixed straight patrol: "
+            "waypoint route file is missing; refusing encoder patrol: "
             f"{selected_path}"
         )
     final_root = str(FINAL_RUNTIME_ROOT)
@@ -66,8 +86,8 @@ def _build_navigation_service(route_path: str | Path | None = None) -> Any:
     validate_straight_encoder_route(
         route,
         EncoderWaypointSettings(
-            start_x_m=float(os.getenv("ROKI_ROUTE_START_X_M", "0.0")),
-            start_y_m=float(os.getenv("ROKI_ROUTE_START_Y_M", "0.0")),
+            start_x_m=float(os.getenv("ROKI_ROUTE_START_X_M", "1.0")),
+            start_y_m=float(os.getenv("ROKI_ROUTE_START_Y_M", "2.5")),
             maximum_travel_m=float(
                 os.getenv("ROKI_ROUTE_MAXIMUM_TRAVEL_M", "0.70")
             ),
@@ -79,49 +99,46 @@ def _build_navigation_service(route_path: str | Path | None = None) -> Any:
 def create_integrated_application(
     *,
     final_runtime: Any | None = None,
+    pose_bridge: Any | None = None,
+    lidar_health_bridge: Any | None = None,
+    start_serial_runtime: bool = True,
     navigation_service: Any | None = None,
 ) -> Any:
-    """Final Runtime과 기존 Publisher가 사용할 객체를 조립한다."""
+    """Final Runtime의 단일 Store를 기존 Publisher에 직접 주입한다."""
 
-    runtime = final_runtime or _build_final_runtime()
+    if final_runtime is None:
+        runtime, default_pose_bridge, default_lidar_bridge = (
+            _build_final_components()
+        )
+        if pose_bridge is None:
+            pose_bridge = default_pose_bridge
+        if lidar_health_bridge is None:
+            lidar_health_bridge = default_lidar_bridge
+    else:
+        runtime = final_runtime
 
     from config.settings import load_settings
-    from integration.encoder_waypoint_runtime_service import (
-        EncoderWaypointRuntimeService,
-    )
     from integration.runtime_state_backend_adapter import (
-        RuntimeStateBackendAdapter,
-        WaypointStateBackendAdapter,
+        FinalRuntimeService,
     )
     from mqtt.client import MqttClient
     from mqtt.command_handler import PatrolCommandHandler
     from mqtt.publisher import RokiPublisherApplication
     from pipeline.patrol_pipeline import PatrolPipelineRunner
-    from state.robot_state_store import RobotStateStore
 
     settings = load_settings()
-    backend_state_store = RobotStateStore()
-    adapter = RuntimeStateBackendAdapter(
-        runtime=runtime,
-        backend_state_store=backend_state_store,
-    )
-    adapter.connect()
-    if navigation_service is not None:
-        WaypointStateBackendAdapter(
-            navigation_service,
-            backend_state_store,
-        ).connect()
+    state_store = runtime.state_store
 
-    runtime_service = EncoderWaypointRuntimeService(
+    runtime_service = FinalRuntimeService(
         runtime,
         patrol_drive_speed_pwm=settings.patrol_drive_speed_pwm,
         patrol_steering_degrees=settings.patrol_steering_degrees,
         navigation_service=navigation_service,
         navigation_start_x_m=float(
-            os.getenv("ROKI_ROUTE_START_X_M", "0.0")
+            os.getenv("ROKI_ROUTE_START_X_M", "1.0")
         ),
         navigation_start_y_m=float(
-            os.getenv("ROKI_ROUTE_START_Y_M", "0.0")
+            os.getenv("ROKI_ROUTE_START_Y_M", "2.5")
         ),
         navigation_maximum_travel_m=float(
             os.getenv("ROKI_ROUTE_MAXIMUM_TRAVEL_M", "0.70")
@@ -138,23 +155,36 @@ def create_integrated_application(
         settings=settings,
         mqtt_client=mqtt_client,
         serial_reader=runtime_service,
-        state_store=backend_state_store,
+        state_store=state_store,
         pipeline_runner=pipeline_runner,
         pipeline_enabled=settings.pipeline_enabled,
     )
     return RokiPublisherApplication(
         settings=settings,
         serial_reader=runtime_service,
-        state_store=backend_state_store,
+        state_store=state_store,
         mqtt_client=mqtt_client,
         command_handler=command_handler,
         pipeline_runner=pipeline_runner,
+        pose_source=pose_bridge,
+        lidar_health_source=lidar_health_bridge,
+        start_serial_reader=start_serial_runtime,
     )
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--pose-only",
+        action="store_true",
+        help="ESP32 Serial Runtime 없이 TF Map Pose와 MQTT만 검증합니다",
+    )
+    args = parser.parse_args()
     application = create_integrated_application(
-        navigation_service=_build_navigation_service()
+        start_serial_runtime=not args.pose_only,
+        navigation_service=(
+            None if args.pose_only else _build_navigation_service()
+        ),
     )
 
     def stop_handler(_signum: int, _frame: object) -> None:

@@ -33,6 +33,8 @@ MQTT command → PatrolCommandHandler
 from __future__ import annotations
 
 import time
+import threading
+from typing import Any
 
 from config.settings import (
     AppSettings,
@@ -66,6 +68,9 @@ class RokiPublisherApplication:
         mqtt_client: MqttClient,
         command_handler: PatrolCommandHandler,
         pipeline_runner: PatrolPipelineRunner,
+        pose_source: Any | None = None,
+        lidar_health_source: Any | None = None,
+        start_serial_reader: bool = True,
     ) -> None:
         self._settings = settings
         self._serial_reader = serial_reader
@@ -73,12 +78,19 @@ class RokiPublisherApplication:
         self._mqtt_client = mqtt_client
         self._command_handler = command_handler
         self._pipeline_runner = pipeline_runner
+        self._pose_source = pose_source
+        self._lidar_health_source = lidar_health_source
+        self._start_serial_reader = start_serial_reader
+        self._serial_reader_started = False
+        self._pose_source_started = False
+        self._lidar_health_source_started = False
 
         self._last_pose_publish_time = 0.0
         self._last_status_publish_time = 0.0
 
         self._pose_wait_log_printed = False
         self._hardware_wait_log_printed = False
+        self._stop_event = threading.Event()
 
     def start(self) -> None:
         """
@@ -90,7 +102,16 @@ class RokiPublisherApplication:
             self._command_handler.handle
         )
 
-        self._serial_reader.start()
+        self._stop_event.clear()
+        if self._pose_source is not None:
+            self._pose_source.start()
+            self._pose_source_started = True
+        if self._lidar_health_source is not None:
+            self._lidar_health_source.start()
+            self._lidar_health_source_started = True
+        if self._start_serial_reader:
+            self._serial_reader.start()
+            self._serial_reader_started = True
         self._mqtt_client.connect()
 
         self._print_startup_information()
@@ -98,6 +119,9 @@ class RokiPublisherApplication:
 
     def stop(self) -> None:
         """Serial, 파이프라인, MQTT를 안전하게 종료한다."""
+
+        self._stop_event.set()
+        self._mqtt_client.disconnect()
 
         try:
             self._pipeline_runner.stop()
@@ -107,8 +131,17 @@ class RokiPublisherApplication:
                 f"{exc}"
             )
 
-        self._serial_reader.stop()
-        self._mqtt_client.disconnect()
+        if self._serial_reader_started:
+            self._serial_reader.stop()
+            self._serial_reader_started = False
+
+        if self._lidar_health_source_started:
+            self._lidar_health_source.stop()
+            self._lidar_health_source_started = False
+
+        if self._pose_source_started:
+            self._pose_source.stop()
+            self._pose_source_started = False
 
     def _run_publish_loop(self) -> None:
         """
@@ -116,7 +149,7 @@ class RokiPublisherApplication:
         필요한 MQTT 메시지를 발행한다.
         """
 
-        while True:
+        while not self._stop_event.is_set():
             current_time = time.monotonic()
 
             self._publish_status_if_needed(
@@ -127,19 +160,14 @@ class RokiPublisherApplication:
                 current_time
             )
 
-            time.sleep(
-                self.LOOP_INTERVAL_SECONDS
-            )
+            self._stop_event.wait(self.LOOP_INTERVAL_SECONDS)
 
     def _publish_status_if_needed(
         self,
         current_time: float,
     ) -> None:
         """
-        다음 조건 중 하나를 만족하면 Status를 발행한다.
-
-        1. Status 정기 발행 주기가 지난 경우
-        2. Status 값이 변경된 경우
+        Status는 상태 변경 빈도와 무관하게 정기 주기로만 발행한다.
         """
 
         periodic_publish_due = (
@@ -149,14 +177,7 @@ class RokiPublisherApplication:
             .status_publish_interval_seconds
         )
 
-        status_changed = (
-            self._state_store.has_status_changed()
-        )
-
-        if (
-            not periodic_publish_due
-            and not status_changed
-        ):
+        if not periodic_publish_due:
             return
 
         status = self._state_store.get_status()
