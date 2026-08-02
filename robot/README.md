@@ -55,6 +55,10 @@ The production environment template is in
 `config/robot.env.example`. The ROS JSON contract and integration points are in
 `docs/ai-ros-contract-v1.md`.
 
+The physical robot integration order, calibration responsibilities, same-day
+gates, and demo acceptance criteria are documented in
+`docs/robot-demo-integration-plan.md`.
+
 ## ESP32, drive, and MQTT implementation snapshot
 
 The assembled robot's verified hardware implementation is preserved separately
