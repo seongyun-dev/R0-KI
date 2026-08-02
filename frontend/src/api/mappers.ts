@@ -266,6 +266,8 @@ function timelinePoint(value: PatrolTimelineResponse): PatrolPoint {
     location: value.checkpointName ?? '위치 미확인',
     status: (value.processingStatus ? processingStatus(value.processingStatus) : '이상무') as StatusLabel,
     eventId: value.eventId == null ? undefined : String(value.eventId),
+    x: value.xCoordinate == null ? undefined : toNumber(value.xCoordinate),
+    y: value.yCoordinate == null ? undefined : toNumber(value.yCoordinate),
   }
 }
 
@@ -319,6 +321,14 @@ export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): P
         }
       : undefined,
     points: timeline.length > 0 ? timeline.map(timelinePoint) : undefined,
+    mapUrl: value.mapUrl ?? undefined,
+    routePoints: (value.routePoints ?? [])
+      .map((point) => ({
+        x: toNumber(point.xCoordinate),
+        y: toNumber(point.yCoordinate),
+        recordedAt: point.recordedAt,
+      }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y)),
   }
 }
 
