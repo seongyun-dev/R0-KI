@@ -16,7 +16,7 @@ public class FileStorageWebConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         String location = "file:" + Path.of(properties.getUploadDir()).toAbsolutePath() + "/";
-        // /uploads/로 시작하는 모든 요청을 처리
+        // urlPrefix(/api/uploads)로 시작하는 모든 요청을 처리
         registry.addResourceHandler(properties.getUrlPrefix() + "/**").addResourceLocations(location);
     }
 }
