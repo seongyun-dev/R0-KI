@@ -1,4 +1,8 @@
-# AIoT infrastructure handoff
+# AIoT 인프라 인수인계 문서
+
+> 이 문서는 구축 과정과 과거 상태를 보존한다. 현재 일상 운영은 `README.md`,
+> `CICD_V2_OPERATIONS.md`, `OPERATIONS.md`, `jetson/README.md`를 우선한다.
+> 특히 브랜치·배포·Jetson 릴리스 상태는 이 문서의 초기 기록보다 최신 운영 문서가 정확하다.
 
 > **Legacy document:** This file preserves the original `develop`-centric
 > rollout history and must not be used as the current deployment procedure.
