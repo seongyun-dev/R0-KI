@@ -14,7 +14,8 @@ PORT = Path(
     "/dev/serial/by-id/"
     "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
 )
-EXPECTED_FIRMWARE_VERSION = "2.2.0"
+EXPECTED_FIRMWARE_NAME = "roki-operating"
+SUPPORTED_FIRMWARE_VERSIONS = {"2.2.0", "3.0.0"}
 
 
 def send(port: serial.Serial, payload: dict[str, object]) -> None:
@@ -79,8 +80,9 @@ def main() -> int:
                     seen["statusAck"] = True
             elif message_type == "hello":
                 seen["hello"] = (
-                    payload.get("protocol") == 1
-                    and payload.get("version") == EXPECTED_FIRMWARE_VERSION
+                    payload.get("firmware") == EXPECTED_FIRMWARE_NAME
+                    and payload.get("protocol") == 1
+                    and payload.get("version") in SUPPORTED_FIRMWARE_VERSIONS
                     and payload.get("sequence") == 1
                 )
             elif message_type == "odometry":

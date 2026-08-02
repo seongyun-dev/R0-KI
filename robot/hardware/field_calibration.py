@@ -30,7 +30,7 @@ DEFAULT_PORT_GLOB = (
     "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_*-if00-port0"
 )
 EXPECTED_FIRMWARE = "roki-operating"
-EXPECTED_VERSION = "2.2.0"
+SUPPORTED_VERSIONS = frozenset({"2.2.0", "3.0.0"})
 LINE_SCENARIOS = (
     ("floor", "Remove all black tape from below all five sensors."),
     ("physical_leftmost", "Put black tape below only the physical leftmost sensor."),
@@ -102,7 +102,7 @@ class PassiveEsp32Session:
             ]
             operating = any(
                 payload.get("firmware") == EXPECTED_FIRMWARE
-                and payload.get("version") == EXPECTED_VERSION
+                and payload.get("version") in SUPPORTED_VERSIONS
                 and payload.get("protocol") == 1
                 for payload in hello_messages
             )
@@ -116,12 +116,13 @@ class PassiveEsp32Session:
                 self.protocol = "line-debug-text"
             else:
                 raise CalibrationError(
-                    "Neither operating firmware 2.2.0 nor the preserved "
+                    "Neither a supported operating firmware nor the preserved "
                     "line-debug telemetry was detected; movement remains stopped."
                 )
             if self._require_operating and not operating:
                 raise CalibrationError(
-                    "This command needs operating firmware 2.2.0. The ESP32 is "
+                    "This command needs operating firmware 2.2.0 or 3.0.0. "
+                    "The ESP32 is "
                     "currently running line-debug firmware, so encoder capture "
                     "is unavailable."
                 )

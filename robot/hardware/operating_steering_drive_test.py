@@ -18,6 +18,7 @@ PORT = Path(
 MAX_TEST_SPEED_PWM = 51
 MIN_ANGLE = 60
 MAX_ANGLE = 100
+SUPPORTED_FIRMWARE_VERSIONS = {"2.2.0", "3.0.0"}
 
 
 def send(port: serial.Serial, payload: dict[str, object]) -> None:
@@ -111,8 +112,9 @@ def main() -> int:
             preflight = read_messages(port, duration=1.0)
             hello_ok = any(
                 message.get("type") == "hello"
+                and message.get("firmware") == "roki-operating"
                 and message.get("protocol") == 1
-                and message.get("version") == "2.2.0"
+                and message.get("version") in SUPPORTED_FIRMWARE_VERSIONS
                 for message in preflight
             )
             batteries = [
@@ -122,7 +124,7 @@ def main() -> int:
                 and isinstance(message.get("battery"), (int, float))
             ]
             if not hello_ok:
-                raise RuntimeError("operating firmware 2.2.0 handshake failed")
+                raise RuntimeError("supported operating firmware handshake failed")
             if not batteries or max(batteries) <= 0.0:
                 raise RuntimeError(
                     "Battery B is not detected; refusing a movement command"
