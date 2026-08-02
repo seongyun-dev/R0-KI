@@ -301,9 +301,11 @@ if [ -L "${current_link}" ]; then
   old_current="$(readlink -f "${current_link}")"
 fi
 ai_was_active=false
+ros_was_active=false
 robot_was_active=false
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
   systemctl is-active --quiet aiot-ai.service && ai_was_active=true
+  systemctl is-active --quiet aiot-ros.service && ros_was_active=true
   systemctl is-active --quiet aiot-robot.service && robot_was_active=true
 fi
 if [ -n "${old_current}" ]; then
@@ -332,6 +334,10 @@ if [ "${ai_was_active}" = true ]; then
   systemctl restart aiot-ai.service || restart_failed=true
   systemctl is-active --quiet aiot-ai.service || restart_failed=true
 fi
+if [ "${restart_failed}" = false ] && [ "${ros_was_active}" = true ]; then
+  systemctl restart aiot-ros.service || restart_failed=true
+  systemctl is-active --quiet aiot-ros.service || restart_failed=true
+fi
 if [ "${restart_failed}" = false ] && [ "${robot_was_active}" = true ]; then
   systemctl restart aiot-robot.service || restart_failed=true
   systemctl is-active --quiet aiot-robot.service || restart_failed=true
@@ -342,6 +348,7 @@ if [ "${restart_failed}" = true ]; then
     ln -s "${old_current}" "${rollback_next}"
     mv -Tf "${rollback_next}" "${current_link}"
     [ "${ai_was_active}" = true ] && systemctl restart aiot-ai.service || true
+    [ "${ros_was_active}" = true ] && systemctl restart aiot-ros.service || true
     [ "${robot_was_active}" = true ] && systemctl restart aiot-robot.service || true
   else
     unlink "${current_link}"

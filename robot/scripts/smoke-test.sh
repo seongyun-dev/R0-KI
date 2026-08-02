@@ -28,5 +28,8 @@ export PYTHONPATH="${robot_root}/src:${robot_root}/roki:${robot_root}/roki-iot${
 export PYTHONDONTWRITEBYTECODE=1
 "${python_bin}" -B -m aiot_robot.smoke
 "${python_bin}" -B -m aiot_robot.ros_smoke
+"${python_bin}" -B -m aiot_robot.ros_config \
+  --template "${robot_root}/config/ros/nav2.params.yaml.template" \
+  --software-only
 "${python_bin}" -B "${robot_root}/roki-iot/run_integrated.py" --check
 echo "Robot ${phase} smoke passed; no actuator command was sent"

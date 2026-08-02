@@ -26,7 +26,7 @@ stable manifest를 확인하지만 순찰이 보유한 `patrol-deploy.lock`을 �
 `phase=activate result=patrol-active`로 현재 버전을 유지한다.
 
 부팅에서는 현재 검증본의 AI/Robot과 updater가 함께 시작될 수 있다. 새 릴리스가
-있을 때 updater가 잠금을 얻고 AI→Robot을 재시작한다. 서비스가 updater 종료를
+있을 때 updater가 잠금을 얻고 AI→ROS→Robot을 재시작한다. 서비스가 updater 종료를
 `After=`로 기다리지는 않으므로 updater 내부 재시작과 교착하지 않는다.
 
 ## 2. Git에서 검증하는 명령
@@ -59,17 +59,20 @@ sudo install -m 0600 -o root -g root \
 sudo install -m 0600 -o root -g root \
   infra/jetson/ai.env.example /opt/aiot/secrets/ai.env
 sudo install -m 0600 -o root -g root \
+  infra/jetson/ros.env.example /opt/aiot/secrets/ros.env.example
+sudo install -m 0600 -o root -g root \
   robot/config/robot.env.example /opt/aiot/secrets/robot.env
 ```
 
-세 env를 현장에서 수정하되 실제 토큰·비밀번호를 Git, shell history, Mattermost에
+실측 후 `ros.env.example`을 `ros.env`로 복사한다. 네 env를 현장에서 수정하되 실제 토큰·비밀번호를 Git, shell history, Mattermost에
 남기지 않는다. `package-read.env`에는 `read_package_registry` 전용 Deploy Token만
 사용한다. Robot service token은 백엔드의 retained `SET_TOKEN`을 받아
 `/var/lib/aiot/secrets/robot-service-token`에 mode 0600으로 저장된다.
 
-현재 감사 결과상 Jetson에는 `slam_toolbox`, `nav2_map_server`만 있고 full Nav2,
-AMCL, planner/controller/BT navigator가 없었다. 위 두 apt 패키지는 map 기반 곡선
-주행 전에 필요한 현장 설치 게이트다.
+2026-08-03 비구동 준비에서 `ros-humble-navigation2`와
+`ros-humble-nav2-bringup` 설치를 완료했고, AMCL·planner·controller·BT navigator
+패키지 경로를 확인했다. lifecycle node 기동과 실제 `/scan`, `/odom`, TF 검증은
+실측값을 채운 뒤 수행한다.
 
 ## 4. 현장 설정
 
@@ -97,6 +100,7 @@ sequence는 1부터 연속이고 마지막 action은 `DESTINATION`이어야 한�
 ```text
 ROKI_WHEELBASE_M=<앞/뒤 차축 중심 거리 m>
 ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG=<서보 60/100도일 때 실제 바퀴 최대 조향각>
+ROKI_ROBOT_RADIUS_M=<차체와 장착물을 포함한 안전 반경 m>
 ```
 
 측정하지 않으면 `auto`가 `encoder_limited`를 선택한다. 제한 모드는 직선·최대
@@ -108,8 +112,8 @@ ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG=<서보 60/100도일 때 실제 바퀴 최대 
 ```bash
 readlink -f /dev/roki_esp32
 readlink -f /dev/roki_lidar
-readlink -f /dev/roki_camera_front
-readlink -f /dev/roki_camera_rear
+readlink -f /dev/roki_camera_left
+readlink -f /dev/roki_camera_right
 ```
 
 ESP32와 LiDAR CP2102는 serial `0001`이 같으므로 `/dev/serial/by-id/...0001`을
@@ -130,6 +134,9 @@ sudo systemctl start aiot-ai.service
 sudo systemctl status aiot-ai.service --no-pager
 sudo test -s /run/aiot/ai-ready.json
 
+sudo systemctl start aiot-ros.service
+sudo systemctl status aiot-ros.service --no-pager
+
 sudo systemctl start aiot-robot.service
 sudo systemctl status aiot-robot.service --no-pager
 ```
@@ -141,6 +148,7 @@ IDLE/status/pose 준비 상태를 확인한다.
 ```bash
 sudo journalctl -u aiot-update.service -n 100 --no-pager
 sudo journalctl -u aiot-ai.service -n 100 --no-pager
+sudo journalctl -u aiot-ros.service -n 200 --no-pager
 sudo journalctl -u aiot-robot.service -n 200 --no-pager
 sudo systemctl list-timers aiot-update.timer --no-pager
 ```
@@ -180,24 +188,29 @@ cat /opt/aiot/iot/state/VERSION
 ```
 
 pre/post smoke나 서비스 재시작이 실패하면 `current`를 이전 symlink로 되돌리고
-이전에 실행 중이던 AI/Robot만 다시 시작한다. 순찰 중이면 새 릴리스를 활성화하지
+이전에 실행 중이던 AI/ROS/Robot만 다시 시작한다. 순찰 중이면 새 릴리스를 활성화하지
 않는다. 수동 복구가 필요하면 먼저 실제 STOP을 확인한 후 다음처럼 previous를
 가리키고 서비스를 AI → Robot 순서로 재시작한다.
 
 ```bash
 sudo ln -sfn "$(readlink -f /opt/aiot/iot/previous)" /opt/aiot/iot/current
 sudo systemctl restart aiot-ai.service
+sudo systemctl restart aiot-ros.service
 sudo systemctl restart aiot-robot.service
 ```
 
+상세 실측법과 단계별 합격 기준은
+[`field-calibration-and-live-gates.md`](field-calibration-and-live-gates.md)를 따른다.
+
 ## 8. 현재 남은 물리 게이트
 
-- full Nav2 패키지 설치와 lifecycle node 정상 기동
+- Nav2 lifecycle node 정상 기동과 `/scan`, `/odom`, TF 연결
 - wheelbase와 실제 최대 바퀴 조향각 실측
 - 최종 occupancy map, initial pose, map→odom→base_link TF
-- 카메라 두 대 stable alias와 pipeline 인자 확인
+- 카메라 좌/우 물리 장착 방향 확인
 - LiDAR 전방 임계거리·사각·clear hysteresis 현장 검증
-- 실제 backend robotKey/MQTT TLS/retained token과 end-to-end 순찰 1회
+- `/opt/aiot/secrets/robot.env` 생성 후 실제 MQTT 인증, retained token과
+  end-to-end 순찰 1회
 - 재부팅, 순찰 중 OTA 보류, 실패 릴리스 rollback 검증
 
 이 항목은 소프트웨어 미구현이 아니라 장비·운영 승인 없이는 완료할 수 없는 검증

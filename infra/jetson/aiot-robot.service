@@ -1,7 +1,7 @@
 [Unit]
 Description=AIoT robot runtime
-Wants=aiot-update.service aiot-ai.service
-After=aiot-ai.service
+Wants=aiot-update.service aiot-ai.service aiot-ros.service
+After=aiot-ai.service aiot-ros.service
 ConditionFileIsExecutable=/opt/aiot/iot/current/robot/scripts/run.sh
 
 [Service]

@@ -9,6 +9,7 @@
 - `roki/`: operating-json 시리얼, 안전 제어, odometry, waypoint/Nav2 연동
 - `roki-iot/`: 백엔드 MQTT 명령·ACK·pose·status와 통합 composition root
 - `src/aiot_robot/`: AI ROS 계약, readiness, 이벤트 outbox/REST 전달, OTA 잠금
+- `config/ros/`: YDLIDAR, RF2O, SLAM Toolbox, Ackermann Nav2 운영 설정
 - `hardware/`: 승인 후에만 실행하는 실물 진단·제한 주행 도구
 - `scripts/`: 설치, 운영 실행, 비이동 smoke, 전체 테스트
 
@@ -37,7 +38,9 @@ ROKI_ROUTE_FILE=robot/roki/maps/dummy_rectangle/route.short-straight.yaml \
 
 배포·진단·복구와 현장 검증 순서는
 [`docs/integrated-runtime-operations.md`](docs/integrated-runtime-operations.md)를
-따른다. Robot-AI 메시지는
+따른다. 아직 실측하지 않은 값과 현장 합격 기준은
+[`docs/field-calibration-and-live-gates.md`](docs/field-calibration-and-live-gates.md),
+Robot-AI 메시지는
 [`docs/ai-ros-contract-v1.md`](docs/ai-ros-contract-v1.md), ESP32 시리얼은
 [`roki/docs/COMMUNICATION_CONTRACT.md`](roki/docs/COMMUNICATION_CONTRACT.md)가
 기준이다. 2026-08-02 Goal 인수인계의 구현 결과는

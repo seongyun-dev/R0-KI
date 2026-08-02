@@ -10,11 +10,9 @@ ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ready_file="${AIOT_AI_READY_FILE:-/run/aiot/ai-ready.json}"
 evidence_dir="${AIOT_AI_EVIDENCE_DIR:-/var/lib/aiot/evidence}"
 required_engines="${AIOT_AI_REQUIRED_ENGINE_PATHS:-}"
-camera_devices=(
-  "${AIOT_AI_CAMERA_DEVICE:-}"
-  "${AIOT_AI_CAMERA_FRONT_DEVICE:-}"
-  "${AIOT_AI_CAMERA_REAR_DEVICE:-}"
-)
+camera_left="${AIOT_AI_CAMERA_LEFT_DEVICE:-${AIOT_AI_CAMERA_FRONT_DEVICE:-${AIOT_AI_CAMERA_DEVICE:-}}}"
+camera_right="${AIOT_AI_CAMERA_RIGHT_DEVICE:-${AIOT_AI_CAMERA_REAR_DEVICE:-}}"
+camera_devices=("${camera_left}" "${camera_right}")
 
 if [ "${ROS_LOCALHOST_ONLY:-1}" != "1" ]; then
   echo "ROS_LOCALHOST_ONLY must be 1 for Jetson-local AI/Robot traffic" >&2
@@ -49,6 +47,13 @@ if [ ! -d "$(dirname "${ready_file}")" ] || \
   echo "AI readiness directory is not writable: $(dirname "${ready_file}")" >&2
   exit 1
 fi
+if [ "${AIOT_AI_REQUIRE_DUAL_CAMERAS:-false}" = true ]; then
+  if [ -z "${camera_left}" ] || [ -z "${camera_right}" ] || \
+     [ "${camera_left}" = "${camera_right}" ]; then
+    echo "Two distinct AI camera devices are required" >&2
+    exit 1
+  fi
+fi
 for camera_device in "${camera_devices[@]}"; do
   if [ -n "${camera_device}" ] && [ ! -r "${camera_device}" ]; then
     echo "Configured AI camera device is not readable: ${camera_device}" >&2
@@ -75,7 +80,12 @@ source "${ros_setup}"
 set -u
 export PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
-"${python_bin}" - "${pipeline_main}" "${robot_adapter}" <<'PY'
+engine_arguments=()
+if [ -n "${required_engines}" ]; then
+  IFS=: read -r -a engine_arguments <<<"${required_engines}"
+fi
+"${python_bin}" - "${pipeline_main}" "${robot_adapter}" \
+  "${AIOT_AI_VALIDATE_TRT_ENGINES:-true}" "${engine_arguments[@]}" <<'PY'
 import py_compile
 import sys
 
@@ -85,8 +95,16 @@ import tensorrt
 import aiot_robot.ai_runtime
 from std_msgs.msg import String
 
-for path in sys.argv[1:]:
+pipeline_main, robot_adapter, validate_engines, *engine_paths = sys.argv[1:]
+for path in (pipeline_main, robot_adapter):
     py_compile.compile(path, doraise=True)
+if validate_engines == "true":
+    logger = tensorrt.Logger(tensorrt.Logger.ERROR)
+    for path in engine_paths:
+        with open(path, "rb") as stream, tensorrt.Runtime(logger) as runtime:
+            engine = runtime.deserialize_cuda_engine(stream.read())
+        if engine is None:
+            raise RuntimeError(f"TensorRT engine cannot be deserialized: {path}")
 print("AI preflight passed: ROS 2, TensorRT and script entrypoints are ready")
 PY
 

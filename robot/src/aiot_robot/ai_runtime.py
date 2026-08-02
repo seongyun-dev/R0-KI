@@ -25,6 +25,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from std_msgs.msg import String
 
 from .ai_adapter_core import build_detection_message
+from .ai_capture import CaptureSettings, configure_capture
 
 
 class AiAdapterNode(Node):
@@ -246,6 +247,7 @@ def run_pipeline(
     node: AiAdapterNode,
     pipeline_main: Path,
     pipeline_args: list[str],
+    capture_settings: CaptureSettings,
 ) -> int:
     try:
         module = _load_pipeline(pipeline_main)
@@ -274,6 +276,7 @@ def run_pipeline(
         def open_capture(source: Any) -> Any:
             nonlocal camera_count
             capture = original_open_capture(source)
+            configure_capture(capture, module.cv2, capture_settings)
             camera_count += 1
             if camera_count >= 2:
                 node.mark_camera_ready()
@@ -307,6 +310,30 @@ def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[
         "--evidence-root",
         default=os.getenv("AIOT_AI_EVIDENCE_DIR", "/var/lib/aiot/evidence"),
     )
+    parser.add_argument(
+        "--capture-width",
+        type=int,
+        default=int(os.getenv("AIOT_AI_CAPTURE_WIDTH", "640")),
+    )
+    parser.add_argument(
+        "--capture-height",
+        type=int,
+        default=int(os.getenv("AIOT_AI_CAPTURE_HEIGHT", "480")),
+    )
+    parser.add_argument(
+        "--capture-fps",
+        type=float,
+        default=float(os.getenv("AIOT_AI_CAPTURE_FPS", "30")),
+    )
+    parser.add_argument(
+        "--capture-fourcc",
+        default=os.getenv("AIOT_AI_CAPTURE_FOURCC", "MJPG"),
+    )
+    parser.add_argument(
+        "--capture-buffer-size",
+        type=int,
+        default=int(os.getenv("AIOT_AI_CAPTURE_BUFFER_SIZE", "1")),
+    )
     return parser.parse_known_args(argv)
 
 
@@ -318,11 +345,20 @@ def main(argv: list[str] | None = None) -> int:
 
     rclpy.init(args=None)
     node = AiAdapterNode(Path(args.evidence_root))
+    capture_settings = CaptureSettings(
+        width=args.capture_width,
+        height=args.capture_height,
+        fps=args.capture_fps,
+        fourcc=args.capture_fourcc,
+        buffer_size=args.capture_buffer_size,
+    )
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     result: list[int] = []
     pipeline_thread = threading.Thread(
-        target=lambda: result.append(run_pipeline(node, pipeline_main, pipeline_args)),
+        target=lambda: result.append(
+            run_pipeline(node, pipeline_main, pipeline_args, capture_settings)
+        ),
         name="ai-model-pipeline",
         daemon=True,
     )

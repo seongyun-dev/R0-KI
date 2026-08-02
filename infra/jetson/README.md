@@ -12,14 +12,17 @@ Jetson의 두 application lifecycle은 분리한다.
 `aiot-ai.service`는 활성 Robot 릴리스의 `aiot_robot.ai_runtime`을 기존 AI venv로
 실행한다. 어댑터가 `/home/e103/yolo-pipeline/yolo_pipeline/main.py`를 불러오고
 기존 REST sink만 ROS sink로 교체하므로 모델 코드는 수정하지 않는다.
+`aiot-ros.service`는 YDLIDAR → RF2O → SLAM Toolbox 또는 Nav2를 실행한다.
+실측값을 기록한 `/opt/aiot/secrets/ros.env`가 없으면 시작되지 않는다.
 `aiot-robot.service`는 `robot/scripts/run.sh` → `roki-iot/run_integrated.py`를
 실행하며 ESP32 시리얼의 유일한 소유자다.
 
 ## 부팅과 주기 확인
 
 ```text
-network-online -> aiot-ai.service -> aiot-robot.service (현재 검증본)
-              -> aiot-update.service (새 버전이면 AI -> Robot 재시작 검증)
+network-online -> aiot-ai.service --------> aiot-robot.service
+              -> aiot-ros.service -------/
+              -> aiot-update.service (새 버전이면 AI -> ROS -> Robot 재시작 검증)
 aiot-update.timer -> boot 2분 후, 이후 5분마다 stable manifest 확인
 ```
 
@@ -43,6 +46,7 @@ installer는 계정·디렉터리·udev·systemd만 만들고 기존 secret과 A
 ```text
 /opt/aiot/secrets/package-read.env  <- package-read.env.example
 /opt/aiot/secrets/ai.env            <- ai.env.example
+/opt/aiot/secrets/ros.env           <- ros.env.example (실측 후 생성)
 /opt/aiot/secrets/robot.env         <- robot/config/robot.env.example
 ```
 
@@ -69,7 +73,7 @@ Generic Package Registry에 올리고 stable manifest를 교체한다. updater�
 4. AI model/engine, `.env`, token, local route 미포함
 5. dependency install과 actuator-free pre smoke
 6. atomic `current` 교체와 post smoke
-7. 이전에 active였던 AI → Robot 순서의 재시작
+7. 이전에 active였던 AI → ROS → Robot 순서의 재시작
 
 post smoke 또는 서비스 재시작 실패 시 `current`를 이전 release로 되돌리고 이전
 서비스를 복구한다. 이미 설치한 버전, network/manifest/checksum 오류, 순찰 중인
@@ -79,10 +83,11 @@ post smoke 또는 서비스 재시작 실패 시 `current`를 이전 release로 
 
 ```bash
 systemctl status aiot-update.timer aiot-update.service --no-pager
-systemctl status aiot-ai.service aiot-robot.service --no-pager
+systemctl status aiot-ai.service aiot-ros.service aiot-robot.service --no-pager
 systemctl list-timers aiot-update.timer --no-pager
 journalctl -u aiot-update.service -n 100 --no-pager
 journalctl -u aiot-ai.service -n 100 --no-pager
+journalctl -u aiot-ros.service -n 200 --no-pager
 journalctl -u aiot-robot.service -n 200 --no-pager
 readlink -f /opt/aiot/iot/current
 readlink -f /opt/aiot/iot/previous

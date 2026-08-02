@@ -41,7 +41,14 @@ chmod 0755 "${test_root}/bin/curl"
 cat >"${test_root}/bin/systemctl" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = "is-active" ]; then
-  exit 3
+  service="${3:-${2:-}}"
+  case ",${TEST_ACTIVE_SERVICES:-}," in
+    *,"${service}",*) exit 0 ;;
+    *) exit 3 ;;
+  esac
+fi
+if [ "${1:-}" = "restart" ]; then
+  printf '%s\n' "${2:-}" >>"${TEST_SYSTEMCTL_LOG:?}"
 fi
 exit 0
 SH
@@ -134,6 +141,8 @@ PY
 
 run_updater() {
   PATH="${test_root}/bin:${PATH}" \
+    TEST_ACTIVE_SERVICES=aiot-ai.service,aiot-ros.service,aiot-robot.service \
+    TEST_SYSTEMCTL_LOG="${test_root}/systemctl.log" \
     AIOT_ROOT="${test_root}/device" \
     AIOT_DEVICE_ARCH_OVERRIDE=aarch64 \
     AIOT_PATROL_DEPLOY_LOCK_FILE="${test_root}/device/iot/state/patrol-deploy.lock" \
@@ -141,8 +150,12 @@ run_updater() {
 }
 
 create_release iot-v0.0.1 false
+: >"${test_root}/systemctl.log"
 first_output="$(run_updater)"
 grep -q 'phase=complete result=activated' <<<"${first_output}"
+mapfile -t restarted_services <"${test_root}/systemctl.log"
+test "${restarted_services[*]}" = \
+  "aiot-ai.service aiot-ros.service aiot-robot.service"
 test "$(readlink -f "${test_root}/device/iot/current")" = \
   "${test_root}/device/iot/releases/iot-v0.0.1"
 test "$(cat "${test_root}/device/iot/state/VERSION")" = "iot-v0.0.1"
