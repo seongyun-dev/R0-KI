@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://i15e103.p.ssafy.io/jetson/manifest.schema.json",
-  "title": "AIoT Jetson stable release manifest",
+  "$id": "https://i15e103.p.ssafy.io/jetson/iot-manifest.schema.json",
+  "title": "AIoT Jetson IoT stable release manifest",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
+    "component",
     "release",
-    "robot_commit",
-    "ai_commit",
-    "model_version",
+    "iot_commit",
+    "required_ai_contract_version",
     "jetpack",
     "architecture",
     "artifact_url",
@@ -21,22 +21,20 @@
     "schema_version": {
       "const": 1
     },
+    "component": {
+      "const": "iot"
+    },
     "release": {
       "type": "string",
-      "pattern": "^jetson-v[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "pattern": "^iot-v[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
-    "robot_commit": {
+    "iot_commit": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
     },
-    "ai_commit": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{40}$"
-    },
-    "model_version": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 128
+    "required_ai_contract_version": {
+      "type": "integer",
+      "minimum": 1
     },
     "jetpack": {
       "const": "6.2"
