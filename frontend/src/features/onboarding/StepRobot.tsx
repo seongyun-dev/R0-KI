@@ -87,6 +87,7 @@ export function StepRobot({ onPrev, onNext }: StepRobotProps) {
           이전
         </button>
         <span className="grow" />
+        {/* 등록을 마치면 맵 등록 단계로 이어진다 */}
         <button type="submit" className="btn btn-p btn-add" disabled={isSubmitting}>
           {isSubmitting ? '등록 중…' : '다음: 맵 파악하기'}
           <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>

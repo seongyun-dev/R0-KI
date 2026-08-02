@@ -6,6 +6,7 @@ import { StepMapScan } from '../features/onboarding/StepMapScan'
 import { StepRobot } from '../features/onboarding/StepRobot'
 import { StepZones } from '../features/onboarding/StepZones'
 import { useRegisteredMap } from '../features/onboarding/useRegisteredMap'
+import { SignupDoneModal } from '../features/onboarding/SignupDoneModal'
 import {
   useOnboardingProgress,
   type OnboardingPhase,
@@ -87,6 +88,8 @@ export default function SignupOnboarding() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>()
   const setMapContext = useAuthStore((s) => s.setMapContext)
+  // 계정 등록을 마친 직후 — 완료 모달을 띄우고, 이어서 할지 여기서 고른다
+  const [signedUpId, setSignedUpId] = useState<string>()
 
   return (
     <R0KiAuthShell bootTagline="관리자 계정 등록을 준비하고 있습니다.">
@@ -110,8 +113,10 @@ export default function SignupOnboarding() {
                     const response = await authApi.signUp(data)
                     login(data.username, response.accessToken)
                     // 이미 등록된 단지면 소속 회원으로 가입 완료 → 바로 대시보드
+                    // (로봇·지도는 단지 관리자가 이미 등록해 둔 상태)
                     if (response.isNewApartment) {
-                      beginOnboarding(data.username)
+                      // 계정 등록까지가 이 단계의 끝 — 이어서 할지는 모달에서 고른다
+                      setSignedUpId(data.username)
                     } else {
                       resetOnboarding()
                       navigate('/app', { replace: true })
@@ -136,6 +141,8 @@ export default function SignupOnboarding() {
               onPrev={() => navigate('/login')}
               onNext={({ robotId: registeredRobotId }) => {
                 setMapContext({ robotId: registeredRobotId })
+                /* 로봇 등록을 마치면 곧바로 맵 등록으로 넘어간다.
+                   지도가 없으면 관제 화면이 비어 있어, 여기서 끊지 않고 이어서 받는다. */
                 moveToScan(registeredRobotId)
               }}
             />
@@ -166,6 +173,20 @@ export default function SignupOnboarding() {
           )}
         </div>
       </div>
+
+      {/* 계정 등록 직후 — 이어서 로봇을 등록할지, 나중에 할지 고른다.
+          나중에 하기를 골라도 계정은 남고, 다음 로그인 때 이 단계로 돌아온다. */}
+      <SignupDoneModal
+        open={signedUpId != null}
+        onContinue={() => {
+          if (signedUpId) beginOnboarding(signedUpId)
+          setSignedUpId(undefined)
+        }}
+        onLater={() => {
+          setSignedUpId(undefined)
+          navigate('/login', { replace: true })
+        }}
+      />
     </R0KiAuthShell>
   )
 }

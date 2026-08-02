@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://t1.kakaocdn.net https://*.kakaocdn.net https://*.daumcdn.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' http: https: ws: wss:; frame-src 'self' https://*.kakao.com https://*.daum.net https://*.kakaocdn.net https://*.daumcdn.net; worker-src 'self' blob:; media-src 'self' blob:"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self' https://postcode.map.kakao.com http://postcode.map.kakao.com https://postcode.map.daum.net http://postcode.map.daum.net; script-src 'self' https://t1.kakaocdn.net https://*.kakaocdn.net https://*.daumcdn.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' http: https: ws: wss:; frame-src 'self' https://postcode.map.kakao.com http://postcode.map.kakao.com https://postcode.map.daum.net http://postcode.map.daum.net; child-src 'self' https://postcode.map.kakao.com http://postcode.map.kakao.com https://postcode.map.daum.net http://postcode.map.daum.net; worker-src 'self' blob:; media-src 'self' blob:"
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,7 +14,10 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    <script
+      id="kakao-postcode-script"
+      src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"
+    ></script>
 
   </body>
 </html>
