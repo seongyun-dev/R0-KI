@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://i15e103.p.ssafy.io/schemas/release-manifest-v1.json",
+  "title": "AIoT production release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "releaseId",
+    "releasedAt",
+    "integrationStatus",
+    "deployedComponents",
+    "frontend",
+    "backend",
+    "ai",
+    "iot",
+    "infra",
+    "mqttSchema"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "releaseId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "releasedAt": { "type": "string", "format": "date-time" },
+    "integrationStatus": {
+      "enum": ["passed", "provisional", "legacy", "pending"]
+    },
+    "deployedComponents": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["frontend", "backend", "ai", "iot", "infra"] }
+    },
+    "frontend": { "$ref": "#/$defs/applicationComponent" },
+    "backend": { "$ref": "#/$defs/backendComponent" },
+    "ai": { "$ref": "#/$defs/edgeComponent" },
+    "iot": { "$ref": "#/$defs/edgeComponent" },
+    "infra": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "pipelineId", "jobId"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "pipelineId": { "type": ["string", "null"], "maxLength": 64 },
+        "jobId": { "type": ["string", "null"], "maxLength": 64 }
+      }
+    },
+    "mqttSchema": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "commit": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "applicationComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "image", "commit", "branch"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": ["string", "null"], "maxLength": 255 },
+        "commit": { "$ref": "#/$defs/commit" },
+        "branch": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "backendComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "image", "commit", "branch", "databaseSchema"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": ["string", "null"], "maxLength": 255 },
+        "commit": { "$ref": "#/$defs/commit" },
+        "branch": { "type": ["string", "null"], "maxLength": 128 },
+        "databaseSchema": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "edgeComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "version", "artifact", "checksum"],
+      "properties": {
+        "status": { "enum": ["pending", "released"] },
+        "version": { "type": ["string", "null"], "maxLength": 128 },
+        "artifact": { "type": ["string", "null"], "maxLength": 2048 },
+        "checksum": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

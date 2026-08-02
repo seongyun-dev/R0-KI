@@ -1,0 +1,11 @@
+safety:
+  # 임시 운영 후보값. ESP32 실제 송신 주기와 USB 부하 시험 후 확정한다.
+  odometry_timeout_ms: 300
+  hardware_status_timeout_ms: 1000
+
+  # TODO(calibration): Firmware battery가 실제 SoC(%)를 보내기 전까지
+  # LOW_BATTERY 판정을 비활성화한다. SoC 보정 완료 후 다시 설정한다.
+  low_battery_percent: null
+
+  # TODO(calibration): 정상 부하 encoder 특성 측정 후 구현한다.
+  stall_timeout_ms: null
