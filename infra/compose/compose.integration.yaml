@@ -36,6 +36,8 @@ services:
   backend:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
     environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Seoul
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/aiot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
       SPRING_DATASOURCE_USERNAME: aiot_integration
       SPRING_DATASOURCE_PASSWORD: integration-only-password
