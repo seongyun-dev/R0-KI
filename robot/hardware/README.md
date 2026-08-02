@@ -1,5 +1,21 @@
 # RO-KI 안전 하드웨어 테스트 환경
 
+## 현장 캘리브레이션
+
+라인 센서와 엔코더를 실제 주행 전에 한 번만 확정하려면 다음 문서를 먼저 따른다.
+
+- [라인트레이싱 현장 통합 계획](../docs/line-tracing-field-plan.md)
+- `jetson_field_audit.sh`: USB, 카메라, ROS 환경을 변경 없이 수집
+- `field_calibration.py line-session`: 5채널 순서·검은색 극성·테이프 폭 수집
+- `field_calibration.py encoder-manual`: 전원 없이 엔코더 부호와 tick/회전 수집
+
+두 Python 명령은 ESP32에 `STOP`, `HELLO`, `STATUS`, `ENCODER_ZERO`만 보낸다.
+모터, 서보, `CONTROL` 명령은 보내지 않는다.
+
+`line-session`은 운영 JSON 펌웨어와 `S1:1 S2:... S5:1` 형식의 라인센서
+확인용 펌웨어를 자동으로 구분한다. `encoder-manual`은 엔코더 텔레메트리가 있는
+운영 펌웨어 2.2.0에서만 실행되며, 라인센서 전용 펌웨어에서는 안전하게 거부한다.
+
 현재 배선 기준:
 
 - LEFT BTS: RPWM GPIO25, LPWM GPIO26
