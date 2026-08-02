@@ -72,6 +72,13 @@ These directories mirror the live Jetson paths `/home/e103/roki`,
 `/home/e103/roki-iot`, and selected files from `/home/e103/robot-hw-test`.
 They are not yet the process started by `scripts/run.sh`.
 
+The live-source snapshot also preserves the legacy `roki/ai`, `roki/camera`,
+`roki/mqtt`, manual diagnostic scripts, and `roki-iot/esp32_serial` modules.
+They are source backup and integration reference only. They were syntax-checked
+during import, but production OTA must not invoke them until the mission owner reviews their
+hardware side effects and folds the required pieces into the stationary
+`scripts/run.sh` entrypoint.
+
 Read [the ESP32/MQTT runtime handoff](docs/esp32-mqtt-runtime-handoff.md)
 before changing the production entrypoint, systemd service, or OTA activation
 flow. It records the pin map, wire protocol, verified commands, safety
