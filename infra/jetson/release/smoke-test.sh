@@ -11,14 +11,27 @@ esac
 
 test -s "${release_root}/VERSION"
 test -x "${release_root}/robot/scripts/run.sh"
+test ! -e "${release_root}/ai"
 
-for component in robot ai; do
-  smoke_script="${release_root}/${component}/scripts/smoke-test.sh"
-  if [ -x "${smoke_script}" ]; then
-    "${smoke_script}" "${phase}"
-  fi
-done
+"${release_root}/robot/scripts/smoke-test.sh" "${phase}"
 
-find "${release_root}/robot" "${release_root}/ai" -type f -name '*.py' -print0 | \
+find "${release_root}/robot" -type f -name '*.py' -print0 | \
   xargs -0 -r python3 -m py_compile
-echo "Jetson ${phase} smoke passed"
+if find "${release_root}" -type f \
+  \( -name '*.engine' -o -name '*.onnx' -o -name '*.pt' \) -print -quit | grep -q .; then
+  echo "IoT release unexpectedly contains an AI model or engine" >&2
+  exit 1
+fi
+
+if [ "${phase}" = post-activate ]; then
+  set +e
+  timeout --signal=TERM --kill-after=5s 5s \
+    "${release_root}/robot/scripts/run.sh"
+  runtime_status=$?
+  set -e
+  if [ "${runtime_status}" -ne 124 ] && [ "${runtime_status}" -ne 143 ]; then
+    echo "Robot runtime exited during the stationary startup probe: ${runtime_status}" >&2
+    exit 1
+  fi
+fi
+echo "Jetson IoT ${phase} smoke passed; no actuator command was sent"

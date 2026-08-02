@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free validation for the stable Jetson manifest contract."""
+"""Dependency-free validation for the stable Jetson IoT manifest contract."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-RELEASE_PATTERN = re.compile(r"^jetson-v\d+\.\d+\.\d+$")
+RELEASE_PATTERN = re.compile(r"^iot-v\d+\.\d+\.\d+$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_FIELDS = {
     "schema_version",
+    "component",
     "release",
-    "robot_commit",
-    "ai_commit",
-    "model_version",
+    "iot_commit",
+    "required_ai_contract_version",
     "jetpack",
     "architecture",
     "artifact_url",
@@ -46,19 +46,23 @@ def validate(manifest: object) -> None:
 
     if manifest["schema_version"] != 1:
         fail("schema_version must be 1")
+    if manifest["component"] != "iot":
+        fail("component must be iot")
     if not isinstance(manifest["release"], str) or not RELEASE_PATTERN.fullmatch(
         manifest["release"]
     ):
-        fail("release must match jetson-vX.Y.Z")
+        fail("release must match iot-vX.Y.Z")
+    commit = manifest["iot_commit"]
+    if not isinstance(commit, str) or not COMMIT_PATTERN.fullmatch(commit):
+        fail("iot_commit must be a 40-character lowercase commit SHA")
 
-    for field in ("robot_commit", "ai_commit"):
-        value = manifest[field]
-        if not isinstance(value, str) or not COMMIT_PATTERN.fullmatch(value):
-            fail(f"{field} must be a 40-character lowercase commit SHA")
-
-    model_version = manifest["model_version"]
-    if not isinstance(model_version, str) or not 1 <= len(model_version) <= 128:
-        fail("model_version must contain 1 to 128 characters")
+    contract_version = manifest["required_ai_contract_version"]
+    if (
+        isinstance(contract_version, bool)
+        or not isinstance(contract_version, int)
+        or contract_version < 1
+    ):
+        fail("required_ai_contract_version must be a positive integer")
     if manifest["jetpack"] != "6.2":
         fail("jetpack must be 6.2")
     if manifest["architecture"] != "aarch64":
@@ -68,7 +72,11 @@ def validate(manifest: object) -> None:
     if not isinstance(artifact_url, str) or urlparse(artifact_url).scheme != "https":
         fail("artifact_url must use HTTPS")
     artifact_size = manifest["artifact_size_bytes"]
-    if isinstance(artifact_size, bool) or not isinstance(artifact_size, int) or artifact_size < 1:
+    if (
+        isinstance(artifact_size, bool)
+        or not isinstance(artifact_size, int)
+        or artifact_size < 1
+    ):
         fail("artifact_size_bytes must be a positive integer")
     checksum = manifest["sha256"]
     if not isinstance(checksum, str) or not SHA256_PATTERN.fullmatch(checksum):
@@ -87,7 +95,10 @@ def validate(manifest: object) -> None:
 
 def main() -> int:
     if len(sys.argv) not in (2, 3):
-        print("usage: validate-jetson-manifest.py <manifest.json> [schema.json]", file=sys.stderr)
+        print(
+            "usage: validate-jetson-manifest.py <manifest.json> [schema.json]",
+            file=sys.stderr,
+        )
         return 2
 
     manifest_path = Path(sys.argv[1])
@@ -98,7 +109,7 @@ def main() -> int:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     validate(manifest)
-    print(f"Jetson manifest validated: {manifest['release']}")
+    print(f"Jetson IoT manifest validated: {manifest['release']}")
     return 0
 
 
