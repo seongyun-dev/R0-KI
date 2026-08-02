@@ -253,7 +253,16 @@ def run_line_session(args: argparse.Namespace) -> int:
     with PassiveEsp32Session(find_port(args.port)) as session:
         print(f"DETECTED_PROTOCOL={session.protocol}")
         for label, instruction in LINE_SCENARIOS:
-            input(f"\n[{label}] {instruction}\nPress Enter when ready: ")
+            input(
+                f"\n[{label}] {instruction}\n"
+                "Position the tape first, hold it still, then press Enter: "
+            )
+            if args.settle_seconds:
+                print(
+                    f"Settling for {args.settle_seconds:g}s; do not move the tape.",
+                    flush=True,
+                )
+                time.sleep(args.settle_seconds)
             sample = session.capture(args.seconds_per_step, scenario=label)
             records.extend(sample)
             summary = summarize_records(sample)
@@ -328,6 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     line = commands.add_parser("line-session")
     line.add_argument("--seconds-per-step", type=float, default=2.0)
+    line.add_argument("--settle-seconds", type=float, default=1.5)
     line.set_defaults(handler=run_line_session)
 
     encoder = commands.add_parser("encoder-manual")
@@ -345,6 +355,8 @@ def main() -> int:
         raise SystemExit("seconds must be positive")
     if getattr(args, "seconds_per_step", 1.0) <= 0:
         raise SystemExit("seconds-per-step must be positive")
+    if getattr(args, "settle_seconds", 0.0) < 0:
+        raise SystemExit("settle-seconds must not be negative")
     try:
         return int(args.handler(args))
     except (CalibrationError, serial.SerialException) as error:

@@ -76,6 +76,23 @@ class CalibrationCoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ticks_per_revolution(100, 0)
 
+    def test_ignores_incomplete_odometry_without_crashing(self) -> None:
+        summary = summarize_records(
+            [
+                {"payload": {"type": "odometry", "seq": 1}},
+                {
+                    "payload": {
+                        "type": "odometry",
+                        "leftTicks": 10,
+                        "rightTicks": 12,
+                    }
+                },
+            ]
+        )
+
+        self.assertEqual(summary["encoder"]["sampleCount"], 1)
+        self.assertEqual(summary["encoder"]["invalidSampleCount"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

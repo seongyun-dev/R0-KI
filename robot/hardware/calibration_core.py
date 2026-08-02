@@ -59,7 +59,16 @@ def summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize line, encoder and battery evidence without assumptions."""
 
     hardware = _payloads(records, "hardwareStatus")
-    odometry = _payloads(records, "odometry")
+    odometry_candidates = _payloads(records, "odometry")
+    odometry = [
+        payload
+        for payload in odometry_candidates
+        if all(
+            isinstance(payload.get(key), int)
+            and not isinstance(payload.get(key), bool)
+            for key in ("leftTicks", "rightTicks")
+        )
+    ]
     errors = _payloads(records, "error")
 
     valid_lines = [
@@ -85,7 +94,10 @@ def summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             }
         )
 
-    encoder_summary: dict[str, Any] = {"sampleCount": len(odometry)}
+    encoder_summary: dict[str, Any] = {
+        "sampleCount": len(odometry),
+        "invalidSampleCount": len(odometry_candidates) - len(odometry),
+    }
     if odometry:
         left_values = [int(payload["leftTicks"]) for payload in odometry]
         right_values = [int(payload["rightTicks"]) for payload in odometry]
