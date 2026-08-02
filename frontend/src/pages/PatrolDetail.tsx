@@ -183,7 +183,7 @@ function RouteMapSvg({
           <path
             d={actualPath}
             fill="none"
-            stroke="var(--detect)"
+            stroke="var(--graphic)"
             strokeWidth="5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -235,21 +235,14 @@ function RouteMapSvg({
                 cx={position.x}
                 cy={position.y}
                 r="13"
-                fill="var(--urgent)"
-                stroke="#fff"
-                strokeWidth="3"
+                fill="none"
+                stroke="var(--detect)"
+                strokeWidth="4"
               />
               <text
                 x={position.x}
-                y={position.y + 5}
-                style={{ fill: '#fff', fontSize: 14, fontWeight: 800 }}
-              >
-                !
-              </text>
-              <text
-                x={position.x}
                 y={position.y - 22}
-                style={{ fill: 'var(--urgent)', fontWeight: 800 }}
+                style={{ fill: 'var(--detect)', fontWeight: 800 }}
               >
                 {point.type}
               </text>
