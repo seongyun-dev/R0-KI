@@ -104,7 +104,18 @@ fi
 archive_name="aiot-${release}.tar.gz"
 archive_path="${output_dir}/${archive_name}"
 manifest_path="${archive_path}.manifest.json"
-tar -C "${stage_dir}" -czf "${archive_path}" .
+tar -C "${stage_dir}" -czf "${archive_path}" \
+  robot scripts VERSION manifest.json CHECKSUMS.sha256
+
+while IFS= read -r archive_entry; do
+  case "${archive_entry}" in
+    robot|robot/*|scripts|scripts/*|VERSION|manifest.json|CHECKSUMS.sha256) ;;
+    *)
+      echo "IoT release archive contains an unexpected path: ${archive_entry}" >&2
+      exit 1
+      ;;
+  esac
+done < <(tar -tzf "${archive_path}")
 
 artifact_sha256="$(sha256sum "${archive_path}" | awk '{print $1}')"
 artifact_size_bytes="$(stat -c '%s' "${archive_path}")"
