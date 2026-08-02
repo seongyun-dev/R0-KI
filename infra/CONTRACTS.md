@@ -46,9 +46,10 @@
 | Readiness | 최종 `/actuator/health`; 초기 `/swagger-ui.html` fallback |
 | Database | `aiot-mysql:3306`, Flyway forward migration |
 | MQTT | `aiot-mosquitto:1883` |
+| Runtime timezone | `Asia/Seoul` (container `TZ`, JVM `user.timezone`) |
 | Persistent paths | `/app/data/uploads`, `/app/data/maps` |
 
-운영 설정은 `/srv/aiot/secrets/backend.env`에서 환경변수로 주입한다. DB migration은 애플리케이션 image rollback과 자동으로 되돌리지 않는다.
+비밀 운영 설정은 `/srv/aiot/secrets/backend.env`에서 환경변수로 주입한다. 시각대처럼 비밀이 아닌 공통 런타임 설정은 Compose가 고정한다. DB migration은 애플리케이션 image rollback과 자동으로 되돌리지 않는다.
 
 ## AI
 
