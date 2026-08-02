@@ -1,4 +1,4 @@
-# AIoT component contracts
+# AIoT 구성요소 실행 계약
 
 이 문서는 각 파트가 공통 CI/CD에 연결되기 위해 지켜야 하는 최소 실행 계약이다.
 애플리케이션 기능은 각 파트가 소유하고, 빌드·실행·배포 인터페이스는 Infra와 함께 관리한다.
@@ -12,7 +12,7 @@
 - `.gitlab-ci.yml`, `infra/**`, `**/Dockerfile` 변경은 Infra 리뷰를 거친다.
 - 코드가 없는 파트의 CI job은 skip한다. 코드가 있는데 계약 파일이 빠진 경우에는 fail한다.
 
-## Frontend
+## 프론트엔드
 
 | Item | Contract |
 | --- | --- |
@@ -32,7 +32,7 @@
 
 운영 도메인이나 Backend IP를 소스에 하드코딩하지 않는다. React Router를 사용하면 Nginx SPA fallback을 유지한다.
 
-## Backend
+## 백엔드
 
 | Item | Contract |
 | --- | --- |
@@ -92,7 +92,7 @@ baseline과 TensorRT engine은 IoT OTA가 수정하지 않는다.
 
 장비 경로와 계정값을 소스에 하드코딩하지 않는다. 사진·지도처럼 큰 payload는 MQTT가 아니라 HTTPS API를 사용한다.
 
-## Jetson IoT release
+## Jetson IoT 릴리스
 
 IoT release에는 Robot 코드만 포함하며 AI runtime과 모델은 포함하지 않는다.
 
@@ -111,7 +111,7 @@ aiot-iot-vX.Y.Z.tar.gz
 `required_ai_contract_version`으로 고정 AI runtime과의 ROS JSON 호환성을 확인한다.
 외부 stable manifest는 실제 archive SHA256과 크기를 기록한다.
 
-## Branch flow
+## 브랜치 흐름
 
 ```text
 feature -> part/dev -> part/master -> develop -> root master
