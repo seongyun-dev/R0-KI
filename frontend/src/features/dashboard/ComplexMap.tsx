@@ -309,28 +309,24 @@ export function ComplexMap({
   })
   const gateIds = new Set(gates.map((g) => g.zone.id))
 
-  /* ── 순찰 경로 — 체크포인트를 직교 동선으로 잇는다. 3곳 이상이면 순환 순찰로 닫는다 ── */
-  const loop = checkpoints.length >= 3 ? [...checkpoints, checkpoints[0]] : checkpoints
-  const routePts: Pt[] = []
-  const cpIdx: number[] = [] // checkpoints[i] → routePts 인덱스
-  loop.forEach((c, i) => {
-    const p = { x: px(c.x), y: py(c.y) }
-    const prev = routePts[routePts.length - 1]
-    // 대각선은 쓰지 않는다 — 단지 중심에서 먼 쪽으로 꺾어 외곽 순찰 동선처럼 읽히게
-    if (prev && Math.abs(prev.x - p.x) > 0.01 && Math.abs(prev.y - p.y) > 0.01) {
-      const e1 = { x: prev.x, y: p.y }
-      const e2 = { x: p.x, y: prev.y }
-      const far = (q: Pt) => Math.abs(q.x - W / 2) + Math.abs(q.y - H / 2)
-      routePts.push(far(e1) >= far(e2) ? e1 : e2)
-    }
-    const at = routePts.push(p) - 1
-    if (i < checkpoints.length) cpIdx.push(at)
-  })
-
   /* 지도에 그릴 로봇 — 여러 대(robots)가 오면 그쪽이 우선 */
   const shownRobots = robots && robots.length > 0 ? robots : robot ? [robot] : []
   /* 진행률·스캔 콘은 한 대만 볼 때 계산한다 (여러 대는 누구 기준인지 정해지지 않는다) */
   const soloRobot = shownRobots.length === 1 ? shownRobots[0] : undefined
+  const routePts: Pt[] =
+    soloRobot?.routePoints?.map((point) => ({ x: px(point.x), y: py(point.y) })) ?? []
+  const cpIdx = checkpoints.map((checkpoint) => {
+    let nearest = -1
+    let nearestDistance = Infinity
+    routePts.forEach((point, index) => {
+      const distance = (point.x - px(checkpoint.x)) ** 2 + (point.y - py(checkpoint.y)) ** 2
+      if (distance < nearestDistance) {
+        nearest = index
+        nearestDistance = distance
+      }
+    })
+    return nearest
+  })
 
   /* 이동 경로는 순찰 중일 때만 — 대기·충전중이면 마지막 위치만 찍는다 */
   const showRoute = patrolling && routePts.length > 1
