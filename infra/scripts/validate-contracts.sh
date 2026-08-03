@@ -54,6 +54,7 @@ done
 
 nginx_template=infra/nginx/aiot.conf.template
 for required_route in \
+  'location = /live/robots/16/stream.mjpg {' \
   'location = /swagger-ui.html {' \
   'location ^~ /swagger-ui/ {' \
   'location = /v3/api-docs {' \
