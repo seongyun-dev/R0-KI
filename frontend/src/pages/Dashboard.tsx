@@ -270,7 +270,7 @@ export default function Dashboard() {
               <R0KiLiveCam
                 urgent={hasUrgent}
                 clockText={clock}
-                robotId={selectedRobot?.backendId}
+                robotId={isPatrolling ? selectedRobot?.backendId : undefined}
               />
               <div className="camnow">
                 {hasUrgent && urgentLabel && (
