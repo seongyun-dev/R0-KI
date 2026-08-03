@@ -16,6 +16,11 @@ x=-0.009, y=-0.058, heading=90.6
 
 - payload의 `robotKey=ROKI-01`, `schemaVersion=1`을 확인했다.
 - status는 `state=IDLE`, `camera=NORMAL`, `lidar=NORMAL`로 갱신됐다.
+- MQTT 발행 직후 운영 백엔드 `GET /api/robots/16/location`에서도
+  `x=0.003`, `y=-0.061`, `heading=90.1`, 갱신 시각 `20:10:35`를 확인했다.
+  따라서 MQTT consumer와 프론트 위치 조회 데이터까지 반영되는 경로가 확인됐다.
+- 비구동 검증 종료 후 Robot 서비스를 정지했기 때문에 백엔드의 최종 로봇 상태는
+  `ERROR`다. 좌표 반영 실패가 아니라 ESP32 telemetry가 없는 의도된 결과다.
 - 검증 중 START/CONTROL 및 모터 명령은 전송하지 않았다.
 
 ## 확인된 원인과 반영 사항
