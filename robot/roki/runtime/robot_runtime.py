@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
 
 from control.motion_controller import MotionController, MotionState, MotionTarget
-from mission.mission_controller import MissionController
+from mission.mission_controller import MissionCommand, MissionController
 from localization.encoder_pose_estimator import EncoderPoseEstimator
 from safety.safety_controller import SafetyController, SafetyDecision
 from serial_comm.protocol import (
@@ -37,6 +38,13 @@ HardwareStatusListener = Callable[[HardwareStatus], None]
 @dataclass(frozen=True)
 class RuntimeSettings:
     disconnected_poll_sec: float
+
+
+@dataclass(frozen=True)
+class _MotionRequest:
+    speed: int
+    steering_deg: int
+    stationary_steering: bool = False
 
 
 class RobotRuntime:
@@ -70,6 +78,10 @@ class RobotRuntime:
         self._odometry_listeners: list[OdometryListener] = []
         self._hardware_status_listeners: list[HardwareStatusListener] = []
         self._stop_requested = False
+        self._request_lock = threading.Lock()
+        self._pending_motion_request: _MotionRequest | None = None
+        self._pending_motion_stop: int | None = None
+        self._stationary_steering_pending = False
         self._latest_hardware_status: HardwareStatus | None = None
         self._last_logged_line_values: tuple[int, ...] | None = None
         self._last_odometry_uptime_ms: int | None = None
@@ -95,8 +107,55 @@ class RobotRuntime:
         self._hardware_status_listeners.append(listener)
 
     def request_stop(self) -> None:
-        self._stop_requested = True
+        with self._request_lock:
+            self._stop_requested = True
+            self._pending_motion_request = None
+            self._pending_motion_stop = None
+            self._stationary_steering_pending = False
         self._mission.emergency_stop()
+
+    def request_motion_target(
+        self,
+        speed: int,
+        steering_deg: int,
+        *,
+        stationary_steering: bool = False,
+    ) -> None:
+        """Queue a manual target without writing Serial from another thread."""
+
+        if not self._protocol_settings.speed_min <= speed <= self._protocol_settings.speed_max:
+            raise ValueError("speed is outside protocol range")
+        if not (
+            self._protocol_settings.steering_min_deg
+            <= steering_deg
+            <= self._protocol_settings.steering_max_deg
+        ):
+            raise ValueError("steering_deg is outside protocol range")
+        if stationary_steering and speed != 0:
+            raise ValueError("stationary steering requires speed=0")
+        with self._request_lock:
+            if self._stop_requested:
+                raise RuntimeError("RobotRuntime is stopping")
+            self._pending_motion_request = _MotionRequest(
+                speed,
+                steering_deg,
+                stationary_steering,
+            )
+
+    def request_motion_stop(self, steering_deg: int) -> None:
+        """Queue a STOP that takes priority over any pending manual target."""
+
+        if not (
+            self._protocol_settings.steering_min_deg
+            <= steering_deg
+            <= self._protocol_settings.steering_max_deg
+        ):
+            raise ValueError("steering_deg is outside protocol range")
+        with self._request_lock:
+            if self._stop_requested:
+                return
+            self._pending_motion_request = None
+            self._pending_motion_stop = steering_deg
 
     def stop_patrol(self, reason: str = "PATROL_STOP") -> None:
         """Clear the motion target and send STOP without waiting for telemetry."""
@@ -108,6 +167,7 @@ class RobotRuntime:
         logger.info("RO-KI headless runtime started")
         try:
             while not self._stop_requested:
+                self._drain_motion_requests()
                 if self._bridge.ensure_connected():
                     self._on_connected()
                 if not self._bridge.is_connected():
@@ -147,10 +207,18 @@ class RobotRuntime:
                         parse_hardware_status(message.payload)
                     )
         finally:
+            with self._request_lock:
+                self._pending_motion_request = None
+                self._pending_motion_stop = None
+                self._stationary_steering_pending = False
             self._bridge.close(build_stop_command(self._sequence.next()))
             logger.info("RO-KI headless runtime stopped")
 
     def _on_connected(self) -> None:
+        with self._request_lock:
+            self._pending_motion_request = None
+            self._pending_motion_stop = None
+            self._stationary_steering_pending = False
         self._latest_hardware_status = None
         self._last_logged_line_values = None
         self._last_odometry_uptime_ms = None
@@ -241,14 +309,20 @@ class RobotRuntime:
                 decision.fault if not decision.allowed else "ODOMETRY_BASELINE"
             )
             return
+        if self._drain_motion_requests():
+            return
         latest_decision = self._evaluate_safety(self._clock())
         latest_mission = self._mission.current()
+        stationary_steering = self._stationary_steering_pending
         if (
             not latest_decision.allowed
-            or command.speed == 0
-            or latest_mission.speed == 0
             or latest_mission.emergency_stop
+            or (
+                (command.speed == 0 or latest_mission.speed == 0)
+                and not stationary_steering
+            )
         ):
+            self._stationary_steering_pending = False
             self._send_stop(latest_decision.fault)
             return
         if not self._bridge.write_line(
@@ -260,6 +334,29 @@ class RobotRuntime:
             )
         ):
             logger.warning("CONTROL write failed; ESP32 watchdog will stop motors")
+        else:
+            self._stationary_steering_pending = False
+
+    def _drain_motion_requests(self) -> bool:
+        """Apply cross-thread manual requests only on the Serial owner thread."""
+
+        with self._request_lock:
+            stop_steering = self._pending_motion_stop
+            request = self._pending_motion_request
+            self._pending_motion_stop = None
+            self._pending_motion_request = None
+        if stop_steering is not None:
+            self._stationary_steering_pending = False
+            self._mission.submit(MissionCommand(0, stop_steering))
+            self._send_stop("MANUAL_STOP")
+            return True
+        if request is None:
+            return False
+        self._mission.submit(
+            MissionCommand(request.speed, request.steering_deg)
+        )
+        self._stationary_steering_pending = request.stationary_steering
+        return True
 
     def _handle_hardware_status(
         self, hardware_status: HardwareStatus

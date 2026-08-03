@@ -66,6 +66,30 @@ class FakeRuntime:
 
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
+    def test_manual_demo_starts_stationary_only_after_mqtt_start(self) -> None:
+        runtime = FakeRuntime()
+        manual = Mock()
+        keyboard = Mock()
+        service = FinalRuntimeService(
+            runtime,
+            manual_controller=manual,
+            keyboard_input=keyboard,
+        )
+
+        service.start()
+        keyboard.start.assert_called_once_with()
+        manual.activate.assert_not_called()
+
+        service.send_command("START_PATROL", patrolId=17)
+        manual.activate.assert_called_once_with(17)
+        self.assertEqual(service.active_patrol_id, 17)
+
+        service.send_command("STOP_PATROL")
+        manual.deactivate.assert_called_once_with()
+        self.assertIsNone(service.active_patrol_id)
+        service.stop()
+        keyboard.stop.assert_called_once_with()
+
     def test_publisher_exits_when_single_serial_runtime_dies(self) -> None:
         from backend_mqtt.publisher import RokiPublisherApplication
 
@@ -241,7 +265,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             },
         )
 
-    def test_status_is_published_immediately_on_change_and_every_five_seconds(self) -> None:
+    def test_status_is_rate_limited_even_when_hardware_values_change(self) -> None:
         from backend_mqtt.publisher import RokiPublisherApplication
 
         settings = SimpleNamespace(
@@ -279,12 +303,12 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             )
         )
         application._publish_status_if_needed(100.1)
-        self.assertEqual(client.publish.call_count, 2)
+        self.assertEqual(client.publish.call_count, 1)
         application._publish_status_if_needed(104.999)
-        self.assertEqual(client.publish.call_count, 2)
+        self.assertEqual(client.publish.call_count, 1)
 
         application._publish_status_if_needed(105.1)
-        self.assertEqual(client.publish.call_count, 3)
+        self.assertEqual(client.publish.call_count, 2)
 
     def test_lidar_bridge_is_injected_without_changing_camera(self) -> None:
         from run_integrated import create_integrated_application
