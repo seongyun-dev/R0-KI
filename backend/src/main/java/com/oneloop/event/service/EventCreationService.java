@@ -15,11 +15,9 @@ import com.oneloop.event.dto.response.EventBatchCreateResponse;
 import com.oneloop.event.dto.response.EventBatchCreatedItem;
 import com.oneloop.event.dto.response.EventCreateResponse;
 import com.oneloop.event.dto.response.EvidenceUploadResponse;
-import com.oneloop.event.dto.response.GeneralEventsCreatedSseResponse;
 import com.oneloop.event.dto.response.VehicleCheckResponse;
 import com.oneloop.event.dto.response.VehicleViolationResponse;
 import com.oneloop.event.event.EmergencyEventCreatedEvent;
-import com.oneloop.event.event.GeneralEventsCreatedEvent;
 import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.event.repository.EventEvidenceRepository;
 import com.oneloop.global.exception.BusinessException;
@@ -115,8 +113,6 @@ public class EventCreationService {
                 request.getEvents().stream()
                         .map(item -> createBatchItem(patrol, robot, item))
                         .toList();
-        publishGeneralEventsCreated(patrol, createdItems.size());
-
         return EventBatchCreateResponse.of(createdItems);
     }
 
@@ -157,8 +153,6 @@ public class EventCreationService {
                         .map(vehicle -> checkVehicle(patrol, robot, vehicle, parkingCheckpoints))
                         .filter(Objects::nonNull)
                         .toList();
-        publishGeneralEventsCreated(patrol, violations.size());
-
         return VehicleCheckResponse.of(violations);
     }
 
@@ -288,7 +282,6 @@ public class EventCreationService {
 
     private void publishEmergencyEvent(DetectedEvent event) {
         if (event.getType() != EventType.EMERGENCY) {
-            publishGeneralEventsCreated(event.getPatrol(), 1);
             return;
         }
 
@@ -323,14 +316,4 @@ public class EventCreationService {
         eventPublisher.publishEvent(new EmergencyEventCreatedEvent(apartmentComplexId, response));
     }
 
-    private void publishGeneralEventsCreated(Patrol patrol, int createdCount) {
-        if (createdCount == 0) {
-            return;
-        }
-
-        eventPublisher.publishEvent(
-                new GeneralEventsCreatedEvent(
-                        patrol.getRobot().getApartmentComplex().getId(),
-                        GeneralEventsCreatedSseResponse.of(patrol.getId(), createdCount)));
-    }
 }
