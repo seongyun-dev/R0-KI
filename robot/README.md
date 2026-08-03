@@ -36,6 +36,10 @@ ROKI_ROUTE_FILE=robot/roki/maps/dummy_rectangle/route.short-straight.yaml \
 운영 설정 예시는 `config/robot.env.example`에 있다. 실제 `.env`, MQTT 비밀번호,
 서비스 토큰과 현장 `route.local.yaml`은 Git에 넣지 않는다.
 
+자동 주행이 완성되기 전 프론트 START·STOP과 AI를 그대로 검증하는 임시 수동 시연은
+[`docs/manual-patrol-ai-demo.md`](docs/manual-patrol-ai-demo.md)를 따른다. 수동 모드는
+foreground에서 `--manual-keyboard`를 명시할 때만 활성화되며 운영 기본값을 바꾸지 않는다.
+
 배포·진단·복구와 현장 검증 순서는
 [`docs/integrated-runtime-operations.md`](docs/integrated-runtime-operations.md)를
 따른다. 아직 실측하지 않은 값과 현장 합격 기준은

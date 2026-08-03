@@ -6,9 +6,9 @@ ConditionFileIsExecutable=/opt/aiot/iot/current/robot/scripts/run.sh
 
 [Service]
 Type=simple
-User=aiot
-Group=aiot
-SupplementaryGroups=dialout video render
+User=e103
+Group=e103
+SupplementaryGroups=aiot dialout video render
 WorkingDirectory=/opt/aiot/iot/current
 EnvironmentFile=-/opt/aiot/secrets/robot.env
 Environment=ROS_LOCALHOST_ONLY=1

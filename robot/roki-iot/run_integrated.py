@@ -169,6 +169,40 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
     )
 
 
+def _build_manual_demo_components(runtime: Any) -> tuple[Any, Any]:
+    """Build the temporary TTY demo without creating another Serial owner."""
+
+    from control.manual_drive_controller import (
+        ManualDriveController,
+        ManualDriveSettings,
+    )
+    from integration.manual_keyboard_input import ManualKeyboardInput
+
+    settings = ManualDriveSettings(
+        forward_target_pwm=int(os.getenv("ROKI_MANUAL_FORWARD_PWM", "45")),
+        reverse_target_pwm=int(os.getenv("ROKI_MANUAL_REVERSE_PWM", "40")),
+        drive_pulse_sec=float(os.getenv("ROKI_MANUAL_DRIVE_PULSE_SEC", "0.2")),
+        steering_center_deg=int(os.getenv("ROKI_MANUAL_STEERING_CENTER_DEG", "80")),
+        steering_min_deg=int(os.getenv("ROKI_MANUAL_STEERING_MIN_DEG", "70")),
+        steering_max_deg=int(os.getenv("ROKI_MANUAL_STEERING_MAX_DEG", "90")),
+        steering_step_deg=int(os.getenv("ROKI_MANUAL_STEERING_STEP_DEG", "2")),
+        steering_pulse_sec=float(
+            os.getenv("ROKI_MANUAL_STEERING_PULSE_SEC", "0.5")
+        ),
+    )
+    controller = ManualDriveController(
+        runtime=runtime,
+        state_store=runtime.state_store,
+        settings=settings,
+    )
+    return controller, ManualKeyboardInput(
+        controller,
+        loop_interval_sec=float(
+            os.getenv("ROKI_MANUAL_KEYBOARD_LOOP_SEC", "0.02")
+        ),
+    )
+
+
 def create_integrated_application(
     *,
     final_runtime: Any | None = None,
@@ -181,6 +215,9 @@ def create_integrated_application(
     ai_controller: Any | None = None,
     event_worker: Any | None = None,
     deployment_guard: Any | None = None,
+    manual_demo: bool = False,
+    manual_controller: Any | None = None,
+    keyboard_input: Any | None = None,
 ) -> Any:
     """Compose all production components around exactly one RobotRuntime."""
 
@@ -203,15 +240,24 @@ def create_integrated_application(
 
     settings = load_settings()
     state_store = runtime.state_store
+    manual_enabled = (
+        manual_demo
+        or manual_controller is not None
+        or keyboard_input is not None
+    )
+    if manual_demo and manual_controller is None and keyboard_input is None:
+        manual_controller, keyboard_input = _build_manual_demo_components(runtime)
     service_holder: dict[str, Any] = {}
     navigation_driver = (
-        _build_nav2_driver(service_holder) if navigation_mode == "nav2" else None
+        _build_nav2_driver(service_holder)
+        if navigation_mode == "nav2" and not manual_enabled
+        else None
     )
     runtime_service = FinalRuntimeService(
         runtime,
         patrol_drive_speed_pwm=settings.patrol_drive_speed_pwm,
         patrol_steering_degrees=settings.patrol_steering_degrees,
-        navigation_service=navigation_service,
+        navigation_service=None if manual_enabled else navigation_service,
         navigation_start_x_m=float(os.getenv("ROKI_ROUTE_START_X_M", "1.0")),
         navigation_start_y_m=float(os.getenv("ROKI_ROUTE_START_Y_M", "2.5")),
         navigation_maximum_travel_m=float(
@@ -226,6 +272,8 @@ def create_integrated_application(
                 "/var/lib/aiot/state/patrol-deploy.lock",
             )
         ),
+        manual_controller=manual_controller,
+        keyboard_input=keyboard_input,
     )
     service_holder["service"] = runtime_service
 
@@ -323,8 +371,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="validate config and route without opening MQTT, ROS or serial",
     )
+    parser.add_argument(
+        "--manual-keyboard",
+        action="store_true",
+        help=(
+            "temporary foreground demo: MQTT START enables AI, then "
+            "W/A/S/D controls short motion pulses"
+        ),
+    )
     parser.add_argument("--route", default=None)
     args = parser.parse_args(argv)
+    if args.manual_keyboard and args.pose_only:
+        parser.error("--manual-keyboard cannot be combined with --pose-only")
+    if args.manual_keyboard and args.check:
+        parser.error("--manual-keyboard cannot be combined with --check")
+    if args.manual_keyboard and not sys.stdin.isatty():
+        parser.error("--manual-keyboard requires a foreground TTY")
     if args.check:
         import json
 
@@ -334,16 +396,21 @@ def main(argv: list[str] | None = None) -> int:
     from backend_config.settings import load_settings
 
     settings = load_settings()
-    mode = _navigation_mode(settings)
-    navigation = _build_navigation_service(
-        args.route,
-        encoder_limited=mode == "encoder_limited",
+    mode = "manual" if args.manual_keyboard else _navigation_mode(settings)
+    navigation = (
+        None
+        if args.manual_keyboard
+        else _build_navigation_service(
+            args.route,
+            encoder_limited=mode == "encoder_limited",
+        )
     )
     application = create_integrated_application(
         start_serial_runtime=not args.pose_only,
         navigation_service=navigation,
         navigation_mode=mode,
         operational_ai=True,
+        manual_demo=args.manual_keyboard,
     )
 
     def stop_handler(_signum: int, _frame: object) -> None:
