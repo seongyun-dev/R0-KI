@@ -267,7 +267,11 @@ export default function Dashboard() {
                   <span className="t num">{clock}</span>
                 </span>
               </div>
-              <R0KiLiveCam urgent={hasUrgent} />
+              <R0KiLiveCam
+                urgent={hasUrgent}
+                clockText={clock}
+                robotId={isPatrolling ? selectedRobot?.backendId : undefined}
+              />
               <div className="camnow">
                 {hasUrgent && urgentLabel && (
                   <span className="cn cnu"><i className="dot" style={{ background: 'var(--urgent)' }} />{urgentLabel} <b>{urgentEvents.length}</b></span>
