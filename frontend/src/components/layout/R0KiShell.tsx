@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useEvents } from '../../features/events/useEvents'
 import { useAuthStore } from '../../features/auth/useAuthStore'
 import '../../styles/r0ki.css'
 
@@ -34,9 +33,19 @@ export function useClockText() {
   }, [])
   return text
 }
+/* "한국시간"이라고 적어 놓고 브라우저 로컬시간을 쓰고 있었다 —
+   시간대가 다른 환경에서 틀린 시각이 뜬다. 서울 기준으로 고정한다.
+   (en-GB 는 24시간 HH:MM:SS 를 안정적으로 낸다. ko-KR 은 자정을 24시로 쓰는 경우가 있다) */
+const SEOUL_CLOCK = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Seoul',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+})
+
 function formatClock(d: Date) {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  return SEOUL_CLOCK.format(d)
 }
 
 // notifications 는 주 메뉴가 아닌 상단바 알림 버튼이 활성 표시를 가져간다
@@ -64,9 +73,6 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
   const clock = useClockText()
   const loginId = useAuthStore((s) => s.loginId)
   const logout = useAuthStore((s) => s.logout)
-  // 알림 배지 — 긴급 이벤트 건수 (실서버 연동 시 그대로 값만 교체)
-  const { data: events } = useEvents()
-  const urgentCount = (events ?? []).filter((e) => e.riskLevel === '긴급').length
 
   const onLogout = () => {
     logout()
@@ -93,13 +99,14 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             </nav>
             <div className="sp" />
             {statusChip}
+            {/* 입주민 발송 내역으로 간다. 배지는 두지 않는다 —
+                긴급 이벤트 건수를 달고 있었는데 이 페이지 내용과 맞지 않았다. */}
             <Link
               to="/app/notifications"
               className="alarmbtn"
               aria-current={active === 'notifications' ? 'page' : undefined}
-              aria-label={`알림 기록 · 긴급 ${urgentCount}건`}
             >
-              알림{urgentCount > 0 && <span className="badge num">{urgentCount}</span>}
+              알림
             </Link>
             <div className="clock num">
               {clock}<small>한국시간</small>

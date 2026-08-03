@@ -52,7 +52,8 @@ export default function Stats() {
       ['KPI', '총 순찰 횟수', data.summary.totalPatrols],
       ['KPI', '총 이벤트', data.summary.totalEvents],
       ['KPI', '평균 처리시간(분)', data.summary.avgHandleMin],
-      ['KPI', '가동률(%)', data.summary.uptime],
+      // 가동률은 백엔드 analytics 응답에 없어 항상 0이 나간다 — 받는 사람이
+      // "가동률 0%"로 읽으므로 열을 빼둔다. 값이 생기면 다시 넣는다.
       [],
       ['일자별 이벤트 추이', '일자', '건수'],
       ...data.daily.map((d) => ['', d.date, d.count]),

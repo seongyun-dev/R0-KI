@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { useEvent, useEvidenceImage, useUpdateEventStatus } from '../features/events/useEvents'
@@ -10,6 +10,12 @@ import type { ProcessingStatus } from '../types/domain'
    한 화면 고정 — 정보 리스트만 내부 스크롤. 데이터/뮤테이션은 기존 훅 그대로. */
 
 const PROC_STATUSES: ProcessingStatus[] = ['탐지', '처리중', '처리완료']
+
+/* 증거 이미지는 로봇이 이벤트를 등록한 뒤 따로 올린다. 잠깐 기다리면 붙으므로
+   짧은 주기로 다시 조회하되 상한을 둔다 — 끝내 증거가 올라오지 않는 이벤트를
+   열어두면 탭을 닫을 때까지 계속 서버를 두드리게 된다. */
+const EVIDENCE_POLL_INTERVAL_MS = 5000
+const EVIDENCE_POLL_MAX_TRIES = 12 // 5초 × 12 = 약 1분
 
 /* 상태 점 색 — 명도 램프 */
 const STATE_DOT: Record<string, string> = {
@@ -56,13 +62,27 @@ export default function EventDetail() {
     return () => clearTimeout(t)
   }, [toast])
 
+  // 재조회 횟수는 effect 재실행(refetch → event 갱신)을 건너뛰어 누적돼야 하므로 ref 로 센다
+  const evidenceTriesRef = useRef(0)
+  useEffect(() => {
+    evidenceTriesRef.current = 0
+  }, [id])
+
   useEffect(() => {
     if (!event || event.evidenceImageUrl || error) return
+    if (evidenceTriesRef.current >= EVIDENCE_POLL_MAX_TRIES) return
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') refetch()
-    }, 5000)
+      // 백그라운드 탭에서는 횟수를 쓰지 않고 건너뛴다 — 돌아왔을 때 남은 기회로 확인한다
+      if (document.visibilityState !== 'visible') return
+      if (evidenceTriesRef.current >= EVIDENCE_POLL_MAX_TRIES) {
+        window.clearInterval(timer)
+        return
+      }
+      evidenceTriesRef.current += 1
+      refetch()
+    }, EVIDENCE_POLL_INTERVAL_MS)
     return () => window.clearInterval(timer)
-  }, [error, event, refetch])
+  }, [error, event, id, refetch])
 
   // 경과시간 — 탐지/처리중일 때만 실시간 카운트. 메모 모달 중엔 멈춤(포커스 튐 방지)
   const isOngoing = proc === '탐지' || proc === '처리중'

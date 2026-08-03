@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CameraIcon, CloseIcon } from '../components/icons'
 import { Button, QueryErrorState, Skeleton, useToast } from '../components/ui'
@@ -14,7 +14,13 @@ const MapLiveScene = lazy(() => import('../features/dashboard/MapLiveScene'))
 function EmergencyPanel({ event, onClose }: { event: PatrolEvent; onClose: () => void }) {
   const navigate = useNavigate()
   const toast = useToast()
-  const elapsed = useElapsed(true, 192)
+  // 경과 시간은 탐지 시각에서 센다 — 상수로 두면 어떤 이벤트를 열어도 같은 값이 뜬다
+  const baseSec = useMemo(() => {
+    if (!event.occurredAt) return 0
+    const seconds = Math.floor((Date.now() - Date.parse(event.occurredAt)) / 1000)
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 0
+  }, [event.occurredAt])
+  const elapsed = useElapsed(Boolean(event.occurredAt), baseSec)
 
   return (
     <aside
@@ -43,11 +49,16 @@ function EmergencyPanel({ event, onClose }: { event: PatrolEvent; onClose: () =>
       <dl className="flex flex-col gap-1.5 text-sm text-subtle">
         <div>위치: <span className="font-semibold text-white">{event.location}</span></div>
         <div>
-          탐지시각: <span className="font-mono tabular text-white">{event.time}</span> · 경과{' '}
-          <span className="font-mono tabular text-danger">{elapsed}</span>
+          탐지시각: <span className="font-mono tabular text-white">{event.time}</span>
+          {event.occurredAt && (
+            <> · 경과 <span className="font-mono tabular text-danger">{elapsed}</span></>
+          )}
         </div>
-        <div>탐지로봇: <span className="font-mono tabular text-white">{event.robotId}</span> (현장 대기중)</div>
-        <div>신뢰도: <span className="font-mono font-bold tabular text-white">{event.confidence}%</span></div>
+        <div>탐지로봇: <span className="font-mono tabular text-white">{event.robotId}</span></div>
+        {/* 목록 응답에는 신뢰도가 없다 — 없는 값을 빈칸이나 0%로 보여주지 않는다 */}
+        {event.confidence != null && (
+          <div>신뢰도: <span className="font-mono font-bold tabular text-white">{event.confidence}%</span></div>
+        )}
       </dl>
 
       {/* 현장 스냅샷 */}
@@ -75,7 +86,12 @@ export default function MapFull() {
   const { data: events } = useEvents()
   const [panelOpen, setPanelOpen] = useState(false)
 
-  const emergency = (events ?? []).find((e) => e.status === '긴급')
+  /* 긴급은 riskLevel 에 담긴다 — status 는 탐지/처리중/처리완료뿐이라
+     'status === 긴급' 은 절대 참이 되지 않아 이 패널이 뜬 적이 없다.
+     이미 처리한 건은 출동 대상이 아니므로 미처리(탐지)만 본다(대시보드와 같은 기준). */
+  const emergency = (events ?? []).find(
+    (e) => e.riskLevel === '긴급' && e.status === '탐지',
+  )
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-ink text-white">
@@ -84,10 +100,8 @@ export default function MapFull() {
         <span className="font-mono text-xs font-bold tracking-widest text-accent-light">
           [ LIVE MAP · 체크포인트 + 이동 경로 ]
         </span>
-        <span className="inline-flex items-center gap-2 rounded-pill bg-white/10 px-3 py-1 font-mono text-xs text-subtle">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-online" />
-          [ 실시간 연결됨 ]
-        </span>
+        {/* 연결 상태를 알려주는 채널이 아직 없다(로봇 위치 SSE 미연동) —
+            근거 없는 "실시간 연결됨" 표기는 두지 않는다. */}
         <button
           type="button"
           onClick={() => navigate('/app')}
@@ -121,7 +135,8 @@ export default function MapFull() {
         {/* 로봇 상태 칩 */}
         {mapData && (
           <span className="pointer-events-none absolute left-4 top-4 inline-flex items-center gap-2 rounded-pill bg-white/10 px-3.5 py-1.5 font-mono text-xs font-bold text-white backdrop-blur sm:left-6 sm:top-5">
-            🤖 {mapData.robot.id} · 순찰중
+            {/* 지도 응답에 로봇 상태가 없다 — 이름만 띄우고 상태는 지어내지 않는다 */}
+            🤖 {mapData.robot.name ?? mapData.robot.id}
           </span>
         )}
 

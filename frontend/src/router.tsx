@@ -17,17 +17,19 @@ import NotificationDetail from './pages/NotificationDetail'
 import MapFull from './pages/MapFull'
 import NotFound from './pages/NotFound'
 import RouteError from './pages/RouteError'
-import DevPreview from './pages/DevPreview'
 
 // 통계는 차트 라이브러리(recharts)를 쓰므로 청크 분리
 const Stats = lazy(() => import('./pages/Stats'))
+// 개발용 컴포넌트 갤러리 — 화면 어디서도 링크하지 않으므로 메인 번들에서 떼어낸다
+// (여기서만 쓰는 UI 컴포넌트들이 함께 딸려 나간다)
+const DevPreview = lazy(() => import('./pages/DevPreview'))
 
 // CLAUDE.md §6 라우트 매핑
 export const router = createBrowserRouter([
   { path: '/', element: <Landing />, errorElement: <RouteError /> },
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
   { path: '/signup/onboarding', element: <SignupOnboarding />, errorElement: <RouteError /> },
-  // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 AppShell 밖에 둔다
+  // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 /app 하위에 두지 않는다
   {
     path: '/app/map',
     element: (
@@ -41,7 +43,7 @@ export const router = createBrowserRouter([
     path: '/app',
     errorElement: <RouteError />,
     children: [
-      // R0-Ki 리디자인 화면 — 자체 상단바 레이아웃(R0KiShell)이라 AppShell 밖 독립 렌더
+      // R0-Ki 화면은 각자 자체 상단바 레이아웃(R0KiShell)을 쓴다 — 공통 래퍼 없이 독립 렌더
       {
         index: true,
         element: (
@@ -124,7 +126,7 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
       },
-      // 통계 — R0KiShell 자체 상단바라 AppShell 밖 독립 렌더 (recharts 청크 지연 로드)
+      // 통계 — recharts 청크 지연 로드
       {
         path: 'stats',
         element: (
@@ -137,6 +139,14 @@ export const router = createBrowserRouter([
       },
     ],
   },
-  { path: '/dev', element: <DevPreview />, errorElement: <RouteError /> },
+  {
+    path: '/dev',
+    element: (
+      <Suspense fallback={null}>
+        <DevPreview />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
   { path: '*', element: <NotFound /> },
 ])
