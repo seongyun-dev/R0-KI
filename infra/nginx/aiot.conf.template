@@ -41,6 +41,27 @@ server {
         return 404;
     }
 
+    # Latency-sensitive SSE streams must bypass Nginx response buffering.
+    # This covers robot location/status, obstacles, emergency/general events,
+    # and mapping-session progress while leaving ordinary REST APIs buffered.
+    location ~ ^/api/(?:robots/(?:location/events|obstacle-events)|events/subscribe/(?:emergency|general)|map/mapping-sessions/[0-9]+/events)$ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 30m;
+        proxy_send_timeout 30m;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering "no" always;
+    }
+
     # This endpoint is called only by the internal auth subrequest below.
     # Prevent clients from validating or consuming stream tokens directly.
     location = /api/internal/stream-sessions/validate {
