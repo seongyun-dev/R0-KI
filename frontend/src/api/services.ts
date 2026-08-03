@@ -27,6 +27,7 @@ import type {
   NotificationHistoryResponse,
   PatrolCreateRequest,
   PatrolCreateResponse,
+  PatrolCompletedSseEvent,
   PatrolDetailResponse,
   PatrolEndRequest,
   PatrolEndResponse,
@@ -117,6 +118,19 @@ export const eventsApi = {
       {
         method: 'POST',
       },
+    ),
+  subscribeGeneral: (
+    onPatrolCompleted: (event: PatrolCompletedSseEvent) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<PatrolCompletedSseEvent | string>(
+      '/api/events/subscribe/general',
+      (data, eventName) => {
+        if (eventName === 'patrol-completed' && typeof data === 'object') {
+          onPatrolCompleted(data)
+        }
+      },
+      signal,
     ),
 }
 

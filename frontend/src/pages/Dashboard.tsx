@@ -19,7 +19,8 @@ import {
 import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
 import { robotStatusLabel } from '../api/mappers'
-import type { Patrol, PatrolEvent } from '../types/domain'
+import type { PatrolCompletedSseEvent } from '../api/contracts'
+import type { PatrolEvent } from '../types/domain'
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
    공용 셸(R0KiShell: 상단바·테마·시계) + 순찰 지도 + 실시간 탐지 영상 + 이벤트 이력.
@@ -159,12 +160,12 @@ export default function Dashboard() {
 
   /* 순찰 완료 모달 — 순찰이 끝나면 뜨고, [확인] 을 누르면 이벤트 이력을 다시 불러온다
      (순찰 중 탐지된 이벤트가 이력에 반영되도록) */
-  const [donePatrol, setDonePatrol] = useState<Patrol | null>(null)
+  const [donePatrol, setDonePatrol] = useState<PatrolCompletedSseEvent | null>(null)
   usePatrolComplete((patrol) => {
-    if (!isPatrolDoneSeen(patrol.id)) setDonePatrol(patrol)
+    if (!isPatrolDoneSeen(String(patrol.patrolId))) setDonePatrol(patrol)
   })
   const confirmPatrolDone = () => {
-    if (donePatrol) markPatrolDoneSeen(donePatrol.id)
+    if (donePatrol) markPatrolDoneSeen(String(donePatrol.patrolId))
     setDonePatrol(null)
     refetchEvents()
   }
