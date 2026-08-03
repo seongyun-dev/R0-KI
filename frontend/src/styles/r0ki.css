@@ -743,6 +743,9 @@
 .r0ki .dd-opt svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:3;
   stroke-linecap:round;stroke-linejoin:round;opacity:0}
 .r0ki .dd-opt:hover{background:var(--track);color:var(--text-1)}
+/* 키보드로 이동할 때 어디에 있는지 보이게 — 항목이 포커스를 받도록 바뀌었다 */
+.r0ki .dd-opt:focus-visible{background:var(--track);color:var(--text-1);
+  outline:2px solid var(--graphic);outline-offset:-2px}
 .r0ki .dd-opt[aria-selected="true"]{color:var(--accent-ink);font-weight:700;
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}

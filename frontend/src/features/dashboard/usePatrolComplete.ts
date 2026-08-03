@@ -34,6 +34,8 @@ export function usePatrolComplete(onComplete: (patrol: Patrol) => void) {
   usePolledFeed({
     enabled: !env.useMocks,
     label: 'usePatrolComplete',
+    // 순찰 완료는 즉시성이 필요 없다 — 긴급 알림보다 더 늦춰도 된다
+    intervalMs: 20_000,
     fetchItems: async () =>
       unwrapList(
         await patrolsApi.list({

@@ -14,6 +14,7 @@ export default function Login() {
   const login = useAuthStore((s) => s.login)
   const setMapContext = useAuthStore((s) => s.setMapContext)
   const resumeOnboarding = useOnboardingProgress((s) => s.resume)
+  const resetOnboarding = useOnboardingProgress((s) => s.reset)
   const [loginId, setLoginId] = useState('')
   const [password, setPassword] = useState('')
   // 목업 — 세션은 zustand persist 로 항상 유지된다. 서버 만료 정책 연동 시 값 사용
@@ -46,7 +47,8 @@ export default function Login() {
                  판정 근거는 로그인 응답의 등록 여부(백엔드 제공) — 브라우저 저장소가 아니라
                  서버 상태를 보므로 다른 기기·시크릿창에서 로그인해도 같게 동작한다. */
               const status = await readOnboardingStatus(response)
-              setMapContext({ robotId: status.robotId })
+              // mapId 가 없으면(응답 미제공) 기존 값을 지우지 않는다 — undefined 는 "유지"
+              setMapContext({ mapId: status.mapId ?? undefined, robotId: status.robotId })
 
               if (status.nextPhase) {
                 resumeOnboarding({
@@ -56,6 +58,9 @@ export default function Login() {
                 })
                 navigate('/signup/onboarding', { replace: true })
               } else {
+                /* 서버가 완료로 판정했으면 브라우저에 남은 예전 진행 기록도 지운다.
+                   그대로 두면 문지기가 그 기록을 보고 이미 끝낸 사람을 온보딩으로 되돌린다. */
+                resetOnboarding()
                 navigate(from, { replace: true })
               }
             } catch (reason) {

@@ -176,15 +176,19 @@ export default function RobotDetail() {
 
             {/* 좌하: 누적 지표 */}
             <div className="rd-left">
-              <div className="rd-card">
-                <span className="ico">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4" /><path d="m15.2 8.8-2.7 5.7-5.7 2.7 2.7-5.7z" /></svg>
-                </span>
-                <span className="txt">
-                  <span className="k">누적 주행</span>
-                  <span className="v num">{robot.odometerKm ?? '—'}km</span>
-                </span>
-              </div>
+              {/* 누적 주행거리는 백엔드 로봇 상세 응답에 없다 — 값이 생기면 그때 다시 뜬다.
+                  항상 '—km'인 카드를 세워두면 자리만 차지하고 고장처럼 보인다. */}
+              {robot.odometerKm != null && (
+                <div className="rd-card">
+                  <span className="ico">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4" /><path d="m15.2 8.8-2.7 5.7-5.7 2.7 2.7-5.7z" /></svg>
+                  </span>
+                  <span className="txt">
+                    <span className="k">누적 주행</span>
+                    <span className="v num">{robot.odometerKm}km</span>
+                  </span>
+                </div>
+              )}
               <div className="rd-card">
                 <span className="ico">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3.8l2.7-6.6 4 13.2 2.7-6.6H21" /></svg>
