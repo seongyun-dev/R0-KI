@@ -4,6 +4,7 @@ import com.oneloop.event.domain.DetectedEvent;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.Builder;
 import lombok.Getter;
@@ -27,6 +28,12 @@ public class PatrolTimelineResponse {
     @Schema(description = "처리 상태", example = "DETECTED")
     private ProcessingStatus processingStatus;
 
+    @Schema(description = "이벤트 발생 X 좌표", example = "13.000", nullable = true)
+    private BigDecimal xCoordinate;
+
+    @Schema(description = "이벤트 발생 Y 좌표", example = "8.000", nullable = true)
+    private BigDecimal yCoordinate;
+
     public static PatrolTimelineResponse of(DetectedEvent event, String checkpointName) {
         return PatrolTimelineResponse.builder()
                 .recordedAt(event.getOccurredAt())
@@ -34,6 +41,8 @@ public class PatrolTimelineResponse {
                 .eventId(event.getId())
                 .eventType(event.getType())
                 .processingStatus(event.getProcessingStatus())
+                .xCoordinate(event.getX())
+                .yCoordinate(event.getY())
                 .build();
     }
 }
