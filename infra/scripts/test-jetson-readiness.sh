@@ -20,6 +20,18 @@ grep -q 'ConditionPathExists=/opt/aiot/secrets/ros.env' \
   "${repository_root}/infra/jetson/aiot-ros.service"
 grep -Eq '^Wants=.*aiot-ros.service' \
   "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q '^User=e103$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
+grep -Eq '^SupplementaryGroups=.*aiot' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q 'fixed_resolution: true' \
+  "${repository_root}/robot/config/ros/ydlidar.yaml"
+grep -q 'support_motor_dtr: false' \
+  "${repository_root}/robot/config/ros/ydlidar.yaml"
+grep -q 'frequency: 10.0' \
+  "${repository_root}/robot/config/ros/ydlidar.yaml"
+grep -q -- '-r __node:=rf2o_laser_odometry' \
+  "${repository_root}/robot/scripts/run-ros.sh"
 grep -q 'use_rotate_to_heading: false' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
 grep -q 'motion_model_for_search: DUBIN' \

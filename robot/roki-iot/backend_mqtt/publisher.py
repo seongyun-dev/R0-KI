@@ -200,8 +200,7 @@ class RokiPublisherApplication:
             .status_publish_interval_seconds
         )
 
-        changed = self._state_store.has_status_changed()
-        if not force and not periodic_publish_due and not changed:
+        if not force and not periodic_publish_due:
             return
 
         status = self._state_store.get_status()

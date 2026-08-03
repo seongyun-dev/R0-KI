@@ -46,7 +46,8 @@ start_component ros2 run tf2_ros static_transform_publisher \
   --z "${ROKI_LIDAR_Z_M}" --yaw "${ROKI_LIDAR_YAW_RAD}" \
   --pitch 0 --roll 0 --frame-id base_link --child-frame-id laser_frame
 start_component ros2 run rf2o_laser_odometry rf2o_laser_odometry_node \
-  --ros-args --params-file "${robot_root}/config/ros/rf2o.yaml"
+  --ros-args -r __node:=rf2o_laser_odometry \
+  --params-file "${robot_root}/config/ros/rf2o.yaml"
 
 if [ "${mode}" = mapping ]; then
   start_component ros2 launch slam_toolbox online_async_launch.py \
