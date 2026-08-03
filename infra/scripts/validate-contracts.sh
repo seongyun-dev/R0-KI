@@ -54,6 +54,9 @@ done
 
 nginx_template=infra/nginx/aiot.conf.template
 for required_route in \
+  'location = /api/internal/stream-sessions/validate {' \
+  'location = /live/robots/16/stream.mjpg {' \
+  'location = /_live_robot_stream_auth {' \
   'location = /swagger-ui.html {' \
   'location ^~ /swagger-ui/ {' \
   'location = /v3/api-docs {' \

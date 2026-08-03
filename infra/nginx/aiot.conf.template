@@ -41,6 +41,12 @@ server {
         return 404;
     }
 
+    # This endpoint is called only by the internal auth subrequest below.
+    # Prevent clients from validating or consuming stream tokens directly.
+    location = /api/internal/stream-sessions/validate {
+        return 404;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
@@ -48,11 +54,47 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization $http_authorization;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_connect_timeout 10s;
         proxy_read_timeout 120s;
         proxy_send_timeout 120s;
+    }
+
+    # The browser cannot reach a field robot's private address. A dedicated
+    # reverse SSH tunnel binds the robot's MJPEG relay to EC2 loopback only.
+    # The frontend obtains a short-lived, one-time token from the authenticated
+    # Backend API. Nginx consumes it through an internal auth subrequest.
+    location = /live/robots/16/stream.mjpg {
+        auth_request /_live_robot_stream_auth;
+
+        proxy_pass http://127.0.0.1:19001/stream.mjpg;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "";
+        proxy_set_header X-Stream-Token "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+        access_log off;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location = /_live_robot_stream_auth {
+        internal;
+        proxy_pass http://127.0.0.1:8080/api/internal/stream-sessions/validate;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization "";
+        proxy_set_header X-Stream-Robot-Id 16;
+        proxy_set_header X-Stream-Token $http_x_stream_token;
+        proxy_set_header Host $host;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
     }
 
     # Springdoc is served by the Backend container. Keep these paths outside
