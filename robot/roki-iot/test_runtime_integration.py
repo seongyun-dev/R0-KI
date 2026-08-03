@@ -66,6 +66,30 @@ class FakeRuntime:
 
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
+    def test_manual_demo_starts_stationary_only_after_mqtt_start(self) -> None:
+        runtime = FakeRuntime()
+        manual = Mock()
+        keyboard = Mock()
+        service = FinalRuntimeService(
+            runtime,
+            manual_controller=manual,
+            keyboard_input=keyboard,
+        )
+
+        service.start()
+        keyboard.start.assert_called_once_with()
+        manual.activate.assert_not_called()
+
+        service.send_command("START_PATROL", patrolId=17)
+        manual.activate.assert_called_once_with(17)
+        self.assertEqual(service.active_patrol_id, 17)
+
+        service.send_command("STOP_PATROL")
+        manual.deactivate.assert_called_once_with()
+        self.assertIsNone(service.active_patrol_id)
+        service.stop()
+        keyboard.stop.assert_called_once_with()
+
     def test_publisher_exits_when_single_serial_runtime_dies(self) -> None:
         from backend_mqtt.publisher import RokiPublisherApplication
 

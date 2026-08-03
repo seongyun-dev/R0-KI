@@ -314,6 +314,48 @@ class RobotRuntimeTest(unittest.TestCase):
         self.assertNotIn("control", types)
         self.assertEqual(types[-1], "stop")
 
+    def test_manual_mailbox_applies_motion_on_serial_owner_thread(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        bridge.connected = True
+        runtime._on_connected()
+        complete_handshake(runtime)
+        runtime._handle_hardware_status(
+            HardwareStatus(82.5, MotorStatus.NORMAL, LineSensorStatus.NORMAL)
+        )
+        runtime._handle_odometry(Odometry(1, 100, 0, 0))
+
+        before = len(bridge.written)
+        runtime.request_motion_target(45, 81)
+        self.assertEqual(len(bridge.written), before)
+        runtime._handle_odometry(Odometry(2, 200, 1, 1))
+        runtime._handle_odometry(Odometry(3, 300, 2, 2))
+
+        controls = [item for item in bridge.written if item["type"] == "control"]
+        self.assertGreater(controls[-1]["speed"], 0)
+        self.assertLessEqual(controls[-1]["speed"], 45)
+        self.assertEqual(controls[-1]["steering"], 81)
+
+    def test_manual_stationary_steering_sends_one_zero_speed_control(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        bridge.connected = True
+        runtime._on_connected()
+        complete_handshake(runtime)
+        runtime._handle_hardware_status(
+            HardwareStatus(82.5, MotorStatus.NORMAL, LineSensorStatus.NORMAL)
+        )
+        runtime._handle_odometry(Odometry(1, 100, 0, 0))
+
+        runtime.request_motion_target(0, 79, stationary_steering=True)
+        runtime._handle_odometry(Odometry(2, 200, 0, 0))
+        runtime._handle_odometry(Odometry(3, 300, 0, 0))
+
+        controls = [item for item in bridge.written if item["type"] == "control"]
+        self.assertEqual(len(controls), 1)
+        self.assertEqual(controls[0]["speed"], 0)
+        self.assertEqual(controls[0]["steering"], 79)
+
     def test_listener_normal_stop_is_rechecked_before_control_write(self) -> None:
         bridge = FakeBridge([])
         runtime, _store = create_runtime(bridge)

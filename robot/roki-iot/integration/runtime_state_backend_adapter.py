@@ -63,7 +63,13 @@ class FinalRuntimeService:
         navigation_driver: Any | None = None,
         destination_listener: Any | None = None,
         deployment_guard: Any | None = None,
+        manual_controller: Any | None = None,
+        keyboard_input: Any | None = None,
     ) -> None:
+        if (manual_controller is None) != (keyboard_input is None):
+            raise ValueError(
+                "manual_controller and keyboard_input must be configured together"
+            )
         self._runtime = runtime
         self._patrol_drive_speed_pwm = patrol_drive_speed_pwm
         self._patrol_steering_degrees = patrol_steering_degrees
@@ -71,6 +77,8 @@ class FinalRuntimeService:
         self._navigation_driver = navigation_driver
         self._destination_listener = destination_listener
         self._deployment_guard = deployment_guard
+        self._manual_controller = manual_controller
+        self._keyboard_input = keyboard_input
         self._patrol_lease_held = False
         self._encoder_fallback_enabled = encoder_fallback_enabled
         self._encoder_progress: Any | None = None
@@ -104,6 +112,16 @@ class FinalRuntimeService:
             daemon=True,
         )
         self._thread.start()
+        try:
+            if self._keyboard_input is not None:
+                self._keyboard_input.start()
+        except Exception:
+            self._runtime.request_stop()
+            self._thread.join(timeout=2.0)
+            self._thread = None
+            if self._navigation_driver is not None:
+                self._navigation_driver.stop()
+            raise
 
     def stop(self) -> None:
         try:
@@ -112,6 +130,8 @@ class FinalRuntimeService:
         except Exception as exc:
             print(f"[RUNTIME] final STOP failed type={type(exc).__name__}")
         finally:
+            if self._keyboard_input is not None:
+                self._keyboard_input.stop()
             if self._navigation_driver is not None:
                 self._navigation_driver.stop()
             self._runtime.request_stop()
@@ -176,6 +196,19 @@ class FinalRuntimeService:
         if command == "START_PATROL":
             if self._active_patrol_id is not None:
                 raise RuntimeError("a patrol is already active")
+            if self._manual_controller is not None:
+                patrol_id = parameters.get("patrolId")
+                try:
+                    self._manual_controller.activate(patrol_id)
+                    self._active_patrol_id = int(patrol_id)
+                    self._paused = False
+                except Exception:
+                    self._manual_controller.deactivate()
+                    self._stop_runtime_patrol("START_PATROL_ROLLBACK")
+                    self._active_patrol_id = None
+                    self._release_patrol_lease()
+                    raise
+                return
             if self._navigation_service is not None:
                 if self._navigation_driver is not None:
                     self._start_nav2_patrol(patrol_id=parameters.get("patrolId"))
@@ -191,6 +224,13 @@ class FinalRuntimeService:
             )
             return
         if command == "STOP_PATROL":
+            if self._manual_controller is not None:
+                self._manual_controller.deactivate()
+                self._stop_runtime_patrol("MQTT_STOP_PATROL")
+                self._active_patrol_id = None
+                self._paused = False
+                self._release_patrol_lease()
+                return
             if self._encoder_progress is not None:
                 self._encoder_progress.stop()
             if self._navigation_service is not None:
@@ -285,6 +325,10 @@ class FinalRuntimeService:
         if self._active_patrol_id is None or self._paused:
             return False
         self._paused = True
+        if self._manual_controller is not None:
+            self._manual_controller.deactivate()
+            self._stop_runtime_patrol(reason)
+            return True
         if self._navigation_driver is not None:
             pause = getattr(self._navigation_driver, "pause_patrol", None)
             if callable(pause):
@@ -296,6 +340,10 @@ class FinalRuntimeService:
         if self._active_patrol_id is None or not self._paused:
             return False
         self._paused = False
+        if self._manual_controller is not None:
+            assert self._active_patrol_id is not None
+            self._manual_controller.activate(self._active_patrol_id)
+            return True
         if self._navigation_driver is not None:
             resume = getattr(self._navigation_driver, "resume_patrol", None)
             if callable(resume):
@@ -308,6 +356,8 @@ class FinalRuntimeService:
         return True
 
     def fail_patrol(self, reason: str) -> None:
+        if self._manual_controller is not None:
+            self._manual_controller.deactivate()
         if self._encoder_progress is not None:
             self._encoder_progress.stop()
         if self._navigation_service is not None:
