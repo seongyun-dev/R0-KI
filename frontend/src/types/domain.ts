@@ -50,6 +50,11 @@ export interface ComplexMapData {
   mapImageUrl?: string;
   /** 격자 1칸의 실제 거리(m) — 축척 표기용. 백엔드 resolution×width 에서 환산 */
   metersPerCell?: number;
+  resolution?: number;
+  originX?: number;
+  originY?: number;
+  pixelWidth?: number;
+  pixelHeight?: number;
 }
 
 export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표, 소수 허용)
@@ -58,8 +63,10 @@ export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표
   name?: string;
   x: number;
   y: number;
+  heading?: number;
   battery?: number;
   updatedAt?: string;
+  routePoints?: PatrolRoutePoint[];
 }
 
 export interface MapPin {           // 지도 위 이벤트 핀
@@ -116,6 +123,14 @@ export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)
   status: StatusLabel;              // 이상무 / 탐지 / 처리완료
   note?: string;                    // 미등록 차량 1대 감지 · 신뢰도 92%
   eventId?: string;                 // 이상 지점 → 이벤트 상세(1g) 링크. 상태 변경은 이벤트 상세에서
+  x?: number;
+  y?: number;
+}
+
+export interface PatrolRoutePoint {
+  x: number;
+  y: number;
+  recordedAt: string;
 }
 
 export interface Patrol {
@@ -134,6 +149,8 @@ export interface Patrol {
   batteryTo?: number;               // 82
   report?: PatrolReport;
   points?: PatrolPoint[];
+  mapUrl?: string;
+  routePoints?: PatrolRoutePoint[];
 }
 
 export interface PatrolReport {     // PATROL REPORT (1e)

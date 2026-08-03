@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { R0KiShell, useClockText } from '../components/layout/R0KiShell'
 import { R0KiLiveCam } from '../features/dashboard/R0KiLiveCam'
 import { R0KiPatrolMap } from '../features/dashboard/R0KiPatrolMap'
 import { ComplexMap } from '../features/dashboard/ComplexMap'
 import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
-import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
-import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
+import { useRobotLocations } from '../features/dashboard/useRobotLocations'
+import { useSelectedRobotLocation } from '../features/dashboard/useSelectedRobotLocation'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
 import {
   usePatrolComplete,
@@ -16,7 +16,8 @@ import {
 } from '../features/dashboard/usePatrolComplete'
 import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
-import type { Patrol, PatrolEvent } from '../types/domain'
+import { robotStatusLabel } from '../api/mappers'
+import type { PatrolCompletedSseEvent } from '../api/contracts'
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
    공용 셸(R0KiShell: 상단바·테마·시계) + 순찰 지도 + 실시간 탐지 영상 + 이벤트 이력.
@@ -49,11 +50,12 @@ function MiniBot() {
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate()
   const clock = useClockText()
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useEvents()
   const { data: robots } = useRobots()
   const { data: mapData } = useComplexMap()
+  const { locations: liveRobotLocations, statuses: liveRobotStatuses } =
+    useRobotLocations(mapData?.map)
 
   /* 이벤트 이력 — 아직 처리하지 않은 '탐지' 상태만 띄운다 (처리중·처리완료 제외).
      긴급(발견 즉시 기록)은 목록 맨 위 고정 / 나머지는 아래 그룹 */
@@ -91,14 +93,50 @@ export default function Dashboard() {
   const [pickedRobotId, setPickedRobotId] = useState<string>()
   // 순찰 중 로봇 전체 보기 — 켜면 개별 선택 대신 순찰 중인 로봇을 모두 띄운다
   const [showAllPatrolling, setShowAllPatrolling] = useState(false)
-  const robotList = robots ?? []
+  const robotList = (robots ?? []).map((robot) => {
+    const liveStatus = liveRobotStatuses[String(robot.backendId ?? robot.id)]
+    return liveStatus ? { ...robot, status: robotStatusLabel(liveStatus) } : robot
+  })
   const patrollingRobots = robotList.filter((r) => r.status === '순찰중')
   const selectedRobot =
     robotList.find((r) => r.id === pickedRobotId) ?? patrollingRobots[0] ?? robotList[0]
-  const isPatrolling = showAllPatrolling || selectedRobot?.status === '순찰중'
-  const mapRobot = robotMapPosition(selectedRobot, mapData?.robot)
+  const selectedRobotBackendId = selectedRobot?.backendId ?? selectedRobot?.id
+  const { data: selectedLocation } = useSelectedRobotLocation(
+    selectedRobotBackendId,
+    mapData?.map,
+  )
+  const currentSelectedLocation =
+    selectedLocation?.robot.id === String(selectedRobotBackendId) ? selectedLocation : undefined
+  const selectedLiveLocation = selectedRobot
+    ? liveRobotLocations.find((location) =>
+        location.id === String(selectedRobotBackendId),
+      )
+    : undefined
+  const selectedLocationFromApi = currentSelectedLocation?.robot
+  const mapRobot = selectedLocationFromApi
+    ? {
+        ...selectedLocationFromApi,
+        ...(selectedLiveLocation
+          ? {
+              x: selectedLiveLocation.x,
+              y: selectedLiveLocation.y,
+              ...(selectedLiveLocation.heading == null
+                ? {}
+                : { heading: selectedLiveLocation.heading }),
+              updatedAt: selectedLiveLocation.updatedAt,
+            }
+          : {}),
+      }
+    : selectedLiveLocation ?? robotMapPosition(selectedRobot, mapData?.robot)
+  const isPatrolling = showAllPatrolling ||
+    currentSelectedLocation?.showRoute ||
+    selectedRobot?.status === '순찰중'
   const mapRobots = patrollingRobots
-    .map((r) => robotMapPosition(r, mapData?.robot))
+    .map((robot) =>
+      liveRobotLocations.find((location) =>
+        location.id === String(robot.backendId ?? robot.id),
+      ) ?? robotMapPosition(robot, mapData?.robot),
+    )
     .filter((r): r is NonNullable<typeof r> => Boolean(r))
 
   const pickRobot = (id: string) => {
@@ -106,24 +144,14 @@ export default function Dashboard() {
     setPickedRobotId(id)
   }
 
-  // 긴급 알림 모달 — push 도착 시에만 (기존 동작 유지)
-  const [alertEvent, setAlertEvent] = useState<PatrolEvent | null>(null)
-  useEmergencyAlert((event) => {
-    if (!isEmergencySeen(event.id)) setAlertEvent(event)
-  })
-  const dismissAlert = () => {
-    if (alertEvent) markEmergencySeen(alertEvent.id)
-    setAlertEvent(null)
-  }
-
   /* 순찰 완료 모달 — 순찰이 끝나면 뜨고, [확인] 을 누르면 이벤트 이력을 다시 불러온다
      (순찰 중 탐지된 이벤트가 이력에 반영되도록) */
-  const [donePatrol, setDonePatrol] = useState<Patrol | null>(null)
+  const [donePatrol, setDonePatrol] = useState<PatrolCompletedSseEvent | null>(null)
   usePatrolComplete((patrol) => {
-    if (!isPatrolDoneSeen(patrol.id)) setDonePatrol(patrol)
+    if (!isPatrolDoneSeen(String(patrol.patrolId))) setDonePatrol(patrol)
   })
   const confirmPatrolDone = () => {
-    if (donePatrol) markPatrolDoneSeen(donePatrol.id)
+    if (donePatrol) markPatrolDoneSeen(String(donePatrol.patrolId))
     setDonePatrol(null)
     refetchEvents()
   }
@@ -239,7 +267,11 @@ export default function Dashboard() {
                   <span className="t num">{clock}</span>
                 </span>
               </div>
-              <R0KiLiveCam urgent={hasUrgent} />
+              <R0KiLiveCam
+                urgent={hasUrgent}
+                clockText={clock}
+                robotId={isPatrolling ? selectedRobot?.backendId : undefined}
+              />
               <div className="camnow">
                 {hasUrgent && urgentLabel && (
                   <span className="cn cnu"><i className="dot" style={{ background: 'var(--urgent)' }} />{urgentLabel} <b>{urgentEvents.length}</b></span>
@@ -314,24 +346,10 @@ export default function Dashboard() {
         {/* 순찰 완료 모달 — 확인 시 이벤트 이력 새로고침.
             긴급 알림이 떠 있으면 그쪽을 먼저 처리하도록 뒤로 미룬다.
             r0ki CSS 는 .r0ki 하위로만 스코프되므로 반드시 셸 안에서 렌더한다 */}
-        {donePatrol && !alertEvent && (
+        {donePatrol && (
           <PatrolCompleteModal patrol={donePatrol} onConfirm={confirmPatrolDone} />
         )}
       </R0KiShell>
-
-      {/* 긴급 알림 모달 (기존 push 동작 유지) */}
-      {alertEvent && (
-        <EmergencyAlertModal
-          open={Boolean(alertEvent)}
-          event={alertEvent}
-          onClose={dismissAlert}
-          onConfirm={() => {
-            const id = alertEvent.id
-            dismissAlert()
-            navigate(`/app/events/${id}`)
-          }}
-        />
-      )}
     </>
   )
 }

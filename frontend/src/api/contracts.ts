@@ -55,11 +55,11 @@ export type SignInResponse = {
   message: string,
   data: {
     accessToken: string
-    /** 로봇 등록 여부 */
-    robotRegistered?: boolean
-    /** 지도(구역 포함) 등록 여부 */
-    mapRegistered?: boolean
-    /** 등록돼 있으면 이어갈 때 쓴다 — 없으면 목록 조회로 채운다 */
+    /** 소속 단지에 등록된 로봇이 있는가 (백엔드 SigninResponse.hasRobot) */
+    hasRobot?: boolean
+    /** 소속 단지에 등록된 지도가 있는가 (백엔드 SigninResponse.hasMap) */
+    hasMap?: boolean
+    /** 아직 백엔드가 내려주지 않는다 — 오면 온보딩 재개·지도 조회에 그대로 쓴다 */
     robotId?: Id | null
     mapId?: Id | null
   }
@@ -356,6 +356,8 @@ export type PatrolTimelineResponse = {
   eventId?: Id | null
   eventType?: EventTypeCode | string
   processingStatus?: ProcessingStatusCode | string
+  xCoordinate?: number | string | null
+  yCoordinate?: number | string | null
 }
 
 export type PatrolAiSummaryResponse = {
@@ -577,14 +579,42 @@ export type RobotLocationEvent = {
   x: number | null
   y: number | null
   heading: number | null
-  status:
-    | 'IDLE'
-    | 'PATROLLING'
-    | 'CHARGING'
-    | 'OBSTACLE_STOP'
-    | 'OFFLINE'
-    | 'DELETED'
-  updatedAt: string | null
+  locationUpdatedAt: string | null
+}
+
+// GET /api/robots/locations
+export type RobotMapLocationResponse = RobotLocationEvent & {
+  robotName: string
+  status: RobotStatusCode | string
+  routePoints: PatrolRoutePointResponse[]
+}
+
+export type RobotStatusUpdateEvent = {
+  robotId: number
+  status: RobotStatusCode | string
+  batteryLevel: number | null
+  statusReportedAt: string | null
+}
+
+export type PatrolCompletedSseEvent = {
+  patrolId: number
+  robotId: number
+  robotName: string
+  completedAt: string
+}
+
+export type EmergencyEventSseResponse = {
+  eventId: number
+  eventType: EventTypeCode
+  title: string
+  occurredAt: string
+  location: string
+  robotName: string
+  riskLevel: RiskLevelCode
+  processingStatus: ProcessingStatusCode
+  mapId: number | null
+  x: number | null
+  y: number | null
 }
 
 // GET /api/robots/obstacle-events (SSE: robot-obstacle)

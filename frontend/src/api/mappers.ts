@@ -1,5 +1,6 @@
 import type {
   ComplexResponse,
+  EmergencyEventSseResponse,
   EventDetailResponse,
   EventListItemResponse,
   MapInfoResponse,
@@ -130,6 +131,24 @@ export function eventListItemToDomain(value: EventListItemResponse): PatrolEvent
     riskLevel: riskLevel(value.riskLevel),
     processingStatus: processing,
     assignee: value.assignee ?? undefined,
+  }
+}
+
+export function emergencyEventSseToDomain(value: EmergencyEventSseResponse): PatrolEvent {
+  const processing = processingStatus(value.processingStatus)
+  return {
+    id: String(value.eventId),
+    backendId: value.eventId,
+    time: dateParts(value.occurredAt).time,
+    occurredAt: value.occurredAt,
+    type: eventType(value.eventType),
+    location: value.location ?? '위치 미확인',
+    robotId: value.robotName,
+    status: processing,
+    riskLevel: riskLevel(value.riskLevel),
+    processingStatus: processing,
+    x: value.x ?? undefined,
+    y: value.y ?? undefined,
   }
 }
 
@@ -266,6 +285,8 @@ function timelinePoint(value: PatrolTimelineResponse): PatrolPoint {
     location: value.checkpointName ?? '위치 미확인',
     status: (value.processingStatus ? processingStatus(value.processingStatus) : '이상무') as StatusLabel,
     eventId: value.eventId == null ? undefined : String(value.eventId),
+    x: value.xCoordinate == null ? undefined : toNumber(value.xCoordinate),
+    y: value.yCoordinate == null ? undefined : toNumber(value.yCoordinate),
   }
 }
 
@@ -319,10 +340,18 @@ export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): P
         }
       : undefined,
     points: timeline.length > 0 ? timeline.map(timelinePoint) : undefined,
+    mapUrl: value.mapUrl ?? undefined,
+    routePoints: (value.routePoints ?? [])
+      .map((point) => ({
+        x: toNumber(point.xCoordinate),
+        y: toNumber(point.yCoordinate),
+        recordedAt: point.recordedAt,
+      }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y)),
   }
 }
 
-function robotStatusLabel(value: string): StatusLabel {
+export function robotStatusLabel(value: string): StatusLabel {
   const map: Record<string, StatusLabel> = {
     IDLE: '대기',
     PATROLLING: '순찰중',
@@ -545,6 +574,6 @@ export function locationEventToMapRobot(
   return {
     id: String(event.robotId),
     ...point,
-    updatedAt: event.updatedAt ?? undefined,
+    updatedAt: event.locationUpdatedAt ?? undefined,
   }
 }

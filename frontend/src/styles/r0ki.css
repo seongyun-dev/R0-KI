@@ -399,8 +399,13 @@
   background:#1B2836;border:1px solid var(--edge);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 6px 16px rgba(12,40,74,.18)}
 .r0ki .cam svg{display:block;width:100%;height:100%}
+.r0ki .cam .camstream{display:block;width:100%;height:100%;object-fit:contain;background:#07101a}
+.r0ki .cam .camstate{position:absolute;top:8px;left:10px;padding:3px 7px;border-radius:999px;
+  background:rgba(3,15,25,.72);color:#DCEBF8;font-size:8px;font-weight:700;letter-spacing:.02em;
+  backdrop-filter:blur(5px)}
 .r0ki .cam .rec{position:absolute;top:9px;right:10px;width:8px;height:8px;border-radius:50%;background:#FF5B5B;
   box-shadow:0 0 10px rgba(255,91,91,.85);animation:r0ki-pulse 1.8s var(--e-glass) infinite}
+.r0ki .cam .rec.paused{background:#8190A0;box-shadow:none;animation:none}
 @keyframes r0ki-scan{0%{transform:translateY(0)}100%{transform:translateY(197px)}}
 .r0ki .scanline{animation:r0ki-scan 3.6s linear infinite}
 @keyframes r0ki-bflick{0%,92%{opacity:1}94%,100%{opacity:.45}}
@@ -743,6 +748,9 @@
 .r0ki .dd-opt svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:3;
   stroke-linecap:round;stroke-linejoin:round;opacity:0}
 .r0ki .dd-opt:hover{background:var(--track);color:var(--text-1)}
+/* 키보드로 이동할 때 어디에 있는지 보이게 — 항목이 포커스를 받도록 바뀌었다 */
+.r0ki .dd-opt:focus-visible{background:var(--track);color:var(--text-1);
+  outline:2px solid var(--graphic);outline-offset:-2px}
 .r0ki .dd-opt[aria-selected="true"]{color:var(--accent-ink);font-weight:700;
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}

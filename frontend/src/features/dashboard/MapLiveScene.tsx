@@ -361,7 +361,9 @@ export function MapLiveScene({ className, ...props }: MapLiveSceneProps) {
         }}
         aria-label="라이브 맵 — 순찰 로봇이 체크포인트를 따라 이동 중"
       >
-        <LiveScene {...props} reduceMotion={reduceMotion} />
+        {/* 체크포인트가 없으면 순찰 경로의 첫 지점을 잡을 수 없어 씬을 구성하다 터진다.
+            없는 지점을 지어내는 대신 씬을 아예 올리지 않는다 — 호출측이 빈 안내를 띄운다. */}
+        {props.checkpoints.length > 0 && <LiveScene {...props} reduceMotion={reduceMotion} />}
       </Canvas>
     </div>
   )

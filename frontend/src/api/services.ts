@@ -12,6 +12,7 @@ import type {
   EventBatchCreateRequest,
   EventBatchCreateResponse,
   EventDetailResponse,
+  EmergencyEventSseResponse,
   EvidenceUploadRequest,
   EvidenceUploadResponse,
   EventListRequest,
@@ -27,6 +28,7 @@ import type {
   NotificationHistoryResponse,
   PatrolCreateRequest,
   PatrolCreateResponse,
+  PatrolCompletedSseEvent,
   PatrolDetailResponse,
   PatrolEndRequest,
   PatrolEndResponse,
@@ -36,6 +38,8 @@ import type {
   RobotDetailResponse,
   RobotListPageResponse,
   RobotLocationEvent,
+  RobotMapLocationResponse,
+  RobotStatusUpdateEvent,
   RobotObstacleEvent,
   RobotRegisterRequest,
   RobotRegisterResponse,
@@ -115,6 +119,32 @@ export const eventsApi = {
       {
         method: 'POST',
       },
+    ),
+  subscribeEmergency: (
+    onEmergency: (event: EmergencyEventSseResponse) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<EmergencyEventSseResponse | string>(
+      '/api/events/subscribe/emergency',
+      (data, eventName) => {
+        if (eventName === 'emergency-event' && typeof data === 'object') {
+          onEmergency(data)
+        }
+      },
+      signal,
+    ),
+  subscribeGeneral: (
+    onPatrolCompleted: (event: PatrolCompletedSseEvent) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<PatrolCompletedSseEvent | string>(
+      '/api/events/subscribe/general',
+      (data, eventName) => {
+        if (eventName === 'patrol-completed' && typeof data === 'object') {
+          onPatrolCompleted(data)
+        }
+      },
+      signal,
     ),
 }
 
@@ -231,6 +261,12 @@ export const robotsApi = {
     )
   },
   stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
+  locations: () =>
+    apiRequest<RobotMapLocationResponse[]>('/api/robots/locations'),
+  location: (robotId: string | number) =>
+    apiRequest<RobotMapLocationResponse>(
+      `/api/robots/${encodeURIComponent(String(robotId))}/location`,
+    ),
   detail: (robotId: string | number) =>
     apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
 
@@ -251,15 +287,18 @@ export const robotsApi = {
   subscribeLocations: (
     onInitial: (locations: RobotLocationEvent[]) => void,
     onLocation: (location: RobotLocationEvent) => void,
+    onStatus: (status: RobotStatusUpdateEvent) => void,
     signal: AbortSignal,
   ) =>
-    consumeSse<RobotLocationEvent[] | RobotLocationEvent>(
+    consumeSse<RobotLocationEvent[] | RobotLocationEvent | RobotStatusUpdateEvent>(
       '/api/robots/location/events',
       (data, eventName) => {
         if (eventName === 'robot-location-initial' && Array.isArray(data)) {
           onInitial(data)
-        } else if (eventName === 'robot-location' && !Array.isArray(data)) {
-          onLocation(data)
+        } else if (eventName === 'robot-location-updated' && !Array.isArray(data)) {
+          onLocation(data as RobotLocationEvent)
+        } else if (eventName === 'robot-status-updated' && !Array.isArray(data)) {
+          onStatus(data as RobotStatusUpdateEvent)
         }
       },
       signal,
