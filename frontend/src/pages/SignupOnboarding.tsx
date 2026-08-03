@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { R0KiAuthShell } from '../components/layout/R0KiAuthShell'
 import { StepAccount } from '../features/onboarding/StepAccount'
@@ -98,8 +98,24 @@ export default function SignupOnboarding() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>()
   const setMapContext = useAuthStore((s) => s.setMapContext)
+  const logout = useAuthStore((s) => s.logout)
   // 계정 등록을 마친 직후 안내 모달 — 닫으면 로봇 등록 단계가 그대로 드러난다
   const [signedUpId, setSignedUpId] = useState<string>()
+
+  /* 모달을 열어둔 채 이 화면을 벗어나면(뒤로 가기 등) 로그아웃한다.
+     계정은 만들어졌지만 로봇·지도가 없는 상태라, 세션을 남겨두면 로그인 화면에
+     이미 로그인된 채로 서 있게 된다. 로그아웃해 두면 다음 로그인 때 서버 판정으로
+     남은 단계부터 다시 이어진다. [로봇 등록하러 가기]를 누른 뒤에는 해당 없다. */
+  const leavingBeforeContinueRef = useRef(false)
+  leavingBeforeContinueRef.current = signedUpId != null
+  useEffect(
+    () => () => {
+      if (!leavingBeforeContinueRef.current) return
+      logout()
+      resetOnboarding()
+    },
+    [logout, resetOnboarding],
+  )
 
   return (
     <R0KiAuthShell bootTagline="관리자 계정 등록을 준비하고 있습니다.">
