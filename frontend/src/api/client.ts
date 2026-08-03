@@ -36,10 +36,15 @@ function authHeaders() {
 export async function authenticatedFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   const auth = authHeaders()
-  if (auth && !headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
+  if (auth) {
+    if (!headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
+    // Nginx auth_request 서브요청은 영상 전용 헤더를 백엔드 Authorization으로 변환한다.
+    if (!headers.has('X-Live-Authorization')) {
+      headers.set('X-Live-Authorization', auth.Authorization)
+    }
+  }
 
   const response = await fetch(apiUrl(path), { ...init, headers })
-  if (response.status === 401) useAuthStore.getState().logout()
   return response
 }
 
