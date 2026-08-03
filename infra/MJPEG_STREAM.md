@@ -7,10 +7,10 @@ Jetson 127.0.0.1:8090
   -> SSH 역방향 터널
 EC2 127.0.0.1:19001
   -> Nginx 내부 영상 세션 검증
-HTTPS /live/robots/16/stream.mjpg
+HTTPS /live/robots/17/stream.mjpg
 ```
 
-브라우저는 로그인 JWT로 `POST /api/robots/16/stream-sessions`를 호출한다. 백엔드는 사용자가
+브라우저는 로그인 JWT로 `POST /api/robots/17/stream-sessions`를 호출한다. 백엔드는 사용자가
 해당 로봇을 조회할 권한이 있는지 확인하고 60초짜리 일회용 토큰을 발급한다. 브라우저는 이 토큰을
 `X-Stream-Token` 헤더로 전송하고, Nginx는 내부 검증 API에서 토큰을 한 번 소비한 뒤 MJPEG 연결을 연다.
 
