@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,7 @@ public class RobotStreamSessionService {
     private final Duration lifetime;
     private final Clock clock;
 
+    @Autowired
     public RobotStreamSessionService(
             @Value("${app.stream.session-lifetime:60s}") Duration lifetime) {
         this(lifetime, Clock.systemUTC());
