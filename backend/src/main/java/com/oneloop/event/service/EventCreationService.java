@@ -39,6 +39,8 @@ import com.oneloop.resident.repository.RegisteredVehicleRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -56,6 +58,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class EventCreationService {
 
     private static final Pattern CONFIDENCE_PATTERN = Pattern.compile("confidence=([0-9]*\\.?[0-9]+)");
+    private static final ZoneId SERVICE_ZONE = ZoneId.of("Asia/Seoul");
 
     private final DetectedEventRepository detectedEventRepository;
     private final EventEvidenceRepository eventEvidenceRepository;
@@ -86,7 +89,7 @@ public class EventCreationService {
                         request.getEventTitle(),
                         request.getEventDetails(),
                         parseConfidence(request.getEventDetails()),
-                        request.getOccurredAt().toLocalDateTime(),
+                        toSeoulLocalDateTime(request.getOccurredAt()),
                         request.getX(),
                         request.getY(),
                         request.getRiskLevel(),
@@ -127,7 +130,7 @@ public class EventCreationService {
                         item.getEventTitle(),
                         item.getEventDetails(),
                         parseConfidence(item.getEventDetails()),
-                        item.getOccurredAt().toLocalDateTime(),
+                        toSeoulLocalDateTime(item.getOccurredAt()),
                         item.getX(),
                         item.getY(),
                         item.getRiskLevel(),
@@ -184,7 +187,7 @@ public class EventCreationService {
                         resolveVehicleEventTitle(violationType),
                         vehicle.getEventDetails(),
                         parseConfidence(vehicle.getEventDetails()),
-                        vehicle.getOccurredAt().toLocalDateTime(),
+                        toSeoulLocalDateTime(vehicle.getOccurredAt()),
                         vehicle.getX(),
                         vehicle.getY(),
                         RiskLevel.NORMAL,
@@ -213,8 +216,8 @@ public class EventCreationService {
         String fileUrl = fileStorageService.store(request.getFile());
         LocalDateTime capturedAt =
                 request.getCapturedAt() != null
-                        ? request.getCapturedAt().toLocalDateTime()
-                        : LocalDateTime.now();
+                        ? toSeoulLocalDateTime(request.getCapturedAt())
+                        : LocalDateTime.now(SERVICE_ZONE);
         EventEvidence evidence = new EventEvidence(event, request.getMediaType(), fileUrl, capturedAt);
         eventEvidenceRepository.save(evidence);
 
@@ -227,6 +230,11 @@ public class EventCreationService {
             case ILLEGAL_PARKING -> "불법주차 감지";
             default -> throw new IllegalStateException("차량 판별에서 나올 수 없는 이벤트 유형: " + type);
         };
+    }
+
+    /** OffsetDateTime을 Asia/Seoul 벽시계 LocalDateTime으로 변환. Jackson UTC 보정과 multipart 파싱 차이를 맞춘다. */
+    private static LocalDateTime toSeoulLocalDateTime(OffsetDateTime offsetDateTime) {
+        return offsetDateTime.atZoneSameInstant(SERVICE_ZONE).toLocalDateTime();
     }
 
     // 단지의 순찰 지도에 속한 체크포인트 중 PARKING 타입만 가져온다. 지도가 없으면 빈 목록

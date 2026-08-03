@@ -11,9 +11,12 @@ import com.oneloop.auth.dto.SignupResponse;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.security.JwtTokenProvider;
+import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.member.domain.Member;
 import com.oneloop.member.domain.MemberStatus;
 import com.oneloop.member.repository.MemberRepository;
+import com.oneloop.robot.domain.RobotStatus;
+import com.oneloop.robot.repository.RobotRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,6 +30,8 @@ public class AuthService {
 
     private final MemberRepository memberRepository;
     private final ApartmentComplexRepository apartmentComplexRepository;
+    private final RobotRepository robotRepository;
+    private final PatrolMapRepository patrolMapRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
 
@@ -91,10 +96,16 @@ public class AuthService {
             throw new BusinessException(ErrorCode.MEMBER_NOT_ACTIVE);
         }
 
+        Long apartmentComplexId = member.getApartmentComplex().getId();
         String accessToken =
                 jwtTokenProvider.createAccessToken(
-                        member.getId().toString(), member.getApartmentComplex().getId(), List.of());
-        return new SigninResponse(accessToken);
+                        member.getId().toString(), apartmentComplexId, List.of());
+        boolean hasRobot =
+                robotRepository.countByApartmentComplexIdAndStatusNot(
+                                apartmentComplexId, RobotStatus.DELETED)
+                        > 0;
+        boolean hasMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId).isPresent();
+        return new SigninResponse(accessToken, hasRobot, hasMap);
     }
 
     /**
