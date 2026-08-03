@@ -258,7 +258,9 @@ iot_ci:
     - test -x robot/scripts/smoke-test.sh
     - test -s robot/docs/ai-ros-contract-v1.md
     - find robot/scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
-    - bash robot/scripts/test.sh
+    - python3 -m venv .venv-iot-ci
+    - .venv-iot-ci/bin/python -m pip install --disable-pip-version-check -r robot/requirements.txt
+    - PYTHON_COMMAND="$CI_PROJECT_DIR/.venv-iot-ci/bin/python" bash robot/scripts/test.sh
     - find robot -type f -name '*.py' -print0 | xargs -0 -r python3 -m py_compile
 
 ai_ci:
