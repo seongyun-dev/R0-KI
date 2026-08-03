@@ -1,17 +1,17 @@
-import type { Patrol } from '../../types/domain'
+import type { PatrolCompletedSseEvent } from '../../api/contracts'
 
 /* 순찰 완료 알림 — 순찰이 끝나면 대시보드 위에 뜬다.
    완료 사실과 탐지 건수만 알리고, 자세한 내용은 순찰 상세로 넘긴다.
    [확인] 을 누르면 닫히면서 이벤트 이력을 다시 불러온다(호출측이 처리). */
 
 export type PatrolCompleteModalProps = {
-  patrol: Patrol
+  patrol: PatrolCompletedSseEvent
   /** [확인] — 닫고 이벤트 이력 새로고침 */
   onConfirm: () => void
 }
 
 export function PatrolCompleteModal({ patrol, onConfirm }: PatrolCompleteModalProps) {
-  const robot = patrol.robotName ?? patrol.robotId
+  const robot = patrol.robotName || String(patrol.robotId)
 
   return (
     <div className="modalwrap">
@@ -25,12 +25,7 @@ export function PatrolCompleteModal({ patrol, onConfirm }: PatrolCompleteModalPr
         </div>
 
         <p className="mdtext">
-          <b>{robot}</b> 순찰이 완료되었습니다.<br />
-          {patrol.eventCount > 0 ? (
-            <>이벤트 <b>{patrol.eventCount}건</b>이 발생했습니다.</>
-          ) : (
-            <>발생한 이벤트는 없습니다.</>
-          )}
+          <b>{robot}</b> 순찰이 완료되었습니다.
         </p>
 
         <div className="mdact">

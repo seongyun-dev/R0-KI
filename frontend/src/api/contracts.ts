@@ -596,6 +596,27 @@ export type RobotStatusUpdateEvent = {
   statusReportedAt: string | null
 }
 
+export type PatrolCompletedSseEvent = {
+  patrolId: number
+  robotId: number
+  robotName: string
+  completedAt: string
+}
+
+export type EmergencyEventSseResponse = {
+  eventId: number
+  eventType: EventTypeCode
+  title: string
+  occurredAt: string
+  location: string
+  robotName: string
+  riskLevel: RiskLevelCode
+  processingStatus: ProcessingStatusCode
+  mapId: number | null
+  x: number | null
+  y: number | null
+}
+
 // GET /api/robots/obstacle-events (SSE: robot-obstacle)
 export type RobotObstacleEvent = {
   robotId: number

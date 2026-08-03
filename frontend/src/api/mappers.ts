@@ -1,5 +1,6 @@
 import type {
   ComplexResponse,
+  EmergencyEventSseResponse,
   EventDetailResponse,
   EventListItemResponse,
   MapInfoResponse,
@@ -130,6 +131,24 @@ export function eventListItemToDomain(value: EventListItemResponse): PatrolEvent
     riskLevel: riskLevel(value.riskLevel),
     processingStatus: processing,
     assignee: value.assignee ?? undefined,
+  }
+}
+
+export function emergencyEventSseToDomain(value: EmergencyEventSseResponse): PatrolEvent {
+  const processing = processingStatus(value.processingStatus)
+  return {
+    id: String(value.eventId),
+    backendId: value.eventId,
+    time: dateParts(value.occurredAt).time,
+    occurredAt: value.occurredAt,
+    type: eventType(value.eventType),
+    location: value.location ?? '위치 미확인',
+    robotId: value.robotName,
+    status: processing,
+    riskLevel: riskLevel(value.riskLevel),
+    processingStatus: processing,
+    x: value.x ?? undefined,
+    y: value.y ?? undefined,
   }
 }
 
