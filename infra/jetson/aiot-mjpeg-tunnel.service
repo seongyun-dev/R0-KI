@@ -1,0 +1,21 @@
+[Unit]
+Description=AIoT MJPEG reverse tunnel
+Wants=network-online.target aiot-ai.service
+After=network-online.target aiot-ai.service
+
+[Service]
+Type=simple
+User=e103
+SupplementaryGroups=aiot
+EnvironmentFile=/opt/aiot/secrets/stream.env
+Environment=AIOT_STREAM_CONFIG_LOADED=true
+LoadCredential=stream_tunnel_ed25519:/opt/aiot/secrets/stream_tunnel_ed25519
+LoadCredential=stream_known_hosts:/opt/aiot/secrets/stream_known_hosts
+ExecStart=/opt/aiot/bin/aiot-mjpeg-tunnel
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

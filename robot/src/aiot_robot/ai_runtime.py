@@ -26,6 +26,7 @@ from std_msgs.msg import String
 
 from .ai_adapter_core import build_detection_message
 from .ai_capture import CaptureSettings, configure_capture
+from .mjpeg_stream import MjpegStreamServer
 
 
 class AiAdapterNode(Node):
@@ -248,6 +249,7 @@ def run_pipeline(
     pipeline_main: Path,
     pipeline_args: list[str],
     capture_settings: CaptureSettings,
+    mjpeg_server: MjpegStreamServer | None = None,
 ) -> int:
     try:
         module = _load_pipeline(pipeline_main)
@@ -270,6 +272,15 @@ def run_pipeline(
                 return getattr(self._delegate, name)
 
         module.DualCamTensorRTBotSortDetector = DetectorProxy
+        if mjpeg_server is not None:
+            original_hconcat = module.cv2.hconcat
+
+            def hconcat_with_preview(images: Any) -> Any:
+                view = original_hconcat(images)
+                mjpeg_server.publisher.publish(view, module.cv2)
+                return view
+
+            module.cv2.hconcat = hconcat_with_preview
         original_open_capture = module.open_capture
         camera_count = 0
 
@@ -334,6 +345,25 @@ def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[
         type=int,
         default=int(os.getenv("AIOT_AI_CAPTURE_BUFFER_SIZE", "1")),
     )
+    parser.add_argument(
+        "--mjpeg-bind",
+        default=os.getenv("AIOT_AI_MJPEG_BIND", "127.0.0.1"),
+    )
+    parser.add_argument(
+        "--mjpeg-port",
+        type=int,
+        default=int(os.getenv("AIOT_AI_MJPEG_PORT", "8090")),
+    )
+    parser.add_argument(
+        "--mjpeg-quality",
+        type=int,
+        default=int(os.getenv("AIOT_AI_MJPEG_QUALITY", "70")),
+    )
+    parser.add_argument(
+        "--mjpeg-max-fps",
+        type=float,
+        default=float(os.getenv("AIOT_AI_MJPEG_MAX_FPS", "8")),
+    )
     return parser.parse_known_args(argv)
 
 
@@ -352,12 +382,31 @@ def main(argv: list[str] | None = None) -> int:
         fourcc=args.capture_fourcc,
         buffer_size=args.capture_buffer_size,
     )
+    mjpeg_server = None
+    if _env_flag("AIOT_AI_MJPEG_ENABLED", default=False):
+        mjpeg_server = MjpegStreamServer(
+            args.mjpeg_bind,
+            args.mjpeg_port,
+            quality=args.mjpeg_quality,
+            max_fps=args.mjpeg_max_fps,
+        )
+        mjpeg_server.start()
+        host, port = mjpeg_server.address
+        node.get_logger().info(
+            f"MJPEG preview listening on http://{host}:{port}/stream.mjpg"
+        )
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     result: list[int] = []
     pipeline_thread = threading.Thread(
         target=lambda: result.append(
-            run_pipeline(node, pipeline_main, pipeline_args, capture_settings)
+            run_pipeline(
+                node,
+                pipeline_main,
+                pipeline_args,
+                capture_settings,
+                mjpeg_server,
+            )
         ),
         name="ai-model-pipeline",
         daemon=True,
@@ -370,6 +419,8 @@ def main(argv: list[str] | None = None) -> int:
         node.mark_stopped()
     finally:
         pipeline_thread.join(timeout=10.0)
+        if mjpeg_server is not None:
+            mjpeg_server.stop()
         executor.remove_node(node)
         node.destroy_node()
         executor.shutdown()
@@ -380,6 +431,18 @@ def main(argv: list[str] | None = None) -> int:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
 
 if __name__ == "__main__":
