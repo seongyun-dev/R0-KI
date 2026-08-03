@@ -254,7 +254,15 @@ export default function Dashboard() {
                   <span className="t num">{clock}</span>
                 </span>
               </div>
-              <R0KiLiveCam urgent={hasUrgent} />
+              <R0KiLiveCam
+                urgent={hasUrgent}
+                clockText={clock}
+                streamPath={
+                  selectedRobot?.backendId == null
+                    ? undefined
+                    : `/live/robots/${selectedRobot.backendId}/stream.mjpg`
+                }
+              />
               <div className="camnow">
                 {hasUrgent && urgentLabel && (
                   <span className="cn cnu"><i className="dot" style={{ background: 'var(--urgent)' }} />{urgentLabel} <b>{urgentEvents.length}</b></span>

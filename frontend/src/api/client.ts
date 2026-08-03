@@ -33,6 +33,16 @@ function authHeaders() {
   return { Authorization: `Bearer ${state.accessToken}` }
 }
 
+export async function authenticatedFetch(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  const auth = authHeaders()
+  if (auth && !headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
+
+  const response = await fetch(apiUrl(path), { ...init, headers })
+  if (response.status === 401) useAuthStore.getState().logout()
+  return response
+}
+
 async function readResponse(response: Response) {
   if (response.status === 204) return undefined
   const contentType = response.headers.get('content-type') ?? ''

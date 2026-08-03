@@ -1,3 +1,5 @@
+import { useMjpegStream } from './useMjpegStream'
+
 /* R0-Ki 실시간 탐지 영상 (시안 §11-2 그대로 포팅)
    어두운 영상 위 HUD — 바운딩 박스 + 스캔라인 + 코너 마커 + REC.
    이 영역은 어둡기 때문에 유리 대비 검증에서 제외(자체 밝은 색 사용).
@@ -7,12 +9,18 @@ export type R0KiLiveCamProps = {
   /** 긴급 감지 여부 — 긴급 바운딩 박스 표시 */
   urgent?: boolean
   clockText?: string
+  streamPath?: string
 }
 
-export function R0KiLiveCam({ urgent = false }: R0KiLiveCamProps) {
+export function R0KiLiveCam({ urgent = false, clockText, streamPath }: R0KiLiveCamProps) {
+  const { frameUrl, state } = useMjpegStream(streamPath)
+
   return (
     <div className="cam">
-      <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-label="로봇 전방 카메라 실시간 영상">
+      {frameUrl && (
+        <img className="camstream" src={frameUrl} alt="로봇 좌우 카메라 AI 실시간 탐지 영상" />
+      )}
+      {!frameUrl && <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-label="로봇 전방 카메라 실시간 영상">
         <defs>
           <linearGradient id="camsky" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="#243447" /><stop offset=".55" stopColor="#3A4E66" /><stop offset="1" stopColor="#1B2836" />
@@ -65,8 +73,12 @@ export function R0KiLiveCam({ urgent = false }: R0KiLiveCamProps) {
           <text x="12" y="193">101동 지하주차장 지하 1층</text>
           <text x="308" y="193" textAnchor="end">적외선 꺼짐</text>
         </g>
-      </svg>
-      <span className="rec" />
+      </svg>}
+      <span className={`camstate ${state}`}>
+        {state === 'live' ? '좌·우 AI 탐지' : state === 'connecting' ? '영상 연결 중' : '영상 대기'}
+        {clockText ? ` · ${clockText}` : ''}
+      </span>
+      <span className={`rec${state === 'live' ? '' : ' paused'}`} />
     </div>
   )
 }
