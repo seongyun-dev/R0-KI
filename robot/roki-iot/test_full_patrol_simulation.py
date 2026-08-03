@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from integration.runtime_state_backend_adapter import FinalRuntimeService
-from mqtt.command_handler import PatrolCommandHandler
-from mqtt.publisher import RokiPublisherApplication
+from backend_mqtt.command_handler import PatrolCommandHandler
+from backend_mqtt.publisher import RokiPublisherApplication
 from navigation.route import parse_route
 from navigation.service import WaypointNavigationService
 from backend_state.models import HardwareState

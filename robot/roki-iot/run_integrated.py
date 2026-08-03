@@ -55,8 +55,8 @@ def _selected_route_path(route_path: str | Path | None = None) -> Path:
     )
 
 
-def _validate_state_import_namespaces() -> None:
-    """Ensure the final runtime and backend adapter state packages coexist."""
+def _validate_import_namespaces() -> None:
+    """Ensure final-runtime and backend-compatibility packages coexist."""
 
     final_root = str(FINAL_RUNTIME_ROOT)
     original_sys_path = list(sys.path)
@@ -73,10 +73,16 @@ def _validate_state_import_namespaces() -> None:
         from backend_state.robot_state_store import (
             RobotStateStore as BackendRobotStateStore,
         )
+        from mqtt.client import MqttClient as FinalMqttClient
+        from backend_mqtt.client import MqttClient as BackendMqttClient
         from integration.runtime_state_backend_adapter import FinalRuntimeService
 
-        if FinalRobotStateStore is BackendRobotStateStore or FinalRuntimeService is None:
-            raise RuntimeError("runtime state import namespaces are not isolated")
+        if (
+            FinalRobotStateStore is BackendRobotStateStore
+            or FinalMqttClient is BackendMqttClient
+            or FinalRuntimeService is None
+        ):
+            raise RuntimeError("runtime import namespaces are not isolated")
     finally:
         sys.path = original_sys_path
         for name in tuple(sys.modules):
@@ -188,11 +194,11 @@ def create_integrated_application(
     from aiot_robot.deployment_guard import PatrolDeploymentGuard
     from aiot_robot.event_delivery import DetectionRecorder, EventDeliveryWorker
     from aiot_robot.outbox import DetectionOutbox
-    from config.settings import load_settings
+    from backend_config.settings import load_settings
     from integration.runtime_state_backend_adapter import FinalRuntimeService
-    from mqtt.client import MqttClient
-    from mqtt.command_handler import PatrolCommandHandler
-    from mqtt.publisher import RokiPublisherApplication
+    from backend_mqtt.client import MqttClient
+    from backend_mqtt.command_handler import PatrolCommandHandler
+    from backend_mqtt.publisher import RokiPublisherApplication
     from pipeline.patrol_pipeline import PatrolPipelineRunner
 
     settings = load_settings()
@@ -282,9 +288,9 @@ def create_integrated_application(
 def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
     """Validate configuration without MQTT, ROS nodes or serial access."""
 
-    from config.settings import load_settings
+    from backend_config.settings import load_settings
 
-    _validate_state_import_namespaces()
+    _validate_import_namespaces()
     settings = load_settings()
     mode = _navigation_mode(settings)
     navigation = _build_navigation_service(
@@ -325,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(preflight(args.route), sort_keys=True))
         return 0
 
-    from config.settings import load_settings
+    from backend_config.settings import load_settings
 
     settings = load_settings()
     mode = _navigation_mode(settings)

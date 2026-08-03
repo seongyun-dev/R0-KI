@@ -67,7 +67,7 @@ class FakeRuntime:
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
     def test_publisher_exits_when_single_serial_runtime_dies(self) -> None:
-        from mqtt.publisher import RokiPublisherApplication
+        from backend_mqtt.publisher import RokiPublisherApplication
 
         serial_service = Mock()
         serial_service.is_running.return_value = False
@@ -242,7 +242,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         )
 
     def test_status_is_published_immediately_on_change_and_every_five_seconds(self) -> None:
-        from mqtt.publisher import RokiPublisherApplication
+        from backend_mqtt.publisher import RokiPublisherApplication
 
         settings = SimpleNamespace(
             status_publish_interval_seconds=5.0,
@@ -342,7 +342,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         self.assertEqual(payload["lineSensor"], "NORMAL")
 
     def test_pose_publisher_keeps_one_second_interval(self) -> None:
-        from mqtt.publisher import RokiPublisherApplication
+        from backend_mqtt.publisher import RokiPublisherApplication
         from backend_state.models import PoseState
 
         settings = SimpleNamespace(
