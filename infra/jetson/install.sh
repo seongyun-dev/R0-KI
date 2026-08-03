@@ -63,12 +63,16 @@ install -m 0755 -o root -g root "${source_dir}/aiot-ai-wait-ready.sh" \
   /opt/aiot/bin/aiot-ai-wait-ready
 install -m 0755 -o root -g root "${source_dir}/aiot-ai-wait-ready.py" \
   /opt/aiot/bin/aiot-ai-wait-ready.py
+install -m 0755 -o root -g root "${source_dir}/aiot-mjpeg-tunnel.sh" \
+  /opt/aiot/bin/aiot-mjpeg-tunnel
 install -m 0644 -o root -g root "${source_dir}/aiot-update.service" \
   /etc/systemd/system/aiot-update.service
 install -m 0644 -o root -g root "${source_dir}/aiot-update.timer" \
   /etc/systemd/system/aiot-update.timer
 install -m 0644 -o root -g root "${source_dir}/aiot-ai.service" \
   /etc/systemd/system/aiot-ai.service
+install -m 0644 -o root -g root "${source_dir}/aiot-mjpeg-tunnel.service" \
+  /etc/systemd/system/aiot-mjpeg-tunnel.service
 install -m 0644 -o root -g root "${source_dir}/aiot-ros.service" \
   /etc/systemd/system/aiot-ros.service
 install -m 0644 -o root -g root "${source_dir}/aiot-robot.service" \
@@ -96,6 +100,11 @@ if [ ! -e /opt/aiot/secrets/ros.env ]; then
     /opt/aiot/secrets/ros.env.example
   echo "Review field measurements in /opt/aiot/secrets/ros.env.example before creating ros.env."
 fi
+if [ ! -e /opt/aiot/secrets/stream.env ]; then
+  install -m 0640 -o root -g aiot "${source_dir}/stream.env.example" \
+    /opt/aiot/secrets/stream.env.example
+  echo "Provision the restricted stream tunnel key and create /opt/aiot/secrets/stream.env before enabling MJPEG relay."
+fi
 
 systemctl daemon-reload
 if command -v systemd-analyze >/dev/null 2>&1; then
@@ -103,6 +112,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     /etc/systemd/system/aiot-update.service
     /etc/systemd/system/aiot-update.timer
     /etc/systemd/system/aiot-ai.service
+    /etc/systemd/system/aiot-mjpeg-tunnel.service
   )
   if [ -x /opt/aiot/iot/current/robot/scripts/run-ros.sh ]; then
     verify_units+=(/etc/systemd/system/aiot-ros.service)
@@ -114,7 +124,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   systemd-analyze verify "${verify_units[@]}"
 fi
 if [ "${enable_services}" = true ]; then
-  systemctl enable aiot-update.timer aiot-ai.service aiot-ros.service aiot-robot.service
+  systemctl enable aiot-update.timer aiot-ai.service aiot-mjpeg-tunnel.service aiot-ros.service aiot-robot.service
   echo "Jetson services enabled. Start them only after environment review."
 else
   echo "Jetson units installed but not newly enabled."
