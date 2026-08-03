@@ -50,6 +50,11 @@ export interface ComplexMapData {
   mapImageUrl?: string;
   /** 격자 1칸의 실제 거리(m) — 축척 표기용. 백엔드 resolution×width 에서 환산 */
   metersPerCell?: number;
+  resolution?: number;
+  originX?: number;
+  originY?: number;
+  pixelWidth?: number;
+  pixelHeight?: number;
 }
 
 export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표, 소수 허용)
@@ -60,6 +65,7 @@ export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표
   y: number;
   battery?: number;
   updatedAt?: string;
+  routePoints?: PatrolRoutePoint[];
 }
 
 export interface MapPin {           // 지도 위 이벤트 핀

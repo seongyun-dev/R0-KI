@@ -579,14 +579,21 @@ export type RobotLocationEvent = {
   x: number | null
   y: number | null
   heading: number | null
-  status:
-    | 'IDLE'
-    | 'PATROLLING'
-    | 'CHARGING'
-    | 'OBSTACLE_STOP'
-    | 'OFFLINE'
-    | 'DELETED'
-  updatedAt: string | null
+  locationUpdatedAt: string | null
+}
+
+// GET /api/robots/locations
+export type RobotMapLocationResponse = RobotLocationEvent & {
+  robotName: string
+  status: RobotStatusCode | string
+  routePoints: PatrolRoutePointResponse[]
+}
+
+export type RobotStatusUpdateEvent = {
+  robotId: number
+  status: RobotStatusCode | string
+  batteryLevel: number | null
+  statusReportedAt: string | null
 }
 
 // GET /api/robots/obstacle-events (SSE: robot-obstacle)

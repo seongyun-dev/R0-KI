@@ -332,7 +332,7 @@ export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): P
   }
 }
 
-function robotStatusLabel(value: string): StatusLabel {
+export function robotStatusLabel(value: string): StatusLabel {
   const map: Record<string, StatusLabel> = {
     IDLE: '대기',
     PATROLLING: '순찰중',
@@ -555,6 +555,6 @@ export function locationEventToMapRobot(
   return {
     id: String(event.robotId),
     ...point,
-    updatedAt: event.updatedAt ?? undefined,
+    updatedAt: event.locationUpdatedAt ?? undefined,
   }
 }
