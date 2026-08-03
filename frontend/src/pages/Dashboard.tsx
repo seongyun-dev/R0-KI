@@ -6,6 +6,7 @@ import { R0KiPatrolMap } from '../features/dashboard/R0KiPatrolMap'
 import { ComplexMap } from '../features/dashboard/ComplexMap'
 import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
+import { useRobotLocations } from '../features/dashboard/useRobotLocations'
 import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
 import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
@@ -16,6 +17,7 @@ import {
 } from '../features/dashboard/usePatrolComplete'
 import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
+import { robotStatusLabel } from '../api/mappers'
 import type { Patrol, PatrolEvent } from '../types/domain'
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
@@ -54,6 +56,8 @@ export default function Dashboard() {
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useEvents()
   const { data: robots } = useRobots()
   const { data: mapData } = useComplexMap()
+  const { locations: liveRobotLocations, statuses: liveRobotStatuses } =
+    useRobotLocations(mapData?.map)
 
   /* 이벤트 이력 — 아직 처리하지 않은 '탐지' 상태만 띄운다 (처리중·처리완료 제외).
      긴급(발견 즉시 기록)은 목록 맨 위 고정 / 나머지는 아래 그룹 */
@@ -91,14 +95,25 @@ export default function Dashboard() {
   const [pickedRobotId, setPickedRobotId] = useState<string>()
   // 순찰 중 로봇 전체 보기 — 켜면 개별 선택 대신 순찰 중인 로봇을 모두 띄운다
   const [showAllPatrolling, setShowAllPatrolling] = useState(false)
-  const robotList = robots ?? []
+  const robotList = (robots ?? []).map((robot) => {
+    const liveStatus = liveRobotStatuses[String(robot.backendId ?? robot.id)]
+    return liveStatus ? { ...robot, status: robotStatusLabel(liveStatus) } : robot
+  })
   const patrollingRobots = robotList.filter((r) => r.status === '순찰중')
   const selectedRobot =
     robotList.find((r) => r.id === pickedRobotId) ?? patrollingRobots[0] ?? robotList[0]
   const isPatrolling = showAllPatrolling || selectedRobot?.status === '순찰중'
-  const mapRobot = robotMapPosition(selectedRobot, mapData?.robot)
+  const mapRobot = selectedRobot
+    ? liveRobotLocations.find((location) =>
+        location.id === String(selectedRobot.backendId ?? selectedRobot.id),
+      ) ?? robotMapPosition(selectedRobot, mapData?.robot)
+    : undefined
   const mapRobots = patrollingRobots
-    .map((r) => robotMapPosition(r, mapData?.robot))
+    .map((robot) =>
+      liveRobotLocations.find((location) =>
+        location.id === String(robot.backendId ?? robot.id),
+      ) ?? robotMapPosition(robot, mapData?.robot),
+    )
     .filter((r): r is NonNullable<typeof r> => Boolean(r))
 
   const pickRobot = (id: string) => {

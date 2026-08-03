@@ -94,6 +94,11 @@ function registeredMapToView(
       mapUrl: detail.mapUrl,
       mapImageUrl,
       metersPerCell,
+      resolution,
+      originX: Number(detail.originX),
+      originY: Number(detail.originY),
+      pixelWidth: detail.width,
+      pixelHeight: detail.height,
     },
     robot: {
       id: String(robotId),

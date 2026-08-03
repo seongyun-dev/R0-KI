@@ -36,6 +36,8 @@ import type {
   RobotDetailResponse,
   RobotListPageResponse,
   RobotLocationEvent,
+  RobotMapLocationResponse,
+  RobotStatusUpdateEvent,
   RobotObstacleEvent,
   RobotRegisterRequest,
   RobotRegisterResponse,
@@ -231,6 +233,8 @@ export const robotsApi = {
     )
   },
   stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
+  locations: () =>
+    apiRequest<RobotMapLocationResponse[]>('/api/robots/locations'),
   detail: (robotId: string | number) =>
     apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
 
@@ -251,15 +255,18 @@ export const robotsApi = {
   subscribeLocations: (
     onInitial: (locations: RobotLocationEvent[]) => void,
     onLocation: (location: RobotLocationEvent) => void,
+    onStatus: (status: RobotStatusUpdateEvent) => void,
     signal: AbortSignal,
   ) =>
-    consumeSse<RobotLocationEvent[] | RobotLocationEvent>(
+    consumeSse<RobotLocationEvent[] | RobotLocationEvent | RobotStatusUpdateEvent>(
       '/api/robots/location/events',
       (data, eventName) => {
         if (eventName === 'robot-location-initial' && Array.isArray(data)) {
           onInitial(data)
-        } else if (eventName === 'robot-location' && !Array.isArray(data)) {
-          onLocation(data)
+        } else if (eventName === 'robot-location-updated' && !Array.isArray(data)) {
+          onLocation(data as RobotLocationEvent)
+        } else if (eventName === 'robot-status-updated' && !Array.isArray(data)) {
+          onStatus(data as RobotStatusUpdateEvent)
         }
       },
       signal,
