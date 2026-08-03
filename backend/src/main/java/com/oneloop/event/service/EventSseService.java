@@ -1,7 +1,7 @@
 package com.oneloop.event.service;
 
 import com.oneloop.event.dto.response.EmergencyEventSseResponse;
-import com.oneloop.event.dto.response.GeneralEventsCreatedSseResponse;
+import com.oneloop.event.dto.response.PatrolCompletedSseResponse;
 import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,7 +16,7 @@ public class EventSseService {
 
     private static final String CONNECTED_EVENT = "connected";
     private static final String EMERGENCY_EVENT = "emergency-event";
-    private static final String GENERAL_EVENTS_CREATED_EVENT = "general-events-created";
+    private static final String PATROL_COMPLETED_EVENT = "patrol-completed";
 
     private final ConcurrentHashMap<Long, Set<SseEmitter>> emergencyEmitters =
             new ConcurrentHashMap<>();
@@ -46,15 +46,14 @@ public class EventSseService {
         broadcast(emergencyEmitters, apartmentComplexId, EMERGENCY_EVENT, response);
     }
 
-    public void broadcastGeneral(
-            Long apartmentComplexId, GeneralEventsCreatedSseResponse response) {
+    public void broadcastPatrolCompleted(
+            Long apartmentComplexId, PatrolCompletedSseResponse response) {
         log.info(
-                "[EVENT_SSE] 발송 시작 channel=general apartmentComplexId={} patrolId={} createdCount={} subscribers={}",
+                "[EVENT_SSE] 발송 시작 channel=general apartmentComplexId={} patrolId={} subscribers={}",
                 apartmentComplexId,
                 response.getPatrolId(),
-                response.getCreatedCount(),
                 subscriberCount(generalEmitters, apartmentComplexId));
-        broadcast(generalEmitters, apartmentComplexId, GENERAL_EVENTS_CREATED_EVENT, response);
+        broadcast(generalEmitters, apartmentComplexId, PATROL_COMPLETED_EVENT, response);
     }
 
     private SseEmitter subscribe(
