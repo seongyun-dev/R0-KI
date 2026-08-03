@@ -12,8 +12,8 @@ from integration.runtime_state_backend_adapter import (
     FinalRuntimeService,
     RuntimeStateBackendAdapter,
 )
-from state.robot_state_store import RobotStateStore
-from state.models import HardwareState, ObstacleState
+from backend_state.robot_state_store import RobotStateStore
+from backend_state.models import HardwareState, ObstacleState
 
 
 class FakeMissionController:
@@ -343,7 +343,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
 
     def test_pose_publisher_keeps_one_second_interval(self) -> None:
         from mqtt.publisher import RokiPublisherApplication
-        from state.models import PoseState
+        from backend_state.models import PoseState
 
         settings = SimpleNamespace(
             pose_publish_interval_seconds=1.0,
