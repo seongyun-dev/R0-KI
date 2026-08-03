@@ -116,6 +116,14 @@ export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)
   status: StatusLabel;              // 이상무 / 탐지 / 처리완료
   note?: string;                    // 미등록 차량 1대 감지 · 신뢰도 92%
   eventId?: string;                 // 이상 지점 → 이벤트 상세(1g) 링크. 상태 변경은 이벤트 상세에서
+  x?: number;
+  y?: number;
+}
+
+export interface PatrolRoutePoint {
+  x: number;
+  y: number;
+  recordedAt: string;
 }
 
 export interface Patrol {
@@ -134,6 +142,8 @@ export interface Patrol {
   batteryTo?: number;               // 82
   report?: PatrolReport;
   points?: PatrolPoint[];
+  mapUrl?: string;
+  routePoints?: PatrolRoutePoint[];
 }
 
 export interface PatrolReport {     // PATROL REPORT (1e)

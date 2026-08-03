@@ -356,6 +356,8 @@ export type PatrolTimelineResponse = {
   eventId?: Id | null
   eventType?: EventTypeCode | string
   processingStatus?: ProcessingStatusCode | string
+  xCoordinate?: number | string | null
+  yCoordinate?: number | string | null
 }
 
 export type PatrolAiSummaryResponse = {
