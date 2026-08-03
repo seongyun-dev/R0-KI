@@ -55,11 +55,11 @@ export type SignInResponse = {
   message: string,
   data: {
     accessToken: string
-    /** 로봇 등록 여부 */
-    robotRegistered?: boolean
-    /** 지도(구역 포함) 등록 여부 */
-    mapRegistered?: boolean
-    /** 등록돼 있으면 이어갈 때 쓴다 — 없으면 목록 조회로 채운다 */
+    /** 소속 단지에 등록된 로봇이 있는가 (백엔드 SigninResponse.hasRobot) */
+    hasRobot?: boolean
+    /** 소속 단지에 등록된 지도가 있는가 (백엔드 SigninResponse.hasMap) */
+    hasMap?: boolean
+    /** 아직 백엔드가 내려주지 않는다 — 오면 온보딩 재개·지도 조회에 그대로 쓴다 */
     robotId?: Id | null
     mapId?: Id | null
   }
