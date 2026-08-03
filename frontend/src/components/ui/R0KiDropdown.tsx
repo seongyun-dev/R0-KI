@@ -56,15 +56,31 @@ export function R0KiDropdown({ allLabel, options, value, onChange }: R0KiDropdow
       </button>
       {open && (
         <ul className="dd-menu" role="listbox">
-          {items.map((o) => (
+          {/* 목록 항목이 클릭으로만 동작해 키보드로는 필터를 아예 쓸 수 없었다.
+              포커스를 받게 하고 Enter/Space 선택 · 위아래 이동을 붙인다. */}
+          {items.map((o, index) => (
             <li
               key={o.value || '__all'}
               className="dd-opt"
               role="option"
+              tabIndex={0}
               aria-selected={o.value === value}
               onClick={() => {
                 onChange(o.value)
                 setOpen(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onChange(o.value)
+                  setOpen(false)
+                  return
+                }
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+                e.preventDefault()
+                const siblings = e.currentTarget.parentElement?.children
+                const next = e.key === 'ArrowDown' ? index + 1 : index - 1
+                ;(siblings?.[next] as HTMLElement | undefined)?.focus()
               }}
             >
               <svg viewBox="0 0 24 24"><path d="M4 12.5 9.5 18 20 6.5" /></svg>

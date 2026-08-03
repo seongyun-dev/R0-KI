@@ -19,12 +19,15 @@ export function RobotEditDrawer({ open, robot, onClose, onSave, onDelete }: Robo
   // 삭제 확인 2단계 (오조작 방지)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  // 열 때마다 현재 로봇 값으로 초기화
+  /* 열 때와 대상 로봇이 바뀔 때만 초기화한다.
+     robot 은 부모가 매 렌더 새로 만드는 객체라({...loaded, ...patch}) 그대로 의존성에
+     두면 부모가 다시 그려질 때마다(토스트 타이머 등) 입력 중이던 이름이 되돌아간다. */
   useEffect(() => {
     if (!open) return
     setName(robot.name)
     setConfirmDelete(false)
-  }, [open, robot])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, robot.id])
 
   const handleDelete = async () => {
     if (!onDelete) return

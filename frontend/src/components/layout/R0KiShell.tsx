@@ -33,9 +33,19 @@ export function useClockText() {
   }, [])
   return text
 }
+/* "한국시간"이라고 적어 놓고 브라우저 로컬시간을 쓰고 있었다 —
+   시간대가 다른 환경에서 틀린 시각이 뜬다. 서울 기준으로 고정한다.
+   (en-GB 는 24시간 HH:MM:SS 를 안정적으로 낸다. ko-KR 은 자정을 24시로 쓰는 경우가 있다) */
+const SEOUL_CLOCK = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Seoul',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+})
+
 function formatClock(d: Date) {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  return SEOUL_CLOCK.format(d)
 }
 
 // notifications 는 주 메뉴가 아닌 상단바 알림 버튼이 활성 표시를 가져간다
