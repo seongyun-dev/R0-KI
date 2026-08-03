@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { R0KiShell, useClockText } from '../components/layout/R0KiShell'
 import { R0KiLiveCam } from '../features/dashboard/R0KiLiveCam'
@@ -10,6 +10,7 @@ import { useRobotLocations } from '../features/dashboard/useRobotLocations'
 import { useEmergencyEventStore } from '../features/dashboard/useEmergencyEventStore'
 import { useSelectedRobotLocation } from '../features/dashboard/useSelectedRobotLocation'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
+import { PatrolStartModal } from '../features/dashboard/PatrolStartModal'
 import {
   usePatrolComplete,
   isPatrolDoneSeen,
@@ -18,8 +19,9 @@ import {
 import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
 import { robotStatusLabel } from '../api/mappers'
+import { patrolsApi } from '../api/services'
 import type { PatrolCompletedSseEvent } from '../api/contracts'
-import type { ComplexMapData } from '../types/domain'
+import type { ComplexMapData, Robot } from '../types/domain'
 
 function emergencyPoint(x: number, y: number, map: ComplexMapData) {
   const { resolution, pixelWidth, pixelHeight, originX, originY } = map
@@ -68,7 +70,7 @@ function MiniBot() {
 export default function Dashboard() {
   const clock = useClockText()
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useEvents()
-  const { data: robots } = useRobots()
+  const { data: robots, refetch: refetchRobots } = useRobots()
   const { data: mapData } = useComplexMap()
   const emergencyEvents = useEmergencyEventStore((state) => state.events)
   const { locations: liveRobotLocations, statuses: liveRobotStatuses } =
@@ -176,9 +178,52 @@ export default function Dashboard() {
     )
     .filter((r): r is NonNullable<typeof r> => Boolean(r))
 
-  const pickRobot = (id: string) => {
+  /* 순찰 시작 — 대기 로봇을 누르면 뜨는 확인 모달. 시작 뒤 되돌리는 버튼은 두지 않기로 했으므로
+     실패는 모달에 남겨 다시 시도할 수 있게 하고, 성공했을 때만 닫는다. */
+  const [patrolTarget, setPatrolTarget] = useState<Robot | null>(null)
+  const [startingPatrol, setStartingPatrol] = useState(false)
+  const [patrolError, setPatrolError] = useState<string>()
+  const [toast, setToast] = useState<string>()
+
+  // 결과 알림 — 고령 사용자 기준이라 로봇 상세(2.6초)보다 길게 띄운다
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(undefined), 4200)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const startPatrol = async () => {
+    if (!patrolTarget || startingPatrol) return
+    const parsed = Number(patrolTarget.backendId ?? patrolTarget.id)
+    if (!Number.isFinite(parsed)) {
+      setPatrolError('로봇 번호를 확인할 수 없어 순찰을 시작하지 못했습니다.')
+      return
+    }
+
+    setStartingPatrol(true)
+    setPatrolError(undefined)
+    try {
+      await patrolsApi.start({ robotId: parsed })
+      setToast(`${patrolTarget.name} 순찰을 시작했습니다.`)
+      setPatrolTarget(null)
+      void refetchRobots()
+    } catch (error) {
+      setPatrolError(error instanceof Error ? error.message : '순찰 시작에 실패했습니다.')
+    } finally {
+      setStartingPatrol(false)
+    }
+  }
+
+  /* 로봇 칩 클릭 — 항상 지도 선택은 하고(대기 로봇의 마지막 위치도 그대로 볼 수 있어야 한다),
+     '대기' 상태일 때만 순찰 시작 확인 모달을 함께 띄운다.
+     순찰중·충전중·오프라인·오류는 지금 시작할 수 있는 상태가 아니라 지도 선택까지만. */
+  const pickRobot = (robot: Robot) => {
     setShowAllPatrolling(false)
-    setPickedRobotId(id)
+    setPickedRobotId(robot.id)
+    if (robot.status === '대기') {
+      setPatrolError(undefined)
+      setPatrolTarget(robot)
+    }
   }
 
   /* 순찰 완료 모달 — 순찰이 끝나면 뜨고, [확인] 을 누르면 이벤트 이력을 다시 불러온다
@@ -262,8 +307,12 @@ export default function Dashboard() {
                       type="button"
                       className="botitem"
                       aria-pressed={picked}
-                      aria-label={`${r.name} ${r.status} — 지도에 ${r.status === '순찰중' ? '위치와 이동 경로' : '마지막 위치'} 표시`}
-                      onClick={() => pickRobot(r.id)}
+                      aria-label={
+                        r.status === '대기'
+                          ? `${r.name} 대기 — 지도에 마지막 위치 표시, 순찰 시작 확인창 열기`
+                          : `${r.name} ${r.status} — 지도에 ${r.status === '순찰중' ? '위치와 이동 경로' : '마지막 위치'} 표시`
+                      }
+                      onClick={() => pickRobot(r)}
                     >
                       <MiniBot />
                       <span className="d" style={{ background: statusColor(r.status) }} />
@@ -286,6 +335,14 @@ export default function Dashboard() {
                       <b className={`pct${hasBattery ? ' num' : ' unknown'}`}>
                         {hasBattery ? `${battery}%` : '--%'}
                       </b>
+                      {/* 대기 로봇에만 붙는 안내 — 누르면 순찰이 시작된다는 걸 누르기 전에 보여준다.
+                          아이콘만 두면 뜻이 전달되지 않으므로 글자를 함께 쓴다 */}
+                      {r.status === '대기' && (
+                        <span className="go" aria-hidden>
+                          <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg>
+                          순찰 시작
+                        </span>
+                      )}
                     </button>
                   )
                 })}
@@ -386,6 +443,26 @@ export default function Dashboard() {
         {donePatrol && (
           <PatrolCompleteModal patrol={donePatrol} onConfirm={confirmPatrolDone} />
         )}
+
+        {/* 순찰 시작 확인 — 대기 로봇 칩을 눌렀을 때 */}
+        {patrolTarget && (
+          <PatrolStartModal
+            robot={patrolTarget}
+            starting={startingPatrol}
+            error={patrolError}
+            onCancel={() => {
+              if (startingPatrol) return
+              setPatrolTarget(null)
+              setPatrolError(undefined)
+            }}
+            onConfirm={() => void startPatrol()}
+          />
+        )}
+
+        <div className={`toast${toast ? ' on' : ''}`} role="status" aria-live="polite">
+          <svg viewBox="0 0 24 24"><path d="M4 12.5 9.5 18 20 6.5" /></svg>
+          <span>{toast}</span>
+        </div>
       </R0KiShell>
     </>
   )
