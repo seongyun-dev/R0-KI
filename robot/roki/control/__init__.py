@@ -7,6 +7,12 @@ from control.motion_controller import (
     MotionState,
     MotionTarget,
 )
+from control.line_follower import (
+    LineFollowDecision,
+    LineFollower,
+    LineFollowerSettings,
+    LineFollowMode,
+)
 
 __all__ = [
     "MotionCommand",
@@ -14,4 +20,8 @@ __all__ = [
     "MotionControllerSettings",
     "MotionState",
     "MotionTarget",
+    "LineFollowDecision",
+    "LineFollower",
+    "LineFollowerSettings",
+    "LineFollowMode",
 ]

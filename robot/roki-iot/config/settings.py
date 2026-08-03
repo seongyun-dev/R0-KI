@@ -76,6 +76,14 @@ class AppSettings:
     pipeline_start_grace_seconds: float
     pipeline_enabled: bool
 
+    ai_required_for_patrol: bool
+    lidar_required_for_patrol: bool
+    service_token_file: str
+    command_cache_file: str
+    navigation_mode: str
+    encoder_fallback_enabled: bool
+    obstacle_clear_hold_seconds: float
+
     patrol_drive_speed_pwm: int
     patrol_steering_degrees: int
 
@@ -89,6 +97,14 @@ class AppSettings:
         if not 60 <= self.patrol_steering_degrees <= 100:
             raise ValueError(
                 "PATROL_STEERING_DEGREES must be between 60 and 100"
+            )
+        if self.navigation_mode not in {"auto", "nav2", "encoder_limited"}:
+            raise ValueError(
+                "ROKI_NAVIGATION_MODE must be auto, nav2 or encoder_limited"
+            )
+        if self.obstacle_clear_hold_seconds < 0:
+            raise ValueError(
+                "OBSTACLE_CLEAR_HOLD_SECONDS must be non-negative"
             )
 
     @property
@@ -175,11 +191,11 @@ def load_settings() -> AppSettings:
         ),
         pipeline_source_a=os.getenv(
             "PIPELINE_SOURCE_A",
-            "0",
+            "/dev/roki_camera_front",
         ),
         pipeline_source_b=os.getenv(
             "PIPELINE_SOURCE_B",
-            "1",
+            "/dev/roki_camera_rear",
         ),
         pipeline_extra_args=os.getenv(
             "PIPELINE_EXTRA_ARGS",
@@ -193,15 +209,41 @@ def load_settings() -> AppSettings:
         ),
         pipeline_enabled=read_boolean_environment(
             name="PIPELINE_ENABLED",
+            default=False,
+        ),
+        ai_required_for_patrol=read_boolean_environment(
+            name="AIOT_AI_REQUIRED_FOR_PATROL",
             default=True,
         ),
-        # 51/255 is 20 percent duty, the lowest value already verified on
-        # the assembled rear drive. Steering 80 degrees is the measured
-        # straight-ahead position.
+        lidar_required_for_patrol=read_boolean_environment(
+            name="AIOT_LIDAR_REQUIRED_FOR_PATROL",
+            default=True,
+        ),
+        service_token_file=os.getenv(
+            "AIOT_BACKEND_TOKEN_FILE",
+            "/var/lib/aiot/secrets/robot-service-token",
+        ),
+        command_cache_file=os.getenv(
+            "AIOT_COMMAND_CACHE_FILE",
+            "/var/lib/aiot/state/command-cache.json",
+        ),
+        navigation_mode=os.getenv(
+            "ROKI_NAVIGATION_MODE",
+            "auto",
+        ).strip().lower(),
+        encoder_fallback_enabled=read_boolean_environment(
+            name="ROKI_ENCODER_FALLBACK_ENABLED",
+            default=True,
+        ),
+        obstacle_clear_hold_seconds=float(
+            os.getenv("OBSTACLE_CLEAR_HOLD_SECONDS", "1.0")
+        ),
+        # PWM 45 is the lowest field-tested motion value. Steering 80 degrees
+        # is the measured straight-ahead position.
         patrol_drive_speed_pwm=int(
             os.getenv(
                 "PATROL_DRIVE_SPEED_PWM",
-                "51",
+                "45",
             )
         ),
         patrol_steering_degrees=int(

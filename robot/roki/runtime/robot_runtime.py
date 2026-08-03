@@ -9,6 +9,7 @@ from typing import Callable
 
 from control.motion_controller import MotionController, MotionState, MotionTarget
 from mission.mission_controller import MissionController
+from localization.encoder_pose_estimator import EncoderPoseEstimator
 from safety.safety_controller import SafetyController, SafetyDecision
 from serial_comm.protocol import (
     HardwareStatus,
@@ -51,6 +52,7 @@ class RobotRuntime:
         safety: SafetyController,
         state_store: RobotStateStore,
         settings: RuntimeSettings,
+        encoder_pose_estimator: EncoderPoseEstimator | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -61,6 +63,7 @@ class RobotRuntime:
         self._safety = safety
         self._state_store = state_store
         self._settings = settings
+        self._encoder_pose_estimator = encoder_pose_estimator
         self._clock = clock
         self._sleep = sleep
         self._sequence = SequenceCounter()
@@ -94,6 +97,12 @@ class RobotRuntime:
     def request_stop(self) -> None:
         self._stop_requested = True
         self._mission.emergency_stop()
+
+    def stop_patrol(self, reason: str = "PATROL_STOP") -> None:
+        """Clear the motion target and send STOP without waiting for telemetry."""
+
+        self._mission.stop_patrol()
+        self._send_stop(reason)
 
     def run_forever(self) -> None:
         logger.info("RO-KI headless runtime started")
@@ -148,6 +157,8 @@ class RobotRuntime:
         self._odometry_baseline_pending = True
         self._encoder_zero_acknowledged = False
         self._motion.reset()
+        if self._encoder_pose_estimator is not None:
+            self._encoder_pose_estimator.reset_baseline()
         self._safety.reset_connection()
         self._state_store.reset_connection()
         if not self._bridge.write_line(build_stop_command(self._sequence.next())):
@@ -165,6 +176,8 @@ class RobotRuntime:
         self._last_odometry_uptime_ms = None
         self._odometry_baseline_pending = True
         self._motion.reset()
+        if self._encoder_pose_estimator is not None:
+            self._encoder_pose_estimator.reset_baseline()
         self._safety.reset_connection()
         self._state_store.reset_connection()
         self._encoder_zero_acknowledged = True
@@ -187,6 +200,8 @@ class RobotRuntime:
             self._latest_hardware_status = None
             self._last_logged_line_values = None
             self._motion.reset()
+            if self._encoder_pose_estimator is not None:
+                self._encoder_pose_estimator.reset_baseline()
             self._safety.reset_connection()
             self._state_store.reset_connection()
             self._odometry_baseline_pending = True
@@ -211,6 +226,13 @@ class RobotRuntime:
         )
         command, motion_state = self._motion.update(odometry, target)
         self._state_store.update_odometry(odometry, motion_state)
+        if self._encoder_pose_estimator is not None:
+            odom_pose = self._encoder_pose_estimator.update(
+                motion_state,
+                steering_command=command.steering_deg,
+                timestamp=now,
+            )
+            self._state_store.update_odom_pose(odom_pose)
         for listener in tuple(self._odometry_listeners):
             listener(odometry, motion_state)
         if self._odometry_baseline_pending:
@@ -220,7 +242,13 @@ class RobotRuntime:
             )
             return
         latest_decision = self._evaluate_safety(self._clock())
-        if not latest_decision.allowed or command.speed == 0:
+        latest_mission = self._mission.current()
+        if (
+            not latest_decision.allowed
+            or command.speed == 0
+            or latest_mission.speed == 0
+            or latest_mission.emergency_stop
+        ):
             self._send_stop(latest_decision.fault)
             return
         if not self._bridge.write_line(
@@ -241,8 +269,10 @@ class RobotRuntime:
             return
         now = self._clock()
         logger.debug(
-            "HardwareStatus: battery=%.2f motor=%s lineSensor=%s",
+            "HardwareStatus: batteryPercent=%s batteryVoltage=%s motor=%s "
+            "lineSensor=%s",
             hardware_status.battery_percent,
+            hardware_status.battery_voltage,
             hardware_status.motor.value,
             hardware_status.line_sensor.value,
         )

@@ -1,8 +1,7 @@
 [Unit]
 Description=AIoT robot runtime
-Wants=aiot-ai.service
-After=aiot-update.service aiot-ai.service
-Requires=aiot-update.service
+Wants=aiot-update.service aiot-ai.service aiot-ros.service
+After=aiot-ai.service aiot-ros.service
 ConditionFileIsExecutable=/opt/aiot/iot/current/robot/scripts/run.sh
 
 [Service]
@@ -14,6 +13,9 @@ WorkingDirectory=/opt/aiot/iot/current
 EnvironmentFile=-/opt/aiot/secrets/robot.env
 Environment=ROS_LOCALHOST_ONLY=1
 Environment=ROS_DOMAIN_ID=0
+Environment=ROS_HOME=/var/lib/aiot/ros
+Environment=ROS_LOG_DIR=/var/lib/aiot/ros/log
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/aiot/iot/current/robot/scripts/run.sh
 Restart=on-failure
 RestartSec=5s

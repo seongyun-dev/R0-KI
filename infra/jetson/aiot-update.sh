@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 0027
 
 aiot_root="${AIOT_ROOT:-/opt/aiot}"
 iot_root="${AIOT_IOT_ROOT:-${aiot_root}/iot}"
@@ -7,6 +8,7 @@ config_file="${AIOT_PACKAGE_ENV:-${aiot_root}/secrets/package-read.env}"
 lock_file="${iot_root}/state/update.lock"
 current_link="${iot_root}/current"
 previous_link="${iot_root}/previous"
+patrol_lock_file="${AIOT_PATROL_DEPLOY_LOCK_FILE:-/var/lib/aiot/state/patrol-deploy.lock}"
 
 log() {
   printf 'aiot-update component=iot release=%s phase=%s result=%s\n' \
@@ -266,11 +268,9 @@ fi
   sha256sum --check --strict CHECKSUMS.sha256
 ) >/dev/null || keep_current checksum payload-mismatch
 
-if ! "${extract_dir}/scripts/install.sh"; then
-  keep_current install failed
-fi
-if ! "${extract_dir}/scripts/smoke-test.sh" pre-activate; then
-  keep_current smoke pre-activate-failed
+exec 8>>"${patrol_lock_file}"
+if ! flock -n 8; then
+  keep_current activate patrol-active
 fi
 
 release_dir="${iot_root}/releases/${release}"
@@ -281,17 +281,32 @@ if [ -e "${release_dir}" ]; then
 fi
 mv "${extract_dir}" "${release_dir}"
 
-if getent group aiot >/dev/null 2>&1; then
-  chown -R root:aiot "${release_dir}"
-fi
 find "${release_dir}" -type d -exec chmod 0750 {} +
 find "${release_dir}" -type f -exec chmod 0640 {} +
 find "${release_dir}/scripts" "${release_dir}/robot/scripts" \
   -type f -name '*.sh' -exec chmod 0750 {} +
 
+if ! "${release_dir}/scripts/install.sh"; then
+  keep_current install failed
+fi
+if getent group aiot >/dev/null 2>&1; then
+  chown -R root:aiot "${release_dir}"
+fi
+if ! "${release_dir}/scripts/smoke-test.sh" pre-activate; then
+  keep_current smoke pre-activate-failed
+fi
+
 old_current=""
 if [ -L "${current_link}" ]; then
   old_current="$(readlink -f "${current_link}")"
+fi
+ai_was_active=false
+ros_was_active=false
+robot_was_active=false
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl is-active --quiet aiot-ai.service && ai_was_active=true
+  systemctl is-active --quiet aiot-ros.service && ros_was_active=true
+  systemctl is-active --quiet aiot-robot.service && robot_was_active=true
 fi
 if [ -n "${old_current}" ]; then
   previous_next="${iot_root}/.previous.next.$$"
@@ -312,6 +327,33 @@ if ! "${current_link}/scripts/smoke-test.sh" post-activate; then
     unlink "${current_link}"
   fi
   keep_current smoke post-activate-rollback
+fi
+
+restart_failed=false
+if [ "${ai_was_active}" = true ]; then
+  systemctl restart aiot-ai.service || restart_failed=true
+  systemctl is-active --quiet aiot-ai.service || restart_failed=true
+fi
+if [ "${restart_failed}" = false ] && [ "${ros_was_active}" = true ]; then
+  systemctl restart aiot-ros.service || restart_failed=true
+  systemctl is-active --quiet aiot-ros.service || restart_failed=true
+fi
+if [ "${restart_failed}" = false ] && [ "${robot_was_active}" = true ]; then
+  systemctl restart aiot-robot.service || restart_failed=true
+  systemctl is-active --quiet aiot-robot.service || restart_failed=true
+fi
+if [ "${restart_failed}" = true ]; then
+  if [ -n "${old_current}" ]; then
+    rollback_next="${iot_root}/.current.service-rollback.$$"
+    ln -s "${old_current}" "${rollback_next}"
+    mv -Tf "${rollback_next}" "${current_link}"
+    [ "${ai_was_active}" = true ] && systemctl restart aiot-ai.service || true
+    [ "${ros_was_active}" = true ] && systemctl restart aiot-ros.service || true
+    [ "${robot_was_active}" = true ] && systemctl restart aiot-robot.service || true
+  else
+    unlink "${current_link}"
+  fi
+  keep_current activate service-start-failed-rollback
 fi
 
 version_tmp="${iot_root}/state/VERSION.tmp.$$"

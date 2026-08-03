@@ -43,6 +43,7 @@ class MqttClient:
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=settings.mqtt_client_id,
         )
+        self._client.reconnect_delay_set(min_delay=1, max_delay=30)
 
         self._configure_authentication()
         self._configure_tls()
@@ -186,16 +187,11 @@ class MqttClient:
             )
             return
 
+        # SET_TOKEN is retained by the backend. Never log command bodies.
         print(
-            "[MQTT] command 수신: "
-            f"topic={message.topic}"
-        )
-        print(
-            json.dumps(
-                payload,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
+            "[MQTT] command received "
+            f"topic={message.topic} command={payload.get('command')} "
+            f"commandId={payload.get('commandId')} retained={message.retain}"
         )
 
         if self._on_command_message is None:
@@ -281,7 +277,6 @@ class MqttClient:
             )
 
         print(f"[MQTT PUBLISH] topic={topic}")
-        print(message)
 
     def disconnect(self) -> None:
         """MQTT 네트워크 루프와 연결을 종료한다."""

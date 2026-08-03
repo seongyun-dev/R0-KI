@@ -1,5 +1,14 @@
 # AIoT operations runbook
 
+> **Jetson Robot runtime update (2026-08-03):** the device checks the stable
+> Robot-only manifest at boot and every five minutes. Activation and patrol use
+> one advisory lock, so neither can start while the other is active. The AI
+> model remains under `/home/e103/yolo-pipeline`; the active IoT release supplies
+> the ROS adapter and integrated Robot process. Use
+> [jetson/README.md](jetson/README.md) and
+> [../robot/docs/integrated-runtime-operations.md](../robot/docs/integrated-runtime-operations.md)
+> for device operations.
+
 > The EC2 runtime in this runbook is installed. The part-master pipeline, real
 > candidate integration tests, JSON release manifest, and component rollback
 > are active. Follow [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for the
@@ -136,9 +145,10 @@ Jetson release procedure:
 4. Create a read-only Package Registry Deploy Token for the Jetson.
 5. On the Jetson, create `/opt/aiot/secrets/package-read.env` and run
    `sudo bash infra/jetson/install.sh` from an authenticated source checkout.
-6. Start `aiot-ai.service` and verify `/run/aiot/ai-ready.json`.
-7. Start `aiot-update.service`, verify `/opt/aiot/iot/current`, `previous`, and
-   `state/VERSION`, then start `aiot-robot.service`.
+6. Start `aiot-update.service`, then verify `/opt/aiot/iot/current`, `previous`,
+   and `state/VERSION`.
+7. Start `aiot-ai.service`, verify `/run/aiot/ai-ready.json`, then start
+   `aiot-robot.service`. Enable `aiot-update.timer` after this first validation.
 
 `aiot-robot.service` only Wants/After AI, so an AI failure leaves Robot alive in
 limited mode. A missing network, invalid manifest, incompatible AI contract,

@@ -1,12 +1,18 @@
 # RO-KI 실물 통합 시연 계획
 
+> [!IMPORTANT]
+> 2026-08-02 라인트레이싱 현장 시험 결과, 센서 보드가 `11011`에서 `11111`로
+> 빠르게 이탈해 안정적인 주행 제어가 불가능했다. 라인트레이싱은 주행 방식에서
+> 제외하고 이 문서의 **수동 SLAM 지도 생성 + 저장 지도 waypoint 주행**을 현재
+> 기준으로 다시 채택한다.
+
 > **Summary**: Jetson, ESP32, LiDAR, 카메라, 백엔드와 프론트엔드를 연결해 맵 생성, 고정 경로 순찰, 장애물 정지·재개, 차량 탐지까지 검증하기 위한 당일 작업 계획
 >
 > **Project**: S15P11E103 한바퀴
 > **Version**: 0.1
 > **Author**: IoT / Codex
 > **Date**: 2026-08-02
-> **Status**: Review
+> **Status**: Active
 
 ---
 
@@ -56,8 +62,8 @@ ESP32 안전 제어·엔코더
 
 ### 2.1 오늘 반드시 수행할 범위
 
-- [ ] ESP32 STOP, 조향 중앙, 모터 방향, 엔코더 방향 검증
-- [ ] 엔코더·직진 거리·조향에 필요한 실측 보조 코드 준비 및 보정값 생성
+- [x] ESP32 STOP, 조향 중앙, 모터 방향, 엔코더 방향 검증
+- [x] 엔코더 1회전 보정과 조향 명령 범위 확정 (`329 ticks/rev`, `60/80/100도`)
 - [ ] YDLIDAR `/scan`과 ROS TF 트리 검증
 - [ ] 수동 주행으로 SLAM 지도 생성 및 저장
 - [ ] 지도 PNG와 메타데이터를 현재 백엔드 계약으로 업로드
@@ -90,11 +96,11 @@ ESP32 안전 제어·엔코더
 
 | ID | 공백 | 영향 | 당일 처리 |
 |---|---|---|---|
-| GAP-01 | `encoder_ticks_per_revolution`, 기어비가 미확정 | 거리와 속도를 계산할 수 없음 | 실측 도구로 결정 |
-| GAP-02 | 휠베이스와 서보 명령-실제 조향각 관계가 없음 | 자동차형 odometry와 경로 추종이 부정확 | 실측값과 안전 범위 저장 |
-| GAP-03 | 최종 `odom -> base_link -> laser_frame` 구성이 없음 | SLAM/Nav2 실행 불가 | URDF/static TF와 odometry 노드 추가 |
+| GAP-01 | 바퀴 기준 `329 ticks/rev` 확정, 런타임 반영 완료 | 거리 계산 기반 확보 | 해결 |
+| GAP-02 | `60/80/100도` 방향은 확정했으나 `cmd_vel`을 서보각으로 바꾸는 계층이 없음 | Nav2가 ESP32를 직접 제어할 수 없음 | 순수 변환기와 가짜 transport 테스트부터 구현 |
+| GAP-03 | Jetson 로컬 ROS 설정은 있으나 최종 `odom -> base_link -> laser_frame`이 저장소의 실행 단위로 없음 | 재배포 가능한 SLAM/Nav2 실행 불가 | URDF/static TF, odometry, launch를 저장소에 추가 |
 | GAP-04 | `START_MAPPING` 로봇 처리와 지도 업로드가 없음 | 프론트 지도 생성 버튼이 완료되지 않음 | 수동 실행 우선, 자동 연결은 후속 |
-| GAP-05 | SLAM/Nav2 launch와 파라미터가 없음 | 지도 및 고정 경로 주행 불가 | 로봇별 launch/config 추가 |
+| GAP-05 | SLAM/Nav2 launch와 자동차형 controller 파라미터가 저장소에 없음 | 지도 및 고정 경로 주행 불가 | map server, localization, waypoint launch/config 추가 |
 | GAP-06 | 물리 주행·MQTT 런타임과 AI REST/outbox 런타임이 분리됨 | 한 프로세스/서비스로 시연 불가 | 실제 Jetson AI 런타임 기준으로 결합 |
 | GAP-07 | 차량 bbox를 LiDAR 거리와 연결하는 노드가 없음 | 차량 좌표를 백엔드에 보낼 수 없음 | 단순 각도-거리 locator 추가 |
 | GAP-08 | 로봇용 구역·경로 조회 API가 없음 | 로봇이 구역별 행동을 로컬 판단할 수 없음 | 당일은 로컬 route 사용; 백엔드 요청 분리 |

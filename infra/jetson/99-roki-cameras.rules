@@ -1,0 +1,7 @@
+# Stable dual-camera aliases verified on the project Jetson on 2026-08-03.
+#
+# Both cameras expose a unique hardware serial, so these aliases follow the
+# camera even when it is moved to another USB socket. Only video-index0 is a
+# capture node; index1 must never be used as an AI source.
+ACTION=="add|change", SUBSYSTEM=="video4linux", ATTR{index}=="0", ATTRS{idVendor}=="32e6", ATTRS{idProduct}=="d412", ATTRS{serial}=="202404120005", SYMLINK+="roki_camera_left", GROUP="video", MODE="0660"
+ACTION=="add|change", SUBSYSTEM=="video4linux", ATTR{index}=="0", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="094c", ATTRS{serial}=="2515ZBD1XHE8", SYMLINK+="roki_camera_right", GROUP="video", MODE="0660"
