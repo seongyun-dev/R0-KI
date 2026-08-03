@@ -38,6 +38,14 @@ HardwareStatusListener = Callable[[HardwareStatus], None]
 @dataclass(frozen=True)
 class RuntimeSettings:
     disconnected_poll_sec: float
+    encoder_zero_retry_interval_sec: float = 0.5
+    encoder_zero_max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        if self.encoder_zero_retry_interval_sec <= 0:
+            raise ValueError("encoder zero retry interval must be positive")
+        if self.encoder_zero_max_attempts < 1:
+            raise ValueError("encoder zero max attempts must be at least one")
 
 
 @dataclass(frozen=True)
@@ -87,6 +95,9 @@ class RobotRuntime:
         self._last_odometry_uptime_ms: int | None = None
         self._odometry_baseline_pending = True
         self._encoder_zero_acknowledged = False
+        self._encoder_zero_attempts = 0
+        self._encoder_zero_last_sent_at: float | None = None
+        self._encoder_zero_wait_logged = False
 
     @property
     def mission(self) -> MissionController:
@@ -173,6 +184,9 @@ class RobotRuntime:
                 if not self._bridge.is_connected():
                     self._sleep(self._settings.disconnected_poll_sec)
                     continue
+                self._maintain_encoder_zero_handshake()
+                if not self._bridge.is_connected():
+                    continue
                 raw = self._bridge.read_line()
                 if raw is None:
                     self._evaluate_idle_safety()
@@ -224,6 +238,9 @@ class RobotRuntime:
         self._last_odometry_uptime_ms = None
         self._odometry_baseline_pending = True
         self._encoder_zero_acknowledged = False
+        self._encoder_zero_attempts = 0
+        self._encoder_zero_last_sent_at = None
+        self._encoder_zero_wait_logged = False
         self._motion.reset()
         if self._encoder_pose_estimator is not None:
             self._encoder_pose_estimator.reset_baseline()
@@ -232,9 +249,50 @@ class RobotRuntime:
         if not self._bridge.write_line(build_stop_command(self._sequence.next())):
             return
         self._bridge.write_line(build_hello_command(self._sequence.next()))
-        self._bridge.write_line(build_encoder_zero_command(self._sequence.next()))
-        self._bridge.write_line(build_status_command(self._sequence.next()))
+        self._send_encoder_zero_attempt(retry=False)
         logger.info("Serial handshake sent after mandatory STOP")
+
+    def _send_encoder_zero_attempt(self, *, retry: bool) -> None:
+        if retry:
+            if not self._bridge.write_line(
+                build_stop_command(self._sequence.next())
+            ):
+                return
+        if not self._bridge.write_line(
+            build_encoder_zero_command(self._sequence.next())
+        ):
+            return
+        self._encoder_zero_attempts += 1
+        self._encoder_zero_last_sent_at = self._clock()
+        self._bridge.write_line(build_status_command(self._sequence.next()))
+        if retry:
+            logger.warning(
+                "ENCODER_ZERO ACK timeout; retrying handshake attempt=%d/%d",
+                self._encoder_zero_attempts,
+                self._settings.encoder_zero_max_attempts,
+            )
+
+    def _maintain_encoder_zero_handshake(self) -> None:
+        if self._encoder_zero_acknowledged:
+            return
+        now = self._clock()
+        last_sent_at = self._encoder_zero_last_sent_at
+        if (
+            last_sent_at is not None
+            and now - last_sent_at
+            < self._settings.encoder_zero_retry_interval_sec
+        ):
+            return
+        if self._encoder_zero_attempts < self._settings.encoder_zero_max_attempts:
+            self._send_encoder_zero_attempt(retry=True)
+            return
+        logger.error(
+            "ENCODER_ZERO ACK missing after %d attempts; reconnecting Serial",
+            self._encoder_zero_attempts,
+        )
+        self._bridge.close(build_stop_command(self._sequence.next()))
+        self._encoder_zero_attempts = 0
+        self._encoder_zero_last_sent_at = None
 
     def _handle_ack(self, command: str) -> None:
         if command.upper() != "ENCODER_ZERO":
@@ -249,11 +307,21 @@ class RobotRuntime:
         self._safety.reset_connection()
         self._state_store.reset_connection()
         self._encoder_zero_acknowledged = True
-        logger.info("ENCODER_ZERO acknowledged; awaiting fresh operating data")
+        self._encoder_zero_wait_logged = False
+        logger.info(
+            "ENCODER_ZERO acknowledged after attempt=%d; awaiting fresh operating data",
+            self._encoder_zero_attempts,
+        )
+
+    def _ignore_operating_data_until_encoder_zero(self) -> None:
+        if self._encoder_zero_wait_logged:
+            return
+        self._encoder_zero_wait_logged = True
+        logger.warning("Operating data ignored until ENCODER_ZERO ACK")
 
     def _handle_odometry(self, odometry: Odometry) -> None:
         if not self._encoder_zero_acknowledged:
-            self._send_stop("ENCODER_ZERO_NOT_ACKNOWLEDGED")
+            self._ignore_operating_data_until_encoder_zero()
             return
         now = self._clock()
         if (
@@ -362,7 +430,7 @@ class RobotRuntime:
         self, hardware_status: HardwareStatus
     ) -> None:
         if not self._encoder_zero_acknowledged:
-            self._send_stop("ENCODER_ZERO_NOT_ACKNOWLEDGED")
+            self._ignore_operating_data_until_encoder_zero()
             return
         now = self._clock()
         logger.debug(

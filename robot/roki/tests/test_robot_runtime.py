@@ -291,7 +291,86 @@ class RobotRuntimeTest(unittest.TestCase):
         )
         self.assertIsNone(store.snapshot().odometry)
         self.assertIsNone(store.snapshot().hardware_status)
-        self.assertEqual(bridge.written[-1]["type"], "stop")
+        self.assertEqual(
+            [message["type"] for message in bridge.written],
+            ["stop", "hello", "encoder_zero", "status"],
+        )
+
+    def test_missing_encoder_zero_ack_retries_then_reconnects(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        now = 0.0
+        runtime._clock = lambda: now
+        bridge.connected = True
+        runtime._on_connected()
+
+        with self.assertLogs("runtime.robot_runtime", level="WARNING") as logs:
+            runtime._handle_hardware_status(
+                HardwareStatus(
+                    82.5,
+                    MotorStatus.NORMAL,
+                    LineSensorStatus.NORMAL,
+                )
+            )
+            runtime._handle_odometry(Odometry(1, 100, 0, 0))
+            now = 0.5
+            runtime._maintain_encoder_zero_handshake()
+            now = 1.0
+            runtime._maintain_encoder_zero_handshake()
+            now = 1.5
+            runtime._maintain_encoder_zero_handshake()
+
+        self.assertFalse(bridge.connected)
+        self.assertEqual(
+            [message["type"] for message in bridge.written],
+            [
+                "stop",
+                "hello",
+                "encoder_zero",
+                "status",
+                "stop",
+                "encoder_zero",
+                "status",
+                "stop",
+                "encoder_zero",
+                "status",
+                "stop",
+            ],
+        )
+        waiting_logs = [
+            line for line in logs.output if "Operating data ignored" in line
+        ]
+        self.assertEqual(len(waiting_logs), 1)
+        self.assertTrue(
+            any("reconnecting Serial" in line for line in logs.output)
+        )
+
+    def test_encoder_zero_ack_after_retry_opens_operating_gate(self) -> None:
+        bridge = FakeBridge([])
+        runtime, store = create_runtime(bridge)
+        now = 0.0
+        runtime._clock = lambda: now
+        bridge.connected = True
+        runtime._on_connected()
+
+        now = 0.5
+        runtime._maintain_encoder_zero_handshake()
+        runtime._handle_ack("ENCODER_ZERO")
+        status = HardwareStatus(
+            82.5,
+            MotorStatus.NORMAL,
+            LineSensorStatus.NORMAL,
+        )
+        runtime._handle_hardware_status(status)
+
+        self.assertTrue(bridge.connected)
+        self.assertEqual(store.snapshot().hardware_status, status)
+        self.assertEqual(
+            [message["type"] for message in bridge.written].count(
+                "encoder_zero"
+            ),
+            2,
+        )
 
     def test_latest_emergency_stop_is_rechecked_before_control_write(self) -> None:
         bridge = FakeBridge([])

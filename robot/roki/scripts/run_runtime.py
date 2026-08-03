@@ -215,7 +215,13 @@ def build_runtime() -> RobotRuntime:
         settings=RuntimeSettings(
             disconnected_poll_sec=float(
                 runtime_values["disconnected_poll_sec"]
-            )
+            ),
+            encoder_zero_retry_interval_sec=float(
+                runtime_values["encoder_zero_retry_interval_sec"]
+            ),
+            encoder_zero_max_attempts=int(
+                runtime_values["encoder_zero_max_attempts"]
+            ),
         ),
     )
 
