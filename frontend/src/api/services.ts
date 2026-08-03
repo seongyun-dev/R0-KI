@@ -12,6 +12,7 @@ import type {
   EventBatchCreateRequest,
   EventBatchCreateResponse,
   EventDetailResponse,
+  EmergencyEventSseResponse,
   EvidenceUploadRequest,
   EvidenceUploadResponse,
   EventListRequest,
@@ -27,6 +28,7 @@ import type {
   NotificationHistoryResponse,
   PatrolCreateRequest,
   PatrolCreateResponse,
+  PatrolCompletedSseEvent,
   PatrolDetailResponse,
   PatrolEndRequest,
   PatrolEndResponse,
@@ -117,6 +119,32 @@ export const eventsApi = {
       {
         method: 'POST',
       },
+    ),
+  subscribeEmergency: (
+    onEmergency: (event: EmergencyEventSseResponse) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<EmergencyEventSseResponse | string>(
+      '/api/events/subscribe/emergency',
+      (data, eventName) => {
+        if (eventName === 'emergency-event' && typeof data === 'object') {
+          onEmergency(data)
+        }
+      },
+      signal,
+    ),
+  subscribeGeneral: (
+    onPatrolCompleted: (event: PatrolCompletedSseEvent) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<PatrolCompletedSseEvent | string>(
+      '/api/events/subscribe/general',
+      (data, eventName) => {
+        if (eventName === 'patrol-completed' && typeof data === 'object') {
+          onPatrolCompleted(data)
+        }
+      },
+      signal,
     ),
 }
 
@@ -235,6 +263,10 @@ export const robotsApi = {
   stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
   locations: () =>
     apiRequest<RobotMapLocationResponse[]>('/api/robots/locations'),
+  location: (robotId: string | number) =>
+    apiRequest<RobotMapLocationResponse>(
+      `/api/robots/${encodeURIComponent(String(robotId))}/location`,
+    ),
   detail: (robotId: string | number) =>
     apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
 

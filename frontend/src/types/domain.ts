@@ -63,6 +63,7 @@ export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표
   name?: string;
   x: number;
   y: number;
+  heading?: number;
   battery?: number;
   updatedAt?: string;
   routePoints?: PatrolRoutePoint[];
