@@ -241,7 +241,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             },
         )
 
-    def test_status_is_published_immediately_on_change_and_every_five_seconds(self) -> None:
+    def test_status_is_rate_limited_even_when_hardware_values_change(self) -> None:
         from backend_mqtt.publisher import RokiPublisherApplication
 
         settings = SimpleNamespace(
@@ -279,12 +279,12 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             )
         )
         application._publish_status_if_needed(100.1)
-        self.assertEqual(client.publish.call_count, 2)
+        self.assertEqual(client.publish.call_count, 1)
         application._publish_status_if_needed(104.999)
-        self.assertEqual(client.publish.call_count, 2)
+        self.assertEqual(client.publish.call_count, 1)
 
         application._publish_status_if_needed(105.1)
-        self.assertEqual(client.publish.call_count, 3)
+        self.assertEqual(client.publish.call_count, 2)
 
     def test_lidar_bridge_is_injected_without_changing_camera(self) -> None:
         from run_integrated import create_integrated_application
