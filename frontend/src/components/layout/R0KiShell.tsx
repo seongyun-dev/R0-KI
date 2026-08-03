@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useEvents } from '../../features/events/useEvents'
 import { useAuthStore } from '../../features/auth/useAuthStore'
 import '../../styles/r0ki.css'
 
@@ -64,9 +63,6 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
   const clock = useClockText()
   const loginId = useAuthStore((s) => s.loginId)
   const logout = useAuthStore((s) => s.logout)
-  // 알림 배지 — 긴급 이벤트 건수 (실서버 연동 시 그대로 값만 교체)
-  const { data: events } = useEvents()
-  const urgentCount = (events ?? []).filter((e) => e.riskLevel === '긴급').length
 
   const onLogout = () => {
     logout()
@@ -93,13 +89,14 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             </nav>
             <div className="sp" />
             {statusChip}
+            {/* 입주민 발송 내역으로 간다. 배지는 두지 않는다 —
+                긴급 이벤트 건수를 달고 있었는데 이 페이지 내용과 맞지 않았다. */}
             <Link
               to="/app/notifications"
               className="alarmbtn"
               aria-current={active === 'notifications' ? 'page' : undefined}
-              aria-label={`알림 기록 · 긴급 ${urgentCount}건`}
             >
-              알림{urgentCount > 0 && <span className="badge num">{urgentCount}</span>}
+              알림
             </Link>
             <div className="clock num">
               {clock}<small>한국시간</small>
