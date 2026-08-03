@@ -10,7 +10,7 @@ import type { ComplexMapData, MapRobot } from '../../types/domain'
 
 const RECONNECT_DELAY_MS = 2_000
 
-function toMapRobot(
+export function toMapRobot(
   location: RobotLocationEvent | RobotMapLocationResponse,
   map: ComplexMapData,
 ): MapRobot | undefined {

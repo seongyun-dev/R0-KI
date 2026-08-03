@@ -235,6 +235,10 @@ export const robotsApi = {
   stats: () => apiRequest<RobotStatsResponse>('/api/robots/stats'),
   locations: () =>
     apiRequest<RobotMapLocationResponse[]>('/api/robots/locations'),
+  location: (robotId: string | number) =>
+    apiRequest<RobotMapLocationResponse>(
+      `/api/robots/${encodeURIComponent(String(robotId))}/location`,
+    ),
   detail: (robotId: string | number) =>
     apiRequest<RobotDetailResponse>(`/api/robots/${encodeURIComponent(robotId)}`),
 

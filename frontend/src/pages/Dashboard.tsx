@@ -7,6 +7,7 @@ import { ComplexMap } from '../features/dashboard/ComplexMap'
 import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
 import { useRobotLocations } from '../features/dashboard/useRobotLocations'
+import { useSelectedRobotLocation } from '../features/dashboard/useSelectedRobotLocation'
 import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
 import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
@@ -102,12 +103,34 @@ export default function Dashboard() {
   const patrollingRobots = robotList.filter((r) => r.status === '순찰중')
   const selectedRobot =
     robotList.find((r) => r.id === pickedRobotId) ?? patrollingRobots[0] ?? robotList[0]
-  const isPatrolling = showAllPatrolling || selectedRobot?.status === '순찰중'
-  const mapRobot = selectedRobot
+  const selectedRobotBackendId = selectedRobot?.backendId ?? selectedRobot?.id
+  const { data: selectedLocation } = useSelectedRobotLocation(
+    selectedRobotBackendId,
+    mapData?.map,
+  )
+  const currentSelectedLocation =
+    selectedLocation?.robot.id === String(selectedRobotBackendId) ? selectedLocation : undefined
+  const selectedLiveLocation = selectedRobot
     ? liveRobotLocations.find((location) =>
-        location.id === String(selectedRobot.backendId ?? selectedRobot.id),
-      ) ?? robotMapPosition(selectedRobot, mapData?.robot)
+        location.id === String(selectedRobotBackendId),
+      )
     : undefined
+  const selectedLocationFromApi = currentSelectedLocation?.robot
+  const mapRobot = selectedLocationFromApi
+    ? {
+        ...selectedLocationFromApi,
+        ...(selectedLiveLocation
+          ? {
+              x: selectedLiveLocation.x,
+              y: selectedLiveLocation.y,
+              updatedAt: selectedLiveLocation.updatedAt,
+            }
+          : {}),
+      }
+    : selectedLiveLocation ?? robotMapPosition(selectedRobot, mapData?.robot)
+  const isPatrolling = showAllPatrolling ||
+    currentSelectedLocation?.showRoute ||
+    selectedRobot?.status === '순찰중'
   const mapRobots = patrollingRobots
     .map((robot) =>
       liveRobotLocations.find((location) =>
