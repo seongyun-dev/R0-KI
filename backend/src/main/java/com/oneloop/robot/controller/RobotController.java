@@ -11,11 +11,13 @@ import com.oneloop.robot.dto.response.RobotListResponse;
 import com.oneloop.robot.dto.response.RobotMapLocationResponse;
 import com.oneloop.robot.dto.response.RobotRegisterResponse;
 import com.oneloop.robot.dto.response.RobotStatsResponse;
+import com.oneloop.robot.dto.response.RobotStreamSessionResponse;
 import com.oneloop.robot.dto.response.RobotUpdateResponse;
 import com.oneloop.robot.service.RobotLocationQueryService;
 import com.oneloop.robot.service.RobotLocationSseService;
 import com.oneloop.robot.service.RobotService;
 import com.oneloop.robot.service.RobotSseService;
+import com.oneloop.robot.service.RobotStreamSessionService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -45,6 +47,7 @@ public class RobotController {
     private final RobotSseService robotSseService;
     private final RobotLocationSseService robotLocationSseService;
     private final RobotLocationQueryService robotLocationQueryService;
+    private final RobotStreamSessionService robotStreamSessionService;
 
     @Operation(summary = "로봇 등록", description = "새로운 순찰로봇을 등록합니다.")
     @PostMapping
@@ -98,6 +101,14 @@ public class RobotController {
     public ApiResponse<RobotDetailResponse> detail(
             @AuthenticationPrincipal CustomUserDetails principal, @PathVariable Long robotId) {
         return ApiResponse.success(robotService.findById(principal.getApartmentComplexId(), robotId));
+    }
+
+    @Operation(summary = "실시간 영상 세션 발급", description = "선택한 로봇의 실시간 영상을 보기 위한 일회용 세션을 발급합니다.")
+    @PostMapping("/{robotId}/stream-sessions")
+    public ApiResponse<RobotStreamSessionResponse> createStreamSession(
+            @AuthenticationPrincipal CustomUserDetails principal, @PathVariable Long robotId) {
+        robotService.findById(principal.getApartmentComplexId(), robotId);
+        return ApiResponse.success(robotStreamSessionService.issue(robotId));
     }
 
     @Operation(summary = "로봇 수정", description = "순찰로봇의 이름을 수정합니다.")
