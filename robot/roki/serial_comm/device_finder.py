@@ -8,6 +8,7 @@
 실제 포트 연결과 데이터 송수신은 serial_manager.py가 담당한다.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -158,16 +159,21 @@ class SerialDeviceFinder:
         devices: Sequence[SerialDevice],
         configured_port: str,
     ) -> Optional[SerialDevice]:
-        """설정된 포트와 정확히 일치하는 장치를 찾는다."""
+        """심볼릭 링크를 포함해 같은 실제 포트를 가리키는 장치를 찾는다."""
 
-        return next(
-            (
-                device
-                for device in devices
-                if device.port == configured_port
-            ),
-            None,
-        )
+        try:
+            configured_real_path = os.path.realpath(configured_port)
+        except (OSError, ValueError):
+            return None
+
+        for device in devices:
+            try:
+                device_real_path = os.path.realpath(device.port)
+            except (OSError, ValueError):
+                continue
+            if device_real_path == configured_real_path:
+                return device
+        return None
 
     @staticmethod
     def _find_by_vid_pid(

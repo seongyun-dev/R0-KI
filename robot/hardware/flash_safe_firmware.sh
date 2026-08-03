@@ -6,7 +6,12 @@ CLI="${BASE}/tools/arduino-cli/arduino-cli"
 CFG="${BASE}/arduino-cli.yaml"
 SKETCH="${BASE}/firmware/roki_safe_test"
 BUILD="${BASE}/build/roki_safe_test"
-PORT="/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+PORT="${ESP32_PORT:-/dev/roki_esp32}"
+
+if [[ ! -e "${PORT}" ]]; then
+  echo "ERROR: stable ESP32 path is missing: ${PORT}" >&2
+  exit 2
+fi
 
 shopt -s nullglob
 FLASH_BACKUPS=("${BASE}"/backups/esp32-full-*.bin)

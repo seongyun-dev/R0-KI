@@ -1,5 +1,6 @@
 lidar:
   scan_topic: "/scan"
+  scan_timeout_sec: 1.0
 
 frames:
   map: "map"
@@ -7,5 +8,8 @@ frames:
   base: "base_link"
 
 obstacle:
+  # 정면을 0도로 하여 좌우 각각 30도까지 검사한다.
   front_angle_deg: 30
   stop_distance_m: 0.6
+  # 10cm hysteresis: STOP 상태는 전방이 0.7m 이상 확보돼야 해제한다.
+  clear_distance_m: 0.7

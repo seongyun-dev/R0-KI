@@ -1,167 +1,97 @@
-# Jetson AI service and Robot Pull OTA
+# Jetson Robot/AI systemd and Pull OTA
 
-This directory implements two deliberately separate lifecycles:
-
-```text
-/home/e103/yolo-pipeline        fixed AI baseline, aiot-ai.service
-/opt/aiot/iot/releases/*        Robot-only iot-v* Pull OTA
-```
-
-IoT OTA never packages or modifies the AI venv, `*.pt`, `*.onnx`, `*.engine`,
-AI logs, or evidence. AI and Robot communicate only through the versioned ROS 2
-JSON contract in `robot/docs/ai-ros-contract-v1.md`.
-
-## Boot order and failure policy
+Jetson의 두 application lifecycle은 분리한다.
 
 ```text
-network-online.target
-  ├─ aiot-ai.service
-  │    ├─ source /opt/ros/humble/setup.bash
-  │    ├─ exec existing Python 3.10 AI venv
-  │    └─ wait for /ai/status READY -> /run/aiot/ai-ready.json
-  └─ aiot-update.service
-       └─ check approved Robot manifest and activate when valid
-
-aiot-robot.service
-  ├─ Requires/After aiot-update.service
-  └─ Wants/After aiot-ai.service
+/home/e103/yolo-pipeline          기존 AI 모델·engine·venv (OTA가 수정하지 않음)
+/opt/aiot/iot/releases/iot-v*    GitLab robot/ 릴리스
+/opt/aiot/iot/current            검증을 통과한 활성 symlink
+/var/lib/aiot                    route, evidence, outbox, command cache, ROS log
 ```
 
-AI failure does not terminate Robot. Robot's live gate uses the two-second
-`/ai/status` heartbeat, not the operations readiness file, and stays in LIMITED
-mode when AI is missing, stale, or degraded.
+`aiot-ai.service`는 활성 Robot 릴리스의 `aiot_robot.ai_runtime`을 기존 AI venv로
+실행한다. 어댑터가 `/home/e103/yolo-pipeline/yolo_pipeline/main.py`를 불러오고
+기존 REST sink만 ROS sink로 교체하므로 모델 코드는 수정하지 않는다.
+`aiot-ros.service`는 YDLIDAR → RF2O → SLAM Toolbox 또는 Nav2를 실행한다.
+실측값을 기록한 `/opt/aiot/secrets/ros.env`가 없으면 시작되지 않는다.
+`aiot-robot.service`는 `robot/scripts/run.sh` → `roki-iot/run_integrated.py`를
+실행하며 ESP32 시리얼의 유일한 소유자다.
 
-## AI runtime requirements
-
-The existing entrypoint is:
+## 부팅과 주기 확인
 
 ```text
-/home/e103/yolo-pipeline/venv/bin/python -m yolo_pipeline.main
+network-online -> aiot-ai.service --------> aiot-robot.service
+              -> aiot-ros.service -------/
+              -> aiot-update.service (새 버전이면 AI -> ROS -> Robot 재시작 검증)
+aiot-update.timer -> boot 2분 후, 이후 5분마다 stable manifest 확인
 ```
 
-The AI process must implement:
+AI 실패 시 Robot은 계속 실행되어 STOP/MQTT/상태 처리를 유지하지만 START는 AI
+readiness gate에서 거절된다. updater와 patrol은
+`/var/lib/aiot/state/patrol-deploy.lock`을 공유한다. 순찰 중에는 릴리스 활성화를
+보류하고, updater가 활성화 중이면 START를 REJECTED 처리한다.
 
-- `/ai/control`: reliable, transient-local, keep-last 1;
-- `/ai/status`: reliable, volatile, keep-last 5, immediate and every 2 seconds;
-- `/ai/detections`: reliable, volatile, keep-last 100;
-- `ROS_LOCALHOST_ONLY=1`;
-- evidence beneath `/var/lib/aiot/evidence`;
-- a READY status only after engine load, camera open, and one warm-up inference.
+## 최초 설치
 
-`aiot-ai-wait-ready` observes the first valid READY heartbeat and atomically
-writes `/run/aiot/ai-ready.json`. If no READY heartbeat arrives within the
-configured timeout, systemd treats AI startup as failed and applies the bounded
-restart policy.
-
-AI configuration defaults are in `ai.env.example`. Do not put Backend, MQTT, or
-Robot service credentials in AI configuration; Robot owns all external
-delivery.
-
-## Robot release contract
-
-A protected `iot-vX.Y.Z` tag must point to a commit contained in `iot/master`.
-The CI archive contains:
-
-```text
-aiot-iot-vX.Y.Z.tar.gz
-  robot/
-  scripts/install.sh
-  scripts/smoke-test.sh
-  VERSION
-  manifest.json
-  CHECKSUMS.sha256
-```
-
-`iot_publish` is a protected manual job. It uploads the immutable archive to
-the `aiot-iot` Generic Package Registry and atomically replaces:
-
-```text
-/srv/aiot/releases/jetson/iot/stable/manifest.json
-```
-
-Public URL:
-
-```text
-https://i15e103.p.ssafy.io/jetson/releases/iot/stable/manifest.json
-```
-
-The manifest records the Robot commit, required AI contract version, JetPack,
-architecture, archive size, and SHA-256. It does not record secrets or AI model
-files.
-
-## One-time installation
-
-Copy the reviewed infra files to the Jetson through an authenticated channel,
-then install without enabling:
+검토한 파일을 인증된 경로로 Jetson에 전달한 뒤 실행한다.
 
 ```bash
 sudo bash infra/jetson/install.sh
-sudo install -m 0600 -o root -g root \
-  infra/jetson/ai.env.example /opt/aiot/secrets/ai.env
-sudo install -m 0600 -o root -g root \
-  infra/jetson/package-read.env.example /opt/aiot/secrets/package-read.env
 ```
 
-Fill the read-only GitLab Deploy Token only in `package-read.env`. Review AI
-paths and optional camera/engine checks in `ai.env`.
+installer는 계정·디렉터리·udev·systemd만 만들고 기존 secret과 AI 파일을
+덮어쓰지 않으며 서비스를 새로 enable하지 않는다. 다음 예시를 mode 0600으로
+복사하고 실제 값을 현장에서 입력한다.
 
-Manual validation:
-
-```bash
-sudo systemctl start aiot-ai.service
-sudo systemctl status aiot-ai.service --no-pager
-sudo journalctl -u aiot-ai.service -n 100 --no-pager
-sudo test -s /run/aiot/ai-ready.json
-
-sudo systemctl start aiot-update.service
-sudo systemctl status aiot-update.service --no-pager
-readlink -f /opt/aiot/iot/current
-
-sudo systemctl start aiot-robot.service
-sudo systemctl status aiot-robot.service --no-pager
-sudo journalctl -u aiot-robot.service -n 100 --no-pager
+```text
+/opt/aiot/secrets/package-read.env  <- package-read.env.example
+/opt/aiot/secrets/ai.env            <- ai.env.example
+/opt/aiot/secrets/ros.env           <- ros.env.example (실측 후 생성)
+/opt/aiot/secrets/robot.env         <- robot/config/robot.env.example
 ```
 
-Only after normal, limited-mode, shutdown, and reboot tests pass:
+검증 후 부팅 자동 시작을 활성화한다.
 
 ```bash
 sudo bash infra/jetson/install.sh --enable
-sudo reboot
 ```
 
-The installer never overwrites existing secret files or AI runtime files.
+첫 릴리스처럼 아직 `current`가 없으면 AI/Robot의 Condition이 false이므로 updater
+완료 뒤 두 서비스를 수동 start한다. 이후 부팅은 current를 즉시 시작하고 updater가
+새 릴리스를 발견했을 때만 잠금 아래 재시작한다. 서비스에서 updater를 `After=`로
+기다리게 하지 않는 이유는 updater 내부의 동기 재시작과 교착하지 않게 하기 위해서다.
 
-## Update and rollback behavior
+## OTA 보장
 
-At boot, `aiot-update`:
+protected `iot-vX.Y.Z` tag의 manual `iot_publish`가 Robot-only archive를 GitLab
+Generic Package Registry에 올리고 stable manifest를 교체한다. updater는 다음을
+검증한다.
 
-1. downloads the public stable manifest;
-2. verifies exact schema, `component=iot`, AI contract, JetPack, architecture,
-   and artifact host/path allowlist;
-3. downloads the private archive with a read-only Deploy Token;
-4. verifies archive size and SHA-256;
-5. rejects unsafe paths, AI/model files, and payload checksum mismatches;
-6. runs dependency install and a no-actuator pre-activation smoke;
-7. atomically switches `/opt/aiot/iot/current`;
-8. runs post-activation smoke and a five-second stationary runtime probe;
-9. restores the previous symlink when post-activation validation fails.
+1. HTTPS, allowlisted host/path, exact manifest schema
+2. JetPack 6.2, aarch64, AI contract version
+3. archive size와 SHA-256, 내부 checksum, 안전한 archive path
+4. AI model/engine, `.env`, token, local route 미포함
+5. dependency install과 actuator-free pre smoke
+6. atomic `current` 교체와 post smoke
+7. 이전에 active였던 AI → ROS → Robot 순서의 재시작
 
-Network, manifest, compatibility, download, or checksum failure keeps the
-current release. A first installation with no valid current release remains
-stopped instead of reporting a usable Robot runtime.
+post smoke 또는 서비스 재시작 실패 시 `current`를 이전 release로 되돌리고 이전
+서비스를 복구한다. 이미 설치한 버전, network/manifest/checksum 오류, 순찰 중인
+경우에는 현재 release를 유지한다.
 
-OTA is boot-time only. Before a manual update, stop patrol, confirm the
-actuators are stopped, stop `aiot-robot.service`, then use
-`sudo systemctl restart aiot-update.service`.
+## 진단
 
-## Remaining application-owned integration
+```bash
+systemctl status aiot-update.timer aiot-update.service --no-pager
+systemctl status aiot-ai.service aiot-ros.service aiot-robot.service --no-pager
+systemctl list-timers aiot-update.timer --no-pager
+journalctl -u aiot-update.service -n 100 --no-pager
+journalctl -u aiot-ai.service -n 100 --no-pager
+journalctl -u aiot-ros.service -n 200 --no-pager
+journalctl -u aiot-robot.service -n 200 --no-pager
+readlink -f /opt/aiot/iot/current
+readlink -f /opt/aiot/iot/previous
+```
 
-Infra does not reimplement Robot or AI features.
-
-- AI must publish the ROS contract from `yolo_pipeline.main`.
-- The drive/mission owner must call `AiRosBridge.gate.decision()` before
-  `START_PATROL` and `set_detection_enabled()` on start/stop.
-- The mission adapter must enrich detection outbox entries with Robot pose and
-  deliver the Backend REST DTO.
-
-These application hooks do not change the systemd or OTA contract.
+실물 시작·검증 순서와 기대 결과는
+`robot/docs/integrated-runtime-operations.md`를 따른다.

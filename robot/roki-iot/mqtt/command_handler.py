@@ -1,22 +1,17 @@
-"""
-MQTT command 수신 처리 모듈.
-
-책임:
-1. command payload 검증
-2. START_PATROL / STOP_PATROL / SET_TOKEN 분기
-3. ESP32 Serial 명령 전달
-4. YOLO 파이프라인 기동/중지
-5. command/ack 발행
-
-MQTT 연결 자체는 MqttClient가 담당한다.
-"""
+"""Validated and idempotent backend MQTT command state machine."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
-from datetime import datetime
+import tempfile
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
 from config.settings import AppSettings
@@ -25,17 +20,34 @@ from pipeline.patrol_pipeline import PatrolPipelineRunner
 from serial_reader import ESP32SerialReader
 from state.robot_state_store import RobotStateStore
 
-SEOUL = ZoneInfo("Asia/Seoul")
 
-TOKEN_FILE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "runtime"
-    / "robot_service_token"
+SEOUL = ZoneInfo("Asia/Seoul")
+SUPPORTED_COMMANDS = frozenset(
+    {"START_PATROL", "STOP_PATROL", "SET_TOKEN", "START_MAPPING"}
 )
+ACK_STATUSES = frozenset({"SUCCEEDED", "REJECTED", "FAILED"})
+
+
+@dataclass(frozen=True)
+class ValidatedCommand:
+    command: str
+    command_id: str
+    patrol_id: int | None
+    fingerprint: str
+
+
+ReadinessCheck = Callable[[], tuple[bool, str] | bool]
+TelemetryFlush = Callable[[], None]
 
 
 class PatrolCommandHandler:
-    """로봇 MQTT command를 처리한다."""
+    """Own command validation, lifecycle ordering and replay-safe ACKs."""
+
+    CACHE_SCHEMA_VERSION = 1
+    MAX_CACHE_ENTRIES = 256
+    MAX_FUTURE_CLOCK_SKEW = timedelta(seconds=30)
+    MAX_PATROL_COMMAND_TTL = timedelta(seconds=30)
+    MAX_TOKEN_COMMAND_TTL = timedelta(hours=25)
 
     def __init__(
         self,
@@ -45,7 +57,13 @@ class PatrolCommandHandler:
         serial_reader: ESP32SerialReader,
         state_store: RobotStateStore,
         pipeline_runner: PatrolPipelineRunner,
-        pipeline_enabled: bool = True,
+        pipeline_enabled: bool = False,
+        ai_controller: Any | None = None,
+        readiness_checks: Iterable[ReadinessCheck] = (),
+        flush_telemetry: TelemetryFlush | None = None,
+        command_cache_path: str | Path | None = None,
+        wall_clock: Callable[[], datetime] | None = None,
+        monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._mqtt_client = mqtt_client
@@ -53,372 +71,509 @@ class PatrolCommandHandler:
         self._state_store = state_store
         self._pipeline_runner = pipeline_runner
         self._pipeline_enabled = pipeline_enabled
-
-    def handle(
-        self,
-        topic: str,
-        payload: dict[str, Any],
-    ) -> None:
-        """MqttClient on_message 콜백 진입점."""
-
-        del topic
-
-        command = payload.get("command")
-        command_id = payload.get("commandId")
-
-        if not isinstance(command, str) or not command:
-            print("[COMMAND] command 필드가 없습니다.")
-            return
-
-        if not isinstance(command_id, str) or not command_id:
-            print("[COMMAND] commandId 필드가 없습니다.")
-            return
-
-        if self._is_expired(payload):
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="REJECTED",
-            )
-            print(
-                "[COMMAND] 만료된 명령 거절: "
-                f"command={command}, "
-                f"commandId={command_id}"
-            )
-            return
-
-        if command == "START_PATROL":
-            self._handle_start_patrol(payload)
-            return
-
-        if command == "STOP_PATROL":
-            self._handle_stop_patrol(payload)
-            return
-
-        if command == "SET_TOKEN":
-            self._handle_set_token(payload)
-            return
-
-        if command == "START_MAPPING":
-            print(
-                "[COMMAND] START_MAPPING은 "
-                "현재 무시합니다."
-            )
-            return
-
-        print(f"[COMMAND] 알 수 없는 명령: {command}")
-
-    def _handle_start_patrol(
-        self,
-        payload: dict[str, Any],
-    ) -> None:
-        """순찰 시작: Serial → 파이프라인 → ACK."""
-
-        command = "START_PATROL"
-        command_id = str(payload["commandId"])
-        patrol_id = payload.get("patrolId")
-
-        current_state = (
-            self._state_store.get_status().state
+        self._ai_controller = ai_controller
+        self._readiness_checks = tuple(readiness_checks)
+        self._flush_telemetry = flush_telemetry
+        self._wall_clock = wall_clock or (lambda: datetime.now(tz=SEOUL))
+        self._monotonic_clock = monotonic_clock
+        self._clear_since: float | None = None
+        self._cache_path = Path(
+            command_cache_path
+            if command_cache_path is not None
+            else settings.command_cache_file
         )
+        self._cache_persistence_enabled = (
+            command_cache_path is not None or os.name == "posix"
+        )
+        self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._load_cache()
 
-        if current_state == "PATROLLING":
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="REJECTED",
-            )
-            print(
-                "[COMMAND] 이미 순찰 중이라 "
-                "START_PATROL을 거절합니다."
-            )
+    def set_flush_telemetry(self, flush: TelemetryFlush) -> None:
+        self._flush_telemetry = flush
+
+    def handle(self, topic: str, payload: dict[str, Any]) -> None:
+        """Validate one backend command and always fail closed."""
+
+        if topic != self._settings.command_topic:
             return
+        command_text = payload.get("command")
+        command_id = payload.get("commandId")
+        fingerprint = self._fingerprint(payload)
 
-        if (
-            self._pipeline_enabled
-            and self._pipeline_runner.is_running()
-        ):
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="REJECTED",
-            )
-            print(
-                "[COMMAND] 파이프라인이 이미 "
-                "실행 중이라 START_PATROL을 거절합니다."
-            )
-            return
-
-        if self._pipeline_enabled:
-            try:
-                self._pipeline_runner.start()
-            except Exception as exc:
-                self._publish_ack(
-                    command=command,
-                    command_id=command_id,
-                    status="FAILED",
-                )
-                print(
-                    "[COMMAND ERROR] 파이프라인 시작 실패: "
-                    f"{exc}"
+        if isinstance(command_id, str) and command_id in self._cache:
+            cached = self._cache[command_id]
+            if cached.get("fingerprint") == fingerprint:
+                self._mqtt_client.publish(
+                    topic=self._settings.command_response_topic,
+                    payload=dict(cached["ack"]),
                 )
                 return
-        else:
-            print(
-                "[PIPELINE] disabled: hardware-only patrol mode"
-            )
-
-        serial_kwargs: dict[str, Any] = {}
-        if patrol_id is not None:
-            serial_kwargs["patrolId"] = patrol_id
-
-        try:
-            self._serial_reader.send_command(
-                "START_PATROL",
-                **serial_kwargs,
-            )
-        except Exception as exc:
-            # START is successful only when the physical runtime accepted the
-            # motion target. Roll back any AI process before sending FAILED.
-            if self._pipeline_enabled:
-                try:
-                    self._pipeline_runner.stop()
-                except Exception as stop_error:
-                    print(
-                        "[COMMAND ERROR] Serial 실패 후 파이프라인 중지 오류: "
-                        f"{stop_error}"
-                    )
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="FAILED",
-            )
-            print(
-                "[COMMAND ERROR] ESP32 START_PATROL 실패: "
-                f"{exc}"
-            )
-            return
-
-        self._state_store.update_robot_state(
-            "PATROLLING"
-        )
-
-        self._publish_ack(
-            command=command,
-            command_id=command_id,
-            status="SUCCEEDED",
-        )
-
-        print(
-            "[COMMAND] START_PATROL 성공: "
-            f"commandId={command_id}, "
-            f"patrolId={patrol_id}"
-        )
-
-    def _handle_stop_patrol(
-        self,
-        payload: dict[str, Any],
-    ) -> None:
-        """순찰 종료: Serial → 파이프라인 중지 → ACK."""
-
-        command = "STOP_PATROL"
-        command_id = str(payload["commandId"])
-
-        serial_error: Exception | None = None
-        pipeline_error: Exception | None = None
-
-        try:
-            self._serial_reader.send_command(
-                "STOP_PATROL",
-            )
-        except Exception as exc:
-            serial_error = exc
-            print(
-                "[COMMAND ERROR] ESP32 STOP_PATROL "
-                f"실패: {exc}"
-            )
-
-        if self._pipeline_enabled:
-            try:
-                self._pipeline_runner.stop()
-            except Exception as exc:
-                pipeline_error = exc
-                print(
-                    "[COMMAND ERROR] 파이프라인 중지 실패: "
-                    f"{exc}"
+            if isinstance(command_text, str) and command_text:
+                self._publish_uncached_ack(
+                    command=command_text,
+                    command_id=command_id,
+                    status="REJECTED",
                 )
-
-        self._state_store.update_robot_state("IDLE")
-
-        if serial_error is not None or pipeline_error is not None:
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="FAILED",
-            )
-            print(
-                "[COMMAND] STOP_PATROL FAILED: "
-                f"commandId={command_id}"
-            )
-            return
-
-        self._publish_ack(
-            command=command,
-            command_id=command_id,
-            status="SUCCEEDED",
-        )
-
-        print(
-            "[COMMAND] STOP_PATROL 성공: "
-            f"commandId={command_id}"
-        )
-
-    def _handle_set_token(
-        self,
-        payload: dict[str, Any],
-    ) -> None:
-        """서비스 토큰을 저장하고 ACK를 보낸다."""
-
-        command = "SET_TOKEN"
-        command_id = str(payload["commandId"])
-        token = payload.get("token")
-
-        if not isinstance(token, str) or not token:
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="REJECTED",
-            )
-            print("[COMMAND] SET_TOKEN token 없음")
             return
 
         try:
-            TOKEN_FILE_PATH.parent.mkdir(
-                parents=True,
-                exist_ok=True,
+            command = self._validate(payload, fingerprint=fingerprint)
+        except ValueError as exc:
+            if (
+                isinstance(command_text, str)
+                and command_text
+                and isinstance(command_id, str)
+                and command_id
+            ):
+                self._record_and_publish(
+                    command=command_text,
+                    command_id=command_id,
+                    status="REJECTED",
+                    fingerprint=fingerprint,
+                )
+            print(f"[COMMAND] rejected reason={exc}")
+            return
+
+        if command.command == "START_PATROL":
+            self._handle_start_patrol(command)
+        elif command.command == "STOP_PATROL":
+            self._handle_stop_patrol(command)
+        elif command.command == "SET_TOKEN":
+            self._handle_set_token(command, str(payload["token"]))
+        else:
+            self._record_and_publish_command(command, "REJECTED")
+            print("[COMMAND] START_MAPPING is not supported by patrol runtime")
+
+    def tick(self) -> None:
+        """Advance map pose and enforce the LiDAR stop/resume interlock."""
+
+        active_patrol = getattr(self._serial_reader, "active_patrol_id", None)
+        if active_patrol is None:
+            self._clear_since = None
+            return
+        status = self._state_store.get_status()
+        obstacle_stop = status.obstacle.status == "STOP"
+        lidar_stale = (
+            getattr(self._settings, "lidar_required_for_patrol", False)
+            and status.lidar != "NORMAL"
+        )
+        ai_unready = False
+        if (
+            getattr(self._settings, "ai_required_for_patrol", False)
+            and self._ai_controller is not None
+        ):
+            readiness = getattr(self._ai_controller, "readiness", None)
+            if callable(readiness):
+                decision = readiness()
+                ai_unready = not (
+                    decision[0] if isinstance(decision, tuple) else decision
+                )
+        if obstacle_stop or lidar_stale or ai_unready:
+            reason = (
+                "OBSTACLE"
+                if obstacle_stop
+                else "LIDAR_STALE"
+                if lidar_stale
+                else "AI_NOT_READY"
             )
-            TOKEN_FILE_PATH.write_text(
-                token,
-                encoding="utf-8",
-            )
-            os.environ["ROBOT_SERVICE_TOKEN"] = token
+            pause = getattr(self._serial_reader, "pause_patrol", None)
+            if callable(pause):
+                pause(reason)
+            self._clear_since = None
+            return
+        if not getattr(self._serial_reader, "paused", False):
+            self._clear_since = None
+            tick = getattr(self._serial_reader, "tick", None)
+            if callable(tick):
+                tick()
+            return
+        now = self._monotonic_clock()
+        if self._clear_since is None:
+            self._clear_since = now
+            return
+        if now - self._clear_since < self._settings.obstacle_clear_hold_seconds:
+            return
+        resume = getattr(self._serial_reader, "resume_patrol", None)
+        if callable(resume):
+            resume()
+        self._clear_since = None
+
+    def shutdown(self) -> None:
+        """Safe shutdown order: physical STOP, AI disable, final telemetry."""
+
+        stop_failed = False
+        try:
+            self._serial_reader.send_command("STOP_PATROL")
         except Exception as exc:
-            self._publish_ack(
-                command=command,
-                command_id=command_id,
-                status="FAILED",
-            )
-            print(
-                "[COMMAND ERROR] SET_TOKEN 저장 실패: "
-                f"{exc}"
-            )
-            return
-
-        self._publish_ack(
-            command=command,
-            command_id=command_id,
-            status="SUCCEEDED",
+            stop_failed = True
+            print(f"[SHUTDOWN] physical STOP failed: {type(exc).__name__}")
+        ai_failed = False
+        try:
+            self._disable_ai("ROBOT_RUNTIME_STOPPING")
+        except Exception as exc:
+            ai_failed = True
+            print(f"[SHUTDOWN] AI disable failed: {type(exc).__name__}")
+        self._state_store.update_robot_state(
+            "ERROR" if stop_failed or ai_failed else "IDLE"
         )
+        self._flush()
 
-        print(
-            "[COMMAND] SET_TOKEN 저장 완료: "
-            f"{TOKEN_FILE_PATH}"
-        )
-
-    def _is_expired(
-        self,
-        payload: dict[str, Any],
-    ) -> bool:
-        """expiresAt이 지났으면 True."""
-
-        expires_at = payload.get("expiresAt")
-
-        if not isinstance(expires_at, str):
-            return False
+    def on_destination_reached(self, _event: Any = None) -> None:
+        """Disable detections as soon as local navigation has physically stopped."""
 
         try:
-            expire_time = self._parse_iso_datetime(
-                expires_at
-            )
-        except ValueError:
-            print(
-                "[COMMAND] expiresAt 파싱 실패: "
-                f"{expires_at}"
-            )
-            # 파싱 실패를 만료로 처리하면 retained SET_TOKEN
-            # 같은 정상 명령이 거절되므로, 만료 검사만 스킵한다.
-            return False
+            self._disable_ai("DESTINATION_REACHED")
+        except Exception as exc:
+            self._state_store.update_robot_state("ERROR")
+            print(f"[AI] destination disable failed type={type(exc).__name__}")
+        self._flush()
 
-        now = datetime.now(tz=SEOUL)
+    def _handle_start_patrol(self, command: ValidatedCommand) -> None:
+        assert command.patrol_id is not None
+        status = self._state_store.get_status()
+        if status.state != "IDLE":
+            self._record_and_publish_command(command, "REJECTED")
+            return
 
-        if expire_time.tzinfo is None:
-            expire_time = expire_time.replace(
-                tzinfo=SEOUL
+        ready, reason = self._readiness()
+        if not ready:
+            self._record_and_publish_command(command, "REJECTED")
+            print(f"[COMMAND] START_PATROL readiness rejected reason={reason}")
+            return
+
+        prepare = getattr(self._serial_reader, "prepare_patrol", None)
+        if callable(prepare):
+            decision = prepare()
+            ready, reason = (
+                decision
+                if isinstance(decision, tuple)
+                else (bool(decision), "OTA_ACTIVATION_IN_PROGRESS")
             )
+            if not ready:
+                self._record_and_publish_command(command, "REJECTED")
+                print(f"[COMMAND] START_PATROL interlock rejected reason={reason}")
+                return
 
-        return now > expire_time
+        try:
+            self._enable_ai(command.patrol_id)
+            self._serial_reader.send_command(
+                "START_PATROL", patrolId=command.patrol_id
+            )
+        except Exception as exc:
+            cancel_prepared = getattr(
+                self._serial_reader, "cancel_prepared_patrol", None
+            )
+            if callable(cancel_prepared):
+                cancel_prepared()
+            self._disable_ai("START_PATROL_ROLLBACK")
+            try:
+                self._serial_reader.send_command("STOP_PATROL")
+            except Exception:
+                pass
+            self._state_store.update_robot_state("ERROR")
+            self._record_and_publish_command(command, "FAILED")
+            print(f"[COMMAND] START_PATROL failed type={type(exc).__name__}")
+            return
+
+        self._state_store.update_robot_state("PATROLLING")
+        self._record_and_publish_command(command, "SUCCEEDED")
+        self._flush()
+        print(
+            "[COMMAND] START_PATROL succeeded "
+            f"commandId={command.command_id} patrolId={command.patrol_id}"
+        )
+
+    def _handle_stop_patrol(self, command: ValidatedCommand) -> None:
+        errors: list[str] = []
+        try:
+            self._serial_reader.send_command("STOP_PATROL")
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+        try:
+            self._disable_ai("STOP_PATROL")
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+
+        self._state_store.update_robot_state("IDLE" if not errors else "ERROR")
+        self._flush()
+        self._record_and_publish_command(
+            command, "SUCCEEDED" if not errors else "FAILED"
+        )
+        print(
+            "[COMMAND] STOP_PATROL completed "
+            f"commandId={command.command_id} errors={len(errors)}"
+        )
+
+    def _handle_set_token(self, command: ValidatedCommand, token: str) -> None:
+        try:
+            self._write_secret(token)
+            os.environ["AIOT_BACKEND_ACCESS_TOKEN"] = token
+        except Exception as exc:
+            self._record_and_publish_command(command, "FAILED")
+            print(f"[COMMAND] SET_TOKEN failed type={type(exc).__name__}")
+            return
+        self._record_and_publish_command(command, "SUCCEEDED")
+        print("[COMMAND] SET_TOKEN stored in protected runtime file")
+
+    def _readiness(self) -> tuple[bool, str]:
+        runtime_check = getattr(self._serial_reader, "readiness", None)
+        checks: list[ReadinessCheck] = []
+        if callable(runtime_check):
+            checks.append(runtime_check)
+        checks.extend(self._readiness_checks)
+        for check in checks:
+            result = check()
+            if isinstance(result, tuple):
+                if not result[0]:
+                    return False, str(result[1])
+            elif not result:
+                return False, "READINESS_CHECK_FAILED"
+
+        status = self._state_store.get_status()
+        if (
+            getattr(self._settings, "lidar_required_for_patrol", False)
+            and status.lidar != "NORMAL"
+        ):
+            return False, "LIDAR_NOT_READY"
+        if getattr(self._settings, "ai_required_for_patrol", False):
+            if self._ai_controller is None:
+                return False, "AI_CONTROLLER_MISSING"
+            readiness = getattr(self._ai_controller, "readiness", None)
+            if not callable(readiness):
+                return False, "AI_READINESS_UNAVAILABLE"
+            result = readiness()
+            if isinstance(result, tuple):
+                if not result[0]:
+                    return False, str(result[1])
+            elif not result:
+                return False, "AI_NOT_READY"
+        return True, "READY"
+
+    def _enable_ai(self, patrol_id: int) -> None:
+        if self._ai_controller is not None:
+            self._ai_controller.enable(patrol_id)
+            return
+        if self._pipeline_enabled:
+            self._pipeline_runner.start()
+
+    def _disable_ai(self, reason: str) -> None:
+        if self._ai_controller is not None:
+            self._ai_controller.disable(reason)
+            return
+        if self._pipeline_enabled:
+            self._pipeline_runner.stop()
+
+    def _flush(self) -> None:
+        if self._flush_telemetry is None:
+            return
+        try:
+            self._flush_telemetry()
+        except Exception as exc:
+            print(f"[TELEMETRY] final flush failed type={type(exc).__name__}")
+
+    def _validate(
+        self, payload: dict[str, Any], *, fingerprint: str
+    ) -> ValidatedCommand:
+        if payload.get("schemaVersion") != self._settings.schema_version:
+            raise ValueError("unsupported schemaVersion")
+        command = payload.get("command")
+        command_id = payload.get("commandId")
+        if not isinstance(command, str) or command not in SUPPORTED_COMMANDS:
+            raise ValueError("unsupported command")
+        if not isinstance(command_id, str) or not command_id.strip():
+            raise ValueError("commandId is required")
+        if len(command_id) > 128:
+            raise ValueError("commandId is too long")
+
+        issued = self._required_timestamp(payload, "issuedAt")
+        expires = self._required_timestamp(payload, "expiresAt")
+        now = self._wall_clock()
+        if now.tzinfo is None:
+            raise RuntimeError("wall clock must be timezone-aware")
+        if expires <= issued:
+            raise ValueError("expiresAt must be after issuedAt")
+        maximum_ttl = (
+            self.MAX_TOKEN_COMMAND_TTL
+            if command == "SET_TOKEN"
+            else self.MAX_PATROL_COMMAND_TTL
+        )
+        if expires - issued > maximum_ttl:
+            raise ValueError("command TTL is too long")
+        if now > expires:
+            raise ValueError("command expired")
+        if issued - now > self.MAX_FUTURE_CLOCK_SKEW:
+            raise ValueError("issuedAt is too far in the future")
+
+        patrol_id = payload.get("patrolId")
+        if command == "START_PATROL":
+            if (
+                isinstance(patrol_id, bool)
+                or not isinstance(patrol_id, int)
+                or patrol_id <= 0
+            ):
+                raise ValueError("patrolId must be a positive integer")
+        else:
+            patrol_id = None
+        if command == "SET_TOKEN":
+            token = payload.get("token")
+            if not isinstance(token, str) or not token:
+                raise ValueError("token is required")
+        return ValidatedCommand(command, command_id, patrol_id, fingerprint)
 
     @staticmethod
-    def _parse_iso_datetime(value: str) -> datetime:
-        """
-        ISO-8601 시각을 파싱한다.
-
-        백엔드는 나노초(소수 9자리)를 보낼 수 있는데,
-        Python 3.10 fromisoformat은 최대 6자리만 받는다.
-        """
-
-        normalized = value.strip()
-
-        # 예: 2026-08-01T11:22:31.247765164+09:00
-        #                 ^^^^^^^^^^^^^^^^ → 6자리로 자름
+    def _required_timestamp(payload: dict[str, Any], field: str) -> datetime:
+        value = payload.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} is required")
+        normalized = value.strip().replace("Z", "+00:00")
         if "." in normalized:
-            head, fraction_and_tz = normalized.split(
-                ".",
-                1,
-            )
+            head, rest = normalized.split(".", 1)
+            digits = ""
+            timezone_part = ""
+            for index, character in enumerate(rest):
+                if character.isdigit():
+                    digits += character
+                else:
+                    timezone_part = rest[index:]
+                    break
+            normalized = f"{head}.{digits[:6].ljust(6, '0')}{timezone_part}"
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError(f"{field} must be ISO-8601") from exc
+        if parsed.tzinfo is None:
+            raise ValueError(f"{field} must include timezone")
+        return parsed
 
-            digits = []
-            tz_part = ""
+    def _record_and_publish_command(
+        self, command: ValidatedCommand, status: str
+    ) -> None:
+        self._record_and_publish(
+            command=command.command,
+            command_id=command.command_id,
+            status=status,
+            fingerprint=command.fingerprint,
+        )
 
-            for index, char in enumerate(
-                fraction_and_tz
-            ):
-                if char.isdigit():
-                    digits.append(char)
-                    continue
-
-                tz_part = fraction_and_tz[index:]
-                break
-
-            fraction = "".join(digits)[:6].ljust(6, "0")
-            normalized = (
-                f"{head}.{fraction}{tz_part}"
-            )
-
-        return datetime.fromisoformat(normalized)
-
-    def _publish_ack(
+    def _record_and_publish(
         self,
         *,
         command: str,
         command_id: str,
         status: str,
+        fingerprint: str,
     ) -> None:
-        """command/ack 토픽으로 ACK를 발행한다."""
+        ack = self._ack(command, command_id, status)
+        self._cache[command_id] = {"fingerprint": fingerprint, "ack": ack}
+        self._cache.move_to_end(command_id)
+        while len(self._cache) > self.MAX_CACHE_ENTRIES:
+            self._cache.popitem(last=False)
+        self._persist_cache()
+        self._mqtt_client.publish(
+            topic=self._settings.command_response_topic,
+            payload=ack,
+        )
 
-        ack_payload = {
-            "schemaVersion": (
-                self._settings.schema_version
-            ),
+    def _publish_uncached_ack(
+        self, *, command: str, command_id: str, status: str
+    ) -> None:
+        self._mqtt_client.publish(
+            topic=self._settings.command_response_topic,
+            payload=self._ack(command, command_id, status),
+        )
+
+    def _ack(self, command: str, command_id: str, status: str) -> dict[str, Any]:
+        if status not in ACK_STATUSES:
+            raise ValueError("invalid ACK status")
+        return {
+            "schemaVersion": self._settings.schema_version,
             "commandId": command_id,
             "command": command,
             "status": status,
-            "receivedAt": datetime.now(
-                tz=SEOUL
-            ).isoformat(timespec="seconds"),
+            "receivedAt": self._wall_clock().isoformat(timespec="seconds"),
         }
 
-        self._mqtt_client.publish(
-            topic=self._settings.command_response_topic,
-            payload=ack_payload,
+    @staticmethod
+    def _fingerprint(payload: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _write_secret(self, token: str) -> None:
+        path = Path(self._settings.service_token_file)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent
         )
+        temporary = Path(temporary_name)
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(token)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            os.chmod(path, 0o600)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _load_cache(self) -> None:
+        if not self._cache_persistence_enabled:
+            return
+        try:
+            raw = json.loads(self._cache_path.read_text(encoding="utf-8"))
+            if raw.get("schemaVersion") != self.CACHE_SCHEMA_VERSION:
+                return
+            for item in raw.get("entries", [])[-self.MAX_CACHE_ENTRIES :]:
+                command_id = item.get("commandId")
+                fingerprint = item.get("fingerprint")
+                ack = item.get("ack")
+                if (
+                    isinstance(command_id, str)
+                    and isinstance(fingerprint, str)
+                    and isinstance(ack, dict)
+                ):
+                    self._cache[command_id] = {
+                        "fingerprint": fingerprint,
+                        "ack": ack,
+                    }
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return
+
+    def _persist_cache(self) -> None:
+        if not self._cache_persistence_enabled:
+            return
+        payload = {
+            "schemaVersion": self.CACHE_SCHEMA_VERSION,
+            "entries": [
+                {
+                    "commandId": command_id,
+                    "fingerprint": item["fingerprint"],
+                    "ack": item["ack"],
+                }
+                for command_id, item in self._cache.items()
+            ],
+        }
+        try:
+            self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{self._cache_path.name}.", dir=self._cache_path.parent
+            )
+            temporary = Path(temporary_name)
+            try:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(descriptor, 0o600)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(payload, stream, separators=(",", ":"))
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, self._cache_path)
+                os.chmod(self._cache_path, 0o600)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"[COMMAND] command cache unavailable type={type(exc).__name__}")

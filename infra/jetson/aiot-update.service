@@ -2,13 +2,12 @@
 Description=AIoT Jetson Robot pull update
 Wants=network-online.target
 After=network-online.target
-Before=aiot-robot.service
 
 [Service]
 Type=oneshot
 ExecStart=/opt/aiot/bin/aiot-update
 TimeoutStartSec=35min
-RemainAfterExit=yes
+RemainAfterExit=no
 
 [Install]
 WantedBy=multi-user.target

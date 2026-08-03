@@ -1,0 +1,32 @@
+schema_version: 1
+map_id: "demo-map"
+map_version: 1
+route_id: "demo-route-v1"
+frame_id: "map"
+
+# 실제 좌표는 수동 SLAM 지도를 저장한 뒤 RViz에서 선택해
+# Git에 올리지 않는 route.local.yaml에 기록한다.
+waypoints:
+  - sequence: 1
+    name: "START"
+    x: 0.0
+    y: 0.0
+    yaw_deg: 0.0
+    acceptance_radius_m: 0.30
+    action: "PASS"
+
+  - sequence: 2
+    name: "CHECKPOINT_1"
+    x: 1.0
+    y: 0.0
+    yaw_deg: 0.0
+    acceptance_radius_m: 0.30
+    action: "SCAN"
+
+  - sequence: 3
+    name: "DESTINATION"
+    x: 2.0
+    y: 0.0
+    yaw_deg: 0.0
+    acceptance_radius_m: 0.20
+    action: "DESTINATION"

@@ -103,6 +103,32 @@ class OperatingProtocolTest(unittest.TestCase):
 
         self.assertEqual(status.line_values, (0, 0, 1, 0, 0))
 
+    def test_uncalibrated_battery_keeps_voltage_separate(self) -> None:
+        status = parse_hardware_status(
+            {
+                "type": "hardwareStatus",
+                "battery": None,
+                "batteryVoltage": 11.82,
+                "motor": "NORMAL",
+                "lineSensor": "NORMAL",
+                "lineValues": [0, 0, 1, 0, 0],
+            }
+        )
+
+        self.assertIsNone(status.battery_percent)
+        self.assertEqual(status.battery_voltage, 11.82)
+
+    def test_null_battery_requires_voltage(self) -> None:
+        with self.assertRaisesRegex(ValueError, "batteryVoltage is required"):
+            parse_hardware_status(
+                {
+                    "type": "hardwareStatus",
+                    "battery": None,
+                    "motor": "NORMAL",
+                    "lineSensor": "NORMAL",
+                }
+            )
+
     def test_hardware_status_rejects_invalid_raw_line_channels(self) -> None:
         invalid_values = (
             [0, 1, 0, 1],

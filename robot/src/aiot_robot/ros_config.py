@@ -1,0 +1,138 @@
+"""Render field-calibrated Nav2 configuration without guessing measurements."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+from pathlib import Path, PurePosixPath
+from string import Template
+from typing import Mapping
+
+
+FIELD_VARIABLES = (
+    "ROKI_WHEELBASE_M",
+    "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG",
+    "ROKI_ROBOT_RADIUS_M",
+)
+
+
+def missing_field_variables(environment: Mapping[str, str]) -> list[str]:
+    return [name for name in FIELD_VARIABLES if not environment.get(name, "").strip()]
+
+
+def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
+    missing = missing_field_variables(environment)
+    if missing:
+        raise ValueError("missing field measurements: " + ", ".join(missing))
+
+    wheelbase = _positive_float(environment, "ROKI_WHEELBASE_M")
+    steering_angle = _positive_float(
+        environment, "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG"
+    )
+    if steering_angle >= 60:
+        raise ValueError("ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG must be below 60")
+    robot_radius = _positive_float(environment, "ROKI_ROBOT_RADIUS_M")
+    desired_speed = _positive_float(
+        environment, "ROKI_NAV2_DESIRED_LINEAR_SPEED_MPS", default="0.20"
+    )
+    maximum_speed = _positive_float(
+        environment, "ROKI_MAXIMUM_LINEAR_SPEED_MPS", default="0.40"
+    )
+    if desired_speed > maximum_speed:
+        raise ValueError(
+            "ROKI_NAV2_DESIRED_LINEAR_SPEED_MPS must not exceed "
+            "ROKI_MAXIMUM_LINEAR_SPEED_MPS"
+        )
+    minimum_turning_radius = wheelbase / math.tan(math.radians(steering_angle))
+    if not math.isfinite(minimum_turning_radius) or minimum_turning_radius <= 0:
+        raise ValueError("calculated minimum turning radius is invalid")
+
+    bt_xml_raw = environment.get(
+        "ROKI_NAV2_BT_XML",
+        "/opt/aiot/iot/current/robot/config/ros/nav2_fixed_path.xml",
+    )
+    bt_xml = Path(bt_xml_raw)
+    posix_bt_xml = PurePosixPath(bt_xml_raw)
+    if not bt_xml.is_absolute() and not posix_bt_xml.is_absolute():
+        raise ValueError("ROKI_NAV2_BT_XML must be an absolute path")
+    return {
+        "ROBOT_RADIUS_M": _number(robot_radius),
+        "INFLATION_RADIUS_M": _number(robot_radius + 0.15),
+        "MINIMUM_TURNING_RADIUS_M": _number(minimum_turning_radius),
+        "ANALYTIC_EXPANSION_MAX_LENGTH_M": _number(
+            max(3.0, minimum_turning_radius * 5.0)
+        ),
+        "DESIRED_LINEAR_SPEED_MPS": _number(desired_speed),
+        "MAXIMUM_LINEAR_SPEED_MPS": _number(maximum_speed),
+        "NAV2_BT_XML": (
+            posix_bt_xml.as_posix() if posix_bt_xml.is_absolute() else bt_xml.as_posix()
+        ),
+    }
+
+
+def render_nav2_config(
+    template_path: Path,
+    output_path: Path,
+    environment: Mapping[str, str],
+) -> dict[str, str]:
+    values = build_nav2_values(environment)
+    template = Template(template_path.read_text(encoding="utf-8"))
+    rendered = template.substitute(values)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(rendered, encoding="utf-8")
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return values
+
+
+def _positive_float(
+    environment: Mapping[str, str], name: str, *, default: str | None = None
+) -> float:
+    raw = environment.get(name, default or "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be positive and finite")
+    return value
+
+
+def _number(value: float) -> str:
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--template", required=True, type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--software-only", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.software_only:
+        print(
+            json.dumps(
+                {
+                    "fieldReady": not missing_field_variables(os.environ),
+                    "missingMeasurements": missing_field_variables(os.environ),
+                    "template": args.template.as_posix(),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.output is None:
+        parser.error("--output is required unless --software-only is used")
+    values = render_nav2_config(args.template, args.output, os.environ)
+    print(json.dumps({"fieldReady": True, "values": values}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

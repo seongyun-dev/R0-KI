@@ -1,0 +1,30 @@
+[Unit]
+Description=AIoT Jetson LiDAR, odometry, SLAM or Nav2 stack
+Wants=network-online.target aiot-update.service
+After=network-online.target
+ConditionPathExists=/opt/aiot/secrets/ros.env
+ConditionFileIsExecutable=/opt/aiot/iot/current/robot/scripts/run-ros.sh
+
+[Service]
+Type=simple
+User=e103
+SupplementaryGroups=aiot dialout video render
+WorkingDirectory=/opt/aiot/iot/current
+Environment=ROS_LOCALHOST_ONLY=1
+Environment=ROS_DOMAIN_ID=0
+Environment=ROS_HOME=/var/lib/aiot/ros
+Environment=ROS_LOG_DIR=/var/lib/aiot/ros/log
+EnvironmentFile=/opt/aiot/secrets/ros.env
+RuntimeDirectory=aiot
+RuntimeDirectoryMode=0755
+ExecStartPre=/opt/aiot/iot/current/robot/scripts/ros-preflight.sh
+ExecStart=/opt/aiot/iot/current/robot/scripts/run-ros.sh
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+KillSignal=SIGINT
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

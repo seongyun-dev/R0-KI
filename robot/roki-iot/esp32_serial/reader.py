@@ -42,7 +42,7 @@ class ESP32SerialReader:
 
     def __init__(
         self,
-        port: str = "/dev/ttyUSB0",
+        port: str = "/dev/roki_esp32",
         baudrate: int = 115200,
         debug: bool = False,
     ) -> None:

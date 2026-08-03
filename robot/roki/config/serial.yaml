@@ -1,7 +1,7 @@
 serial:
-  # ttyUSB 번호는 USB 재연결 순서에 따라 바뀔 수 있으므로 CP2102의
-  # 안정적인 by-id 경로를 사용한다.
-  port: "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+  # ESP32와 LiDAR의 CP2102가 같은 serial 0001을 사용하므로 by-id는
+  # 충돌한다. Jetson 물리 USB 위치로 만든 udev 별칭을 사용한다.
+  port: "/dev/roki_esp32"
 
   # Jetson과 ESP32가 동일한 통신 속도를 사용해야 한다.
   baudrate: 115200

@@ -1,5 +1,12 @@
 # AIoT infrastructure handoff
 
+> **2026-08-03 Jetson 갱신:** 기존 EC2 이력은 아래에 보존한다. 현재 Jetson
+> 릴리스는 AI와 IoT를 합친 bundle이 아니라 `robot/` 전용 `iot-vX.Y.Z`다.
+> `aiot-update.timer`가 부팅 2분 후와 이후 5분마다 확인하고, 순찰/배포 advisory
+> lock으로 이동 중 활성화를 보류한다. 성공한 pre/post smoke와 서비스 재시작까지
+> 확인한 뒤에만 `current`를 유지하고 실패하면 `previous`로 복구한다. 실제 운영은
+> `infra/jetson/README.md`와 `robot/docs/integrated-runtime-operations.md`가 기준이다.
+
 > **Legacy document:** This file preserves the original `develop`-centric
 > rollout history and must not be used as the current deployment procedure.
 > The migration is complete. Use [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md)

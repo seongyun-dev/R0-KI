@@ -17,11 +17,20 @@ set +u
 source "${ros_setup}"
 set -u
 
+"${robot_root}/.venv/bin/python" -m pip install \
+  --disable-pip-version-check \
+  -r "${robot_root}/requirements.txt"
+
 "${robot_root}/.venv/bin/python" -c \
   'import rclpy; from std_msgs.msg import String; print("Robot ROS dependencies OK")'
 
 if [ "$(id -u)" -eq 0 ] && id aiot >/dev/null 2>&1; then
-  install -d -m 0750 -o aiot -g aiot /var/lib/aiot/outbox
+  install -d -m 2770 -o aiot -g aiot \
+    /var/lib/aiot/config \
+    /var/lib/aiot/evidence \
+    /var/lib/aiot/outbox \
+    /var/lib/aiot/secrets \
+    /var/lib/aiot/state
 fi
 
 echo "Robot runtime installed without sending movement commands"

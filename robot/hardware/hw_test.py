@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import sys
 import time
@@ -12,11 +11,9 @@ from dataclasses import dataclass
 
 import serial
 
+from esp32_port import Esp32PortError, resolve_esp32_port
 
-DEFAULT_PORT_GLOB = (
-    "/dev/serial/by-id/"
-    "usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_*-if00-port0"
-)
+
 SAFE_FIRMWARE_NAME = "roki-safe-hw-test"
 
 
@@ -109,15 +106,10 @@ class Esp32Client:
 
 
 def find_port(explicit_port: str | None) -> str:
-    if explicit_port:
-        return explicit_port
-    matches = sorted(glob.glob(DEFAULT_PORT_GLOB))
-    if len(matches) != 1:
-        raise SafetyError(
-            "Expected exactly one CP2102 ESP32 device, "
-            f"found {len(matches)}: {matches}"
-        )
-    return matches[0]
+    try:
+        return resolve_esp32_port(explicit_port)
+    except Esp32PortError as error:
+        raise SafetyError(str(error)) from error
 
 
 def require_confirmation(actual: str | None, expected: str) -> None:
