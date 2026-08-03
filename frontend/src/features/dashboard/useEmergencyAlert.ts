@@ -34,6 +34,8 @@ export function useEmergencyAlert(onEmergency: (event: PatrolEvent) => void) {
   usePolledFeed({
     enabled: !env.useMocks,
     label: 'useEmergencyAlert',
+    // 종일 띄워두는 화면이라 5초는 과하다. 긴급이라 가장 짧게 두되 10초로 늦춘다
+    intervalMs: 10_000,
     fetchItems: async () =>
       unwrapList(
         await eventsApi.list({
