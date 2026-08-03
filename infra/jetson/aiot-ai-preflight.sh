@@ -86,8 +86,8 @@ if [ -n "${required_engines}" ]; then
 fi
 "${python_bin}" - "${pipeline_main}" "${robot_adapter}" \
   "${AIOT_AI_VALIDATE_TRT_ENGINES:-true}" "${engine_arguments[@]}" <<'PY'
-import py_compile
 import sys
+from pathlib import Path
 
 import rclpy
 import cv2
@@ -97,7 +97,8 @@ from std_msgs.msg import String
 
 pipeline_main, robot_adapter, validate_engines, *engine_paths = sys.argv[1:]
 for path in (pipeline_main, robot_adapter):
-    py_compile.compile(path, doraise=True)
+    source = Path(path).read_text(encoding="utf-8")
+    compile(source, path, "exec")
 if validate_engines == "true":
     logger = tensorrt.Logger(tensorrt.Logger.ERROR)
     for path in engine_paths:
