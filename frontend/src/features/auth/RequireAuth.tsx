@@ -12,6 +12,7 @@ import { useAuthStore } from './useAuthStore'
 import { useOnboardingProgress } from '../onboarding/useOnboardingProgress'
 import { RobotObstacleAlertModal } from '../robots/RobotObstacleAlertModal'
 import { useRobotObstacleAlert } from '../robots/useRobotObstacleAlert'
+import { useEmergencyEventStore } from '../dashboard/useEmergencyEventStore'
 
 /** 비로그인 접근 차단 — 로그인 후 원래 가려던 곳으로 복귀 */
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -26,8 +27,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const [alertEvent, setAlertEvent] = useState<PatrolEvent | null>(null)
   const [obstacleEvent, setObstacleEvent] = useState<RobotObstacleEvent | null>(null)
+  const addEmergencyEvent = useEmergencyEventStore((state) => state.addEvent)
 
   useEmergencyAlert((event) => {
+    addEmergencyEvent(event)
     if (!isEmergencySeen(event.id)) setAlertEvent(event)
   })
 
