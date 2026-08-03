@@ -36,13 +36,13 @@ import time
 import threading
 from typing import Any
 
-from config.settings import (
+from backend_config.settings import (
     AppSettings,
     load_settings,
 )
-from mqtt.client import MqttClient
-from mqtt.command_handler import PatrolCommandHandler
-from mqtt.payload_builder import (
+from backend_mqtt.client import MqttClient
+from backend_mqtt.command_handler import PatrolCommandHandler
+from backend_mqtt.payload_builder import (
     build_pose_payload,
     build_status_payload,
 )

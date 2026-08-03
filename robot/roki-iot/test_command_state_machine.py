@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from mqtt.command_handler import PatrolCommandHandler
+from backend_mqtt.command_handler import PatrolCommandHandler
 
 
 NOW = datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc)

@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 from zoneinfo import ZoneInfo
 
-from config.settings import AppSettings
-from mqtt.client import MqttClient
+from backend_config.settings import AppSettings
+from backend_mqtt.client import MqttClient
 from pipeline.patrol_pipeline import PatrolPipelineRunner
 from serial_reader import ESP32SerialReader
 from backend_state.robot_state_store import RobotStateStore
