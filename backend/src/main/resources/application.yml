@@ -40,7 +40,7 @@ app:
     client-id: oneloop-backend
   file-storage:
     upload-dir: ${UPLOAD_DIR:uploads}
-    url-prefix: /uploads
+    url-prefix: /api/uploads
     map-dir: ${MAP_DIR:uploads/maps}
 
 gms:

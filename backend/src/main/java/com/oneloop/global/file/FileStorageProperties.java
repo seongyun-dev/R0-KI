@@ -13,6 +13,6 @@ import org.springframework.stereotype.Component;
 public class FileStorageProperties {
 
     private String uploadDir = "uploads";
-    private String urlPrefix = "/uploads";
+    private String urlPrefix = "/api/uploads";
     private String mapDir = "uploads/maps";
 }
