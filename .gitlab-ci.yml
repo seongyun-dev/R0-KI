@@ -258,10 +258,24 @@ iot_ci:
     - test -x robot/scripts/smoke-test.sh
     - test -s robot/docs/ai-ros-contract-v1.md
     - find robot/scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
-    - python3 -m venv .venv-iot-ci
-    - .venv-iot-ci/bin/python -m pip install --disable-pip-version-check -r robot/requirements.txt
-    - PYTHON_COMMAND="$CI_PROJECT_DIR/.venv-iot-ci/bin/python" bash robot/scripts/test.sh
-    - find robot -type f -name '*.py' -print0 | xargs -0 -r python3 -m py_compile
+    - |
+      docker run --rm \
+        --mount "type=bind,src=${CI_PROJECT_DIR}/robot,dst=/workspace/robot,readonly" \
+        --env PYTHONDONTWRITEBYTECODE=1 \
+        python:3.12-slim-bookworm \
+        bash -euo pipefail -c '
+          cp -a /workspace/robot /tmp/robot
+          cd /tmp
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --retries 5 \
+            --timeout 30 \
+            -r robot/requirements.txt
+          PYTHON_COMMAND=python bash robot/scripts/test.sh
+          find robot -type f -name "*.py" -print0 | \
+            xargs -0 -r python -m py_compile
+        '
 
 ai_ci:
   stage: test
