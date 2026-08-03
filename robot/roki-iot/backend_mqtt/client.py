@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
-from config.settings import AppSettings
+from backend_config.settings import AppSettings
 
 CommandMessageHandler = Callable[[str, dict[str, Any]], None]
 

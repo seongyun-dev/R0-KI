@@ -23,7 +23,7 @@ import paho.mqtt.client as mqtt
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from config.settings import AppSettings, load_settings  # noqa: E402
+from backend_config.settings import AppSettings, load_settings  # noqa: E402
 
 
 SEOUL = ZoneInfo("Asia/Seoul")
