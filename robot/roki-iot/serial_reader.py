@@ -20,8 +20,8 @@ from threading import Event, Lock, Thread
 from typing import Any
 
 import serial
-from state.models import HardwareState
-from state.robot_state_store import RobotStateStore
+from backend_state.models import HardwareState
+from backend_state.robot_state_store import RobotStateStore
 
 
 class JsonFrameBuffer:

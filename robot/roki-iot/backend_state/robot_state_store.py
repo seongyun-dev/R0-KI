@@ -18,7 +18,7 @@ from __future__ import annotations
 import threading
 from dataclasses import replace
 
-from state.models import (
+from backend_state.models import (
     HardwareState,
     ObstacleState,
     PoseState,

@@ -12,8 +12,8 @@ from mqtt.command_handler import PatrolCommandHandler
 from mqtt.publisher import RokiPublisherApplication
 from navigation.route import parse_route
 from navigation.service import WaypointNavigationService
-from state.models import HardwareState
-from state.robot_state_store import RobotStateStore
+from backend_state.models import HardwareState
+from backend_state.robot_state_store import RobotStateStore
 
 
 class SimulationStore(RobotStateStore):

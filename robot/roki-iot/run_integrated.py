@@ -42,11 +42,6 @@ def _build_final_components() -> tuple[Any, Any, Any]:
     finally:
         sys.path = original_sys_path
 
-    # roki-iot also has a legacy ``state`` package. Keep the already-created
-    # final objects but let subsequent imports resolve the adapter package.
-    for module_name in tuple(sys.modules):
-        if module_name == "state" or module_name.startswith("state."):
-            del sys.modules[module_name]
     return runtime, pose_bridge, lidar_health_bridge
 
 
@@ -58,6 +53,36 @@ def _selected_route_path(route_path: str | Path | None = None) -> Path:
             "/var/lib/aiot/config/route.local.yaml",
         )
     )
+
+
+def _validate_state_import_namespaces() -> None:
+    """Ensure the final runtime and backend adapter state packages coexist."""
+
+    final_root = str(FINAL_RUNTIME_ROOT)
+    original_sys_path = list(sys.path)
+    preserved_state_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "state" or name.startswith("state.")
+    }
+    for name in preserved_state_modules:
+        del sys.modules[name]
+    sys.path = [final_root, *(path for path in original_sys_path if path != final_root)]
+    try:
+        from state.robot_state import RobotStateStore as FinalRobotStateStore
+        from backend_state.robot_state_store import (
+            RobotStateStore as BackendRobotStateStore,
+        )
+        from integration.runtime_state_backend_adapter import FinalRuntimeService
+
+        if FinalRobotStateStore is BackendRobotStateStore or FinalRuntimeService is None:
+            raise RuntimeError("runtime state import namespaces are not isolated")
+    finally:
+        sys.path = original_sys_path
+        for name in tuple(sys.modules):
+            if name == "state" or name.startswith("state."):
+                del sys.modules[name]
+        sys.modules.update(preserved_state_modules)
 
 
 def _build_navigation_service(
@@ -259,6 +284,7 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
 
     from config.settings import load_settings
 
+    _validate_state_import_namespaces()
     settings = load_settings()
     mode = _navigation_mode(settings)
     navigation = _build_navigation_service(
