@@ -10,7 +10,10 @@
 
 - 영상은 메모리에 최신 JPEG 한 장만 보관하며 SD 카드에 계속 쓰지 않는다.
 - Jetson의 MJPEG 포트와 EC2의 터널 포트는 모두 loopback에만 바인딩한다.
-- 브라우저 요청은 기존 로그인 Bearer 토큰으로 로봇 소속 검증을 통과해야 한다.
+- 브라우저는 기존 로그인으로 짧은 영상 세션을 발급받고, Nginx 내부 검증을
+  통과한 경우에만 영상을 수신한다.
+- 서비스 시작 시 모델을 한 번 준비해 `READY` 상태를 유지하지만, 실제 반복
+  추론과 MJPEG 프레임 갱신은 순찰 `ENABLE`부터 `DISABLE`까지만 수행한다.
 - 현재 시연 로봇은 백엔드 `robotId=16`이고, Nginx 경로는
   `/live/robots/16/stream.mjpg`이다.
 
@@ -23,7 +26,7 @@ AIOT_AI_MJPEG_ENABLED=true
 AIOT_AI_MJPEG_BIND=127.0.0.1
 AIOT_AI_MJPEG_PORT=8090
 AIOT_AI_MJPEG_QUALITY=70
-AIOT_AI_MJPEG_MAX_FPS=8
+AIOT_AI_MJPEG_MAX_FPS=5
 ```
 
 `/opt/aiot/secrets/stream.env`는 `infra/jetson/stream.env.example`을 기준으로
@@ -45,5 +48,5 @@ EC2에서는 터널이 열려 있을 때만 아래 주소가 응답한다.
 curl -fsS http://127.0.0.1:19001/health
 ```
 
-서비스가 중단되면 프론트는 마지막 프레임 대신 영상 대기 상태를 표시하고
-2초 간격으로 재연결한다.
+대기 상태에서는 프론트가 영상 연결을 열지 않는다. 순찰이 시작되면 연결하고,
+순찰 종료 또는 서비스 중단 시 마지막 프레임 대신 영상 대기 상태로 돌아간다.

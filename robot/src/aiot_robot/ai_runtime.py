@@ -27,6 +27,7 @@ from std_msgs.msg import String
 from .ai_adapter_core import build_detection_message
 from .ai_capture import CaptureSettings, configure_capture
 from .mjpeg_stream import MjpegStreamServer
+from .patrol_activation import PatrolActivation
 
 
 class AiAdapterNode(Node):
@@ -42,6 +43,7 @@ class AiAdapterNode(Node):
         self._inference_ready = False
         self._error_code: str | None = None
         self._message: str | None = None
+        self._patrol_activation = PatrolActivation()
 
         control_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -125,6 +127,7 @@ class AiAdapterNode(Node):
                 "cameraReady": self._camera_ready,
                 "engineReady": self._engine_ready,
                 "inferenceReady": self._inference_ready,
+                "detectionEnabled": self._patrol_activation.enabled,
                 "modelVersion": os.getenv("AIOT_AI_MODEL_VERSION") or None,
                 "heartbeatAt": _utc_now(),
                 "errorCode": self._error_code,
@@ -187,13 +190,24 @@ class AiAdapterNode(Node):
                     raise ValueError("ENABLE requires patrolId")
                 with self._lock:
                     self._active_patrol_id = patrol_id
+                self._patrol_activation.enable()
             elif command == "DISABLE":
+                self._patrol_activation.disable()
                 with self._lock:
                     self._active_patrol_id = None
             else:
                 raise ValueError("unsupported control command")
         except (ValueError, json.JSONDecodeError) as exc:
             self.get_logger().warning(f"Rejected AI control: {exc}")
+            return
+        self.publish_status()
+
+    @property
+    def detection_enabled(self) -> bool:
+        return self._patrol_activation.enabled
+
+    def wait_for_detection_enabled(self, timeout: float) -> bool:
+        return self._patrol_activation.wait(timeout)
 
 
 class RosEventSink:
@@ -261,11 +275,19 @@ def run_pipeline(
         class DetectorProxy:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 self._delegate = original_detector(*args, **kwargs)
+                self._warmup_complete = False
                 node.mark_engine_ready()
 
             def track_pair(self, *args: Any, **kwargs: Any) -> Any:
+                if self._warmup_complete:
+                    while rclpy.ok() and not node.wait_for_detection_enabled(0.25):
+                        pass
+                    if not rclpy.ok():
+                        raise RuntimeError("AI runtime is stopping")
                 result = self._delegate.track_pair(*args, **kwargs)
-                node.mark_inference_ready()
+                if not self._warmup_complete:
+                    self._warmup_complete = True
+                    node.mark_inference_ready()
                 return result
 
             def __getattr__(self, name: str) -> Any:
@@ -277,7 +299,8 @@ def run_pipeline(
 
             def hconcat_with_preview(images: Any) -> Any:
                 view = original_hconcat(images)
-                mjpeg_server.publisher.publish(view, module.cv2)
+                if node.detection_enabled:
+                    mjpeg_server.publisher.publish(view, module.cv2)
                 return view
 
             module.cv2.hconcat = hconcat_with_preview
@@ -362,7 +385,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[
     parser.add_argument(
         "--mjpeg-max-fps",
         type=float,
-        default=float(os.getenv("AIOT_AI_MJPEG_MAX_FPS", "8")),
+        default=float(os.getenv("AIOT_AI_MJPEG_MAX_FPS", "5")),
     )
     return parser.parse_known_args(argv)
 
