@@ -257,11 +257,7 @@ export default function Dashboard() {
               <R0KiLiveCam
                 urgent={hasUrgent}
                 clockText={clock}
-                streamPath={
-                  selectedRobot?.backendId == null
-                    ? undefined
-                    : `/live/robots/${selectedRobot.backendId}/stream.mjpg`
-                }
+                robotId={selectedRobot?.backendId}
               />
               <div className="camnow">
                 {hasUrgent && urgentLabel && (

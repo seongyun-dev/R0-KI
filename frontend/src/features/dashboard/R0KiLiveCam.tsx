@@ -9,11 +9,11 @@ export type R0KiLiveCamProps = {
   /** 긴급 감지 여부 — 긴급 바운딩 박스 표시 */
   urgent?: boolean
   clockText?: string
-  streamPath?: string
+  robotId?: string | number
 }
 
-export function R0KiLiveCam({ urgent = false, clockText, streamPath }: R0KiLiveCamProps) {
-  const { frameUrl, state } = useMjpegStream(streamPath)
+export function R0KiLiveCam({ urgent = false, clockText, robotId }: R0KiLiveCamProps) {
+  const { frameUrl, state } = useMjpegStream(robotId)
 
   return (
     <div className="cam">

@@ -33,21 +33,6 @@ function authHeaders() {
   return { Authorization: `Bearer ${state.accessToken}` }
 }
 
-export async function authenticatedFetch(path: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers)
-  const auth = authHeaders()
-  if (auth) {
-    if (!headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
-    // Nginx auth_request 서브요청은 영상 전용 헤더를 백엔드 Authorization으로 변환한다.
-    if (!headers.has('X-Live-Token')) {
-      headers.set('X-Live-Token', auth.Authorization.slice('Bearer '.length))
-    }
-  }
-
-  const response = await fetch(apiUrl(path), { ...init, headers })
-  return response
-}
-
 async function readResponse(response: Response) {
   if (response.status === 204) return undefined
   const contentType = response.headers.get('content-type') ?? ''

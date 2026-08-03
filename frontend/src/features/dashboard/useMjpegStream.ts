@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { authenticatedFetch } from '../../api/client'
+import { apiRequest, apiUrl } from '../../api/client'
 
 export type MjpegStreamState = 'idle' | 'connecting' | 'live' | 'offline'
 
@@ -19,12 +19,17 @@ function findMarker(bytes: Uint8Array, first: number, second: number, from = 0) 
   return -1
 }
 
-export function useMjpegStream(path?: string) {
+type StreamSession = {
+  token: string
+  expiresAt: string
+}
+
+export function useMjpegStream(robotId?: string | number) {
   const [frameUrl, setFrameUrl] = useState<string>()
-  const [state, setState] = useState<MjpegStreamState>(path ? 'connecting' : 'idle')
+  const [state, setState] = useState<MjpegStreamState>(robotId == null ? 'idle' : 'connecting')
 
   useEffect(() => {
-    if (!path) {
+    if (robotId == null) {
       setState('idle')
       setFrameUrl(undefined)
       return
@@ -51,8 +56,15 @@ export function useMjpegStream(path?: string) {
     const connect = async () => {
       setState((previous) => (previous === 'live' ? previous : 'connecting'))
       try {
-        const response = await authenticatedFetch(new URL(path, window.location.origin).toString(), {
-          headers: { Accept: 'multipart/x-mixed-replace' },
+        const session = await apiRequest<StreamSession>(
+          `/api/robots/${robotId}/stream-sessions`,
+          { method: 'POST', signal: controller.signal },
+        )
+        const response = await fetch(apiUrl(`/live/robots/${robotId}/stream.mjpg`), {
+          headers: {
+            Accept: 'multipart/x-mixed-replace',
+            'X-Stream-Token': session.token,
+          },
           cache: 'no-store',
           signal: controller.signal,
         })
@@ -92,7 +104,7 @@ export function useMjpegStream(path?: string) {
       if (retryTimer) clearTimeout(retryTimer)
       if (currentUrl) URL.revokeObjectURL(currentUrl)
     }
-  }, [path])
+  }, [robotId])
 
   return { frameUrl, state }
 }
