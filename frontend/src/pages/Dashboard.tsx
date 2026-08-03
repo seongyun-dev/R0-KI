@@ -7,6 +7,7 @@ import { ComplexMap } from '../features/dashboard/ComplexMap'
 import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
 import { useRobotLocations } from '../features/dashboard/useRobotLocations'
+import { useEmergencyEventStore } from '../features/dashboard/useEmergencyEventStore'
 import { useSelectedRobotLocation } from '../features/dashboard/useSelectedRobotLocation'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
 import {
@@ -18,6 +19,21 @@ import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
 import { robotStatusLabel } from '../api/mappers'
 import type { PatrolCompletedSseEvent } from '../api/contracts'
+import type { ComplexMapData } from '../types/domain'
+
+function emergencyPoint(x: number, y: number, map: ComplexMapData) {
+  const { resolution, pixelWidth, pixelHeight, originX, originY } = map
+  if (!resolution || !pixelWidth || !pixelHeight || originX == null || originY == null) {
+    return undefined
+  }
+  const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value))
+  const pixelX = (x - originX) / resolution
+  const pixelY = pixelHeight - (y - originY) / resolution
+  return {
+    x: clamp((pixelX / pixelWidth) * map.cols, map.cols),
+    y: clamp((pixelY / pixelHeight) * map.rows, map.rows),
+  }
+}
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
    공용 셸(R0KiShell: 상단바·테마·시계) + 순찰 지도 + 실시간 탐지 영상 + 이벤트 이력.
@@ -54,8 +70,29 @@ export default function Dashboard() {
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useEvents()
   const { data: robots } = useRobots()
   const { data: mapData } = useComplexMap()
+  const emergencyEvents = useEmergencyEventStore((state) => state.events)
   const { locations: liveRobotLocations, statuses: liveRobotStatuses } =
     useRobotLocations(mapData?.map)
+  const emergencyPins = mapData
+    ? emergencyEvents.flatMap((event) => {
+        if (
+          event.mapId == null ||
+          String(event.mapId) !== String(mapData.map.mapId) ||
+          event.x == null ||
+          event.y == null
+        ) return []
+        const point = emergencyPoint(event.x, event.y, mapData.map)
+        return point
+          ? [{
+              id: event.id,
+              label: event.subType ?? event.type,
+              detail: `${event.time} · ${event.location}`,
+              ...point,
+              tone: 'danger' as const,
+            }]
+          : []
+      })
+    : []
 
   /* 이벤트 이력 — 아직 처리하지 않은 '탐지' 상태만 띄운다 (처리중·처리완료 제외).
      긴급(발견 즉시 기록)은 목록 맨 위 고정 / 나머지는 아래 그룹 */
@@ -181,7 +218,7 @@ export default function Dashboard() {
                   map={mapData.map}
                   robot={showAllPatrolling ? undefined : mapRobot}
                   robots={showAllPatrolling ? mapRobots : undefined}
-                  pins={mapData.pins}
+                  pins={[...mapData.pins, ...emergencyPins]}
                   checkpoints={mapData.checkpoints}
                   patrolling={isPatrolling}
                   bottomRight={
