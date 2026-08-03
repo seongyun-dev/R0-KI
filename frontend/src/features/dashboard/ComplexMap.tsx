@@ -353,7 +353,7 @@ export function ComplexMap({
   const donePts = prog ? [...routePts.slice(0, prog.seg + 1), prog.p] : []
   const visited = (i: number) => (prog ? cpIdx[i] <= prog.seg : false)
   // 스캔 콘이 진행 방향을 향하도록 — 현재 구간의 방향각
-  const heading = prog
+  const routeHeading = prog
     ? (Math.atan2(routePts[prog.seg + 1].y - routePts[prog.seg].y, routePts[prog.seg + 1].x - routePts[prog.seg].x) *
         180) /
       Math.PI
@@ -603,9 +603,10 @@ export function ComplexMap({
               const rx = px(r.x)
               const ry = py(r.y)
               const solo = shownRobots.length === 1
+              const heading = r.heading ?? (solo ? routeHeading : 0)
               return (
                 <g key={`bot-${r.id}`}>
-                  <g className="bot" transform={`translate(${rx},${ry}) rotate(${solo ? heading : 0})`}>
+                  <g className="bot" transform={`translate(${rx},${ry}) rotate(${heading})`}>
                     <circle r="30" fill="url(#cmapHalo)" />
                     {/* 진행 방향 스캔 콘 — 한 대를 이동 중으로 볼 때만 */}
                     {solo && showRoute && <path d="M0 0 L40 -19 A44 44 0 0 1 40 19 Z" fill="url(#cmapCone)" />}

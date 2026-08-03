@@ -123,6 +123,9 @@ export default function Dashboard() {
           ? {
               x: selectedLiveLocation.x,
               y: selectedLiveLocation.y,
+              ...(selectedLiveLocation.heading == null
+                ? {}
+                : { heading: selectedLiveLocation.heading }),
               updatedAt: selectedLiveLocation.updatedAt,
             }
           : {}),
