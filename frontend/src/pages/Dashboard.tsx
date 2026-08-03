@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { R0KiShell, useClockText } from '../components/layout/R0KiShell'
 import { R0KiLiveCam } from '../features/dashboard/R0KiLiveCam'
 import { R0KiPatrolMap } from '../features/dashboard/R0KiPatrolMap'
@@ -8,8 +8,6 @@ import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
 import { useRobotLocations } from '../features/dashboard/useRobotLocations'
 import { useSelectedRobotLocation } from '../features/dashboard/useSelectedRobotLocation'
-import { EmergencyAlertModal } from '../features/dashboard/EmergencyAlertModal'
-import { useEmergencyAlert, isEmergencySeen, markEmergencySeen } from '../features/dashboard/useEmergencyAlert'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
 import {
   usePatrolComplete,
@@ -20,7 +18,6 @@ import { useEvents } from '../features/events/useEvents'
 import { useRobots } from '../features/robots/useRobot'
 import { robotStatusLabel } from '../api/mappers'
 import type { PatrolCompletedSseEvent } from '../api/contracts'
-import type { PatrolEvent } from '../types/domain'
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
    공용 셸(R0KiShell: 상단바·테마·시계) + 순찰 지도 + 실시간 탐지 영상 + 이벤트 이력.
@@ -53,7 +50,6 @@ function MiniBot() {
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate()
   const clock = useClockText()
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = useEvents()
   const { data: robots } = useRobots()
@@ -146,16 +142,6 @@ export default function Dashboard() {
   const pickRobot = (id: string) => {
     setShowAllPatrolling(false)
     setPickedRobotId(id)
-  }
-
-  // 긴급 알림 모달 — push 도착 시에만 (기존 동작 유지)
-  const [alertEvent, setAlertEvent] = useState<PatrolEvent | null>(null)
-  useEmergencyAlert((event) => {
-    if (!isEmergencySeen(event.id)) setAlertEvent(event)
-  })
-  const dismissAlert = () => {
-    if (alertEvent) markEmergencySeen(alertEvent.id)
-    setAlertEvent(null)
   }
 
   /* 순찰 완료 모달 — 순찰이 끝나면 뜨고, [확인] 을 누르면 이벤트 이력을 다시 불러온다
@@ -356,24 +342,10 @@ export default function Dashboard() {
         {/* 순찰 완료 모달 — 확인 시 이벤트 이력 새로고침.
             긴급 알림이 떠 있으면 그쪽을 먼저 처리하도록 뒤로 미룬다.
             r0ki CSS 는 .r0ki 하위로만 스코프되므로 반드시 셸 안에서 렌더한다 */}
-        {donePatrol && !alertEvent && (
+        {donePatrol && (
           <PatrolCompleteModal patrol={donePatrol} onConfirm={confirmPatrolDone} />
         )}
       </R0KiShell>
-
-      {/* 긴급 알림 모달 (기존 push 동작 유지) */}
-      {alertEvent && (
-        <EmergencyAlertModal
-          open={Boolean(alertEvent)}
-          event={alertEvent}
-          onClose={dismissAlert}
-          onConfirm={() => {
-            const id = alertEvent.id
-            dismissAlert()
-            navigate(`/app/events/${id}`)
-          }}
-        />
-      )}
     </>
   )
 }

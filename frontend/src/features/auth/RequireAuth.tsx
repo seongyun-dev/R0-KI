@@ -1,5 +1,12 @@
-import { useEffect, type ReactNode } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import type { PatrolEvent } from '../../types/domain'
+import { EmergencyAlertModal } from '../dashboard/EmergencyAlertModal'
+import {
+  isEmergencySeen,
+  markEmergencySeen,
+  useEmergencyAlert,
+} from '../dashboard/useEmergencyAlert'
 import { useAuthStore } from './useAuthStore'
 import { useOnboardingProgress } from '../onboarding/useOnboardingProgress'
 
@@ -13,6 +20,17 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   const onboardingOwner = useOnboardingProgress((s) => s.ownerLoginId)
   const onboardingPhase = useOnboardingProgress((s) => s.phase)
   const location = useLocation()
+  const navigate = useNavigate()
+  const [alertEvent, setAlertEvent] = useState<PatrolEvent | null>(null)
+
+  useEmergencyAlert((event) => {
+    if (!isEmergencySeen(event.id)) setAlertEvent(event)
+  })
+
+  const dismissAlert = () => {
+    if (alertEvent) markEmergencySeen(alertEvent.id)
+    setAlertEvent(null)
+  }
 
   const hasValidToken =
     isAuthenticated &&
@@ -32,5 +50,21 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (onboardingPhase && onboardingOwner === loginId) {
     return <Navigate to="/signup/onboarding" replace />
   }
-  return <>{children}</>
+  return (
+    <>
+      {children}
+      {alertEvent && (
+        <EmergencyAlertModal
+          open
+          event={alertEvent}
+          onClose={dismissAlert}
+          onConfirm={() => {
+            const eventId = alertEvent.id
+            dismissAlert()
+            navigate(`/app/events/${eventId}`)
+          }}
+        />
+      )}
+    </>
+  )
 }

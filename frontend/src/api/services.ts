@@ -12,6 +12,7 @@ import type {
   EventBatchCreateRequest,
   EventBatchCreateResponse,
   EventDetailResponse,
+  EmergencyEventSseResponse,
   EvidenceUploadRequest,
   EvidenceUploadResponse,
   EventListRequest,
@@ -118,6 +119,19 @@ export const eventsApi = {
       {
         method: 'POST',
       },
+    ),
+  subscribeEmergency: (
+    onEmergency: (event: EmergencyEventSseResponse) => void,
+    signal: AbortSignal,
+  ) =>
+    consumeSse<EmergencyEventSseResponse | string>(
+      '/api/events/subscribe/emergency',
+      (data, eventName) => {
+        if (eventName === 'emergency-event' && typeof data === 'object') {
+          onEmergency(data)
+        }
+      },
+      signal,
     ),
   subscribeGeneral: (
     onPatrolCompleted: (event: PatrolCompletedSseEvent) => void,
