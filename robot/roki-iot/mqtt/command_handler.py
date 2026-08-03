@@ -18,7 +18,7 @@ from config.settings import AppSettings
 from mqtt.client import MqttClient
 from pipeline.patrol_pipeline import PatrolPipelineRunner
 from serial_reader import ESP32SerialReader
-from state.robot_state_store import RobotStateStore
+from backend_state.robot_state_store import RobotStateStore
 
 
 SEOUL = ZoneInfo("Asia/Seoul")
