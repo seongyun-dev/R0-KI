@@ -180,13 +180,15 @@ export default function EventList() {
                 </div>
               )}
 
+              {/* 여기 숫자는 지금 보이는 페이지 기준이다 — 아래 페이지네이션 줄의
+                  '전체 N건'(totalElements)과 같은 말로 보이지 않게 범위를 밝힌다 */}
               <div className="tfoot">
                 <span>
                   {isLoading
                     ? '불러오는 중…'
                     : rows.length === 0
                       ? '결과 없음'
-                      : `전체 ${rows.length}건 · 긴급 ${urgentCount}건`}
+                      : `이 페이지 ${rows.length}건 · 긴급 ${urgentCount}건`}
                 </span>
                 <span>최신순</span>
               </div>

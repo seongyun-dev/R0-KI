@@ -158,7 +158,14 @@ export default function RobotList() {
               )}
 
               <div className="tfoot">
-                <span>{isLoading ? '불러오는 중…' : `전체 ${rows.length}대`}</span>
+                {/* 지금 보이는 페이지 기준 — 아래 '전체 N대'(totalElements)와 구분한다 */}
+                <span>
+                  {isLoading
+                    ? '불러오는 중…'
+                    : rows.length === 0
+                      ? '결과 없음'
+                      : `이 페이지 ${rows.length}대`}
+                </span>
                 <span>등록순</span>
               </div>
               <div

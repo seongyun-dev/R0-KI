@@ -132,7 +132,8 @@ export default function PatrolList() {
                 </tbody>
               </table>
               <div className="tfoot">
-                <span>{isLoading ? '불러오는 중…' : rows.length === 0 ? '조건에 맞는 순찰 이력이 없습니다' : `전체 ${rows.length}건`}</span>
+                {/* 지금 보이는 페이지 기준 — 아래 '전체 N건'(totalElements)과 구분한다 */}
+                <span>{isLoading ? '불러오는 중…' : rows.length === 0 ? '조건에 맞는 순찰 이력이 없습니다' : `이 페이지 ${rows.length}건`}</span>
                 <span>{PERIOD_LABEL[applied] ?? '기간 전체'}</span>
               </div>
               <div
