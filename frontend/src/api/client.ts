@@ -39,8 +39,8 @@ export async function authenticatedFetch(path: string, init: RequestInit = {}) {
   if (auth) {
     if (!headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
     // Nginx auth_request 서브요청은 영상 전용 헤더를 백엔드 Authorization으로 변환한다.
-    if (!headers.has('X-Live-Authorization')) {
-      headers.set('X-Live-Authorization', auth.Authorization)
+    if (!headers.has('X-Live-Token')) {
+      headers.set('X-Live-Token', auth.Authorization.slice('Bearer '.length))
     }
   }
 
