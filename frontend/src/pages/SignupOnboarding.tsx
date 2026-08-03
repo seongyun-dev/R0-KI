@@ -74,11 +74,21 @@ export default function SignupOnboarding() {
   const storedPhase = useOnboardingProgress((state) => state.phase)
   const ownsStoredProgress =
     currentLoginId != null && onboardingOwner === currentLoginId
-  const phase: Phase = ownsStoredProgress && storedPhase ? storedPhase : 'account'
   const storedRobotId = useOnboardingProgress((state) => state.robotId)
   const storedMapId = useOnboardingProgress((state) => state.mapId)
   const robotId = ownsStoredProgress ? storedRobotId : null
   const mapId = ownsStoredProgress ? storedMapId : null
+
+  /* 단계에 필요한 값이 없으면 그 단계를 그릴 수 없다 — 스캔은 주행할 로봇을,
+     구역 지정은 완성된 지도를 알아야 시작한다. 값이 갖춰진 가장 앞 단계로 되돌린다.
+     그대로 두면 제목·설명만 뜨고 버튼이 하나도 없는 화면에 갇혀 자력으로 못 빠져나온다. */
+  const resolvePhase = (): Phase => {
+    if (!ownsStoredProgress || !storedPhase) return 'account'
+    if (storedPhase === 'zones' && mapId == null) return robotId == null ? 'robot' : 'scan'
+    if (storedPhase === 'scan' && robotId == null) return 'robot'
+    return storedPhase
+  }
+  const phase = resolvePhase()
   const beginOnboarding = useOnboardingProgress((state) => state.begin)
   const moveToRobot = useOnboardingProgress((state) => state.moveToRobot)
   const moveToScan = useOnboardingProgress((state) => state.moveToScan)
@@ -88,7 +98,7 @@ export default function SignupOnboarding() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string>()
   const setMapContext = useAuthStore((s) => s.setMapContext)
-  // 계정 등록을 마친 직후 — 완료 모달을 띄우고, 이어서 할지 여기서 고른다
+  // 계정 등록을 마친 직후 안내 모달 — 닫으면 로봇 등록 단계가 그대로 드러난다
   const [signedUpId, setSignedUpId] = useState<string>()
 
   return (
@@ -115,7 +125,11 @@ export default function SignupOnboarding() {
                     // 이미 등록된 단지면 소속 회원으로 가입 완료 → 바로 대시보드
                     // (로봇·지도는 단지 관리자가 이미 등록해 둔 상태)
                     if (response.isNewApartment) {
-                      // 계정 등록까지가 이 단계의 끝 — 이어서 할지는 모달에서 고른다
+                      /* 회원가입 API가 토큰을 발급하므로 이 시점에 이미 로그인 상태다.
+                         온보딩 진행 상태를 모달을 닫은 뒤가 아니라 여기서 바로 세운다 —
+                         모달이 떠 있는 동안 주소창으로 /app 에 들어가면 문지기(RequireAuth)가
+                         진행 상태를 못 봐서, 로봇·지도 없는 빈 관제 화면이 그대로 열린다. */
+                      beginOnboarding(data.username)
                       setSignedUpId(data.username)
                     } else {
                       resetOnboarding()
@@ -161,7 +175,10 @@ export default function SignupOnboarding() {
             <StepZones
               mapId={mapId}
               onPrev={() => {
+                // 로봇을 모르면 스캔으로 돌아가도 시작할 수 없다 — 로봇 등록부터.
+                // (조건만 걸어두면 버튼이 아무 반응 없이 먹통이 된다)
                 if (robotId != null) moveToScan(robotId)
+                else moveToRobot()
               }}
               onComplete={(zones) => {
                 setRegisteredZones(zones) // 대시보드 지도에 반영
@@ -174,19 +191,9 @@ export default function SignupOnboarding() {
         </div>
       </div>
 
-      {/* 계정 등록 직후 — 이어서 로봇을 등록할지, 나중에 할지 고른다.
-          나중에 하기를 골라도 계정은 남고, 다음 로그인 때 이 단계로 돌아온다. */}
-      <SignupDoneModal
-        open={signedUpId != null}
-        onContinue={() => {
-          if (signedUpId) beginOnboarding(signedUpId)
-          setSignedUpId(undefined)
-        }}
-        onLater={() => {
-          setSignedUpId(undefined)
-          navigate('/login', { replace: true })
-        }}
-      />
+      {/* 계정 등록 직후 안내 — 진행 상태는 위에서 이미 세웠으므로 여기서는 닫기만 한다.
+          닫으면 바로 로봇 등록 단계다. 관제 화면으로 빠져나가는 길은 두지 않는다. */}
+      <SignupDoneModal open={signedUpId != null} onContinue={() => setSignedUpId(undefined)} />
     </R0KiAuthShell>
   )
 }

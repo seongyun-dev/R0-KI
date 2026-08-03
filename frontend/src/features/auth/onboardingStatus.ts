@@ -15,6 +15,27 @@ export type OnboardingStatus = {
 }
 
 /**
+ * 이어서 진행할 단계를 고른다.
+ *
+ * 스캔 단계는 "어느 로봇이 주행할지"를 알아야 시작할 수 있다. 로봇은 등록됐는데
+ * 식별자를 못 구한 경우(로그인 응답에 없고 로봇 목록 조회도 실패)에 그대로 스캔으로
+ * 보내면 [맵 파악하기] 버튼이 렌더되지 않아 빈 화면에 갇힌다 — 문지기가 /app 도
+ * 막으므로 자력으로 못 빠져나온다. 그래서 로봇 등록부터 다시 밟게 한다.
+ *
+ * 지도까지 끝난 계정은 식별자를 몰라도 온보딩을 다시 시킬 이유가 없으므로 통과시킨다.
+ */
+function nextOnboardingPhase(
+  robotRegistered: boolean,
+  mapRegistered: boolean,
+  robotId: string | number | null,
+): OnboardingPhase | null {
+  if (!robotRegistered) return 'robot'
+  if (mapRegistered) return null
+  if (robotId == null) return 'robot'
+  return 'scan'
+}
+
+/**
  * 로그인 응답 + (필요 시) 로봇 목록으로 등록 상태를 만든다.
  *
  * 백엔드가 robotRegistered/mapRegistered 를 내려주는 것이 기본이고,
@@ -45,6 +66,6 @@ export async function readOnboardingStatus(
     robotRegistered: Boolean(robotRegistered),
     mapRegistered,
     robotId,
-    nextPhase: !robotRegistered ? 'robot' : !mapRegistered ? 'scan' : null,
+    nextPhase: nextOnboardingPhase(Boolean(robotRegistered), mapRegistered, robotId),
   }
 }
