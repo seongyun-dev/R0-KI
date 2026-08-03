@@ -174,6 +174,7 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   assignee?: string;                // 담당자 (처리중/처리완료 시) — 백엔드 제공
   processedAt?: string;             // 처리 완료 시각 (처리완료 시 표시)
   occurredAt?: string;
+  mapId?: string | number | null;
   x?: number;
   y?: number;
   confidence?: number;              // 92 (%)
