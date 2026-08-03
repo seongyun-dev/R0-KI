@@ -40,18 +40,17 @@ function nextOnboardingPhase(
 /**
  * 로그인 응답 + (필요 시) 로봇 목록으로 등록 상태를 만든다.
  *
- * 백엔드가 robotRegistered/mapRegistered 를 내려주는 것이 기본이고,
- * 아직 안 내려오는 동안에는 로봇 목록 조회로 로봇 등록 여부를 보완한다.
- *
- * 지도는 "내 지도" 조회 API가 없어 목록으로 보완할 수 없다. 대신 로그인 응답의
- * mapId 유무로 판정한다 — 지도가 있으면 그 식별자가 함께 내려오기 때문이다.
- * 둘 다 없으면 미등록으로 본다. 로봇만 등록하고 지도를 건너뛴 계정이
- * 지도 없는 관제 화면으로 들어가는 것을 막는 쪽을 우선한다.
+ * 판정 근거는 로그인 응답의 hasRobot / hasMap 이다(백엔드 SigninResponse 필드명).
+ * 값이 안 오는 경우:
+ * - 로봇은 로봇 목록 조회로 보완한다.
+ * - 지도는 "내 지도" 조회 API가 없어 보완할 수 없다. 이때는 등록된 것으로 보고
+ *   흐름을 막지 않는다 — 여기서 미등록으로 단정하면 지도를 이미 등록한 사람까지
+ *   맵 등록 화면에 갇힌다(실제로 필드명을 잘못 읽어 그 사고가 났었다).
  */
 export async function readOnboardingStatus(
   data: SignInResponse['data'],
 ): Promise<OnboardingStatus> {
-  let robotRegistered = data.robotRegistered
+  let robotRegistered = data.hasRobot
   let robotId: string | number | null = data.robotId ?? null
 
   if (robotRegistered === undefined || robotId == null) {
@@ -66,7 +65,7 @@ export async function readOnboardingStatus(
   }
 
   const mapId: string | number | null = data.mapId ?? null
-  const mapRegistered = data.mapRegistered ?? mapId != null
+  const mapRegistered = data.hasMap ?? true
 
   return {
     robotRegistered: Boolean(robotRegistered),
