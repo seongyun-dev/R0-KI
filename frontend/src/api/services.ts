@@ -28,6 +28,7 @@ import type {
   NotificationHistoryResponse,
   PatrolCreateRequest,
   PatrolCreateResponse,
+  PatrolStopResponse,
   PatrolCompletedSseEvent,
   PatrolDetailResponse,
   PatrolEndRequest,
@@ -203,6 +204,11 @@ export const patrolsApi = {
       method: 'POST',
       body: jsonBody(request),
     }),
+  stop: (patrolId: string | number) =>
+    apiRequest<PatrolStopResponse>(
+      `/api/patrols/${encodeURIComponent(String(patrolId))}/stop`,
+      { method: 'POST' },
+    ),
   end: (patrolId: string | number, request: PatrolEndRequest) =>
     apiRequest<PatrolEndResponse>(
       `/api/patrols/${encodeURIComponent(String(patrolId))}/end`,

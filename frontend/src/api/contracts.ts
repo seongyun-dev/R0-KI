@@ -273,7 +273,12 @@ export type EvidenceUploadResponse = {
 
 
 // 백엔드 enum 코드 (back/dev 기준)
-export type PatrolStatusCode = 'IN_PROGRESS' | 'COMPLETED' | 'STOPPED' | 'FAILED'
+export type PatrolStatusCode =
+  | 'IN_PROGRESS'
+  | 'STOP_REQUESTED'
+  | 'COMPLETED'
+  | 'STOPPED'
+  | 'FAILED'
 export type AiSummaryStatusCode = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 
 // POST /api/patrols (순찰 기록 생성)
@@ -286,6 +291,12 @@ export type PatrolCreateResponse = {
   robotId: number
   patrolStatus: PatrolStatusCode
   patrolStartedAt: string
+}
+
+export type PatrolStopResponse = {
+  patrolId: number
+  robotId: number
+  patrolStatus: PatrolStatusCode
 }
 
 // PATCH /api/patrols/{patrolId}/end (순찰 기록 종료)
@@ -399,6 +410,7 @@ export type RobotListResponse = {
   robotStatus: RobotStatusCode | string
   batteryLevel: number | null
   location: string | null
+  activePatrolId?: number | null
 }
 
 export type RobotListPageResponse = {

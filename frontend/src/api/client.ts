@@ -67,6 +67,8 @@ const ERROR_MESSAGES_BY_CODE: Record<string, string> = {
   COMMON_003: '요청한 정보를 찾을 수 없습니다.',
   ROBOT_001: '로봇을 찾을 수 없습니다.',
   ROBOT_002: '이미 등록된 시리얼 번호입니다.',
+  ROBOT_003: '로봇의 통신 또는 모듈 상태를 확인해 주세요.',
+  PATROL_003: '현재 상태에서는 순찰을 종료할 수 없습니다.',
 }
 
 function apiErrorMessage(status: number, body: unknown) {

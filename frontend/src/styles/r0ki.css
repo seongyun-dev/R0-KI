@@ -503,6 +503,11 @@
   background:var(--focus-in);color:var(--graphic);
   font-size:12px;font-weight:800;letter-spacing:-.01em;white-space:nowrap}
 .r0ki .botitem .go svg{width:11px;height:11px;flex:none;fill:currentColor}
+/* 순찰중 로봇의 종료 안내는 시작 안내와 크기·배치를 맞추되 위험 동작임을 색으로 구분한다. */
+.r0ki .botitem .go.stop{border-color:color-mix(in srgb,var(--urgent) 32%,transparent);
+  background:color-mix(in srgb,var(--urgent) 9%,transparent);color:var(--urgent)}
+.r0ki .botitem:hover .go.stop,.r0ki .botitem:focus-visible .go.stop{
+  border-color:var(--urgent);background:var(--urgent);color:#fff}
 /* 배지가 붙은 칩은 폭이 빠듯하다. 다른 칩과 달리 여기서는 이름이 먼저 줄어든다 —
    배지가 잘리면 눌러도 되는 칩인지 알 수 없어서, 이름 몇 글자보다 이쪽이 우선이다. */
 .r0ki .botitem:has(.go) .nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
