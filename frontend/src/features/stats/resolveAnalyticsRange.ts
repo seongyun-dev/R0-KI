@@ -1,20 +1,21 @@
 /**
- * 통계 기간(from/to) 계산.
+ * 통계 기간(from/to) 계산 — 주/월/분기/연 + offset 네비게이션.
  *
- * Stats 화면 드롭다운 period → 백엔드 overview/trend/handling/by-zone 공통 쿼리.
- * 시간대는 백엔드와 동일하게 Asia/Seoul(+09:00) wall-clock 문자열을 쓴다.
- *
- * - week: 이번 주 월요일 00:00 ~ 일요일 23:59:59
- * - month: 이번 달 1일 00:00 ~ 말일 23:59:59 (기본)
- * - quarter: 이번 분기 첫날 00:00 ~ 분기 말일 23:59:59
+ * offset 0 = 현재 구간, -1 = 직전, -2 = 그 이전 …
+ * 분기·연 추이는 항상 month 버킷 (day 촘촘 라벨 방지).
+ * 시간대: Asia/Seoul(+09:00).
  */
+
+export type StatsUnit = 'week' | 'month' | 'quarter' | 'year'
 
 export type AnalyticsRange = {
   from: string
   to: string
+  label: string
 }
 
-/** 서울 기준 오늘 연·월·일 */
+export type TrendBucket = 'day' | 'week' | 'month'
+
 function seoulYmd() {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Seoul',
@@ -38,45 +39,106 @@ function atEnd(y: number, m: number, d: number) {
   return `${y}-${pad(m)}-${pad(d)}T23:59:59+09:00`
 }
 
-/** 해당 월 말일 */
 function lastDayOfMonth(y: number, m: number) {
   return new Date(Date.UTC(y, m, 0)).getUTCDate()
 }
 
-/**
- * Stats period 값 → analytics from/to.
- * @param period 'week' | 'month' | 'quarter' | 기타(기본 month)
- */
-export function resolveAnalyticsRange(period = 'month'): AnalyticsRange {
+function todayAnchor() {
   const { year, month, day } = seoulYmd()
-  // JS Date: monthIndex 0-based. 요일 계산용(서울 날짜를 UTC 정오로 고정해 요일만 씀)
-  const todayUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0))
-  const dow = todayUtc.getUTCDay() // 0=일 … 6=토
-  const daysFromMonday = (dow + 6) % 7
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0))
+}
 
-  if (period === 'week') {
-    const monday = new Date(todayUtc)
-    monday.setUTCDate(day - daysFromMonday)
-    const sunday = new Date(monday)
-    sunday.setUTCDate(monday.getUTCDate() + 6)
-    return {
-      from: atStart(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate()),
-      to: atEnd(sunday.getUTCFullYear(), sunday.getUTCMonth() + 1, sunday.getUTCDate()),
-    }
-  }
-
-  if (period === 'quarter') {
-    const qStartMonth = Math.floor((month - 1) / 3) * 3 + 1
-    const qEndMonth = qStartMonth + 2
-    return {
-      from: atStart(year, qStartMonth, 1),
-      to: atEnd(year, qEndMonth, lastDayOfMonth(year, qEndMonth)),
-    }
-  }
-
-  // month (기본)
+function ymdOf(date: Date) {
   return {
-    from: atStart(year, month, 1),
-    to: atEnd(year, month, lastDayOfMonth(year, month)),
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
   }
+}
+
+function formatMd(m: number, d: number) {
+  return `${m}/${d}`
+}
+
+/**
+ * 단위 + offset → from/to/label.
+ * @param offset 0=현재, 음수=과거 (양수는 현재로 클램프)
+ */
+export function resolveStatsRange(unit: StatsUnit = 'month', offset = 0): AnalyticsRange {
+  const clamped = Math.min(0, offset)
+  const today = todayAnchor()
+  const { year, month } = seoulYmd()
+
+  if (unit === 'week') {
+    const dow = today.getUTCDay()
+    const daysFromMonday = (dow + 6) % 7
+    const thisMonday = new Date(today)
+    thisMonday.setUTCDate(today.getUTCDate() - daysFromMonday + clamped * 7)
+    const sunday = new Date(thisMonday)
+    sunday.setUTCDate(thisMonday.getUTCDate() + 6)
+
+    const a = ymdOf(thisMonday)
+    const b = ymdOf(sunday)
+    const sameYear = a.year === b.year
+    const label = sameYear
+      ? `${a.year}. ${formatMd(a.month, a.day)}–${formatMd(b.month, b.day)}`
+      : `${a.year}. ${formatMd(a.month, a.day)}–${b.year}. ${formatMd(b.month, b.day)}`
+
+    return {
+      from: atStart(a.year, a.month, a.day),
+      to: atEnd(b.year, b.month, b.day),
+      label,
+    }
+  }
+
+  if (unit === 'quarter') {
+    const thisQ = Math.floor((month - 1) / 3) // 0..3
+    const index = year * 4 + thisQ + clamped
+    const y = Math.floor(index / 4)
+    const q = ((index % 4) + 4) % 4 // 안전
+    const startMonth = q * 3 + 1
+    const endMonth = startMonth + 2
+    return {
+      from: atStart(y, startMonth, 1),
+      to: atEnd(y, endMonth, lastDayOfMonth(y, endMonth)),
+      label: `${y}년 ${q + 1}분기`,
+    }
+  }
+
+  if (unit === 'year') {
+    const y = year + clamped
+    return {
+      from: atStart(y, 1, 1),
+      to: atEnd(y, 12, 31),
+      label: `${y}년`,
+    }
+  }
+
+  // month
+  const monthIndex = year * 12 + (month - 1) + clamped
+  const y = Math.floor(monthIndex / 12)
+  const m = ((monthIndex % 12) + 12) % 12 + 1
+  return {
+    from: atStart(y, m, 1),
+    to: atEnd(y, m, lastDayOfMonth(y, m)),
+    label: `${y}년 ${m}월`,
+  }
+}
+
+/**
+ * 추이 버킷.
+ * - 주/달: day
+ * - 분기/연: 무조건 month (라벨 과밀 방지)
+ */
+export function resolveTrendBucket(unit: StatsUnit = 'month'): TrendBucket {
+  if (unit === 'quarter' || unit === 'year') return 'month'
+  return 'day'
+}
+
+/** @deprecated 프리셋 period 호환 */
+export function resolveAnalyticsRange(period = 'month'): AnalyticsRange {
+  if (period === 'week') return resolveStatsRange('week', 0)
+  if (period === 'quarter') return resolveStatsRange('quarter', 0)
+  if (period === 'year') return resolveStatsRange('year', 0)
+  return resolveStatsRange('month', 0)
 }

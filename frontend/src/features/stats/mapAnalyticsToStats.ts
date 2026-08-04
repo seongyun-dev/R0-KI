@@ -79,16 +79,24 @@ function formatHandleDelta(delta: AnalyticsDecimalDelta | null | undefined) {
   return `이전 대비 ${sign}${diff}분`
 }
 
-/** LocalDateTime 문자열 → MM/DD (일자별 차트 X축) */
-function toMonthDay(bucketStart: string) {
+/** LocalDateTime 문자열 → 추이 차트 X축 라벨 */
+function toTrendLabel(bucketStart: string, bucket: string) {
   // "2026-07-01T00:00:00" 또는 offset 포함 모두 앞 10자로 날짜 파싱
   const datePart = bucketStart.slice(0, 10)
   const [, m, d] = datePart.split('-')
-  if (!m || !d) return bucketStart
+  if (!m) return bucketStart
+  if (bucket === 'month') return `${Number(m)}월`
+  if (!d) return bucketStart
   return `${m}/${d}`
 }
 
-/** overview → KPI summary */
+/** trend(day|month) → 추이 차트 데이터 */
+export function mapTrendToDaily(trend: AnalyticsTrendResponse): DailyEventStat[] {
+  return trend.series.map((item) => ({
+    date: toTrendLabel(item.bucketStart, trend.bucket),
+    count: num(item.totalCount),
+  }))
+}
 export function mapOverviewToSummary(overview: AnalyticsOverviewResponse): StatSummary {
   const avg = overview.totals.avgHandleMin
   return {
@@ -103,14 +111,6 @@ export function mapOverviewToSummary(overview: AnalyticsOverviewResponse): StatS
       handle: formatHandleDelta(overview.delta.handleTime),
     },
   }
-}
-
-/** trend(day) → 일자별 추이 */
-export function mapTrendToDaily(trend: AnalyticsTrendResponse): DailyEventStat[] {
-  return trend.series.map((item) => ({
-    date: toMonthDay(item.bucketStart),
-    count: num(item.totalCount),
-  }))
 }
 
 /**

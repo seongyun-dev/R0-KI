@@ -8,21 +8,19 @@ import { EventTrendChart } from '../features/stats/EventTrendChart'
 import { HandlingChart, HANDLING_OPACITIES } from '../features/stats/HandlingChart'
 import { HourlyTypeChart, HOURLY_SERIES } from '../features/stats/HourlyTypeChart'
 import { ZonePieChart } from '../features/stats/ZonePieChart'
-import { useStats } from '../features/stats/useStats'
+import { useStats, useStatsPeriodLabel } from '../features/stats/useStats'
+import type { StatsUnit } from '../features/stats/resolveAnalyticsRange'
 import { downloadCsv } from '../lib/downloadCsv'
 
 /* R0-Ki 통계 — 시안 R0Ki-stats 그대로.
-   3단 관제 구성: 좌 KPI 스택 / 중앙 주력 차트 2단 / 우 보조 패널 / 하단 AI 인사이트.
-   한 화면 고정. 데이터·CSV 내보내기는 기존 훅/로직 그대로. */
+   기간: 주/월 단위 + 화살표로 과거 구간 이동 (차트만, AI 리포트는 독립). */
 
-// 기본값(이번 달/전체)은 allLabel 로 두어 미선택 상태로 보이게 한다
-// period → resolveAnalyticsRange → analytics from/to (디자인은 그대로, 기간만 API에 반영)
-const PERIOD_OPTIONS = [
-  { value: 'week', label: '이번 주' },
-  { value: 'quarter', label: '이번 분기' },
+const UNIT_OPTIONS = [
+  { value: 'week', label: '주 단위' },
+  { value: 'quarter', label: '분기 단위' },
+  { value: 'year', label: '연 단위' },
 ]
-// 구역 드롭다운은 화면 값을 zoneId(checkpoint_id) 목록으로 변환해 API 필터에 반영한다.
-// (현재는 zoneName 키워드 기반 매핑: parking=주차, recycle=분리수거, danger=위험)
+
 const ZONE_OPTIONS = [
   { value: 'parking', label: '구역: 주차장' },
   { value: 'recycle', label: '구역: 분리수거장' },
@@ -30,13 +28,21 @@ const ZONE_OPTIONS = [
 ]
 
 export default function Stats() {
-  const [period, setPeriod] = useState('')
+  // '' = 달 단위(기본)
+  const [unitKey, setUnitKey] = useState('')
+  const unit: StatsUnit =
+    unitKey === 'week' || unitKey === 'quarter' || unitKey === 'year'
+      ? unitKey
+      : 'month'
+  // 0 = 이번 주/달, -1 = 직전, … (미래로 가지 않음)
+  const [offset, setOffset] = useState(0)
   const [zone, setZone] = useState('')
+  const periodLabel = useStatsPeriodLabel(unit, offset)
   const { data, isLoading, error, refetch } = useStats({
-    period: period || 'month',
+    unit,
+    offset,
     zone: zone || 'all',
   })
-  // 토스트
   const [toast, setToast] = useState<string>()
 
   useEffect(() => {
@@ -45,17 +51,22 @@ export default function Stats() {
     return () => clearTimeout(t)
   }, [toast])
 
+  // 단위가 바뀌면 이번 구간(offset 0)으로 리셋
+  const onUnitChange = (value: string) => {
+    setUnitKey(value)
+    setOffset(0)
+  }
+
   const onExport = () => {
     if (!data) return
     const rows: (string | number)[][] = [
       ['구분', '항목', '값'],
+      ['기간', periodLabel, ''],
       ['KPI', '총 순찰 횟수', data.summary.totalPatrols],
       ['KPI', '총 이벤트', data.summary.totalEvents],
       ['KPI', '평균 처리시간(분)', data.summary.avgHandleMin],
-      // 가동률은 백엔드 analytics 응답에 없어 항상 0이 나간다 — 받는 사람이
-      // "가동률 0%"로 읽으므로 열을 빼둔다. 값이 생기면 다시 넣는다.
       [],
-      ['일자별 이벤트 추이', '일자', '건수'],
+      ['이벤트 추이', '기간', '건수'],
       ...data.daily.map((d) => ['', d.date, d.count]),
       [],
       ['시간대별 이벤트(유형별)', '시간대', '주차', '쓰레기'],
@@ -71,18 +82,17 @@ export default function Stats() {
     setToast('CSV를 내보냈습니다')
   }
 
-  // 일자별 추이 메타 — 07/15 6건 · 전일 −4건 ▼
   const last = data?.daily[data.daily.length - 1]
   const prev = data?.daily[data.daily.length - 2]
   const diff = last && prev ? last.count - prev.count : 0
+  const useMonthTrend = unit === 'quarter' || unit === 'year'
+  const trendTitle = useMonthTrend ? '월별 이벤트 추이' : '이벤트 추이'
+  const trendPrevLabel = useMonthTrend ? '전월' : '전일'
 
-  // 시간대별 피크 — 15-18시 20건
   const hourly = (data?.hourly ?? []).map((h) => ({ ...h, total: h.주차 + h.쓰레기 }))
   const peak = hourly.length ? hourly.reduce((a, b) => (b.total > a.total ? b : a)) : undefined
-
   const zoneTotal = (data?.zones ?? []).reduce((s, z) => s + z.count, 0)
 
-  // KPI — 증감 화살표는 색이 아니라 방향으로 (모노크롬 규칙)
   const kpis = data
     ? [
         { k: '총 순찰 횟수', v: data.summary.totalPatrols, u: '회', d: data.summary.deltas?.patrols, ar: '▲' },
@@ -102,7 +112,32 @@ export default function Stats() {
             <div className="ptitle">기간별 통계 &amp; 인사이트</div>
           </div>
           <div className="headtools tight">
-            <R0KiDropdown allLabel="이번 달" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+            <R0KiDropdown
+              allLabel="달 단위"
+              options={UNIT_OPTIONS}
+              value={unitKey}
+              onChange={onUnitChange}
+            />
+            <button
+              type="button"
+              className="btn btn-s btn-add"
+              aria-label="이전 기간"
+              onClick={() => setOffset((v) => v - 1)}
+            >
+              <svg viewBox="0 0 24 24"><path d="M15 5.5 8.5 12 15 18.5" /></svg>
+            </button>
+            <span className="st-head" style={{ marginBottom: 0, minWidth: '9.5rem', justifyContent: 'center' }}>
+              <span className="ttl" style={{ fontSize: 13.5 }}>{periodLabel}</span>
+            </span>
+            <button
+              type="button"
+              className="btn btn-s btn-add"
+              aria-label="다음 기간"
+              disabled={offset >= 0}
+              onClick={() => setOffset((v) => Math.min(0, v + 1))}
+            >
+              <svg viewBox="0 0 24 24"><path d="M9 5.5 15.5 12 9 18.5" /></svg>
+            </button>
             <R0KiDropdown allLabel="구역: 전체" options={ZONE_OPTIONS} value={zone} onChange={setZone} />
             <button type="button" className="btn btn-s btn-add" onClick={onExport} disabled={!data}>
               <svg viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 19h16" /></svg>
@@ -124,7 +159,6 @@ export default function Stats() {
           </div>
         ) : (
           <div className="st-grid">
-            {/* ── 좌: KPI 스택 ── */}
             <div className="st-col c1">
               {kpis.map((k) => (
                 <div className="st-kpi" key={k.k}>
@@ -137,14 +171,13 @@ export default function Stats() {
               ))}
             </div>
 
-            {/* ── 중앙: 주력 차트 2단 ── */}
             <div className="st-col c2">
               <div className="glass g2 st-panel" style={{ flex: 1.22 }}>
                 <div className="st-head">
-                  <span className="bul" /><span className="ttl">일자별 이벤트 추이</span>
+                  <span className="bul" /><span className="ttl">{trendTitle}</span>
                   {last && (
                     <span className="meta">
-                      <b>{last.date}</b> {last.count}건 · 전일 {diff > 0 ? `+${diff}` : diff}건{' '}
+                      <b>{last.date}</b> {last.count}건 · {trendPrevLabel} {diff > 0 ? `+${diff}` : diff}건{' '}
                       {diff > 0 ? '▲' : diff < 0 ? '▼' : ''}
                     </span>
                   )}
@@ -170,7 +203,6 @@ export default function Stats() {
               </div>
             </div>
 
-            {/* ── 우: 보조 패널 ── */}
             <div className="st-col c3">
               <div className="glass g2 st-panel">
                 <div className="st-head">
@@ -206,7 +238,6 @@ export default function Stats() {
               </div>
             </div>
 
-            {/* ── 하단: 백엔드 AI 인사이트 리포트 (지난 완료 주/월) ── */}
             <InsightReportPanel />
           </div>
         )}
@@ -214,7 +245,6 @@ export default function Stats() {
         {(error || !data) && <InsightReportPanel />}
       </div>
 
-      {/* 토스트 */}
       <div className={`toast${toast ? ' on' : ''}`} role="status" aria-live="polite">
         <svg viewBox="0 0 24 24"><path d="M4 12.5 9.5 18 20 6.5" /></svg>
         <span>{toast}</span>
