@@ -65,13 +65,55 @@ class EventDeliveryTest(unittest.TestCase):
             store = SimpleNamespace(
                 get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
             )
-            DetectionRecorder(outbox, store)(vehicle)
+            ranges = SimpleNamespace(get_front_range=lambda: 1.0)
+            DetectionRecorder(
+                outbox, store, vehicle_range_source=ranges
+            )(vehicle)
             backend = FakeBackend()
             worker = EventDeliveryWorker(outbox, backend_factory=lambda: backend)
 
             self.assertEqual(worker.process_available(), 1)
             self.assertEqual(outbox.pending_count(), 0)
             self.assertEqual(backend.create_calls, 0)
+
+    def test_vehicle_uses_lidar_range_instead_of_robot_pose(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            payload = detection("vehicle-ranged").to_dict()
+            payload["eventType"] = "VEHICLE_DETECTED"
+            payload["attributes"] = {"plateText": "12가3456"}
+            vehicle = DetectionEvent.from_json(json.dumps(payload))
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=90.0)
+            )
+            ranges = SimpleNamespace(get_front_range=lambda: 2.0)
+            DetectionRecorder(
+                outbox, store, vehicle_range_source=ranges
+            )(vehicle)
+            backend = FakeBackend()
+            worker = EventDeliveryWorker(outbox, backend_factory=lambda: backend)
+
+            self.assertEqual(worker.process_available(), 1)
+            self.assertAlmostEqual(backend.vehicles[0]["x"], 1.0, places=6)
+            self.assertAlmostEqual(backend.vehicles[0]["y"], 4.0, places=6)
+
+    def test_vehicle_without_fresh_lidar_range_is_not_misplaced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            payload = detection("vehicle-no-range").to_dict()
+            payload["eventType"] = "VEHICLE_DETECTED"
+            payload["attributes"] = {"plateText": "12가3456"}
+            vehicle = DetectionEvent.from_json(json.dumps(payload))
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
+            )
+            ranges = SimpleNamespace(get_front_range=lambda: None)
+
+            DetectionRecorder(
+                outbox, store, vehicle_range_source=ranges
+            )(vehicle)
+
+            self.assertEqual(outbox.pending_count(), 0)
 
     def test_recorder_drops_detection_until_map_pose_exists(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

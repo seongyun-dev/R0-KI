@@ -15,6 +15,8 @@ class AiStatusTest(unittest.TestCase):
                     "cameraReady": True,
                     "engineReady": True,
                     "inferenceReady": True,
+                    "detectionEnabled": True,
+                    "patrolId": 17,
                     "modelVersion": "vehicle-v1",
                     "heartbeatAt": "2026-07-31T05:20:02Z",
                     "errorCode": None,
@@ -23,6 +25,46 @@ class AiStatusTest(unittest.TestCase):
             )
         )
         self.assertTrue(status.ready_for_patrol)
+        self.assertTrue(status.detection_enabled)
+        self.assertEqual(status.patrol_id, 17)
+        self.assertTrue(status.detection_applied_for(17))
+
+    def test_rejects_invalid_detection_application_status(self) -> None:
+        payload = {
+            "schemaVersion": 1,
+            "state": "READY",
+            "ready": True,
+            "cameraReady": True,
+            "engineReady": True,
+            "inferenceReady": True,
+            "detectionEnabled": "yes",
+            "patrolId": 17,
+            "heartbeatAt": "2026-07-31T05:20:02Z",
+        }
+        with self.assertRaises(ContractError):
+            AiStatus.from_json(json.dumps(payload))
+
+    def test_matching_detection_is_not_applied_while_ai_is_unready(self) -> None:
+        for state in ("ERROR", "DEGRADED"):
+            with self.subTest(state=state):
+                status = AiStatus.from_json(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "state": state,
+                            "ready": False,
+                            "cameraReady": True,
+                            "engineReady": True,
+                            "inferenceReady": True,
+                            "detectionEnabled": True,
+                            "patrolId": 17,
+                            "heartbeatAt": "2026-08-04T00:00:00Z",
+                        }
+                    )
+                )
+
+                self.assertFalse(status.ready_for_patrol)
+                self.assertFalse(status.detection_applied_for(17))
 
     def test_rejects_unsupported_schema(self) -> None:
         with self.assertRaises(ContractError):

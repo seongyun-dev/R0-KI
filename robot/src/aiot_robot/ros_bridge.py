@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -36,6 +38,9 @@ class AiRosBridge(Node):
         self._detection_sink = detection_sink
         self._gate_listener = gate_listener
         self._last_decision: GateDecision | None = None
+        self._status_condition = threading.Condition()
+        self._last_status: AiStatus | None = None
+        self._status_revision = 0
         self._active_patrol_id: int | None = None
 
         control_qos = QoSProfile(
@@ -76,7 +81,7 @@ class AiRosBridge(Node):
 
     def set_detection_enabled(
         self, enabled: bool, patrol_id: int | None, reason: str
-    ) -> None:
+    ) -> int:
         if enabled:
             if patrol_id is None:
                 raise ValueError("patrol_id is required when enabling AI detection")
@@ -90,18 +95,84 @@ class AiRosBridge(Node):
             requested_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             reason=reason,
         )
-        self._control_publisher.publish(message)
-        self._active_patrol_id = patrol_id if enabled else None
+        with self._status_condition:
+            previous_patrol_id = self._active_patrol_id
+            status_revision = self._status_revision
+            self._active_patrol_id = patrol_id if enabled else None
+            try:
+                # Serialize the revision snapshot and publish against status
+                # callbacks. A status observed after ``status_revision`` must
+                # therefore have been received after this control publish.
+                self._control_publisher.publish(message)
+            except Exception:
+                self._active_patrol_id = previous_patrol_id
+                raise
+        return status_revision
 
-    def safe_disable(self, reason: str) -> None:
-        self.set_detection_enabled(False, self._active_patrol_id, reason)
+    def safe_disable(self, reason: str) -> int:
+        with self._status_condition:
+            patrol_id = self._active_patrol_id
+        return self.set_detection_enabled(False, patrol_id, reason)
+
+    def detection_applied(self, patrol_id: int) -> bool:
+        with self._status_condition:
+            status = self._last_status
+            return (
+                self._active_patrol_id == patrol_id
+                and status is not None
+                and status.detection_applied_for(patrol_id)
+            )
+
+    def wait_for_detection_state(
+        self,
+        enabled: bool,
+        patrol_id: int | None,
+        *,
+        after_revision: int,
+        timeout_seconds: float,
+    ) -> bool:
+        """Wait for an AI status newer than the corresponding control."""
+
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        deadline = time.monotonic() + timeout_seconds
+        with self._status_condition:
+            while True:
+                status = self._last_status
+                is_new = self._status_revision > after_revision
+                if enabled:
+                    applied = (
+                        is_new
+                        and self._active_patrol_id == patrol_id
+                        and status is not None
+                        and status.detection_applied_for(patrol_id)
+                    )
+                else:
+                    applied = (
+                        is_new
+                        and self._active_patrol_id is None
+                        and status is not None
+                        and status.detection_enabled is False
+                        and status.patrol_id is None
+                    )
+                if applied:
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._status_condition.wait(remaining)
 
     def _on_status(self, message: String) -> None:
         try:
-            self.gate.record(AiStatus.from_json(message.data))
+            status = AiStatus.from_json(message.data)
         except ContractError as exc:
             self.get_logger().warning(f"Rejected /ai/status message: {exc}")
             return
+        self.gate.record(status)
+        with self._status_condition:
+            self._last_status = status
+            self._status_revision += 1
+            self._status_condition.notify_all()
         self._refresh_gate()
 
     def _on_detection(self, message: String) -> None:
@@ -111,13 +182,15 @@ class AiRosBridge(Node):
             self.get_logger().warning(f"Rejected /ai/detections message: {exc}")
             return
 
-        if self._active_patrol_id is None:
+        with self._status_condition:
+            active_patrol_id = self._active_patrol_id
+        if active_patrol_id is None:
             self.get_logger().warning("Rejected detection while AI detection is disabled")
             return
-        if event.patrol_id != self._active_patrol_id:
+        if event.patrol_id != active_patrol_id:
             self.get_logger().warning(
                 "Rejected detection for non-active patrol "
-                f"{event.patrol_id}; active={self._active_patrol_id}"
+                f"{event.patrol_id}; active={active_patrol_id}"
             )
             return
         try:
@@ -139,7 +212,9 @@ class AiRosBridge(Node):
             f"AI gate mode={decision.mode} allowed={decision.allowed} "
             f"reason={decision.reason}"
         )
-        if not decision.allowed and self._active_patrol_id is not None:
+        with self._status_condition:
+            has_active_patrol = self._active_patrol_id is not None
+        if not decision.allowed and has_active_patrol:
             self.safe_disable(decision.reason)
         if self._gate_listener is not None:
             self._gate_listener(decision)

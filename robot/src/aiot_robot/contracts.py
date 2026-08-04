@@ -55,6 +55,24 @@ def _optional_string(data: Mapping[str, Any], name: str) -> str | None:
     return value
 
 
+def _optional_bool(data: Mapping[str, Any], name: str) -> bool | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ContractError(f"{name} must be a boolean or null")
+    return value
+
+
+def _optional_positive_int(data: Mapping[str, Any], name: str) -> int | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ContractError(f"{name} must be a positive integer or null")
+    return value
+
+
 def _timestamp(data: Mapping[str, Any], name: str) -> str:
     value = _required_string(data, name)
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
@@ -75,6 +93,8 @@ class AiStatus:
     engine_ready: bool
     inference_ready: bool
     heartbeat_at: str
+    detection_enabled: bool | None = None
+    patrol_id: int | None = None
     model_version: str | None = None
     error_code: str | None = None
     message: str | None = None
@@ -87,6 +107,15 @@ class AiStatus:
             and self.camera_ready
             and self.engine_ready
             and self.inference_ready
+        )
+
+    def detection_applied_for(self, patrol_id: int) -> bool:
+        """Return true only when matching detection is usable for patrol."""
+
+        return (
+            self.ready_for_patrol
+            and self.detection_enabled is True
+            and self.patrol_id == patrol_id
         )
 
     @classmethod
@@ -102,6 +131,8 @@ class AiStatus:
             engine_ready=_required_bool(data, "engineReady"),
             inference_ready=_required_bool(data, "inferenceReady"),
             heartbeat_at=_timestamp(data, "heartbeatAt"),
+            detection_enabled=_optional_bool(data, "detectionEnabled"),
+            patrol_id=_optional_positive_int(data, "patrolId"),
             model_version=_optional_string(data, "modelVersion"),
             error_code=_optional_string(data, "errorCode"),
             message=_optional_string(data, "message"),

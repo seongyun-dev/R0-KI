@@ -28,9 +28,19 @@ if [ "$(id -u)" -eq 0 ] && id aiot >/dev/null 2>&1; then
   install -d -m 2770 -o aiot -g aiot \
     /var/lib/aiot/config \
     /var/lib/aiot/evidence \
+    /var/lib/aiot/maps \
     /var/lib/aiot/outbox \
     /var/lib/aiot/secrets \
     /var/lib/aiot/state
+fi
+
+# Generic USB gamepads are normally root:input 0660. The deployed runtime
+# currently runs as e103, while local development may override the user.
+if [ "$(id -u)" -eq 0 ]; then
+  runtime_user="${AIOT_RUNTIME_USER:-e103}"
+  if id "${runtime_user}" >/dev/null 2>&1 && getent group input >/dev/null 2>&1; then
+    usermod -a -G input "${runtime_user}"
+  fi
 fi
 
 echo "Robot runtime installed without sending movement commands"

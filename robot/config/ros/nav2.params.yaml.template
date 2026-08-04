@@ -21,8 +21,16 @@ amcl:
     resample_interval: 1
     transform_tolerance: 0.5
     tf_broadcast: true
-    set_initial_pose: false
-    always_reset_initial_pose: false
+    # The Friday demo always starts from the physically marked dock pose.  Do
+    # not reuse an AMCL pose cached by an earlier run or wait for an operator
+    # to publish /initialpose after the patrol START request.
+    set_initial_pose: true
+    always_reset_initial_pose: true
+    initial_pose:
+      x: $INITIAL_POSE_X_M
+      y: $INITIAL_POSE_Y_M
+      z: 0.0
+      yaw: $INITIAL_POSE_YAW_RAD
     first_map_only: true
 
 bt_navigator:
@@ -64,7 +72,7 @@ controller_server:
     general_goal_checker:
       stateful: true
       plugin: nav2_controller::SimpleGoalChecker
-      xy_goal_tolerance: 0.20
+      xy_goal_tolerance: $XY_GOAL_TOLERANCE_M
       yaw_goal_tolerance: 0.35
     FollowPath:
       plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController

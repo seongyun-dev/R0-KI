@@ -37,6 +37,7 @@ class RobotStateStoreTest(unittest.TestCase):
         self.assertEqual(store.get_status().state, "PATROLLING")
         self.assertEqual(store.get_status().camera, "NORMAL")
         self.assertEqual(store.get_status().lidar, "NORMAL")
+        self.assertEqual(store.get_status().line_sensor, "NORMAL")
         self.assertEqual(store.get_status().obstacle.status, "STOP")
         self.assertEqual(store.get_pose(), PoseState(1.0, 2.0, 90.0))
         self.assertTrue(store.has_status_changed())
@@ -66,6 +67,24 @@ class RobotStateStoreTest(unittest.TestCase):
         self.assertEqual(status.line_sensor, "DISCONNECTED")
         self.assertEqual(status.state, "PATROLLING")
         self.assertEqual(status.camera, "NORMAL")
+
+    def test_line_sensor_contract_maps_fault_but_preserves_health(self) -> None:
+        store = RobotStateStore()
+
+        for sensor_status, expected in (
+            (LineSensorStatus.NORMAL, "NORMAL"),
+            (LineSensorStatus.FAULT, "ERROR"),
+            (LineSensorStatus.DISCONNECTED, "DISCONNECTED"),
+        ):
+            with self.subTest(sensor_status=sensor_status):
+                store.update_hardware_status(
+                    HardwareStatus(
+                        80.0,
+                        MotorStatus.NORMAL,
+                        sensor_status,
+                    )
+                )
+                self.assertEqual(store.get_status().line_sensor, expected)
 
 
 if __name__ == "__main__":

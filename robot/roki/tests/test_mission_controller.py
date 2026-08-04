@@ -45,6 +45,21 @@ class MissionControllerTest(unittest.TestCase):
         self.assertFalse(self.controller.patrol_active)
         self.assertTrue(self.controller.current().emergency_stop)
 
+    def test_stale_generation_cannot_commit_control_operation(self) -> None:
+        self.controller.start_patrol(speed=35, steering_deg=80)
+        snapshot = self.controller.snapshot()
+        committed = []
+
+        self.controller.stop_patrol()
+
+        self.assertFalse(
+            self.controller.run_if_current(
+                snapshot.generation,
+                committed.append,
+            )
+        )
+        self.assertEqual(committed, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,3 +1,6 @@
 runtime:
   # Serial이 끊긴 동안 reconnect 여부를 확인하는 주기.
   disconnected_poll_sec: 0.05
+  # ACK 유실 시에도 영구 정지 상태에 머물지 않도록 제한적으로 재시도한다.
+  encoder_zero_retry_interval_sec: 0.5
+  encoder_zero_max_attempts: 3

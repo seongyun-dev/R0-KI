@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 from .backend_client import BackendConfig, RobotBackendClient
 from .contracts import DetectionEvent
 from .outbox import DetectionOutbox
+from .vehicle_localization import project_front_vehicle
 
 
 BackendFactory = Callable[[], RobotBackendClient]
@@ -19,20 +20,51 @@ BackendFactory = Callable[[], RobotBackendClient]
 class DetectionRecorder:
     """Attach the Robot-owned map pose before an AI event reaches disk."""
 
-    def __init__(self, outbox: DetectionOutbox, state_store: Any) -> None:
+    def __init__(
+        self,
+        outbox: DetectionOutbox,
+        state_store: Any,
+        *,
+        vehicle_range_source: Any | None = None,
+        camera_yaw_deg: float = 0.0,
+    ) -> None:
         self._outbox = outbox
         self._state_store = state_store
+        self._vehicle_range_source = vehicle_range_source
+        self._camera_yaw_deg = float(camera_yaw_deg)
 
     def __call__(self, event: DetectionEvent) -> None:
         pose = self._state_store.get_pose()
         if pose is None:
             print(f"[EVENT] detection dropped without map pose eventId={event.event_id}")
             return
-        context = {
-            "x": float(pose.x),
-            "y": float(pose.y),
-            "heading": float(pose.heading),
-        }
+        x = float(pose.x)
+        y = float(pose.y)
+        context = {"x": x, "y": y, "heading": float(pose.heading)}
+        if event.event_type == "VEHICLE_DETECTED":
+            get_range = getattr(self._vehicle_range_source, "get_front_range", None)
+            range_m = get_range() if callable(get_range) else None
+            if range_m is None:
+                print(
+                    "[EVENT] vehicle detection dropped without fresh LiDAR range "
+                    f"eventId={event.event_id}"
+                )
+                return
+            try:
+                vehicle = project_front_vehicle(
+                    pose,
+                    float(range_m),
+                    camera_yaw_deg=self._camera_yaw_deg,
+                )
+            except (TypeError, ValueError):
+                print(
+                    "[EVENT] vehicle detection dropped with invalid LiDAR range "
+                    f"eventId={event.event_id}"
+                )
+                return
+            context.update(
+                {"x": vehicle.x, "y": vehicle.y, "rangeM": vehicle.range_m}
+            )
         self._outbox.enqueue(event, context=context)
 
 

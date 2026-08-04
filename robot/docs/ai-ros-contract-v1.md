@@ -37,12 +37,18 @@ QoS는 reliable, volatile, keep-last 5이며 시작 즉시와 이후 2초마다 
   "cameraReady": true,
   "engineReady": true,
   "inferenceReady": true,
+  "detectionEnabled": true,
+  "patrolId": 15,
   "modelVersion": "vehicle-v1",
   "heartbeatAt": "2026-08-03T05:20:02Z",
   "errorCode": null,
   "message": null
 }
 ```
+
+Robot treats `ENABLE` as applied only after a newer status reports both
+`detectionEnabled=true` and the same `patrolId`. A missing or mismatched
+application status fails START closed after `AIOT_AI_CONTROL_APPLY_TIMEOUT_SEC`.
 
 `state`는 `STARTING`, `READY`, `DEGRADED`, `ERROR`, `STOPPED` 중 하나다. Robot은
 heartbeat가 `AIOT_AI_STATUS_TIMEOUT_SEC`보다 오래되지 않았고 네 readiness 값이

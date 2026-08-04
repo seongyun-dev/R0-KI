@@ -4,7 +4,7 @@ import json
 import unittest
 
 from control.motion_controller import MotionController, MotionControllerSettings
-from mission.mission_controller import MissionCommand, MissionController
+from mission.mission_controller import MissionController
 from runtime.robot_runtime import RobotRuntime, RuntimeSettings
 from safety.safety_controller import SafetyController, SafetySettings
 from serial_comm.protocol import ProtocolSettings
@@ -107,7 +107,6 @@ class SerialIntegrationTest(unittest.TestCase):
         bridge = MockSerialBridge(incoming)
         protocol = ProtocolSettings()
         mission = MissionController(protocol.steering_center_deg)
-        mission.submit(MissionCommand(speed=30, steering_deg=80))
         store = RobotStateStore()
         runtime = RobotRuntime(
             bridge=bridge,
@@ -147,6 +146,12 @@ class SerialIntegrationTest(unittest.TestCase):
                 runtime.request_stop()
 
         runtime.add_odometry_listener(stop_after_odometry)
+        runtime.add_hardware_status_listener(
+            lambda _status: mission.start_patrol(
+                speed=30,
+                steering_deg=80,
+            )
+        )
         runtime.run_forever()
 
         snapshot = store.snapshot()
