@@ -70,15 +70,18 @@ public class RobotTelemetryService {
             return;
         }
 
+        LocalDateTime receivedAt = LocalDateTime.now();
+
         robotRepository
                 .findBySerialNumber(message.robotKey())
                 .ifPresentOrElse(
-                        robot -> applyStatus(robot, message),
+                        robot -> applyStatus(robot, message, receivedAt),
                         () -> log.warn("[MQTT] 알 수 없는 robotKey={}, status 갱신 무시", message.robotKey()));
     }
 
     // obstacle.status=STOP이면 기기가 보낸 state 필드보다 우선해서 robot_status를 OBSTACLE_STOP으로 덮어씀
-    private void applyStatus(PatrolRobot robot, RobotStatusMessage message) {
+    private void applyStatus(
+            PatrolRobot robot, RobotStatusMessage message, LocalDateTime receivedAt) {
         boolean obstacleStop =
                 message.obstacle() != null && message.obstacle().status() == ObstacleStatus.STOP;
         RobotStatus previousStatus = robot.getStatus();
@@ -97,6 +100,7 @@ public class RobotTelemetryService {
                 reportedAt,
                 direction,
                 reason);
+        robot.recordConnection(receivedAt);
 
         if (previousStatus == RobotStatus.OFFLINE && isPatrolling(resolvedStatus)) {
             // 재연결 메시지가 아직 주행 중이라고 알려주면 IDLE로 덮어쓰지 않고 실제 STOP_PATROL을 보낸다.

@@ -78,9 +78,10 @@ public class MappingCommandAckService {
             return null;
         }
 
-        // SUCCEEDED가 아니면 실패로 처리한다(REJECTED/FAILED 구분 없음) - 시작 전 거절된 경우만 반영하고,
-        // 뒤늦게 도착한 상충 ACK로 진행 중인 작업을 종료하지 않는다.
-        if (session.getStatus() == MappingStatus.REQUESTED) {
+        // 같은 시작 명령의 REJECTED/FAILED는 REQUESTED와 MAPPING 모두 실패로 닫는다.
+        // 이미 완료·취소된 terminal 세션은 뒤늦은 ACK로 되돌리지 않는다.
+        if (session.getStatus() == MappingStatus.REQUESTED
+                || session.getStatus() == MappingStatus.MAPPING) {
             session.fail();
             return MappingStatus.FAILED;
         } else if (session.getStatus() != MappingStatus.FAILED) {
