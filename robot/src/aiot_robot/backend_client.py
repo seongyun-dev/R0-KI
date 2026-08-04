@@ -109,6 +109,48 @@ class RobotBackendClient:
             f"multipart/form-data; boundary={boundary}",
         )
 
+    def upload_map(
+        self,
+        mapping_session_id: int,
+        command_id: str,
+        map_image: str | os.PathLike[str],
+        *,
+        resolution: float,
+        origin_x: float,
+        origin_y: float,
+        origin_yaw: float,
+    ) -> Mapping[str, Any]:
+        """Upload the exact PNG + ROS metadata contract owned by Backend."""
+
+        if isinstance(mapping_session_id, bool) or mapping_session_id < 1:
+            raise ValueError("mapping_session_id must be positive")
+        if not command_id:
+            raise ValueError("command_id is required")
+        path = Path(map_image)
+        if not path.is_file() or path.suffix.lower() != ".png":
+            raise ValueError("map_image must be an existing PNG file")
+        if resolution <= 0:
+            raise ValueError("resolution must be positive")
+        boundary = f"aiot-map-{uuid4().hex}"
+        body = self._multipart_body(
+            boundary=boundary,
+            fields=(
+                ("commandId", command_id),
+                ("resolution", format(resolution, ".10g")),
+                ("originX", format(origin_x, ".10g")),
+                ("originY", format(origin_y, ".10g")),
+                ("originYaw", format(origin_yaw, ".10g")),
+            ),
+            file_field="mapImage",
+            file_path=path,
+            file_content_type="image/png",
+        )
+        return self._request(
+            f"/api/map/mapping-sessions/{mapping_session_id}/map",
+            body,
+            f"multipart/form-data; boundary={boundary}",
+        )
+
     def _post_json(
         self, endpoint: str, payload: Mapping[str, Any]
     ) -> Mapping[str, Any]:
@@ -116,6 +158,36 @@ class RobotBackendClient:
             "utf-8"
         )
         return self._request(endpoint, body, "application/json")
+
+    @staticmethod
+    def _multipart_body(
+        *,
+        boundary: str,
+        fields: tuple[tuple[str, str], ...],
+        file_field: str,
+        file_path: Path,
+        file_content_type: str,
+    ) -> bytes:
+        body = bytearray()
+        for name, value in fields:
+            body.extend(f"--{boundary}\r\n".encode())
+            body.extend(
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
+            )
+            body.extend(value.encode("utf-8"))
+            body.extend(b"\r\n")
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(
+            (
+                f'Content-Disposition: form-data; name="{file_field}"; '
+                f'filename="{file_path.name}"\r\n'
+            ).encode("utf-8")
+        )
+        body.extend(f"Content-Type: {file_content_type}\r\n\r\n".encode())
+        body.extend(file_path.read_bytes())
+        body.extend(b"\r\n")
+        body.extend(f"--{boundary}--\r\n".encode())
+        return bytes(body)
 
     def _request(
         self, endpoint: str, body: bytes, content_type: str

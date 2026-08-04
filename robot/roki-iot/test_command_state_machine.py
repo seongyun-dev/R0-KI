@@ -50,10 +50,14 @@ class FakeRuntimeService:
         self.paused = False
         self.order = order
         self.prepare_decision = (True, "READY")
+        self.ready_decision = (True, "READY")
         self.cancel_count = 0
+        self.start_error: Exception | None = None
+        self.invalidate_after_start = False
+        self.stop_error: Exception | None = None
 
     def readiness(self):
-        return True, "READY"
+        return self.ready_decision
 
     def prepare_patrol(self):
         return self.prepare_decision
@@ -66,10 +70,16 @@ class FakeRuntimeService:
         if self.order is not None:
             self.order.append("serial-start" if command == "START_PATROL" else "serial-stop")
         if command == "START_PATROL":
+            if self.start_error is not None:
+                raise self.start_error
             self.active_patrol_id = parameters["patrolId"]
+            if self.invalidate_after_start:
+                self.active_patrol_id = None
         elif command == "STOP_PATROL":
             self.active_patrol_id = None
             self.paused = False
+            if self.stop_error is not None:
+                raise self.stop_error
 
     def pause_patrol(self, reason: str) -> None:
         del reason
@@ -77,6 +87,8 @@ class FakeRuntimeService:
 
     def resume_patrol(self) -> None:
         self.paused = False
+        if self.order is not None:
+            self.order.append("serial-resume")
 
     def tick(self) -> None:
         return None
@@ -87,22 +99,35 @@ class FakeAi:
         self.enabled: list[int] = []
         self.disabled: list[str] = []
         self.order = order
+        self.ready = True
+        self.applied_patrol_id: int | None = None
 
     def readiness(self):
-        return True, "AI_READY"
+        return self.ready, "AI_READY" if self.ready else "AI_STATUS_STALE"
 
     def enable(self, patrol_id: int) -> None:
         self.enabled.append(patrol_id)
+        self.applied_patrol_id = patrol_id
         if self.order is not None:
             self.order.append("ai-enable")
 
     def disable(self, reason: str) -> None:
         self.disabled.append(reason)
+        self.applied_patrol_id = None
         if self.order is not None:
             self.order.append("ai-disable")
 
+    def detection_applied(self, patrol_id: int) -> bool:
+        return self.applied_patrol_id == patrol_id
 
-def payload(command: str, command_id: str, *, patrol_id: int | None = None) -> dict:
+
+def payload(
+    command: str,
+    command_id: str,
+    *,
+    patrol_id: int | None = None,
+    mapping_session_id: int | None = None,
+) -> dict:
     result = {
         "schemaVersion": 1,
         "command": command,
@@ -112,7 +137,44 @@ def payload(command: str, command_id: str, *, patrol_id: int | None = None) -> d
     }
     if patrol_id is not None:
         result["patrolId"] = patrol_id
+    if mapping_session_id is not None:
+        result["mappingSessionId"] = mapping_session_id
     return result
+
+
+class FakeMappingRuntime:
+    def __init__(self) -> None:
+        self.active = False
+        self.starts: list[tuple[int, str]] = []
+        self.stops = 0
+        self.aborts: list[str] = []
+        self.command_id: str | None = None
+        self.start_decision = (True, "READY")
+
+    @property
+    def motion_active(self) -> bool:
+        return self.active
+
+    def start(self, mapping_session_id: int, command_id: str):
+        self.starts.append((mapping_session_id, command_id))
+        if self.start_decision[0]:
+            self.active = True
+            self.command_id = command_id
+        return self.start_decision
+
+    def stop(self) -> None:
+        self.stops += 1
+        self.active = False
+        self.command_id = None
+
+    def abort(self, reason: str) -> str | None:
+        if not self.active:
+            return None
+        self.aborts.append(reason)
+        command_id = self.command_id
+        self.active = False
+        self.command_id = None
+        return command_id
 
 
 class CommandStateMachineTest(unittest.TestCase):
@@ -134,6 +196,7 @@ class CommandStateMachineTest(unittest.TestCase):
         self.store = FakeStore()
         self.runtime = FakeRuntimeService()
         self.ai = FakeAi()
+        self.mapping = FakeMappingRuntime()
         self.now_monotonic = 0.0
         self.handler = PatrolCommandHandler(
             settings=self.settings,
@@ -142,6 +205,7 @@ class CommandStateMachineTest(unittest.TestCase):
             state_store=self.store,
             pipeline_runner=SimpleNamespace(),
             ai_controller=self.ai,
+            mapping_runtime=self.mapping,
             command_cache_path=self.settings.command_cache_file,
             wall_clock=lambda: NOW,
             monotonic_clock=lambda: self.now_monotonic,
@@ -169,6 +233,59 @@ class CommandStateMachineTest(unittest.TestCase):
         restarted.handle(self.settings.command_topic, command)
         self.assertEqual(len(self.runtime.calls), 1)
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+
+    def test_lifecycle_invalidated_start_is_failed_not_acknowledged(self) -> None:
+        self.runtime.start_error = RuntimeError(
+            "runtime lifecycle changed during START_PATROL"
+        )
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "start-raced", patrol_id=7),
+        )
+
+        self.assertEqual(self.store.state, "ERROR")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertIsNone(self.runtime.active_patrol_id)
+        self.assertEqual(self.ai.disabled, ["START_PATROL_ROLLBACK"])
+
+    def test_silent_invalidation_before_confirmation_is_failed(self) -> None:
+        self.runtime.invalidate_after_start = True
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "start-invalidated", patrol_id=7),
+        )
+
+        self.assertEqual(self.store.state, "ERROR")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertIsNone(self.runtime.active_patrol_id)
+
+    def test_explicit_start_can_recover_error_only_after_readiness(self) -> None:
+        self.store.state = "ERROR"
+        self.runtime.ready_decision = (False, "ODOMETRY_NOT_READY")
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "recover-not-ready", patrol_id=7),
+        )
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(self.runtime.calls, [])
+
+        self.runtime.ready_decision = (True, "READY")
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "recover-ready", patrol_id=7),
+        )
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+        self.assertEqual(self.store.state, "PATROLLING")
+
+    def test_runtime_failure_disables_ai_and_publishes_error_state(self) -> None:
+        self.ai.enable(7)
+
+        self.handler.on_runtime_failure("MOTOR_FAULT")
+
+        self.assertEqual(self.ai.disabled, ["MOTOR_FAULT"])
+        self.assertEqual(self.store.state, "ERROR")
 
     def test_expired_and_malformed_commands_fail_closed(self) -> None:
         expired = payload("START_PATROL", "expired", patrol_id=7)
@@ -221,8 +338,24 @@ class CommandStateMachineTest(unittest.TestCase):
             ["serial-stop", "ai-disable", "state-IDLE", "flush", "mqtt"],
         )
 
+    def test_unconfirmed_physical_stop_publishes_failed_ack(self) -> None:
+        self.runtime.active_patrol_id = 7
+        self.runtime.stop_error = RuntimeError("ESP32 STOP was not delivered")
+        self.store.state = "PATROLLING"
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("STOP_PATROL", "stop-write-failed"),
+        )
+
+        self.assertIsNone(self.runtime.active_patrol_id)
+        self.assertEqual(self.store.state, "ERROR")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertEqual(self.ai.disabled, ["STOP_PATROL"])
+
     def test_obstacle_requires_stable_clear_before_resume(self) -> None:
         self.runtime.active_patrol_id = 7
+        self.ai.applied_patrol_id = 7
         self.store.state = "PATROLLING"
         self.store.obstacle = "STOP"
         self.handler.tick()
@@ -235,6 +368,42 @@ class CommandStateMachineTest(unittest.TestCase):
         self.now_monotonic = 1.0
         self.handler.tick()
         self.assertFalse(self.runtime.paused)
+
+    def test_ai_stale_recovery_reenables_before_drive_resume(self) -> None:
+        order: list[str] = []
+        runtime = FakeRuntimeService(order)
+        runtime.active_patrol_id = 7
+        store = FakeStore(order)
+        store.state = "PATROLLING"
+        ai = FakeAi(order)
+        ai.applied_patrol_id = 7
+        handler = PatrolCommandHandler(
+            settings=self.settings,
+            mqtt_client=FakeMqtt(order),
+            serial_reader=runtime,
+            state_store=store,
+            pipeline_runner=SimpleNamespace(),
+            ai_controller=ai,
+            command_cache_path=Path(self.temporary.name) / "ai-recovery.json",
+            wall_clock=lambda: NOW,
+            monotonic_clock=lambda: self.now_monotonic,
+        )
+
+        ai.ready = False
+        ai.applied_patrol_id = None
+        handler.tick()
+        self.assertTrue(runtime.paused)
+
+        ai.ready = True
+        handler.tick()
+        self.assertTrue(runtime.paused)
+        self.assertEqual(ai.enabled, [7])
+        self.assertNotIn("serial-resume", order)
+
+        self.now_monotonic = 1.0
+        handler.tick()
+        self.assertFalse(runtime.paused)
+        self.assertLess(order.index("ai-enable"), order.index("serial-resume"))
 
     def test_ota_activation_interlock_rejects_start_before_ai_or_motion(self) -> None:
         self.runtime.prepare_decision = (False, "OTA_ACTIVATION_IN_PROGRESS")
@@ -256,6 +425,86 @@ class CommandStateMachineTest(unittest.TestCase):
         self.assertEqual(token_path.read_text(encoding="utf-8").strip(), "runtime-secret")
         cache = Path(self.settings.command_cache_file).read_text(encoding="utf-8")
         self.assertNotIn("runtime-secret", cache)
+
+    def test_start_mapping_uses_existing_backend_contract(self) -> None:
+        self.handler.handle(
+            self.settings.command_topic,
+            payload(
+                "START_MAPPING",
+                "map-command",
+                mapping_session_id=12,
+            ),
+        )
+
+        self.assertEqual(self.mapping.starts, [(12, "map-command")])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+
+    def test_runtime_failure_aborts_mapping_and_replays_failed_ack(self) -> None:
+        command = payload(
+            "START_MAPPING",
+            "map-fault",
+            mapping_session_id=12,
+        )
+        self.handler.handle(self.settings.command_topic, command)
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+
+        self.handler.on_runtime_failure("MOTOR_FAULT")
+
+        self.assertEqual(self.mapping.aborts, ["MOTOR_FAULT"])
+        self.assertFalse(self.mapping.active)
+        self.assertEqual(self.mqtt.messages[-1][1]["command"], "START_MAPPING")
+        self.assertEqual(self.mqtt.messages[-1][1]["commandId"], "map-fault")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertEqual(self.store.state, "ERROR")
+
+        self.handler.handle(self.settings.command_topic, command)
+        self.assertEqual(self.mapping.starts, [(12, "map-fault")])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload(
+                "START_MAPPING",
+                "map-retry",
+                mapping_session_id=12,
+            ),
+        )
+        self.assertEqual(
+            self.mapping.starts,
+            [(12, "map-fault"), (12, "map-retry")],
+        )
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+        self.assertEqual(self.store.state, "IDLE")
+
+    def test_mapping_start_lifecycle_race_is_failed_not_rejected(self) -> None:
+        self.mapping.start_decision = (False, "RUNTIME_LIFECYCLE_CHANGED")
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload(
+                "START_MAPPING",
+                "map-start-race",
+                mapping_session_id=12,
+            ),
+        )
+
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertEqual(self.store.state, "ERROR")
+
+    def test_mapping_requires_session_id_and_blocks_patrol_concurrency(self) -> None:
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_MAPPING", "missing-session"),
+        )
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+
+        self.mapping.active = True
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "patrol-during-map", patrol_id=7),
+        )
+        self.assertEqual(self.runtime.calls, [])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
 
 
 if __name__ == "__main__":

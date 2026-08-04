@@ -16,6 +16,8 @@ Payload 내용을 해석하거나 순찰/센서 로직을
 from __future__ import annotations
 
 import json
+import queue
+import threading
 import time
 from typing import Any, Callable
 
@@ -24,6 +26,8 @@ import paho.mqtt.client as mqtt
 from backend_config.settings import AppSettings
 
 CommandMessageHandler = Callable[[str, dict[str, Any]], None]
+CommandEnvelope = tuple[str, dict[str, Any]]
+_COMMAND_WORKER_STOP = object()
 
 
 class MqttClient:
@@ -38,6 +42,13 @@ class MqttClient:
         self._on_command_message: (
             CommandMessageHandler | None
         ) = None
+        self._command_queue: queue.Queue[
+            CommandEnvelope | object
+        ] = queue.Queue()
+        self._command_worker_lock = threading.Lock()
+        self._command_worker: threading.Thread | None = None
+        self._accepting_commands = False
+        self._discard_pending_commands = False
 
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -201,10 +212,96 @@ class MqttClient:
             )
             return
 
-        self._on_command_message(
-            message.topic,
-            payload,
-        )
+        if not self._enqueue_command(message.topic, payload):
+            print("[MQTT] command ignored while worker is stopping")
+
+    def _enqueue_command(self, topic: str, payload: dict[str, Any]) -> bool:
+        """Enqueue without running application code on Paho's loop thread."""
+
+        with self._command_worker_lock:
+            if not self._accepting_commands:
+                return False
+            self._command_queue.put_nowait((topic, payload))
+            return True
+
+    def _start_command_worker(self) -> None:
+        with self._command_worker_lock:
+            if (
+                self._command_worker is not None
+                and self._command_worker.is_alive()
+            ):
+                self._accepting_commands = True
+                return
+            self._command_queue = queue.Queue()
+            self._accepting_commands = True
+            self._discard_pending_commands = False
+            self._command_worker = threading.Thread(
+                target=self._run_command_worker,
+                name="mqtt-command-worker",
+                daemon=True,
+            )
+            self._command_worker.start()
+
+    def _run_command_worker(self) -> None:
+        while True:
+            item = self._command_queue.get()
+            try:
+                if item is _COMMAND_WORKER_STOP:
+                    return
+                with self._command_worker_lock:
+                    if self._discard_pending_commands:
+                        continue
+                topic, payload = item
+                handler = self._on_command_message
+                if handler is None:
+                    print("[MQTT] command handler is not registered")
+                    continue
+                try:
+                    handler(topic, payload)
+                except Exception as exc:
+                    # One failed command must not kill FIFO processing for a
+                    # later physical STOP.
+                    print(
+                        "[MQTT ERROR] command handler failed "
+                        f"type={type(exc).__name__}"
+                    )
+            finally:
+                self._command_queue.task_done()
+
+    def stop_command_worker(
+        self,
+        *,
+        drain: bool,
+        timeout_seconds: float = 10.0,
+    ) -> bool:
+        """Stop intake, optionally process queued commands, and join worker."""
+
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        with self._command_worker_lock:
+            self._accepting_commands = False
+            self._discard_pending_commands = not drain
+            worker = self._command_worker
+            if worker is None:
+                return True
+            if not drain:
+                while True:
+                    try:
+                        self._command_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    else:
+                        self._command_queue.task_done()
+            self._command_queue.put_nowait(_COMMAND_WORKER_STOP)
+        if worker is threading.current_thread():
+            return False
+        worker.join(timeout=timeout_seconds)
+        stopped = not worker.is_alive()
+        if stopped:
+            with self._command_worker_lock:
+                if self._command_worker is worker:
+                    self._command_worker = None
+        return stopped
 
     def connect(
         self,
@@ -217,11 +314,16 @@ class MqttClient:
         ConnectionError를 발생시킨다.
         """
 
-        self._client.connect(
-            host=self._settings.mqtt_host,
-            port=self._settings.mqtt_port,
-            keepalive=60,
-        )
+        self._start_command_worker()
+        try:
+            self._client.connect(
+                host=self._settings.mqtt_host,
+                port=self._settings.mqtt_port,
+                keepalive=60,
+            )
+        except Exception:
+            self.stop_command_worker(drain=False)
+            raise
 
         self._client.loop_start()
 
@@ -236,6 +338,8 @@ class MqttClient:
         if self._connected:
             return
 
+        self._client.loop_stop()
+        self.stop_command_worker(drain=False)
         raise ConnectionError(
             "MQTT Broker 연결 실패: "
             f"{self._settings.mqtt_host}:"
@@ -281,6 +385,7 @@ class MqttClient:
     def disconnect(self) -> None:
         """MQTT 네트워크 루프와 연결을 종료한다."""
 
+        self.stop_command_worker(drain=False)
         self._client.loop_stop()
 
         if self._connected:

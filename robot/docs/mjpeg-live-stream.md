@@ -27,6 +27,7 @@ AIOT_AI_MJPEG_BIND=127.0.0.1
 AIOT_AI_MJPEG_PORT=8090
 AIOT_AI_MJPEG_QUALITY=70
 AIOT_AI_MJPEG_MAX_FPS=5
+AIOT_AI_MJPEG_FRAME_MAX_AGE_SEC=2
 ```
 
 `/opt/aiot/secrets/stream.env`는 `infra/jetson/stream.env.example`을 기준으로
@@ -41,6 +42,11 @@ AIOT_AI_MJPEG_MAX_FPS=5
 systemctl is-active aiot-ai.service aiot-mjpeg-tunnel.service
 curl -fsS http://127.0.0.1:8090/health
 ```
+
+`ready=true` means the latest JPEG is newer than
+`AIOT_AI_MJPEG_FRAME_MAX_AGE_SEC`. After patrol DISABLE, an older cached frame
+is retained only for diagnostics and is neither marked ready nor replayed to a
+new viewer.
 
 EC2에서는 터널이 열려 있을 때만 아래 주소가 응답한다.
 

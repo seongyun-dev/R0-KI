@@ -11,7 +11,7 @@ import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 
@@ -21,11 +21,20 @@ BOUNDARY = "roki-frame"
 class MjpegFrameHub:
     """Keep only the newest encoded frame and wake all connected viewers."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_frame_age_seconds: float = 2.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if max_frame_age_seconds <= 0:
+            raise ValueError("MJPEG max frame age must be positive")
         self._condition = threading.Condition()
         self._frame: bytes | None = None
         self._sequence = 0
         self._published_at: float | None = None
+        self._max_frame_age_seconds = max_frame_age_seconds
+        self._clock = clock
 
     def publish(self, frame: bytes) -> int:
         if not frame:
@@ -33,31 +42,43 @@ class MjpegFrameHub:
         with self._condition:
             self._frame = bytes(frame)
             self._sequence += 1
-            self._published_at = time.monotonic()
+            self._published_at = self._clock()
             self._condition.notify_all()
             return self._sequence
 
     def wait_for_frame(
         self, after_sequence: int, timeout: float
     ) -> tuple[int, bytes] | None:
+        deadline = time.monotonic() + max(timeout, 0.0)
         with self._condition:
-            self._condition.wait_for(
-                lambda: self._sequence > after_sequence,
-                timeout=max(timeout, 0.0),
-            )
-            if self._frame is None or self._sequence <= after_sequence:
-                return None
-            return self._sequence, self._frame
+            while True:
+                now = self._clock()
+                if (
+                    self._frame is not None
+                    and self._sequence > after_sequence
+                    and self._published_at is not None
+                    and now - self._published_at
+                    <= self._max_frame_age_seconds
+                ):
+                    return self._sequence, self._frame
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._condition.wait(remaining)
 
     def health(self) -> dict[str, object]:
         with self._condition:
             age = (
                 None
                 if self._published_at is None
-                else max(0.0, time.monotonic() - self._published_at)
+                else max(0.0, self._clock() - self._published_at)
             )
             return {
-                "ready": self._frame is not None,
+                "ready": (
+                    self._frame is not None
+                    and age is not None
+                    and age <= self._max_frame_age_seconds
+                ),
                 "sequence": self._sequence,
                 "frameAgeSeconds": None if age is None else round(age, 3),
             }
@@ -113,10 +134,13 @@ class MjpegStreamServer:
         *,
         quality: int = 70,
         max_fps: float = 8.0,
+        max_frame_age_seconds: float = 2.0,
     ) -> None:
         if not 0 <= port <= 65535:
             raise ValueError("MJPEG port must be between 0 and 65535")
-        self.hub = MjpegFrameHub()
+        self.hub = MjpegFrameHub(
+            max_frame_age_seconds=max_frame_age_seconds,
+        )
         self.publisher = MjpegPublisher(
             self.hub,
             quality=quality,

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -98,6 +99,11 @@ def build_safety_settings(
     low_battery_percent = (
         None if low_battery is None else float(low_battery)
     )
+    require_line_sensor = raw_safety.get("require_line_sensor", False)
+    if not isinstance(require_line_sensor, bool):
+        raise ValueError(
+            "safety.yaml.safety.require_line_sensor must be a boolean"
+        )
     return SafetySettings(
         odometry_timeout_sec=_positive_milliseconds_to_seconds(
             raw_safety,
@@ -110,6 +116,7 @@ def build_safety_settings(
             "safety.yaml.safety",
         ),
         low_battery_percent=low_battery_percent,
+        require_line_sensor=require_line_sensor,
     )
 
 
@@ -138,6 +145,7 @@ def build_localization_settings(
         base_frame=str(_required(raw, "base_frame", "robot.yaml.localization")),
         map_pose_timeout_sec=positive_number("map_pose_timeout_sec"),
         tf_poll_interval_sec=positive_number("tf_poll_interval_sec"),
+        max_future_transform_sec=positive_number("max_future_transform_sec"),
     )
 
 
@@ -215,7 +223,13 @@ def build_runtime() -> RobotRuntime:
         settings=RuntimeSettings(
             disconnected_poll_sec=float(
                 runtime_values["disconnected_poll_sec"]
-            )
+            ),
+            encoder_zero_retry_interval_sec=float(
+                runtime_values["encoder_zero_retry_interval_sec"]
+            ),
+            encoder_zero_max_attempts=int(
+                runtime_values["encoder_zero_max_attempts"]
+            ),
         ),
     )
 
@@ -258,6 +272,21 @@ def build_ros_lidar_health_bridge(
         settings=RosLidarHealthSettings(
             scan_topic=str(_required(raw, "scan_topic", "lidar.yaml.lidar")),
             scan_timeout_sec=float(timeout),
+            vehicle_center_angle_deg=float(
+                os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0")
+            ),
+            vehicle_half_angle_deg=float(
+                os.getenv("AIOT_VEHICLE_FRONT_HALF_ANGLE_DEG", "8")
+            ),
+            vehicle_max_range_m=float(
+                os.getenv("AIOT_VEHICLE_MAX_RANGE_M", "8")
+            ),
+            vehicle_nearest_samples=int(
+                os.getenv("AIOT_VEHICLE_NEAREST_SAMPLES", "5")
+            ),
+            vehicle_range_timeout_sec=float(
+                os.getenv("AIOT_VEHICLE_RANGE_MAX_AGE_SEC", "1")
+            ),
         ),
         obstacle_detector=FrontObstacleDetector(
             ObstacleDetectorSettings(

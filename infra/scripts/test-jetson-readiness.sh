@@ -24,6 +24,10 @@ grep -q '^User=e103$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -Eq '^SupplementaryGroups=.*aiot' \
   "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q '^EnvironmentFile=/opt/aiot/secrets/ros.env$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q 'fixed_resolution: true' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \
@@ -36,11 +40,31 @@ grep -q 'use_rotate_to_heading: false' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
 grep -q 'motion_model_for_search: DUBIN' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
+grep -q 'xy_goal_tolerance: \$XY_GOAL_TOLERANCE_M' \
+  "${repository_root}/robot/config/ros/nav2.params.yaml.template"
+grep -q 'nav2_xy_goal_tolerance(os.environ)' \
+  "${repository_root}/robot/roki-iot/run_integrated.py"
 grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/ros-preflight.sh"
 grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/mqtt-e2e-check.sh"
 ! grep -qE 'ROKI_(WHEELBASE_M|ROBOT_RADIUS_M)=[0-9]' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_INITIAL_POSE_X_M=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_INITIAL_POSE_Y_M=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_INITIAL_POSE_YAW_RAD=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAP_ID=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAP_VERSION=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAP_SHA256=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_ROUTE_SHA256=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_NAV2_XY_GOAL_TOLERANCE_M=0.20$' \
   "${repository_root}/infra/jetson/ros.env.example"
 
 install -d "${test_root}/bin" "${test_root}/ai/yolo_pipeline" "${test_root}/current"
@@ -78,5 +102,25 @@ printf '%s\n' "${output}" | grep -q -- '--source-a /dev/roki_camera_left'
 printf '%s\n' "${output}" | grep -q -- '--source-b /dev/roki_camera_right'
 printf '%s\n' "${output}" | grep -q -- '--capture-width 640'
 grep -q -- 'pixelformat=MJPG' "${test_root}/v4l2.log"
+
+: >"${test_root}/v4l2.log"
+single_output="$(
+  PATH="${test_root}/bin:${PATH}" \
+  AIOT_AI_ROOT="${test_root}/ai" \
+  AIOT_AI_PYTHON="${test_root}/bin/python" \
+  AIOT_AI_PIPELINE_MAIN="${test_root}/ai/yolo_pipeline/main.py" \
+  AIOT_IOT_CURRENT="${test_root}/current" \
+  ROS_SETUP_FILE="${test_root}/ros-setup.bash" \
+  AIOT_AI_SINGLE_CAMERA=true \
+  AIOT_AI_CAMERA_DEVICE=/dev/roki_camera_right \
+  AIOT_AI_CAMERA_LEFT_DEVICE= \
+  AIOT_AI_CAMERA_RIGHT_DEVICE= \
+  V4L2_LOG="${test_root}/v4l2.log" \
+  bash "${repository_root}/infra/jetson/aiot-ai-run.sh"
+)"
+printf '%s\n' "${single_output}" | grep -q -- '--single-camera'
+printf '%s\n' "${single_output}" | grep -q -- '--source-a /dev/roki_camera_right'
+! printf '%s\n' "${single_output}" | grep -q -- '--source-b'
+[ "$(wc -l <"${test_root}/v4l2.log")" -eq 1 ]
 
 echo "Jetson camera, ROS, and field-gate readiness tests passed"

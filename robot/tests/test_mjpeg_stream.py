@@ -35,6 +35,31 @@ class MjpegStreamTest(unittest.TestCase):
         self.assertEqual((2, b"second"), hub.wait_for_frame(0, timeout=0.01))
         self.assertTrue(hub.health()["ready"])
 
+    def test_stale_frame_is_not_ready_or_replayed_to_new_viewer(self):
+        now = [100.0]
+        hub = MjpegFrameHub(
+            max_frame_age_seconds=2.0,
+            clock=lambda: now[0],
+        )
+        self.assertEqual(1, hub.publish(b"patrol-frame"))
+        self.assertTrue(hub.health()["ready"])
+
+        now[0] = 102.001
+        health = hub.health()
+        self.assertFalse(health["ready"])
+        self.assertGreater(health["frameAgeSeconds"], 2.0)
+        self.assertIsNone(hub.wait_for_frame(0, timeout=0.0))
+
+        self.assertEqual(2, hub.publish(b"new-patrol-frame"))
+        self.assertEqual(
+            (2, b"new-patrol-frame"),
+            hub.wait_for_frame(0, timeout=0.0),
+        )
+
+    def test_frame_freshness_must_be_positive(self):
+        with self.assertRaises(ValueError):
+            MjpegFrameHub(max_frame_age_seconds=0)
+
     def test_publisher_throttles_jpeg_encoding(self):
         hub = MjpegFrameHub()
         cv2 = _FakeCv2()

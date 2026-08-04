@@ -8,11 +8,50 @@ case "${phase}" in
 esac
 
 robot_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 python_bin="${robot_root}/.venv/bin/python"
+environment_parser="${robot_root}/scripts/parse_systemd_env.py"
+robot_env="${AIOT_ROBOT_ENV_FILE:-/opt/aiot/secrets/robot.env}"
+ros_env="${AIOT_ROS_ENV_FILE:-/opt/aiot/secrets/ros.env}"
 
-test -r "${ros_setup}"
+# OTA smoke runs outside systemd. Load the same files in the same order as
+# aiot-robot.service so mapping/patrol mode and geometry are validated against
+# the configuration that will actually run after activation.
 test -x "${python_bin}"
+test -r "${environment_parser}"
+shopt -s lastpipe
+
+load_environment_file() {
+  local environment_file="$1"
+  local required="$2"
+  local assignment
+  local -a assignments=()
+
+  if [ ! -r "${environment_file}" ]; then
+    if [ "${required}" = true ]; then
+      echo "Required environment file is not readable: ${environment_file}" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if ! "${python_bin}" -B "${environment_parser}" "${environment_file}" |
+    while IFS= read -r -d '' assignment; do
+      assignments+=("${assignment}")
+    done
+  then
+    return 1
+  fi
+
+  for assignment in "${assignments[@]}"; do
+    export "${assignment}"
+  done
+}
+
+load_environment_file "${robot_env}" false
+load_environment_file "${ros_env}" true
+
+ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
+test -r "${ros_setup}"
 test -x "${robot_root}/scripts/run.sh"
 
 set +u

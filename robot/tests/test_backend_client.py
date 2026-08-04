@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from aiot_robot.backend_client import BackendConfig, RobotBackendClient
 
@@ -61,6 +63,45 @@ class BackendClientTest(unittest.TestCase):
     def test_requires_https(self) -> None:
         with self.assertRaises(ValueError):
             BackendConfig("http://example.com", "secret")
+
+    def test_upload_map_uses_robot_contract_and_exact_multipart_fields(self) -> None:
+        opener = CapturingUrlOpen()
+        client = RobotBackendClient(
+            BackendConfig("https://i15e103.p.ssafy.io", "robot-token", 3),
+            urlopen=opener,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            image = Path(temporary) / "map.png"
+            image.write_bytes(b"\x89PNG\r\n\x1a\npreview")
+            client.upload_map(
+                12,
+                "mapping-command",
+                image,
+                resolution=0.05,
+                origin_x=-1.5,
+                origin_y=-2.5,
+                origin_yaw=0.0,
+            )
+
+        self.assertEqual(
+            opener.request.full_url,
+            "https://i15e103.p.ssafy.io/api/map/mapping-sessions/12/map",
+        )
+        self.assertEqual(
+            opener.request.get_header("Authorization"), "Bearer robot-token"
+        )
+        body = opener.request.data
+        for expected in (
+            b'name="commandId"',
+            b"mapping-command",
+            b'name="mapImage"',
+            b'name="resolution"',
+            b'name="originX"',
+            b'name="originY"',
+            b'name="originYaw"',
+            b"Content-Type: image/png",
+        ):
+            self.assertIn(expected, body)
 
 
 if __name__ == "__main__":

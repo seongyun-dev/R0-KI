@@ -73,6 +73,9 @@ localization:
   # MQTT pose는 1초 주기이며 2초 이상 갱신되지 않은 TF는 발행하지 않는다.
   map_pose_timeout_sec: 2.0
   tf_poll_interval_sec: 0.1
+  # AMCL can future-date map->odom by transform_tolerance (currently 0.5s).
+  # Keep this above that value but reject clocks/TF that jump far ahead.
+  max_future_transform_sec: 0.75
 
 hardware:
   computer: "Jetson Orin Nano"

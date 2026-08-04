@@ -19,6 +19,7 @@ class SafetySettings:
     odometry_timeout_sec: float
     hardware_status_timeout_sec: float
     low_battery_percent: float | None
+    require_line_sensor: bool = False
 
     def __post_init__(self) -> None:
         if self.odometry_timeout_sec <= 0:
@@ -128,10 +129,11 @@ class SafetyController:
             return "MOTOR_FAULT"
         if hardware_status.motor is MotorStatus.DISCONNECTED:
             return "MOTOR_DISCONNECTED"
-        if hardware_status.line_sensor is LineSensorStatus.FAULT:
-            return "LINE_SENSOR_FAULT"
-        if hardware_status.line_sensor is LineSensorStatus.DISCONNECTED:
-            return "LINE_SENSOR_DISCONNECTED"
+        if self._settings.require_line_sensor:
+            if hardware_status.line_sensor is LineSensorStatus.FAULT:
+                return "LINE_SENSOR_FAULT"
+            if hardware_status.line_sensor is LineSensorStatus.DISCONNECTED:
+                return "LINE_SENSOR_DISCONNECTED"
         cutoff = self._settings.low_battery_percent
         if cutoff is not None:
             if hardware_status.battery_percent is None:

@@ -127,6 +127,14 @@ class RokiPublisherApplication:
         """Serial, 파이프라인, MQTT를 안전하게 종료한다."""
 
         self._stop_event.set()
+        stop_commands = getattr(
+            self._mqtt_client,
+            "stop_command_worker",
+            None,
+        )
+        if callable(stop_commands):
+            if not stop_commands(drain=False):
+                print("[SYSTEM] MQTT command worker did not stop cleanly")
         try:
             self._command_handler.shutdown()
         except Exception as exc:
