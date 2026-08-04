@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { MapDetailResponse, ZoneCreateResponse } from '../api/contracts'
-import { mapApi } from '../api/services'
+import { mapApi, patrolsApi } from '../api/services'
 import { env } from '../config/env'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { useToast } from '../components/ui'
@@ -257,8 +257,8 @@ function RouteMapSvg({
 /* ── 타임라인 행 ── */
 function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void }) {
   const color = pointColor(point.status)
-  return (
-    <div className="tl">
+  const content = (
+    <>
       <span className="d" style={{ background: color }} />
       <span className="t">{point.time}</span>
       <span className="c">
@@ -270,13 +270,17 @@ function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void })
       </span>
       <span className="a">
         <span className="st"><i style={{ background: color }} />{point.status}</span>
-        {onGo && (
-          <button type="button" className="arrow" aria-label="이벤트 상세로" onClick={onGo}>
-            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-          </button>
-        )}
       </span>
-    </div>
+    </>
+  )
+
+  // 화살표 대신 이벤트가 있는 기록 행 전체를 클릭 영역으로 제공한다.
+  return onGo ? (
+    <button type="button" className="tl tl-clickable" onClick={onGo} aria-label={`${point.type} 이벤트 상세로`}>
+      {content}
+    </button>
+  ) : (
+    <div className="tl">{content}</div>
   )
 }
 
@@ -289,6 +293,30 @@ export default function PatrolDetail() {
   const [mapImageUrl, setMapImageUrl] = useState<string>()
   const [mapDetail, setMapDetail] = useState<MapDetailResponse>()
   const [checkpointZones, setCheckpointZones] = useState<ZoneCreateResponse[]>([])
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
+
+  const handlePdfDownload = async () => {
+    if (!id || isDownloadingPdf) return
+
+    setIsDownloadingPdf(true)
+    try {
+      const pdf = await patrolsApi.downloadPdf(id)
+      const objectUrl = URL.createObjectURL(pdf)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `patrol-report-${id}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      toast('PDF 보고서를 다운로드했습니다.')
+    } catch (reason) {
+      console.error('PDF 보고서 다운로드에 실패했습니다.', reason)
+      toast('PDF 보고서 다운로드에 실패했습니다.')
+    } finally {
+      setIsDownloadingPdf(false)
+    }
+  }
 
   useEffect(() => {
     if (!mapId && !patrol?.mapUrl) {
@@ -361,11 +389,19 @@ export default function PatrolDetail() {
             </div>
           </div>
           <div className="headtools">
+            <Link to="/app/patrol" className="btn btn-s">
+              순찰 목록
+            </Link>
             <button type="button" className="btn btn-s" onClick={() => toast('✓ 재순찰이 요청되었습니다')}>
               재순찰 요청
             </button>
-            <button type="button" className="btn btn-p" onClick={() => window.print()}>
-              PDF 다운로드
+            <button
+              type="button"
+              className="btn btn-p"
+              disabled={!patrol || isDownloadingPdf}
+              onClick={handlePdfDownload}
+            >
+              {isDownloadingPdf ? 'PDF 생성 중...' : 'PDF 다운로드'}
             </button>
           </div>
         </div>
