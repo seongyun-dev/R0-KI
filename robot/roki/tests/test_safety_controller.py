@@ -94,21 +94,34 @@ class SafetyControllerTest(unittest.TestCase):
             "MOTOR_DISCONNECTED",
         )
 
-    def test_line_sensor_states(self) -> None:
-        self.assertEqual(
-            self.evaluate(
-                status=hardware_status(line_sensor=LineSensorStatus.FAULT)
-            ).fault,
-            "LINE_SENSOR_FAULT",
-        )
-        self.assertEqual(
-            self.evaluate(
-                status=hardware_status(
-                    line_sensor=LineSensorStatus.DISCONNECTED
+    def test_line_sensor_is_diagnostic_only_by_default(self) -> None:
+        for line_sensor in (
+            LineSensorStatus.FAULT,
+            LineSensorStatus.DISCONNECTED,
+        ):
+            with self.subTest(line_sensor=line_sensor):
+                self.assertTrue(
+                    self.evaluate(
+                        status=hardware_status(line_sensor=line_sensor)
+                    ).allowed
                 )
-            ).fault,
-            "LINE_SENSOR_DISCONNECTED",
+
+    def test_line_sensor_gate_requires_explicit_legacy_opt_in(self) -> None:
+        safety = SafetyController(
+            SafetySettings(0.3, 1.0, 20.0, require_line_sensor=True)
         )
+        safety.record_odometry(10.0)
+        safety.record_hardware_status(10.0)
+        decision = safety.evaluate(
+            now=10.1,
+            connected=True,
+            hardware_status=hardware_status(
+                line_sensor=LineSensorStatus.DISCONNECTED
+            ),
+            emergency_stop=False,
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.fault, "LINE_SENSOR_DISCONNECTED")
 
     def test_low_battery_uses_hardware_status_percent(self) -> None:
         self.assertEqual(

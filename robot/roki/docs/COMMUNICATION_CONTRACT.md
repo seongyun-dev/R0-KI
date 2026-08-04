@@ -5,8 +5,8 @@
 > `roki-iot/serial_reader.py`, 수동 hardware script, AI process가 같은 포트를
 > 동시에 열면 안 된다. 운영 alias는 `/dev/roki_esp32`다. 현재 보정은 바퀴 지름
 > 65 mm, LEFT 329 / RIGHT 328 ticks/rev, 서보 좌/중앙/우 60/80/100도, 현장 PWM
-> 45다. 라인 센서는 경로 추종에는 사용하지 않지만 안전 입력으로 유지하며,
-> 백엔드에는 실제 상태를 `NORMAL`/`ERROR`/`DISCONNECTED`로 보낸다
+> 45다. 라인 센서는 경로 추종과 주행 안전 게이트에 사용하지 않는 진단값이며,
+> 백엔드에는 표시용 상태를 `NORMAL`/`ERROR`/`DISCONNECTED`로 보낸다
 > (`FAULT`는 백엔드 계약의 `ERROR`로 변환).
 
 이 문서는 ESP32와 Jetson 내부 USB Serial JSON Lines 계약만 정의한다.

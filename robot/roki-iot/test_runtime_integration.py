@@ -364,16 +364,46 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             "PATROLLING",
         )
 
-        runtime.simulate_safety_fault("LINE_SENSOR_FAULT")
+        runtime.simulate_safety_fault("MOTOR_FAULT")
 
         self.assertIsNone(service.active_patrol_id)
         self.assertFalse(service.paused)
         navigation.stop_patrol.assert_called_once_with()
         driver.stop_patrol.assert_called_once_with()
         guard.release.assert_called_once_with()
-        self.assertEqual(failures, ["LINE_SENSOR_FAULT"])
+        self.assertEqual(failures, ["MOTOR_FAULT"])
         self.assertEqual(runtime.state_store.get_status().state, "ERROR")
         self.assertFalse(service.confirm_patrol_started(97))
+
+    def test_serial_reconnect_notifies_active_mapping_owner(self) -> None:
+        runtime = FakeRuntime()
+        mapping = SimpleNamespace(motion_active=True)
+        failures: list[str] = []
+        service = FinalRuntimeService(runtime)
+        service.set_mapping_runtime(mapping)
+        service.set_fault_listener(failures.append)
+        service.start()
+        self.addCleanup(service.stop)
+
+        runtime.simulate_connection()
+
+        self.assertEqual(failures, ["SERIAL_CONNECTION_RESET"])
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_runtime_safety_fault_notifies_active_mapping_owner(self) -> None:
+        runtime = FakeRuntime()
+        mapping = SimpleNamespace(motion_active=True)
+        failures: list[str] = []
+        service = FinalRuntimeService(runtime)
+        service.set_mapping_runtime(mapping)
+        service.set_fault_listener(failures.append)
+        service.start()
+        self.addCleanup(service.stop)
+
+        runtime.simulate_safety_fault("MOTOR_FAULT")
+
+        self.assertEqual(failures, ["MOTOR_FAULT"])
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
 
     def test_pause_component_failure_still_stops_and_abandons_patrol(self) -> None:
         runtime = FakeRuntime()
@@ -661,6 +691,23 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         time.sleep(0.01)
         self.assertFalse(service.is_running())
 
+    def test_mapping_can_be_ready_when_patrol_route_is_not_configured(self) -> None:
+        runtime = FakeRuntime()
+        service = FinalRuntimeService(
+            runtime,
+            allow_legacy_direct_patrol=False,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+
+        self.assertEqual(
+            service.readiness(),
+            (False, "PATROL_ROUTE_NOT_CONFIGURED"),
+        )
+        self.assertEqual(service.mapping_readiness(), (True, "READY"))
+        with self.assertRaisesRegex(RuntimeError, "PATROL_ROUTE_NOT_CONFIGURED"):
+            service.send_command("START_PATROL", patrolId=7)
+
     def test_integrated_di_does_not_construct_legacy_serial_reader(self) -> None:
         from run_integrated import create_integrated_application
 
@@ -678,6 +725,20 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         self.assertEqual(
             application._serial_reader.__class__.__name__,
             "FinalRuntimeService",
+        )
+
+    def test_integrated_mapping_failure_routes_to_command_handler(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        mapping_runtime = Mock()
+        application = create_integrated_application(
+            final_runtime=runtime,
+            mapping_runtime=mapping_runtime,
+        )
+
+        mapping_runtime.set_failure_listener.assert_called_once_with(
+            application._command_handler.on_runtime_failure
         )
 
     def test_pose_bridge_and_publisher_share_final_runtime_store(self) -> None:

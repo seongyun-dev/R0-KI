@@ -1,5 +1,11 @@
 # RO-KI 안전 하드웨어 테스트 환경
 
+> [!WARNING]
+> 라인센서 도구는 과거 배선 진단용으로만 보존한다. 현재 지도 생성과 순찰은 라인센서를
+> 사용하지 않으며, 사전 제작 지도 + LiDAR localization/Nav2 waypoint + encoder
+> odometry를 따른다. 금요일 시연 절차는
+> [현장 시연 runbook](../docs/friday-field-test-runbook-2026-08-04.md)을 기준으로 한다.
+
 ## 현장 캘리브레이션
 
 라인 센서와 엔코더를 실제 주행 전에 한 번만 확정하려면 다음 문서를 먼저 따른다.

@@ -68,6 +68,7 @@ class FinalRuntimeService:
         deployment_guard: Any | None = None,
         manual_controller: Any | None = None,
         keyboard_input: Any | None = None,
+        allow_legacy_direct_patrol: bool = True,
     ) -> None:
         if (manual_controller is None) != (keyboard_input is None):
             raise ValueError(
@@ -82,6 +83,8 @@ class FinalRuntimeService:
         self._deployment_guard = deployment_guard
         self._manual_controller = manual_controller
         self._keyboard_input = keyboard_input
+        self._mapping_runtime: Any | None = None
+        self._allow_legacy_direct_patrol = allow_legacy_direct_patrol
         self._patrol_lease_held = False
         self._encoder_fallback_enabled = encoder_fallback_enabled
         self._encoder_progress: Any | None = None
@@ -186,11 +189,33 @@ class FinalRuntimeService:
 
         self._fault_listener = listener
 
+    def set_mapping_runtime(self, mapping_runtime: Any) -> None:
+        """Attach manual mapping to the same reconnect/fault lifecycle."""
+
+        with self._lifecycle_lock:
+            self._mapping_runtime = mapping_runtime
+
+    def mapping_lifecycle_marker(self) -> tuple[int | None, int]:
+        """Return a conservative lock-free snapshot for mapping START races.
+
+        Mapping START must not acquire ``_lifecycle_lock`` while the runtime
+        fault callback is waiting for the command handler's mapping lock.  A
+        changed or mixed snapshot is therefore treated as a safe START failure.
+        """
+
+        return self._runtime_lifecycle_marker()
+
     def readiness(self) -> tuple[bool, str]:
         """Return the physical/navigation gate without issuing a command."""
 
         if not self.is_running():
             return False, "SERIAL_RUNTIME_NOT_RUNNING"
+        if (
+            self._manual_controller is None
+            and self._navigation_service is None
+            and not self._allow_legacy_direct_patrol
+        ):
+            return False, "PATROL_ROUTE_NOT_CONFIGURED"
         snapshot_method = getattr(self._runtime.state_store, "snapshot", None)
         if not callable(snapshot_method):
             return True, "READY"
@@ -217,6 +242,27 @@ class FinalRuntimeService:
                         return False, str(decision[1])
                 elif not decision:
                     return False, "NAV2_NOT_READY"
+        return True, "READY"
+
+    def mapping_readiness(self) -> tuple[bool, str]:
+        """Require only the Serial/odometry safety needed for manual mapping."""
+
+        if not self.is_running():
+            return False, "SERIAL_RUNTIME_NOT_RUNNING"
+        snapshot_method = getattr(self._runtime.state_store, "snapshot", None)
+        if not callable(snapshot_method):
+            return True, "READY"
+        snapshot = snapshot_method()
+        motion_state = getattr(snapshot, "motion_state", None)
+        if (
+            motion_state is None
+            or getattr(motion_state, "left_distance_m", None) is None
+            or getattr(motion_state, "right_distance_m", None) is None
+        ):
+            return False, "ODOMETRY_NOT_READY"
+        safety = getattr(snapshot, "safety_decision", None)
+        if safety is None or not getattr(safety, "allowed", False):
+            return False, str(getattr(safety, "fault", "SAFETY_NOT_READY"))
         return True, "READY"
 
     def send_command(self, command: str, **parameters: Any) -> None:
@@ -246,6 +292,8 @@ class FinalRuntimeService:
                                 patrol_id=patrol_id
                             )
                     else:
+                        if not self._allow_legacy_direct_patrol:
+                            raise RuntimeError("PATROL_ROUTE_NOT_CONFIGURED")
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
                         self._runtime.mission.start_patrol(
@@ -400,11 +448,14 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             self._fail_patrol_locked(reason)
 
-    def _fail_patrol_locked(self, reason: str) -> None:
+    def _fail_patrol_locked(
+        self, reason: str, *, external_motion_active: bool = False
+    ) -> None:
         had_patrol = (
             self._active_patrol_id is not None
             or bool(getattr(self._manual_controller, "active", False))
             or self._patrol_lease_held
+            or external_motion_active
         )
         try:
             self._best_effort_stop_runtime_patrol(reason)
@@ -560,6 +611,7 @@ class FinalRuntimeService:
             getattr(self._manual_controller, "active", False)
         )
         lease_held = self._patrol_lease_held
+        mapping_motion_active = self._mapping_motion_active()
         # Clear the public interlock before component cleanup. Any concurrent
         # stale cmd_vel callback then takes MOTION_INTERLOCK instead of rearming.
         self._active_patrol_id = None
@@ -570,7 +622,7 @@ class FinalRuntimeService:
         except Exception as exc:
             if cleanup_failure is None:
                 cleanup_failure = exc
-        if had_active_patrol or manual_active or lease_held:
+        if had_active_patrol or manual_active or lease_held or mapping_motion_active:
             self._update_runtime_state("ERROR")
             self._notify_fault_listener("SERIAL_CONNECTION_RESET")
             print(
@@ -598,14 +650,22 @@ class FinalRuntimeService:
             manual_active = bool(
                 getattr(self._manual_controller, "active", False)
             )
+            mapping_motion_active = self._mapping_motion_active()
             if not (
                 had_active_patrol
                 or manual_active
                 or self._patrol_lease_held
+                or mapping_motion_active
             ):
                 return False
-            self._fail_patrol_locked(reason)
+            self._fail_patrol_locked(
+                reason,
+                external_motion_active=mapping_motion_active,
+            )
             return True
+
+    def _mapping_motion_active(self) -> bool:
+        return bool(getattr(self._mapping_runtime, "motion_active", False))
 
     def _runtime_lifecycle_marker(self) -> tuple[int | None, int]:
         generation = getattr(self._runtime, "connection_generation", None)

@@ -27,6 +27,7 @@ class RuntimeBootstrapTest(unittest.TestCase):
         self.assertEqual(settings.odometry_timeout_sec, 0.3)
         self.assertEqual(settings.hardware_status_timeout_sec, 1.0)
         self.assertEqual(settings.low_battery_percent, 20.0)
+        self.assertFalse(settings.require_line_sensor)
 
     def test_null_low_battery_percent_is_supported(self) -> None:
         settings = build_safety_settings(
@@ -114,6 +115,7 @@ class RuntimeBootstrapTest(unittest.TestCase):
     ) -> None:
         settings = build_safety_settings(load_safety_config())
         self.assertIsNone(settings.low_battery_percent)
+        self.assertFalse(settings.require_line_sensor)
 
 
 if __name__ == "__main__":

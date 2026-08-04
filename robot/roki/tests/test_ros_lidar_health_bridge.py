@@ -50,6 +50,33 @@ class RosLidarHealthBridgeTest(unittest.TestCase):
             "DISCONNECTED",
         )
 
+    def test_front_range_uses_nearest_samples_and_expires(self) -> None:
+        distance = self.bridge.ingest_scan(
+            ranges=[9.0, 2.0, 1.5, 1.6, 9.0],
+            angle_min_rad=-0.2,
+            angle_increment_rad=0.1,
+            range_min_m=0.12,
+            range_max_m=12.0,
+            received_at=10.0,
+        )
+
+        self.assertAlmostEqual(distance, 1.6)
+        self.assertAlmostEqual(self.bridge.get_front_range(now=10.5), 1.6)
+        self.assertIsNone(self.bridge.get_front_range(now=11.0))
+
+    def test_front_range_rejects_invalid_values(self) -> None:
+        distance = self.bridge.ingest_scan(
+            ranges=[float("nan"), float("inf"), 9.0],
+            angle_min_rad=-0.1,
+            angle_increment_rad=0.1,
+            range_min_m=0.12,
+            range_max_m=12.0,
+            received_at=10.0,
+        )
+
+        self.assertIsNone(distance)
+        self.assertIsNone(self.bridge.get_front_range(now=10.5))
+
     def test_scan_updates_obstacle_without_touching_motion_or_safety(self) -> None:
         bridge = RosLidarHealthBridge(
             state_store=self.store,

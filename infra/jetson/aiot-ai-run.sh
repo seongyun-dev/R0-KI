@@ -8,6 +8,8 @@ robot_root="${AIOT_IOT_CURRENT:-/opt/aiot/iot/current}/robot"
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 camera_left="${AIOT_AI_CAMERA_LEFT_DEVICE:-${AIOT_AI_CAMERA_FRONT_DEVICE:-${AIOT_AI_CAMERA_DEVICE:-}}}"
 camera_right="${AIOT_AI_CAMERA_RIGHT_DEVICE:-${AIOT_AI_CAMERA_REAR_DEVICE:-}}"
+single_camera="${AIOT_AI_SINGLE_CAMERA:-false}"
+camera_single="${AIOT_AI_CAMERA_DEVICE:-${camera_right:-${camera_left}}}"
 capture_width="${AIOT_AI_CAPTURE_WIDTH:-640}"
 capture_height="${AIOT_AI_CAPTURE_HEIGHT:-480}"
 capture_fps="${AIOT_AI_CAPTURE_FPS:-30}"
@@ -39,8 +41,12 @@ configure_camera() {
     --set-parm="${capture_fps}" >/dev/null
 }
 
-configure_camera "${camera_left}"
-configure_camera "${camera_right}"
+if [ "${single_camera}" = true ]; then
+  configure_camera "${camera_single}"
+else
+  configure_camera "${camera_left}"
+  configure_camera "${camera_right}"
+fi
 
 set +u
 # shellcheck disable=SC1090
@@ -55,11 +61,15 @@ umask 0007
 cd "${ai_root}"
 export PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}"
 args=()
-if [ -n "${camera_left}" ]; then
-  args+=(--source-a "${camera_left}")
-fi
-if [ -n "${camera_right}" ]; then
-  args+=(--source-b "${camera_right}")
+if [ "${single_camera}" = true ]; then
+  args+=(--single-camera --source-a "${camera_single}")
+else
+  if [ -n "${camera_left}" ]; then
+    args+=(--source-a "${camera_left}")
+  fi
+  if [ -n "${camera_right}" ]; then
+    args+=(--source-b "${camera_right}")
+  fi
 fi
 if [ -n "${pipeline_extra_args}" ]; then
   read -r -a extra_args <<<"${pipeline_extra_args}"
