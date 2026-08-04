@@ -257,8 +257,8 @@ function RouteMapSvg({
 /* ── 타임라인 행 ── */
 function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void }) {
   const color = pointColor(point.status)
-  return (
-    <div className="tl">
+  const content = (
+    <>
       <span className="d" style={{ background: color }} />
       <span className="t">{point.time}</span>
       <span className="c">
@@ -270,13 +270,17 @@ function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void })
       </span>
       <span className="a">
         <span className="st"><i style={{ background: color }} />{point.status}</span>
-        {onGo && (
-          <button type="button" className="arrow" aria-label="이벤트 상세로" onClick={onGo}>
-            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-          </button>
-        )}
       </span>
-    </div>
+    </>
+  )
+
+  // 화살표 대신 이벤트가 있는 기록 행 전체를 클릭 영역으로 제공한다.
+  return onGo ? (
+    <button type="button" className="tl tl-clickable" onClick={onGo} aria-label={`${point.type} 이벤트 상세로`}>
+      {content}
+    </button>
+  ) : (
+    <div className="tl">{content}</div>
   )
 }
 
