@@ -60,8 +60,8 @@ public class MqttPublisher {
             mqttClient.publish(topic, message);
             log.info("[MQTT] 발행 완료 topic={}, retained={}, payload={}", topic, retained, payload);
         } catch (MqttException e) {
-            // 호출부가 아직 없어 지금은 로그만 남김 - 실제 사용처 붙을 때 실패 처리 다시 판단
             log.error("[MQTT] 발행 실패 topic={}, payload={}", topic, payload, e);
+            throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
 }

@@ -28,6 +28,8 @@ public enum ErrorCode {
     MAP_NOT_FOUND(HttpStatus.NOT_FOUND, "MAP_003", "지도를 찾을 수 없습니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
     PATROL_ALREADY_IN_PROGRESS(HttpStatus.CONFLICT, "PATROL_002", "해당 로봇은 이미 순찰 중입니다."),
+    PATROL_INVALID_STATE(HttpStatus.CONFLICT, "PATROL_003", "현재 상태에서는 순찰을 종료할 수 없습니다."),
+    ROBOT_NOT_READY(HttpStatus.CONFLICT, "ROBOT_003", "로봇의 통신 또는 모듈 상태가 순찰 가능한 상태가 아닙니다."),
     EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다."),
     FILE_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "EVENT_003", "파일 저장 중 오류가 발생했습니다."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTI_001", "존재하지 않는 알림입니다.");

@@ -98,6 +98,11 @@ public class RobotTelemetryService {
                 direction,
                 reason);
 
+        if (previousStatus == RobotStatus.OFFLINE && isPatrolling(resolvedStatus)) {
+            // 재연결 메시지가 아직 주행 중이라고 알려주면 IDLE로 덮어쓰지 않고 실제 STOP_PATROL을 보낸다.
+            patrolCommandService.stopAfterReconnect(robot);
+        }
+
         // status heartbeat가 약 5초 주기이므로 그 시점의 최신 pose를 순찰 경로로 저장합니다.
         saveRoutePosition(robot);
         publishObstacleTransition(robot.getId(), previousStatus, resolvedStatus, direction, reason);

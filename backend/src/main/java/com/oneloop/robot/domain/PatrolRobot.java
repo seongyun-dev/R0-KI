@@ -124,6 +124,13 @@ public class PatrolRobot extends BaseEntity {
         this.status = RobotStatus.DELETED;
     }
 
+    public void markOffline() {
+        // 삭제 상태는 운영 상태보다 우선하므로 통신 감시가 DELETED를 OFFLINE으로 되돌리지 않게 한다.
+        if (status != RobotStatus.DELETED) {
+            this.status = RobotStatus.OFFLINE;
+        }
+    }
+
     public void issueServiceToken(String serviceToken) {
         this.serviceToken = serviceToken;
     }

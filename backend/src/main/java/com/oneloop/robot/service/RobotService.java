@@ -10,6 +10,7 @@ import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
 import com.oneloop.patrol.domain.Patrol;
+import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.dto.response.PatrolSummaryResponse;
 import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.robot.domain.PatrolRobot;
@@ -28,6 +29,9 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -95,13 +99,37 @@ public class RobotService {
                         .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
                         .orElseGet(List::of);
 
+        // 대시보드가 순찰중 로봇에서 종료 API를 호출하려면 현재 순찰 ID가 필요하다.
+        // 페이지에 포함된 로봇을 한 번의 IN 쿼리로 조회해 로봇별 추가 쿼리를 피한다.
+        List<Long> robotIds = robots.stream().map(PatrolRobot::getId).toList();
+        Map<Long, Patrol> activePatrolByRobotId =
+                robotIds.isEmpty()
+                        ? Map.of()
+                        : patrolRepository
+                                .findAllByRobotIdInAndStatusInOrderByStartedAtDesc(
+                                        robotIds,
+                                        List.of(
+                                                PatrolStatus.IN_PROGRESS,
+                                                PatrolStatus.STOP_REQUESTED))
+                                .stream()
+                                .collect(
+                                        Collectors.toMap(
+                                                patrol -> patrol.getRobot().getId(),
+                                                Function.identity(),
+                                                (latest, ignored) -> latest));
+
         Page<RobotListResponse> responses =
                 robots.map(
                         robot ->
                                 RobotListResponse.of(
                                         robot,
                                         checkpointLocator.resolveLocationName(
-                                                checkpoints, robot.getXCoordinate(), robot.getYCoordinate())));
+                                                checkpoints,
+                                                robot.getXCoordinate(),
+                                                robot.getYCoordinate()),
+                                        activePatrolByRobotId.containsKey(robot.getId())
+                                                ? activePatrolByRobotId.get(robot.getId()).getId()
+                                                : null));
         return PageResponse.from(responses);
     }
 

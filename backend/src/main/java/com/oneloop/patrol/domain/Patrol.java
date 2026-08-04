@@ -60,7 +60,28 @@ public class Patrol extends BaseEntity {
     }
 
     public void complete() {
-        this.status = PatrolStatus.COMPLETED;
+        finish(PatrolStatus.COMPLETED);
+    }
+
+    public void requestStop(String commandId) {
+        if (status != PatrolStatus.IN_PROGRESS && status != PatrolStatus.STOP_REQUESTED) {
+            throw new IllegalStateException("진행 중이거나 종료 요청 중인 순찰만 종료 요청할 수 있습니다.");
+        }
+        // MQTT 발행만으로 실제 정지를 확정할 수 없으므로, 성공 ACK 전까지 중간 상태로 둔다.
+        // 재요청할 때는 최신 commandId로 교체하여 늦게 도착한 이전 ACK가 상태를 바꾸지 못하게 한다.
+        this.status = PatrolStatus.STOP_REQUESTED;
+        this.commandId = commandId;
+    }
+
+    public void stop() {
+        if (status != PatrolStatus.STOP_REQUESTED) {
+            throw new IllegalStateException("종료 요청 중인 순찰만 종료할 수 있습니다.");
+        }
+        finish(PatrolStatus.STOPPED);
+    }
+
+    private void finish(PatrolStatus finishedStatus) {
+        this.status = finishedStatus;
         this.endedAt = LocalDateTime.now();
         this.endBatteryLevel = robot.getBatteryLevel();
         if (startedAt != null)
@@ -70,8 +91,12 @@ public class Patrol extends BaseEntity {
 
     // START_PATROL 명령이 거절/실패한 경우에만 호출되며, 아직 순찰이 시작되지 않았으므로 배터리/기간은 남기지 않는다.
     public void fail() {
+        // 통신 단절로 끝난 순찰도 보고서에 종료 시점과 운행 시간을 남길 수 있도록 종료 정보를 채운다.
         this.status = PatrolStatus.FAILED;
         this.endedAt = LocalDateTime.now();
+        this.endBatteryLevel = robot.getBatteryLevel();
+        if (startedAt != null)
+            this.totalDuration = Math.toIntExact(Duration.between(startedAt, endedAt).toSeconds());
     }
 
     // STOP_PATROL 발행 시 commandId를 새로 발급한 값으로 교체한다(START_PATROL의 commandId는 이미 ACK 처리가 끝난 상태).

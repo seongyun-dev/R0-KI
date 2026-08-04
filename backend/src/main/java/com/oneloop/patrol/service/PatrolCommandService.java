@@ -15,9 +15,11 @@ import com.oneloop.patrol.dto.mqtt.StartPatrolCommand;
 import com.oneloop.patrol.dto.mqtt.StopPatrolCommand;
 import com.oneloop.patrol.dto.request.PatrolStartRequest;
 import com.oneloop.patrol.dto.response.PatrolStartResponse;
+import com.oneloop.patrol.dto.response.PatrolStopResponse;
 import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
+import com.oneloop.robot.domain.SensorStatus;
 import com.oneloop.robot.repository.RobotRepository;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -35,6 +37,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class PatrolCommandService {
+
+    private static final long CONNECTION_TIMEOUT_SECONDS = 15;
+    private static final List<PatrolStatus> ACTIVE_PATROL_STATUSES =
+            List.of(PatrolStatus.IN_PROGRESS, PatrolStatus.STOP_REQUESTED);
 
     private final PatrolRepository patrolRepository;
     private final RobotRepository robotRepository;
@@ -55,9 +61,10 @@ public class PatrolCommandService {
                                 request.getRobotId(), apartmentComplexId, RobotStatus.DELETED)
                         .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
 
-        if (patrolRepository.existsByRobotIdAndStatus(robot.getId(), PatrolStatus.IN_PROGRESS)) {
+        if (patrolRepository.existsByRobotIdAndStatusIn(robot.getId(), ACTIVE_PATROL_STATUSES)) {
             throw new BusinessException(ErrorCode.PATROL_ALREADY_IN_PROGRESS);
         }
+        validateReadyForPatrol(robot);
 
         // commandId는 MQTT 명령과 IoT가 돌려주는 ACK가 같은 명령인지 확인하기 위해 저장한다.
         String commandId = UUID.randomUUID().toString();
@@ -67,6 +74,41 @@ public class PatrolCommandService {
         publish(robot.getSerialNumber(), command);
 
         return PatrolStartResponse.from(patrol);
+    }
+
+    @Transactional
+    public PatrolStopResponse stop(Long apartmentComplexId, Long patrolId) {
+        // 단지 ID를 조회 조건에 포함해 URL의 patrolId만 바꿔 다른 단지의 순찰을 종료하지 못하게 한다.
+        Patrol patrol =
+                patrolRepository
+                        .findByIdAndRobotApartmentComplexId(patrolId, apartmentComplexId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.PATROL_NOT_FOUND));
+        if (patrol.getStatus() != PatrolStatus.IN_PROGRESS
+                && patrol.getStatus() != PatrolStatus.STOP_REQUESTED) {
+            throw new BusinessException(ErrorCode.PATROL_INVALID_STATE);
+        }
+
+        String commandId = UUID.randomUUID().toString();
+        // 먼저 STOP_REQUESTED와 commandId를 같은 트랜잭션에 기록한다.
+        // MQTT 발행이 예외로 실패하면 트랜잭션도 롤백되어 진행 중 상태가 그대로 유지된다.
+        patrol.requestStop(commandId);
+        publish(patrol.getRobot().getSerialNumber(), StopPatrolCommand.of(commandId));
+        return PatrolStopResponse.from(patrol);
+    }
+
+    @Transactional
+    public void stopAfterReconnect(PatrolRobot robot) {
+        // 통신이 끊긴 동안 실제 로봇이 계속 움직였을 수 있다.
+        // 실패 처리된 마지막 순찰이 있는 경우 재연결 직후 정지 명령을 다시 보내 실제 정지를 우선한다.
+        Patrol patrol =
+                patrolRepository.findFirstByRobotIdOrderByStartedAtDesc(robot.getId()).orElse(null);
+        if (patrol == null || patrol.getStatus() != PatrolStatus.FAILED) {
+            return;
+        }
+
+        String commandId = UUID.randomUUID().toString();
+        patrol.updateCommandId(commandId);
+        publish(robot.getSerialNumber(), StopPatrolCommand.of(commandId));
     }
 
     // pose 수신 때마다 RobotTelemetryService.updatePose()에서 호출된다.
@@ -119,5 +161,22 @@ public class PatrolCommandService {
             throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
         mqttPublisher.publishCommand(robotKey, command);
+    }
+
+    private void validateReadyForPatrol(PatrolRobot robot) {
+        LocalDateTime connectedAt = robot.getLastConnectedAt();
+        boolean recentlyConnected =
+                connectedAt != null
+                        && !connectedAt.isBefore(
+                                LocalDateTime.now().minusSeconds(CONNECTION_TIMEOUT_SECONDS));
+        boolean modulesNormal =
+                robot.getCameraStatus() == SensorStatus.NORMAL
+                        && robot.getLidarStatus() == SensorStatus.NORMAL
+                        && robot.getMotorStatus() == SensorStatus.NORMAL
+                        && robot.getLineSensorStatus() == SensorStatus.NORMAL;
+        // DB 상태만 IDLE로 바꿔 재출발시키지 않는다. 최신 통신과 필수 모듈 정상 상태가 함께 확인돼야 한다.
+        if (robot.getStatus() != RobotStatus.IDLE || !recentlyConnected || !modulesNormal) {
+            throw new BusinessException(ErrorCode.ROBOT_NOT_READY);
+        }
     }
 }
