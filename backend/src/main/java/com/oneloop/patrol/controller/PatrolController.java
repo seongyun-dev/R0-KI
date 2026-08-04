@@ -9,6 +9,7 @@ import com.oneloop.patrol.dto.request.PatrolStatusFilter;
 import com.oneloop.patrol.dto.response.PatrolDetailResponse;
 import com.oneloop.patrol.dto.response.PatrolListResponse;
 import com.oneloop.patrol.dto.response.PatrolStartResponse;
+import com.oneloop.patrol.dto.response.PatrolStopResponse;
 import com.oneloop.patrol.service.PatrolCommandService;
 import com.oneloop.patrol.service.PatrolService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -48,6 +49,18 @@ public class PatrolController {
         return ApiResponse.success(
                 "순찰이 요청되었습니다.",
                 patrolCommandService.start(principal.getApartmentComplexId(), request));
+    }
+
+    @Operation(summary = "순찰 수동 종료", description = "진행 중인 순찰의 로봇에 STOP_PATROL 명령을 전송합니다.")
+    @PostMapping("/{patrolId}/stop")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ApiResponse<PatrolStopResponse> stop(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Parameter(description = "순찰 ID", example = "1", required = true) @PathVariable
+                    Long patrolId) {
+        return ApiResponse.success(
+                "순찰 종료를 요청했습니다.",
+                patrolCommandService.stop(principal.getApartmentComplexId(), patrolId));
     }
 
     @Operation(

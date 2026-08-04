@@ -34,13 +34,17 @@ public class RobotListResponse {
             nullable = true)
     private String location;
 
-    public static RobotListResponse of(PatrolRobot robot, String location) {
+    @Schema(description = "진행 중이거나 종료 요청 중인 순찰 ID", example = "15", nullable = true)
+    private Long activePatrolId;
+
+    public static RobotListResponse of(PatrolRobot robot, String location, Long activePatrolId) {
         return RobotListResponse.builder()
                 .robotId(robot.getId())
                 .robotName(robot.getName())
                 .robotStatus(robot.getStatus())
                 .batteryLevel(robot.getBatteryLevel())
                 .location(location)
+                .activePatrolId(activePatrolId)
                 .build();
     }
 }

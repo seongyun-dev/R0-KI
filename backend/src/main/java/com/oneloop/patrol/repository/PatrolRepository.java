@@ -3,6 +3,7 @@ package com.oneloop.patrol.repository;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolStatus;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -18,6 +19,13 @@ public interface PatrolRepository extends JpaRepository<Patrol, Long> {
     Optional<Patrol> findFirstByRobotIdOrderByStartedAtDesc(Long robotId);
 
     boolean existsByRobotIdAndStatus(Long robotId, PatrolStatus status);
+
+    boolean existsByRobotIdAndStatusIn(Long robotId, Collection<PatrolStatus> statuses);
+
+    List<Patrol> findAllByStatusIn(Collection<PatrolStatus> statuses);
+
+    List<Patrol> findAllByRobotIdInAndStatusInOrderByStartedAtDesc(
+            Collection<Long> robotIds, Collection<PatrolStatus> statuses);
 
     Optional<Patrol> findByCommandId(String commandId);
 
