@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public enum PatrolStatusFilter {
     ALL(null),
     IN_PROGRESS(PatrolStatus.IN_PROGRESS),
+    STOP_REQUESTED(PatrolStatus.STOP_REQUESTED),
     COMPLETED(PatrolStatus.COMPLETED),
     STOPPED(PatrolStatus.STOPPED),
     FAILED(PatrolStatus.FAILED);

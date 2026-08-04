@@ -80,6 +80,10 @@ public class PatrolCommandAckService {
     // STOP_PATROL은 백엔드가 이미 pose로 도착을 확인하고 COMPLETED로 확정한 뒤 통보하는 명령이라, 실패해도 순찰 상태는 건드리지 않고 로봇이 실제로 멈췄는지 확인이 필요하다는 경고만 남긴다.
     private void handleStopAck(Patrol patrol, CommandAck ack) {
         if (ack.status() == CommandAck.AckStatus.SUCCEEDED) {
+            // 자동 종료는 STOP 명령 전 이미 COMPLETED이고, 수동 종료만 ACK 시점에 STOPPED로 확정한다.
+            if (patrol.getStatus() == PatrolStatus.STOP_REQUESTED) {
+                patrol.stop();
+            }
             log.info("[MQTT] 순찰 종료 ACK 처리 완료. patrolId={}, commandId={}", patrol.getId(), ack.commandId());
             return;
         }
