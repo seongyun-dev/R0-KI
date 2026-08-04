@@ -21,6 +21,15 @@ export function useR0KiTheme() {
       return next
     })
   }
+
+  /* 테마를 <html> 에도 심는다 (S15P11E103-295).
+     ui/Modal 은 document.body 로 포털해서 .r0ki 바깥에 그려지므로
+     [data-theme] 셀렉터가 닿지 않는다 — 그래서 야간에도 흰 카드로 떴다.
+     여기서 심어 준 값으로 r0ki.css 끝의 포털 전용 규칙이 걸린다. */
+  useEffect(() => {
+    document.documentElement.dataset.r0kiTheme = theme
+  }, [theme])
+
   return { theme, toggle }
 }
 
@@ -72,6 +81,7 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
   const { theme, toggle } = useR0KiTheme()
   const clock = useClockText()
   const loginId = useAuthStore((s) => s.loginId)
+  const memberName = useAuthStore((s) => s.memberName)
   const logout = useAuthStore((s) => s.logout)
 
   const onLogout = () => {
@@ -120,7 +130,7 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             </button>
             <span className="admin">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>
-              {loginId && <b className="who">{loginId}</b>} 관리자
+              {(memberName ?? loginId) && <b className="who">{memberName ?? loginId}</b>} 관리자
             </span>
             <button type="button" className="themebtn" onClick={onLogout}>
               로그아웃

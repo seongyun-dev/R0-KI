@@ -55,6 +55,8 @@ export type SignInResponse = {
   message: string,
   data: {
     accessToken: string
+    /** 로그인한 회원의 이름 (회원가입 시 입력한 name) */
+    name: string
     /** 소속 단지에 등록된 로봇이 있는가 (백엔드 SigninResponse.hasRobot) */
     hasRobot?: boolean
     /** 소속 단지에 등록된 지도가 있는가 (백엔드 SigninResponse.hasMap) */

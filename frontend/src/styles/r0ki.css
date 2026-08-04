@@ -53,33 +53,48 @@
   color-scheme:light;
 }
 
-/* ── 야간 ────────────────────────────────────────────────── */
+/* ── 야간 (S15P11E103-295) ───────────────────────────────────
+   거의 검정 바탕 + 코발트~아이스블루 발광 램프 + 유리질 표면.
+   깊이는 검정 그림자가 아니라 '가장자리 광'과 파란 블룸으로 만든다 —
+   #04070F 위에서 검정 그림자는 보이지 않는다.
+   액센트를 창백한 하늘색에서 채도 높은 코발트로 내렸기 때문에
+   그 위 글씨(--accent-ink)는 어두운 남색에서 흰색으로 뒤집혔다. */
 .r0ki[data-theme="nocturne"]{
-  --page:#101A2B;
-  --text-1:#F3F8FD;--text-2:#CFE2F6;--text-3:#B5CFEE;
-  --accent:#B9D5ED;
-  --accent-fill-1:#A8CBEA;--accent-fill-2:#8FBAE2;--accent-ink:#0B1220;
-  --accent-edge:transparent;--accent-2:#8FBAE2;--accent-glow:rgba(168,203,234,.40);
-  --graphic:#B5D2EC;--graphic-soft:#3D6089;
-  --alert:#F7FAFD;--detect:#D6E7F5;--patrol:#B5D2EC;--charge:#97C1E5;--offline:#A4CCEE;
-  /* 로봇 상태 팔레트 — 야간은 같은 색상을 파스텔 명도로 올린다 */
-  --st-patrol:#8FC6F0;--st-charge:#7BD8AC;--st-idle:#9DB0CC;
-  --urgent:#FF8A93;--urgent-text:#FCC5C8;--urgent-ink:#2A0508;
-  --urgent-bg:rgba(255,138,147,.11);--urgent-edge:rgba(255,138,147,.45);
-  --track:rgba(255,255,255,.07);--edge:rgba(255,255,255,.20);
-  --hair:rgba(255,255,255,.13);--focus-in:#101A2B;
-  --tint-1:linear-gradient(168deg,rgba(255,255,255,.09) 0%,rgba(255,255,255,.025) 44%,rgba(255,255,255,.06) 100%);
-  --tint-2:linear-gradient(168deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,.02) 46%,rgba(255,255,255,.05) 100%);
-  --tint-3:linear-gradient(168deg,rgba(255,255,255,.16) 0%,rgba(255,255,255,.07) 100%);
-  --rim-top:rgba(255,255,255,.72);--rim-bot:rgba(255,255,255,.30);--rim-side:rgba(255,255,255,.26);
-  --refract:rgba(8,16,32,.60);
-  --pool:rgba(255,255,255,.40);--pool-wide:rgba(255,255,255,.15);
-  --inner-ring:rgba(255,255,255,.07);--inner-ring-bot:rgba(255,255,255,.26);
-  --halo:0 0 0 1px rgba(255,255,255,.10),0 0 16px rgba(160,200,255,.10);
-  --sh-1:0 16px 36px rgba(0,0,0,.48),0 4px 10px rgba(0,0,0,.3);
-  --sh-2:0 26px 52px rgba(0,0,0,.54),0 5px 12px rgba(0,0,0,.32);
-  --sh-3:0 32px 68px rgba(0,0,0,.62),0 6px 14px rgba(0,0,0,.34);
-  --bot-shadow:#000814;--bot-led:#7AAFDE;--bot-led-soft:#C6DEF3;
+  --page:#04070F;
+  --text-1:#EDF4FF;--text-2:#B8CDE8;--text-3:#8CA6C8;
+  --accent:#5AA9FF;
+  --accent-fill-1:#2B76F0;--accent-fill-2:#123FC9;--accent-ink:#F2F8FF;
+  --accent-edge:rgba(150,200,255,.55);--accent-2:#123FC9;--accent-glow:rgba(43,118,240,.45);
+  --graphic:#6FB4FF;--graphic-soft:#1C3E75;
+  /* 상태 점 — 하나의 블루 램프를 명도로 나눈다(색상으로 나누면 상태색과 충돌) */
+  --alert:#FFFFFF;--detect:#C8E2FF;--patrol:#7FBEFF;--charge:#4E9BF5;--offline:#3A6FA8;
+  /* 로봇 상태 팔레트 — 여기만 색상으로 구분한다(순찰=파랑·충전=초록·대기=회청) */
+  --st-patrol:#5AA9FF;--st-charge:#5FE0B0;--st-idle:#8FA6C6;
+  /* 응급은 이 화면에서 유일한 난색 — 파란 램프에 섞이지 않게 둔다 */
+  --urgent:#FF7A85;--urgent-text:#FFC2C7;--urgent-ink:#2A0508;
+  --urgent-bg:rgba(255,122,133,.12);--urgent-edge:rgba(255,122,133,.48);
+  --track:rgba(120,170,255,.07);--edge:rgba(150,200,255,.22);
+  --hair:rgba(150,200,255,.14);--focus-in:#04070F;
+  /* 유리 몸통 — 옅은 우유빛이 아니라 '채도 높은 짙은 파랑'이어야 유리로 읽힌다.
+     밝은 헤어라인(.g*::before)과 대비가 클수록 두께감이 산다. */
+  --tint-1:linear-gradient(160deg,rgba(26,56,120,.30) 0%,rgba(8,18,44,.42) 48%,rgba(18,44,102,.34) 100%);
+  --tint-2:linear-gradient(160deg,rgba(24,52,114,.28) 0%,rgba(7,16,40,.40) 50%,rgba(16,40,96,.32) 100%);
+  --tint-3:linear-gradient(160deg,rgba(32,66,138,.36) 0%,rgba(9,20,48,.46) 52%,rgba(22,52,116,.38) 100%);
+  /* 곧게 뻗은 밝은 띠(rim)는 무광 플라스틱의 신호 — 눌러 두고
+     테두리는 ::before 헤어라인에, 두께감은 아래 고이는 빛(pool)에 맡긴다 */
+  --rim-top:rgba(220,240,255,.30);--rim-bot:rgba(150,205,255,.22);--rim-side:rgba(160,210,255,.20);
+  --refract:rgba(0,3,12,.85);
+  --pool:rgba(150,205,255,.55);--pool-wide:rgba(70,135,255,.22);
+  --inner-ring:rgba(150,200,255,.09);--inner-ring-bot:rgba(165,208,255,.36);
+  /* 가장자리를 안쪽으로 어둡게 눌러 '두꺼운 유리의 그림자 띠'를 만든다.
+     이 어두운 띠가 있어야 그 위의 하이라이트가 표면이 아니라 모서리로 읽힌다.
+     --halo 는 .g1/.g2/.g3 box-shadow 의 첫 항목이라 가장 위에 깔린다. */
+  --halo:inset 0 0 0 1.5px rgba(2,6,16,.85),inset 0 0 16px 3px rgba(0,4,14,.55),
+    0 0 0 1px rgba(140,190,255,.07),0 0 34px rgba(43,118,240,.20);
+  --sh-1:0 18px 40px rgba(0,0,0,.66),0 0 26px rgba(28,86,200,.11);
+  --sh-2:0 28px 56px rgba(0,0,0,.72),0 0 34px rgba(28,86,200,.13);
+  --sh-3:0 34px 72px rgba(0,0,0,.78),0 0 42px rgba(28,86,200,.15);
+  --bot-shadow:#000208;--bot-led:#5AA9FF;--bot-led-soft:#BBDCFF;
   color-scheme:dark;
 }
 
@@ -132,20 +147,68 @@
     radial-gradient(150% 110% at 4% -16%,rgba(255,255,255,.20) 0%,rgba(255,255,255,.06) 24%,rgba(255,255,255,.015) 44%,transparent 62%),
     linear-gradient(0deg,rgba(255,255,255,.045) 0%,transparent 24%);
   mix-blend-mode:screen;opacity:.85}
+/* ══ 야간 유리 (S15P11E103-295) ══════════════════════════════
+   플라스틱과 유리를 가르는 건 '채움'이 아니라 '가장자리'다.
+   균일한 반투명 채움 + 넓고 부드러운 면광 = 플라스틱.
+   어두운 채도 높은 속 + 둘레를 따라 굵기가 변하는 얇고 날카로운 하이라이트 = 유리.
+
+   그래서 야간에서는
+     ① ::before 를 이중 안쪽 링에서 '그라데이션 헤어라인'으로 바꾸고
+        (padding+mask-composite 로 테두리만 남긴다 — 둥근 모서리를 그대로 탄다)
+     ② 평평한 1px 보더는 끄고 그 헤어라인이 유일한 테두리가 되게 하며
+     ③ ::after 면광을 좁고 선명한 사선 스펙큘러로 바꾸고
+     ④ backdrop blur/채도를 올려 뒤가 실제로 굴절돼 보이게 한다.
+   ══════════════════════════════════════════════════════════ */
+.r0ki[data-theme="nocturne"] .g1,
+.r0ki[data-theme="nocturne"] .g2,
+.r0ki[data-theme="nocturne"] .g3{border-color:transparent}
+.r0ki[data-theme="nocturne"] .g1{-webkit-backdrop-filter:blur(13px) saturate(155%);backdrop-filter:blur(13px) saturate(155%)}
+.r0ki[data-theme="nocturne"] .g2{-webkit-backdrop-filter:blur(15px) saturate(160%);backdrop-filter:blur(15px) saturate(160%)}
+.r0ki[data-theme="nocturne"] .g3{-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%)}
+
+/* ① 모서리 베벨 — 두꺼운 유리의 테.
+   균일한 굵기의 선은 사출 플라스틱의 신호다. 실제 유리 모서리는
+   '어두운 띠 안에서 짧게 부풀었다 사라지는 강한 스펙큘러' 로 보인다.
+   그래서 정지점을 촘촘하게 몰아 두 군데(좌상·우하)만 흰색으로 터뜨리고
+   나머지 구간은 거의 검정으로 눌러 굵기가 변하는 것처럼 읽히게 한다. */
+.r0ki[data-theme="nocturne"] .g1::before,
+.r0ki[data-theme="nocturne"] .g2::before,
+.r0ki[data-theme="nocturne"] .g3::before{
+  inset:0;border:0;border-radius:inherit;padding:1.6px;
+  background:linear-gradient(135deg,
+    rgba(90,130,190,.08) 0%,
+    rgba(150,190,240,.26) 4.5%,
+    rgba(246,251,255,.98) 8.5%,
+    rgba(222,238,255,.80) 11.5%,
+    rgba(120,170,235,.20) 16%,
+    rgba(24,50,105,.08) 28%,
+    rgba(8,20,50,.05) 48%,
+    rgba(40,80,155,.10) 66%,
+    rgba(170,210,250,.48) 82%,
+    rgba(240,248,255,.94) 89%,
+    rgba(130,175,235,.22) 94%,
+    rgba(30,60,120,.08) 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude}
+
+/* ③ 앞면 스펙큘러 — 좁고 선명한 사선 + 아래쪽에 고이는 빛.
+   넓게 퍼진 면광은 무광 플라스틱의 신호라 쓰지 않는다. */
 .r0ki[data-theme="nocturne"] .g1::after,.r0ki[data-theme="nocturne"] .g2::after,.r0ki[data-theme="nocturne"] .g3::after{
   background:
-    radial-gradient(150% 110% at 4% -16%,rgba(255,255,255,.16) 0%,rgba(255,255,255,.05) 28%,transparent 60%),
-    linear-gradient(0deg,rgba(255,255,255,.04) 0%,transparent 26%);
-  opacity:.85}
+    linear-gradient(118deg,transparent 6%,rgba(226,242,255,.13) 12%,rgba(255,255,255,.05) 15%,transparent 22%),
+    radial-gradient(120% 80% at 0% -10%,rgba(210,234,255,.16) 0%,rgba(140,190,255,.04) 26%,transparent 52%),
+    radial-gradient(140% 60% at 50% 108%,rgba(120,180,255,.10) 0%,transparent 60%);
+  opacity:1}
 
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   .r0ki[data-theme="crystal"] .g1,.r0ki[data-theme="crystal"] .g2,.r0ki[data-theme="crystal"] .g3{background:rgba(255,255,255,.82)}
-  .r0ki[data-theme="nocturne"] .g1,.r0ki[data-theme="nocturne"] .g2,.r0ki[data-theme="nocturne"] .g3{background:rgba(16,24,38,.90)}}
+  .r0ki[data-theme="nocturne"] .g1,.r0ki[data-theme="nocturne"] .g2,.r0ki[data-theme="nocturne"] .g3{background:rgba(8,14,28,.90)}}
 @media (prefers-reduced-transparency:reduce){
   .r0ki .g1,.r0ki .g2,.r0ki .g3{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
   .r0ki .g1::after,.r0ki .g2::after{display:none}
   .r0ki[data-theme="crystal"] .g1,.r0ki[data-theme="crystal"] .g2,.r0ki[data-theme="crystal"] .g3{background:rgba(255,255,255,.94)}
-  .r0ki[data-theme="nocturne"] .g1,.r0ki[data-theme="nocturne"] .g2,.r0ki[data-theme="nocturne"] .g3{background:rgba(16,24,38,.96)}}
+  .r0ki[data-theme="nocturne"] .g1,.r0ki[data-theme="nocturne"] .g2,.r0ki[data-theme="nocturne"] .g3{background:rgba(8,14,28,.96)}}
 @media (prefers-reduced-motion:reduce){
   .r0ki *,.r0ki *::before,.r0ki *::after{animation:none!important;transition-duration:.01ms!important}}
 .r0ki :focus-visible{outline:none;box-shadow:0 0 0 2px var(--focus-in),0 0 0 4px var(--accent)}
@@ -159,10 +222,14 @@
   background:
     radial-gradient(1200px 900px at 50% -20%,rgba(255,255,255,.62),transparent 70%),
     linear-gradient(176deg,#F2F7FD 0%,#E1ECFA 38%,#CCDFF5 70%,#BFD9F5 100%)}
+/* 야간 씬 — 거의 검정 위에 파란 블룸 세 덩어리(레퍼런스의 발광 그라데이션).
+   블룸을 겹쳐야 넓은 검정 면이 죽은 회색으로 읽히지 않는다. */
 .r0ki[data-theme="nocturne"] .scene{
   background:
-    radial-gradient(1200px 900px at 50% -20%,rgba(150,190,255,.14),transparent 70%),
-    linear-gradient(176deg,#1B2739 0%,#151F2F 44%,#101A28 100%)}
+    radial-gradient(900px 620px at 16% 6%,rgba(43,118,240,.20),transparent 62%),
+    radial-gradient(1000px 720px at 84% 94%,rgba(18,63,201,.17),transparent 66%),
+    radial-gradient(1300px 900px at 50% -18%,rgba(120,180,255,.10),transparent 70%),
+    linear-gradient(176deg,#070C18 0%,#04070F 46%,#02040A 100%)}
 /* 무대 직계 자식은 씬 위로 — 단 화면 전체에 떠야 하는 오버레이(토스트·모달)는 제외.
    제외하지 않으면 position:fixed 가 relative 로 덮여 화면 밖에 그려진다. */
 .r0ki .stage>*:not(.scene):not(.toast):not(.modalwrap){position:relative;z-index:1}
@@ -175,7 +242,8 @@
   background:conic-gradient(from 140deg,var(--patrol),var(--accent-fill-2,var(--accent)),var(--patrol));
   box-shadow:0 0 16px var(--accent-glow),inset 0 1px 0 rgba(255,255,255,.8)}
 .r0ki .brand .core::after{content:'';position:absolute;inset:7px;border-radius:50%;background:rgba(255,255,255,.9)}
-.r0ki[data-theme="nocturne"] .brand .core::after{background:#0B1220}
+/* 브랜드 점 가운데 구멍 — 액센트 잉크가 아니라 '페이지 색으로 뚫은 링'이다 */
+.r0ki[data-theme="nocturne"] .brand .core::after{background:var(--page)}
 .r0ki .sp{flex:1}
 .r0ki .nav{display:flex;gap:4px;margin-left:var(--s4)}
 .r0ki .nv{height:50px;padding:0 22px;border:0;border-radius:var(--r-pill);background:transparent;cursor:pointer;
@@ -186,7 +254,7 @@
 .r0ki .nv[aria-pressed="true"]{color:var(--accent-ink,#fff);font-weight:700;
   background:linear-gradient(180deg,var(--accent-fill-1,var(--accent)),var(--accent-fill-2,var(--accent-2)));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(5,42,71,.22),0 2px 5px rgba(6,48,88,.42),0 8px 20px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .nv[aria-pressed="true"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .nv[aria-pressed="true"]{color:var(--accent-ink)}
 /* 상단바 항목은 좁아져도 줄바꿈하지 않는다 — 다른 항목(.nv/.admin/.themebtn)과 같은 규칙 */
 .r0ki .alarmbtn{position:relative;flex:none;height:50px;padding:0 22px 0 20px;border-radius:var(--r-pill);
   border:1px solid var(--edge);background:var(--track);cursor:pointer;
@@ -470,7 +538,7 @@
 .r0ki .botall[aria-pressed="true"]{border-color:transparent;color:var(--accent-ink);
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 6px 16px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .botall[aria-pressed="true"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .botall[aria-pressed="true"]{color:var(--accent-ink)}
 
 /* 지도에 띄울 로봇을 고르는 버튼 — 선택된 칩은 테두리·바탕으로 표시한다 */
 .r0ki .botitem{display:flex;align-items:center;gap:var(--s2);width:100%;min-width:0;padding:var(--s3) var(--s4);
@@ -514,7 +582,7 @@
 .r0ki .botitem:hover .go,.r0ki .botitem:focus-visible .go{border-color:transparent;color:var(--accent-ink);
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2))}
 .r0ki[data-theme="nocturne"] .botitem:hover .go,
-.r0ki[data-theme="nocturne"] .botitem:focus-visible .go{color:#0B1220}
+.r0ki[data-theme="nocturne"] .botitem:focus-visible .go{color:var(--accent-ink)}
 /* 미니 로봇 — 안테나 + 바이저(LED 눈) + 바퀴. 전부 토큰 색 */
 .r0ki .botitem .mini{width:26px;height:26px;flex:none}
 .r0ki .botitem .mini .ant{stroke:var(--graphic);stroke-width:1.4;stroke-linecap:round}
@@ -559,7 +627,7 @@
 .r0ki .btn-p{color:var(--accent-ink,#fff);border:0;
   background:linear-gradient(180deg,var(--accent-fill-1,var(--accent)),var(--accent-fill-2,var(--accent-2)));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 8px 22px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .btn-p{color:#0B1220}
+.r0ki[data-theme="nocturne"] .btn-p{color:var(--accent-ink)}
 .r0ki .btn-p:hover{transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 13px 30px var(--accent-glow)}
 .r0ki .btn-s{color:var(--text-1);background:var(--track);border:1px solid var(--edge);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(255,255,255,.5);
@@ -597,6 +665,9 @@
 .r0ki .golink{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 15px;border:0;border-radius:var(--r-pill);
   background:transparent;cursor:pointer;font-family:var(--sans);font-size:13.5px;font-weight:700;color:var(--accent-2);
   transition:all var(--d-fast) var(--e-glass)}
+/* --accent-2 는 야간에서 딥 코발트(그라데이션 아래쪽 정지점)라 글자색으로 쓰면
+   어두운 바탕에서 2.5:1까지 떨어진다. 여기만 밝은 액센트로 올린다. */
+.r0ki[data-theme="nocturne"] .golink{color:var(--accent)}
 .r0ki .golink:hover{background:var(--track);color:var(--text-1)}
 .r0ki .golink svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .r0ki .tfoot{display:flex;align-items:center;justify-content:space-between;padding:var(--s3) var(--s3) 0;
@@ -660,7 +731,7 @@
 
 /* ══════════════ 이벤트 관리 화면 (R0Kievents 시안 포팅) ══════════════ */
 .r0ki[data-theme="crystal"]{--modal-bg:rgba(244,249,255,.94);--menu-bg:rgba(240,247,255,.97)}
-.r0ki[data-theme="nocturne"]{--modal-bg:rgba(22,32,48,.95);--menu-bg:rgba(19,28,43,.97)}
+.r0ki[data-theme="nocturne"]{--modal-bg:rgba(10,17,32,.95);--menu-bg:rgba(8,14,27,.97)}
 
 /* 헤더 타이틀 — 배지 나란히 */
 .r0ki .ptitle.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -731,7 +802,7 @@
 .r0ki .acts button[aria-pressed="true"]{color:var(--accent-ink,#fff);font-weight:700;
   background:linear-gradient(180deg,var(--accent-fill-1,var(--accent)),var(--accent-fill-2,var(--accent-2)));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(5,42,71,.22),0 2px 5px rgba(6,48,88,.42),0 6px 16px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .acts button[aria-pressed="true"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .acts button[aria-pressed="true"]{color:var(--accent-ink)}
 
 /* 커스텀 드롭다운 — 네이티브 select 는 OS 메뉴가 떠서 톤이 깨짐 */
 .r0ki .dd{position:relative}
@@ -748,8 +819,8 @@
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 2px 5px rgba(6,48,88,.42)}
 .r0ki .dd-btn[aria-expanded="true"] svg{stroke:var(--accent-ink);transform:rotate(180deg)}
-.r0ki[data-theme="nocturne"] .dd-btn[aria-expanded="true"]{color:#0B1220}
-.r0ki[data-theme="nocturne"] .dd-btn[aria-expanded="true"] svg{stroke:#0B1220}
+.r0ki[data-theme="nocturne"] .dd-btn[aria-expanded="true"]{color:var(--accent-ink)}
+.r0ki[data-theme="nocturne"] .dd-btn[aria-expanded="true"] svg{stroke:var(--accent-ink)}
 .r0ki .dd.on .dd-btn{position:relative;z-index:61}
 .r0ki .dd.set .dd-btn{color:var(--text-1);border-color:var(--graphic);font-weight:700}
 .r0ki .dd.set .dd-btn svg{stroke:var(--graphic)}
@@ -777,7 +848,7 @@
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
 .r0ki .dd-opt[aria-selected="true"] svg{opacity:1}
-.r0ki[data-theme="nocturne"] .dd-opt[aria-selected="true"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .dd-opt[aria-selected="true"]{color:var(--accent-ink)}
 
 /* 빈 상태 */
 .r0ki .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
@@ -937,13 +1008,13 @@
   transition:opacity var(--d-base) var(--e-glass),transform var(--d-base) var(--e-spring)}
 .r0ki .toast.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
 .r0ki .toast svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
-.r0ki[data-theme="nocturne"] .toast{color:#0B1220}
+.r0ki[data-theme="nocturne"] .toast{color:var(--accent-ink)}
 
 /* 모달 — 처리 완료 메모 */
 .r0ki .modalwrap{position:fixed;inset:0;z-index:130;display:flex;align-items:center;justify-content:center}
 .r0ki .backdrop{position:absolute;inset:0;background:rgba(16,32,56,.42);
   -webkit-backdrop-filter:blur(6px) saturate(115%);backdrop-filter:blur(6px) saturate(115%)}
-.r0ki[data-theme="nocturne"] .backdrop{background:rgba(4,10,20,.58)}
+.r0ki[data-theme="nocturne"] .backdrop{background:rgba(0,2,8,.68)}
 /* 내용이 길어도 화면 밖으로 자라지 않는다 — 페이지가 스크롤되지 않도록 높이를 가둔다 */
 .r0ki .modal{position:relative;width:min(560px,92vw);max-height:86vh;overflow-y:auto;
   padding:var(--s6);border-radius:var(--r-float);
@@ -1097,8 +1168,11 @@
   background:radial-gradient(closest-side,rgba(255,255,255,1),rgba(255,255,255,.62) 46%,rgba(255,255,255,.16) 70%,transparent 82%)}
 .r0ki .rd-plinth::after{content:'';position:absolute;inset:0;border-radius:50%;
   border:1px solid var(--edge);box-shadow:0 0 0 1px rgba(255,255,255,.30) inset}
+/* 야간 받침 — 로봇 발밑에 고인 파란 광. 세게 주면 검은 무대 위에 원판이 뜬다 */
 .r0ki[data-theme="nocturne"] .rd-plinth::before{
-  background:radial-gradient(closest-side,rgba(170,210,255,.30),rgba(170,210,255,.10) 52%,transparent 80%)}
+  background:radial-gradient(closest-side,rgba(90,169,255,.26),rgba(43,118,240,.10) 52%,transparent 80%)}
+/* 테두리 링은 야간에서 '떠 있는 원'으로 읽힌다 — 받침은 광으로만 남긴다 */
+.r0ki[data-theme="nocturne"] .rd-plinth::after{display:none}
 
 /* 부위 콜아웃 — 박스는 로봇 양옆에 멀찍이 고정. 부위까지는 .rd-leads 가 잇는다 */
 .r0ki .rd-cal{position:absolute;display:flex;align-items:center;width:max-content;z-index:3;pointer-events:none}
@@ -1253,6 +1327,16 @@
 /* 입력칸 — 흰 카드 위에서는 반투명 --track 이 흰색으로 묻힌다. 연한 하늘색을 직접 지정 */
 .r0ki.r0ki-auth .au-in,
 .r0ki.r0ki-auth .mdin{background:#E8EFFB;border-color:transparent}
+/* 야간 (S15P11E103-295) — 위 두 규칙은 테마를 안 가려서 야간에도 흰 카드가 나온다.
+   채움을 비워 유리 틴트가 그대로 보이게 하고, 입력칸은 어두운 채움으로 되돌린다. */
+.r0ki.r0ki-auth[data-theme="nocturne"] .au-card{background:var(--tint-3)}
+.r0ki.r0ki-auth[data-theme="nocturne"] .au-in,
+.r0ki.r0ki-auth[data-theme="nocturne"] .mdin{
+  background:rgba(10,22,50,.72);border-color:rgba(150,200,255,.22)}
+/* 인증 셸 브랜드 점도 주간 하늘색 고정이라 야간에서 뜬다 — 공용 액센트로 되돌린다 */
+.r0ki.r0ki-auth[data-theme="nocturne"] .brand .core{
+  background:conic-gradient(from 140deg,var(--patrol),var(--accent-fill-2),var(--patrol));
+  box-shadow:0 0 16px var(--accent-glow),inset 0 1px 0 rgba(255,255,255,.5)}
 .r0ki .au-card.w-mid{max-width:860px}
 .r0ki .au-card.w-map{max-width:1120px}
 
@@ -1354,8 +1438,8 @@
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 1px 3px rgba(6,48,88,.10),0 4px 12px var(--accent-glow)}
 .r0ki .au-stp li.on .n{background:rgba(255,255,255,.34);border-color:transparent;color:var(--accent-ink)}
-.r0ki[data-theme="nocturne"] .au-stp li.on .st{color:#0B1220}
-.r0ki[data-theme="nocturne"] .au-stp li.on .n{color:#0B1220}
+.r0ki[data-theme="nocturne"] .au-stp li.on .st{color:var(--accent-ink)}
+.r0ki[data-theme="nocturne"] .au-stp li.on .n{color:var(--accent-ink)}
 
 /* ── Spinner ── */
 @keyframes r0ki-auSpin{to{transform:rotate(360deg)}}
@@ -1406,7 +1490,7 @@
 .r0ki .au-kind[aria-pressed="true"]{color:var(--accent-ink);border-color:transparent;font-weight:700;
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 2px 5px rgba(6,48,88,.22),0 8px 20px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .au-kind[aria-pressed="true"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .au-kind[aria-pressed="true"]{color:var(--accent-ink)}
 /* 스와치 — 실제 구역과 같은 반투명 레시피. color-mix 로 테마 전환을 따라간다 */
 .r0ki .sw{width:13px;height:13px;border-radius:4px;flex:none;
   background:color-mix(in srgb,var(--z) 24%,transparent);
@@ -1463,7 +1547,7 @@
 .r0ki .zkinds button[aria-pressed="true"]{color:var(--accent-ink);font-weight:700;border-color:transparent;
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 2px 5px rgba(6,48,88,.30)}
-.r0ki[data-theme="nocturne"] .zkinds button[aria-pressed="true"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .zkinds button[aria-pressed="true"]{color:var(--accent-ink)}
 .r0ki .mdin{width:100%;height:52px;padding:0 18px;border-radius:var(--r-inner);
   border:1px solid var(--edge);background:var(--track);color:var(--text-1);
   font-family:var(--sans);font-size:16px;font-weight:600;letter-spacing:-.01em;
@@ -1497,7 +1581,7 @@
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(5,42,71,.22),
     0 2px 5px rgba(6,48,88,.42),0 8px 20px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .alarmbtn[aria-current="page"]{color:#0B1220}
+.r0ki[data-theme="nocturne"] .alarmbtn[aria-current="page"]{color:var(--accent-ink)}
 
 /* 입주민에게 나간 메시지 원문 — 본문만 내부 스크롤 */
 .r0ki .ntmsg{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;
@@ -1543,6 +1627,15 @@
     linear-gradient(176deg,#1B2739 0%,#151F2F 44%,#101A28 100%);
   transform:translateY(0);
   transition:transform .52s var(--e-glass)}
+/* 야간 (S15P11E103-295) — 부트 화면은 테마와 무관하게 구 야간 팔레트(슬레이트)로
+   고정돼 있었다. 야간에서만 새 팔레트에 맞춘다(주간 부트 화면은 그대로).
+   boot__row 는 흰색 .45 라 이 배경에서 4.47:1 — AA(4.5) 에 걸려 함께 올린다. */
+.r0ki[data-theme="nocturne"] .boot{
+  background:
+    radial-gradient(900px 620px at 16% 6%,rgba(43,118,240,.20),transparent 62%),
+    radial-gradient(1000px 720px at 84% 94%,rgba(18,63,201,.17),transparent 66%),
+    linear-gradient(176deg,#070C18 0%,#04070F 46%,#02040A 100%)}
+.r0ki[data-theme="nocturne"] .boot__row{color:rgba(255,255,255,.58)}
 .r0ki .boot.exit{transform:translateY(-100%)}
 .r0ki .boot__center{display:flex;flex-direction:column;align-items:center;gap:var(--s3);text-align:center;
   transition:opacity .4s var(--e-glass),transform .4s var(--e-glass)}
@@ -1581,3 +1674,25 @@
   .r0ki .rncard{padding:var(--s6) var(--s8)}
   .r0ki .rnform .au-act{margin-top:var(--s6)}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   포털 모달 야간 대응 (S15P11E103-295)
+   ui/Modal 은 createPortal 로 document.body 에 그려져 .r0ki 바깥에 있다.
+   그래서 [data-theme="nocturne"] 셀렉터가 닿지 않아 야간에도 흰 카드로 떴다
+   (긴급 알림 모달). useR0KiTheme 이 <html data-r0ki-theme> 를 심어 주므로
+   여기서 그 값으로 덮는다.
+   body > div > [role=dialog] 는 포털 구조에만 맞는다 —
+   .r0ki 안쪽 유리 모달(.modal.g3)은 훨씬 깊어서 걸리지 않는다.
+   ⚠️ 주간(crystal)은 손대지 않는다.
+   ══════════════════════════════════════════════════════════════ */
+html[data-r0ki-theme="nocturne"] body > div > [role="dialog"]{
+  background:#0A1120;
+  color:#EDF4FF;
+  box-shadow:0 0 0 1px rgba(150,200,255,.16),0 28px 64px rgba(0,0,0,.72),0 0 40px rgba(43,118,240,.14)}
+html[data-r0ki-theme="nocturne"] body > div > [role="dialog"] .text-fg{color:#EDF4FF}
+html[data-r0ki-theme="nocturne"] body > div > [role="dialog"] .text-muted{color:#8CA6C8}
+html[data-r0ki-theme="nocturne"] body > div > [role="dialog"] .text-subtle{color:#7E96B6}
+/* 응급 안내 박스 — 연한 분홍 채움은 검정 위에서 형광처럼 뜬다 */
+html[data-r0ki-theme="nocturne"] body > div > [role="dialog"] .bg-danger-soft{
+  background:rgba(255,122,133,.13)}
+html[data-r0ki-theme="nocturne"] body > div > [role="dialog"] .text-danger{color:#FF9AA3}
