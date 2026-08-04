@@ -72,6 +72,7 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
   const { theme, toggle } = useR0KiTheme()
   const clock = useClockText()
   const loginId = useAuthStore((s) => s.loginId)
+  const memberName = useAuthStore((s) => s.memberName)
   const logout = useAuthStore((s) => s.logout)
 
   const onLogout = () => {
@@ -120,7 +121,7 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             </button>
             <span className="admin">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>
-              {loginId && <b className="who">{loginId}</b>} 관리자
+              {(memberName ?? loginId) && <b className="who">{memberName ?? loginId}</b>} 관리자
             </span>
             <button type="button" className="themebtn" onClick={onLogout}>
               로그아웃

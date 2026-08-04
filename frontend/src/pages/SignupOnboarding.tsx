@@ -137,7 +137,7 @@ export default function SignupOnboarding() {
 
                   try {
                     const response = await authApi.signUp(data)
-                    login(data.username, response.accessToken)
+                    login(data.username, data.name, response.accessToken)
                     // 이미 등록된 단지면 소속 회원으로 가입 완료 → 바로 대시보드
                     // (로봇·지도는 단지 관리자가 이미 등록해 둔 상태)
                     if (response.isNewApartment) {

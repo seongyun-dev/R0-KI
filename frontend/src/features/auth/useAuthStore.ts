@@ -55,6 +55,7 @@ function accessTokenExpiration(accessToken: string) {
 
 type AuthState = {
   loginId: string | null
+  memberName: string | null
   accessToken: string | null
   accessTokenExpiresAt: number | null
   mapId: string | null
@@ -65,13 +66,14 @@ type AuthState = {
     mapId?: string | number | null
     robotId?: string | number | null
   }) => void
-  login: (loginId: string, accessToken: string) => void
+  login: (loginId: string, memberName: string, accessToken: string) => void
   logout: () => void
 }
 
 type PersistedAuthState = Pick<
   AuthState,
   | 'loginId'
+  | 'memberName'
   | 'accessToken'
   | 'accessTokenExpiresAt'
   | 'mapId'
@@ -82,6 +84,7 @@ type PersistedAuthState = Pick<
 
 const EMPTY_AUTH_STATE: PersistedAuthState = {
   loginId: null,
+  memberName: null,
   accessToken: null,
   accessTokenExpiresAt: null,
   mapId: null,
@@ -112,6 +115,7 @@ function migrateAuthState(persistedState: unknown, version: number): PersistedAu
 
   return {
     loginId: hasValidToken && typeof previous.loginId === 'string' ? previous.loginId : null,
+    memberName: hasValidToken && typeof previous.memberName === 'string' ? previous.memberName : null,
     accessToken: hasValidToken ? previous.accessToken ?? null : null,
     accessTokenExpiresAt: hasValidToken ? previous.accessTokenExpiresAt ?? null : null,
     mapId: hasValidToken && typeof previous.mapId === 'string' ? previous.mapId : null,
@@ -126,6 +130,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       loginId: null,
+      memberName: null,
       accessToken: null,
       accessTokenExpiresAt: null,
       mapId: null,
@@ -159,7 +164,7 @@ export const useAuthStore = create<AuthState>()(
                   },
           }
         }),
-      login: (loginId, accessToken) => {
+      login: (loginId, memberName, accessToken) => {
         if (!accessToken) {
           throw new Error('로그인 토큰이 없습니다.')
         }
@@ -168,6 +173,7 @@ export const useAuthStore = create<AuthState>()(
           const savedContext = state.contextByLoginId[normalizedLoginId]
           return {
             loginId: normalizedLoginId,
+            memberName: memberName.trim(),
             accessToken,
             accessTokenExpiresAt: accessTokenExpiration(accessToken),
             mapId: savedContext?.mapId ?? null,
@@ -179,6 +185,7 @@ export const useAuthStore = create<AuthState>()(
       logout: () =>
         set({
           loginId: null,
+          memberName: null,
           accessToken: null,
           accessTokenExpiresAt: null,
           mapId: null,
@@ -193,6 +200,7 @@ export const useAuthStore = create<AuthState>()(
       migrate: migrateAuthState,
       partialize: ({
         loginId,
+        memberName,
         accessToken,
         accessTokenExpiresAt,
         mapId,
@@ -201,6 +209,7 @@ export const useAuthStore = create<AuthState>()(
         isAuthenticated,
       }) => ({
         loginId,
+        memberName,
         accessToken,
         accessTokenExpiresAt,
         mapId,
