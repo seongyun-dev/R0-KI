@@ -387,8 +387,14 @@ export const statsApi = {
    *
    * @param range resolveAnalyticsRange() 결과 (from/to, +09:00)
    * @param zone 구역 드롭다운 값. parking/recycle/danger를 zoneIds로 변환해 함께 적용한다.
+   * @param options.trendBucket 추이 버킷. 연간은 month, 그 외 day.
    */
-  fetchDashboard: async (range: { from: string; to: string }, zone?: string) => {
+  fetchDashboard: async (
+    range: { from: string; to: string },
+    zone?: string,
+    options?: { trendBucket?: 'day' | 'week' | 'month' },
+  ) => {
+    const trendBucket = options?.trendBucket ?? 'day'
     const base = {
       from: range.from,
       to: range.to,
@@ -407,9 +413,9 @@ export const statsApi = {
       apiRequest<AnalyticsOverviewResponse>(
         withQuery('/api/analytics/events/overview', { ...scoped, compare: 'true' }),
       ),
-      // 일자별 추이 차트
+      // 추이 차트 (주·월·분기는 day, 올해는 month)
       apiRequest<AnalyticsTrendResponse>(
-        withQuery('/api/analytics/events/trend', { ...scoped, bucket: 'day' }),
+        withQuery('/api/analytics/events/trend', { ...scoped, bucket: trendBucket }),
       ),
       // 시간대×유형 차트 (3시간×8칸)
       apiRequest<AnalyticsTrendResponse>(
