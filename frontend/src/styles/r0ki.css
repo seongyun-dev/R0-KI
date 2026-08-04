@@ -533,7 +533,9 @@
 
 /* 버튼 */
 .r0ki .btn{height:40px;padding:0 20px;border-radius:var(--r-pill);cursor:pointer;
-  font-family:var(--sans);font-size:14px;font-weight:600;transition:all var(--d-base) var(--e-glass);
+  font-family:var(--sans);font-size:14px;font-weight:600;
+  transition:transform var(--d-base) var(--e-glass),box-shadow var(--d-base) var(--e-glass),
+    background-color var(--d-base) var(--e-glass),border-color var(--d-base) var(--e-glass),color var(--d-base) var(--e-glass);
   display:inline-flex;align-items:center;text-decoration:none}
 .r0ki .btn-p{color:var(--accent-ink,#fff);border:0;
   background:linear-gradient(180deg,var(--accent-fill-1,var(--accent)),var(--accent-fill-2,var(--accent-2)));
@@ -544,7 +546,8 @@
   box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(255,255,255,.5);
   position:relative;overflow:hidden}
 .r0ki[data-theme="nocturne"] .btn-s{box-shadow:inset 0 1px 0 rgba(255,255,255,.16)}
-.r0ki .btn-s:hover{transform:translateY(-1px)}
+/* 보조 버튼은 위치를 움직이지 않아 주변 backdrop-filter 카드가 다시 합성되는 깜빡임을 막는다. */
+.r0ki .btn-s:hover{background:var(--focus-in);border-color:var(--graphic-soft)}
 .r0ki .btn-s::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
   background:radial-gradient(140% 130% at 6% -30%,rgba(255,255,255,.22) 0%,rgba(255,255,255,.055) 28%,transparent 58%);
   mix-blend-mode:screen}
