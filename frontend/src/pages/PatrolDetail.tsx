@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { MapDetailResponse, ZoneCreateResponse } from '../api/contracts'
-import { mapApi } from '../api/services'
+import { mapApi, patrolsApi } from '../api/services'
 import { env } from '../config/env'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { useToast } from '../components/ui'
@@ -289,6 +289,30 @@ export default function PatrolDetail() {
   const [mapImageUrl, setMapImageUrl] = useState<string>()
   const [mapDetail, setMapDetail] = useState<MapDetailResponse>()
   const [checkpointZones, setCheckpointZones] = useState<ZoneCreateResponse[]>([])
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
+
+  const handlePdfDownload = async () => {
+    if (!id || isDownloadingPdf) return
+
+    setIsDownloadingPdf(true)
+    try {
+      const pdf = await patrolsApi.downloadPdf(id)
+      const objectUrl = URL.createObjectURL(pdf)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `patrol-report-${id}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      toast('PDF 보고서를 다운로드했습니다.')
+    } catch (reason) {
+      console.error('PDF 보고서 다운로드에 실패했습니다.', reason)
+      toast('PDF 보고서 다운로드에 실패했습니다.')
+    } finally {
+      setIsDownloadingPdf(false)
+    }
+  }
 
   useEffect(() => {
     if (!mapId && !patrol?.mapUrl) {
@@ -364,8 +388,13 @@ export default function PatrolDetail() {
             <button type="button" className="btn btn-s" onClick={() => toast('✓ 재순찰이 요청되었습니다')}>
               재순찰 요청
             </button>
-            <button type="button" className="btn btn-p" onClick={() => window.print()}>
-              PDF 다운로드
+            <button
+              type="button"
+              className="btn btn-p"
+              disabled={!patrol || isDownloadingPdf}
+              onClick={handlePdfDownload}
+            >
+              {isDownloadingPdf ? 'PDF 생성 중...' : 'PDF 다운로드'}
             </button>
           </div>
         </div>
