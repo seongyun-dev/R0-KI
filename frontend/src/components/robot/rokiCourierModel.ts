@@ -303,6 +303,45 @@ export function buildRokiCourier() {
   wordmark.position.set(0, -0.36, FRONT_Z + 0.005)
   root.add(wordmark)
 
+  /* ---- 뒷면 — 적재함 도어 + 통풍구 + 후방 LED ----
+     360° 회전을 열어 뒀으므로 뒷면이 민무늬 판이면 돌려 볼 이유가 없어진다.
+     시안의 언어(얇은 분할선, 흰 셸)를 지키면서 최소한만 얹는다. */
+  const BACK_Z = -FRONT_Z
+
+  // 도어 — 살짝 도드라지게 얹으면 모서리가 빛을 받아 윤곽이 드러난다
+  const hatch = new THREE.Mesh(new RoundedBoxGeometry(1.42, 1.62, 0.024, 3, 0.09), shellMat)
+  hatch.position.set(0, -0.16, BACK_Z - 0.006)
+  root.add(hatch)
+  // 손잡이
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.34, 16), cavityMat)
+  handle.rotation.z = Math.PI / 2
+  handle.position.set(0, 0.32, BACK_Z - 0.05)
+  root.add(handle)
+  // 통풍구 — 도어 위 세 줄
+  const ventGeo = new THREE.BoxGeometry(0.52, 0.035, 0.02)
+  ;[0.72, 0.8, 0.88].forEach((y) => {
+    const vent = new THREE.Mesh(ventGeo, cavityMat)
+    vent.position.set(0, y, BACK_Z - 0.004)
+    root.add(vent)
+  })
+  // 후방 LED — 눈과 같은 계열로 켜 둔다
+  const tailLight = new THREE.Mesh(
+    new THREE.BoxGeometry(0.72, 0.055, 0.022),
+    new THREE.MeshStandardMaterial({
+      color: 0x0b2233,
+      emissive: 0x35acf8,
+      emissiveIntensity: 2.4,
+      roughness: 0.3,
+    }),
+  )
+  tailLight.position.set(0, -1.08, BACK_Z - 0.005)
+  root.add(tailLight)
+
+  // ---- 좌측면 점검 패널 — 우측 정비창과 짝이 되는 닫힌 패널 ----
+  const sidePanel = new THREE.Mesh(new RoundedBoxGeometry(0.024, 1.5, 0.6, 3, 0.07), shellMat)
+  sidePanel.position.set(-SIDE_X + 0.006, -0.26, 0.1)
+  root.add(sidePanel)
+
   // ---- 우측 정비창 ----
   /* 셸이 한 덩어리 솔리드라 안쪽을 파낼 수 없다(불리언 연산 없음).
      x < SIDE_X 에 둔 부품은 전부 셸 표면에 가린다 — 그래서 창을 밖으로 조금
@@ -466,10 +505,23 @@ export function buildRokiCourier() {
 /** 진단 뷰 기본 자세 — 앞면은 살짝 왼쪽, 우측 정비창이 보이도록 튼 3/4 뷰(시안 구도) */
 export const ROKI_BASE_YAW = -0.45
 
-/** 생동감 — 부유 · 라이다 스캔 회전 · 눈 깜빡임 */
-export function animateRoki(model: RokiCourierModel, t: number) {
+/**
+ * 부위 콜아웃이 가리킬 지점 — 모델 로컬 좌표.
+ * 순서는 로봇 상세의 parts(카메라/라이다/휠모터/구동부)와 1:1 대응한다.
+ * normal 은 그 부위가 바라보는 방향 — 카메라 반대편으로 돌아가면 지시선을 흐리는 데 쓴다.
+ * (로봇이 회전하므로 매 프레임 root.matrixWorld 를 먹여 월드 좌표로 옮겨야 한다)
+ */
+export const ROKI_PART_ANCHORS = [
+  { key: 'cam', point: [0, 0.85, 0.92], normal: [0, 0, 1] },
+  { key: 'lidar', point: [0, 1.6, 0.22], normal: [0, 0.72, 0.7] },
+  { key: 'motor', point: [1.05, -0.7, 0.1], normal: [1, 0, 0] },
+  { key: 'drive', point: [-1.08, -1.12, 0.62], normal: [-0.8, -0.2, 0.56] },
+] as const
+
+/** 생동감 — 부유 · 라이다 스캔 회전 · 눈 깜빡임. yaw 는 뷰가 소유한다(드래그/스크롤 회전) */
+export function animateRoki(model: RokiCourierModel, t: number, yaw: number) {
   model.root.position.y = Math.sin(t * 1.5) * 0.022
-  model.root.rotation.y = ROKI_BASE_YAW + Math.sin(t * 0.55) * 0.05
+  model.root.rotation.y = yaw
 
   // 라이다는 실제 스캐너처럼 한 방향으로 계속 돈다
   model.lidar.rotation.y = t * 0.9

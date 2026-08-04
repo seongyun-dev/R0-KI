@@ -245,6 +245,8 @@ export const patrolsApi = {
   // 상세 응답에 경로·타임라인이 포함됨(별도 /path 엔드포인트 없음)
   detail: (patrolId: string | number) =>
     apiRequest<PatrolDetailResponse>(`/api/patrols/${encodeURIComponent(patrolId)}`),
+  downloadPdf: (patrolId: string | number, signal?: AbortSignal) =>
+    apiBlob(`/api/patrols/${encodeURIComponent(String(patrolId))}/pdf`, signal),
   path: (patrolId: string | number) =>
     apiRequest<PatrolPathResponse>(
       `/api/patrols/${encodeURIComponent(String(patrolId))}/path`,
