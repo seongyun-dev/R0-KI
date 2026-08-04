@@ -292,7 +292,7 @@ export type PatrolCreateResponse = {
   patrolId: number
   robotId: number
   patrolStatus: PatrolStatusCode
-  patrolStartedAt: string
+  startedAt: string
 }
 
 export type PatrolStopResponse = {

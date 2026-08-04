@@ -4,6 +4,9 @@ import { apiRequest, apiUrl } from '../../api/client'
 export type MjpegStreamState = 'idle' | 'connecting' | 'live' | 'offline'
 
 const MAX_BUFFER_BYTES = 2 * 1024 * 1024
+const FIRST_FRAME_TIMEOUT_MS = 12_000
+const NEXT_FRAME_TIMEOUT_MS = 5_000
+const RETRY_DELAY_MS = 2_000
 
 function appendBytes(left: Uint8Array, right: Uint8Array) {
   const joined = new Uint8Array(left.length + right.length)
@@ -38,11 +41,25 @@ export function useMjpegStream(robotId?: string | number) {
     setState('connecting')
     setFrameUrl(undefined)
 
-    const controller = new AbortController()
+    const lifecycleController = new AbortController()
+    let activeAttempt: AbortController | undefined
     let currentUrl: string | undefined
     let retryTimer: ReturnType<typeof setTimeout> | undefined
 
-    const replaceFrame = (jpeg: Uint8Array) => {
+    const clearPublishedFrame = () => {
+      const previousUrl = currentUrl
+      currentUrl = undefined
+      setFrameUrl(undefined)
+      if (previousUrl) URL.revokeObjectURL(previousUrl)
+    }
+
+    const replaceFrame = (jpeg: Uint8Array, attemptController: AbortController) => {
+      if (
+        lifecycleController.signal.aborted ||
+        attemptController.signal.aborted ||
+        activeAttempt !== attemptController
+      ) return
+
       const jpegBuffer = new ArrayBuffer(jpeg.byteLength)
       new Uint8Array(jpegBuffer).set(jpeg)
       const nextUrl = URL.createObjectURL(new Blob([jpegBuffer], { type: 'image/jpeg' }))
@@ -54,11 +71,24 @@ export function useMjpegStream(robotId?: string | number) {
     }
 
     const connect = async () => {
+      if (lifecycleController.signal.aborted) return
       setState((previous) => (previous === 'live' ? previous : 'connecting'))
+
+      const attemptController = new AbortController()
+      activeAttempt = attemptController
+      const abortAttempt = () => attemptController.abort()
+      lifecycleController.signal.addEventListener('abort', abortAttempt, { once: true })
+      let frameWatchdog: ReturnType<typeof setTimeout> | undefined
+      const armFrameWatchdog = (timeoutMs: number) => {
+        if (frameWatchdog) clearTimeout(frameWatchdog)
+        frameWatchdog = setTimeout(() => attemptController.abort(), timeoutMs)
+      }
+      armFrameWatchdog(FIRST_FRAME_TIMEOUT_MS)
+
       try {
         const session = await apiRequest<StreamSession>(
           `/api/robots/${robotId}/stream-sessions`,
-          { method: 'POST', signal: controller.signal },
+          { method: 'POST', signal: attemptController.signal },
         )
         const response = await fetch(apiUrl(`/live/robots/${robotId}/stream.mjpg`), {
           headers: {
@@ -66,7 +96,7 @@ export function useMjpegStream(robotId?: string | number) {
             'X-Stream-Token': session.token,
           },
           cache: 'no-store',
-          signal: controller.signal,
+          signal: attemptController.signal,
         })
         if (!response.ok || !response.body) {
           throw new Error(`MJPEG stream failed (${response.status})`)
@@ -74,8 +104,15 @@ export function useMjpegStream(robotId?: string | number) {
 
         const reader = response.body.getReader()
         let buffer = new Uint8Array()
-        while (!controller.signal.aborted) {
+        while (!attemptController.signal.aborted) {
           const { value, done } = await reader.read()
+          if (
+            lifecycleController.signal.aborted ||
+            activeAttempt !== attemptController
+          ) return
+          if (attemptController.signal.aborted) {
+            throw new Error('MJPEG frame timeout')
+          }
           if (done) throw new Error('MJPEG stream closed')
           if (!value) continue
 
@@ -84,23 +121,33 @@ export function useMjpegStream(robotId?: string | number) {
           while (start >= 0) {
             const end = findMarker(buffer, 0xff, 0xd9, start + 2)
             if (end < 0) break
-            replaceFrame(buffer.slice(start, end + 2))
+            replaceFrame(buffer.slice(start, end + 2), attemptController)
+            armFrameWatchdog(NEXT_FRAME_TIMEOUT_MS)
             buffer = buffer.slice(end + 2)
             start = findMarker(buffer, 0xff, 0xd8)
           }
 
           if (buffer.length > MAX_BUFFER_BYTES) buffer = buffer.slice(-2)
         }
+        if (!lifecycleController.signal.aborted && activeAttempt === attemptController) {
+          throw new Error('MJPEG stream attempt aborted')
+        }
       } catch {
-        if (controller.signal.aborted) return
+        if (lifecycleController.signal.aborted) return
+        clearPublishedFrame()
         setState('offline')
-        retryTimer = setTimeout(connect, 2000)
+        retryTimer = setTimeout(connect, RETRY_DELAY_MS)
+      } finally {
+        if (frameWatchdog) clearTimeout(frameWatchdog)
+        lifecycleController.signal.removeEventListener('abort', abortAttempt)
+        if (activeAttempt === attemptController) activeAttempt = undefined
       }
     }
 
     void connect()
     return () => {
-      controller.abort()
+      lifecycleController.abort()
+      activeAttempt?.abort()
       if (retryTimer) clearTimeout(retryTimer)
       if (currentUrl) URL.revokeObjectURL(currentUrl)
     }
