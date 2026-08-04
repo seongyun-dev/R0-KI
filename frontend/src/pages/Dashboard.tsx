@@ -24,6 +24,15 @@ import { patrolsApi } from '../api/services'
 import type { PatrolCompletedSseEvent } from '../api/contracts'
 import type { ComplexMapData, Robot } from '../types/domain'
 
+const PATROL_START_CONFIRM_TIMEOUT_MS = 16_000
+
+type PendingPatrolStart = {
+  patrolId: number
+  robotId: string
+  robotName: string
+  requestedAt: number
+}
+
 function emergencyPoint(x: number, y: number, map: ComplexMapData) {
   const { resolution, pixelWidth, pixelHeight, originX, originY } = map
   if (!resolution || !pixelWidth || !pixelHeight || originX == null || originY == null) {
@@ -76,6 +85,16 @@ export default function Dashboard() {
   const emergencyEvents = useEmergencyEventStore((state) => state.events)
   const { locations: liveRobotLocations, statuses: liveRobotStatuses } =
     useRobotLocations(mapData?.map)
+  const terminalStatusSignature = Object.entries(liveRobotStatuses)
+    .filter(([, status]) => status === 'IDLE' || status === 'OFFLINE' || status === 'ERROR')
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([robotId, status]) => `${robotId}:${status}`)
+    .join('|')
+
+  useEffect(() => {
+    if (terminalStatusSignature) void refetchRobots()
+  }, [terminalStatusSignature, refetchRobots])
+
   const emergencyPins = mapData
     ? emergencyEvents.flatMap((event) => {
         if (
@@ -133,14 +152,28 @@ export default function Dashboard() {
   const [pickedRobotId, setPickedRobotId] = useState<string>()
   // 순찰 중 로봇 전체 보기 — 켜면 개별 선택 대신 순찰 중인 로봇을 모두 띄운다
   const [showAllPatrolling, setShowAllPatrolling] = useState(false)
+  const rawStatusForRobot = (robot: Robot) =>
+    liveRobotStatuses[String(robot.backendId ?? robot.id)]
+  const hasLivePatrolStatus = (robot: Robot) => {
+    const status = rawStatusForRobot(robot)
+    return status === 'PATROLLING' || status === 'OBSTACLE_STOP'
+  }
   const robotList = (robots ?? []).map((robot) => {
-    const liveStatus = liveRobotStatuses[String(robot.backendId ?? robot.id)]
+    const liveStatus = rawStatusForRobot(robot)
     return liveStatus ? { ...robot, status: robotStatusLabel(liveStatus) } : robot
   })
-  const patrollingRobots = robotList.filter((r) => r.status === '순찰중')
+  const patrollingRobots = robotList.filter(
+    (robot) => robot.status === '순찰중' || hasLivePatrolStatus(robot),
+  )
   const selectedRobot =
     robotList.find((r) => r.id === pickedRobotId) ?? patrollingRobots[0] ?? robotList[0]
   const selectedRobotBackendId = selectedRobot?.backendId ?? selectedRobot?.id
+  const selectedRobotLiveStatus = selectedRobotBackendId == null
+    ? undefined
+    : liveRobotStatuses[String(selectedRobotBackendId)]
+  const isSelectedRobotLivePatrolling =
+    selectedRobotLiveStatus === 'PATROLLING' || selectedRobotLiveStatus === 'OBSTACLE_STOP'
+  const shouldStreamSelectedRobot = isSelectedRobotLivePatrolling
   const { data: selectedLocation } = useSelectedRobotLocation(
     selectedRobotBackendId,
     mapData?.map,
@@ -168,9 +201,12 @@ export default function Dashboard() {
           : {}),
       }
     : selectedLiveLocation ?? robotMapPosition(selectedRobot, mapData?.robot)
-  const isPatrolling = showAllPatrolling ||
-    currentSelectedLocation?.showRoute ||
-    selectedRobot?.status === '순찰중'
+  const isPatrolling =
+    (showAllPatrolling && patrollingRobots.length > 0) ||
+    isSelectedRobotLivePatrolling ||
+    (selectedRobotLiveStatus == null && (
+      currentSelectedLocation?.showRoute || selectedRobot?.status === '순찰중'
+    ))
   const mapRobots = patrollingRobots
     .map((robot) =>
       liveRobotLocations.find((location) =>
@@ -184,10 +220,20 @@ export default function Dashboard() {
   const [patrolTarget, setPatrolTarget] = useState<Robot | null>(null)
   const [startingPatrol, setStartingPatrol] = useState(false)
   const [patrolError, setPatrolError] = useState<string>()
+  const [pendingPatrolStart, setPendingPatrolStart] = useState<PendingPatrolStart>()
   const [stopTarget, setStopTarget] = useState<Robot | null>(null)
   const [stoppingPatrol, setStoppingPatrol] = useState(false)
   const [stopError, setStopError] = useState<string>()
   const [toast, setToast] = useState<string>()
+
+  const pendingPatrolIdForRobot = (robot: Robot) => {
+    const robotId = String(robot.backendId ?? robot.id)
+    return pendingPatrolStart?.robotId === robotId ? pendingPatrolStart.patrolId : undefined
+  }
+  const effectiveActivePatrolId = (robot: Robot) =>
+    robot.activePatrolId ?? pendingPatrolIdForRobot(robot)
+  const canStopRobot = (robot: Robot) =>
+    hasLivePatrolStatus(robot) || effectiveActivePatrolId(robot) != null
 
   // 결과 알림 — 고령 사용자 기준이라 로봇 상세(2.6초)보다 길게 띄운다
   useEffect(() => {
@@ -196,8 +242,62 @@ export default function Dashboard() {
     return () => clearTimeout(timer)
   }, [toast])
 
+  const pendingPatrolStatus = pendingPatrolStart
+    ? liveRobotStatuses[pendingPatrolStart.robotId]
+    : undefined
+
+  useEffect(() => {
+    if (!pendingPatrolStart) return
+
+    if (pendingPatrolStatus === 'PATROLLING' || pendingPatrolStatus === 'OBSTACLE_STOP') {
+      setToast(`${pendingPatrolStart.robotName} 순찰 시작을 확인했습니다.`)
+      setPendingPatrolStart(undefined)
+      void refetchRobots()
+      return
+    }
+
+    if (pendingPatrolStatus === 'OFFLINE' || pendingPatrolStatus === 'ERROR') {
+      setToast(`${pendingPatrolStart.robotName} 시작을 확인하지 못했습니다. 로봇 상태를 확인해 주세요.`)
+      setPendingPatrolStart(undefined)
+      void refetchRobots()
+      return
+    }
+
+    let cancelled = false
+    const remaining = Math.max(
+      0,
+      pendingPatrolStart.requestedAt + PATROL_START_CONFIRM_TIMEOUT_MS - Date.now(),
+    )
+    const timer = window.setTimeout(() => {
+      void patrolsApi.detail(pendingPatrolStart.patrolId)
+        .then((detail) => {
+          if (cancelled) return
+          setToast(
+            detail.patrolStatus === 'FAILED'
+              ? `${pendingPatrolStart.robotName} 순찰 시작에 실패했습니다. 장비 상태를 확인해 주세요.`
+              : `${pendingPatrolStart.robotName} 시작 응답을 확인하지 못했습니다. 안전 상태를 확인해 주세요.`,
+          )
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setToast(`${pendingPatrolStart.robotName} 시작 결과를 확인하지 못했습니다. 안전 상태를 확인해 주세요.`)
+          }
+        })
+        .finally(() => {
+          if (cancelled) return
+          setPendingPatrolStart(undefined)
+          void refetchRobots()
+        })
+    }, remaining)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [pendingPatrolStart, pendingPatrolStatus, refetchRobots])
+
   const startPatrol = async () => {
-    if (!patrolTarget || startingPatrol) return
+    if (!patrolTarget || startingPatrol || pendingPatrolStart) return
     const parsed = Number(patrolTarget.backendId ?? patrolTarget.id)
     if (!Number.isFinite(parsed)) {
       setPatrolError('로봇 번호를 확인할 수 없어 순찰을 시작하지 못했습니다.')
@@ -207,8 +307,15 @@ export default function Dashboard() {
     setStartingPatrol(true)
     setPatrolError(undefined)
     try {
-      await patrolsApi.start({ robotId: parsed })
-      setToast(`${patrolTarget.name} 순찰을 시작했습니다.`)
+      const targetName = patrolTarget.name
+      const response = await patrolsApi.start({ robotId: parsed })
+      setPendingPatrolStart({
+        patrolId: response.patrolId,
+        robotId: String(response.robotId),
+        robotName: targetName,
+        requestedAt: Date.now(),
+      })
+      setToast(`${targetName} 순찰 시작 요청을 접수했습니다. 로봇 응답을 기다립니다.`)
       setPatrolTarget(null)
       void refetchRobots()
     } catch (error) {
@@ -231,6 +338,9 @@ export default function Dashboard() {
       // API 성공은 STOP_PATROL 접수이며, 최종 STOPPED 전환은 로봇의 성공 ACK가 처리한다.
       await patrolsApi.stop(stopTarget.activePatrolId)
       setToast(`${stopTarget.name} 순찰 종료를 요청했습니다.`)
+      if (pendingPatrolStart?.patrolId === stopTarget.activePatrolId) {
+        setPendingPatrolStart(undefined)
+      }
       setStopTarget(null)
       void refetchRobots()
     } catch (error) {
@@ -245,16 +355,18 @@ export default function Dashboard() {
   const pickRobot = (robot: Robot) => {
     setShowAllPatrolling(false)
     setPickedRobotId(robot.id)
-    if (robot.status === '대기') {
-      setPatrolError(undefined)
-      setPatrolTarget(robot)
-    } else if (robot.status === '순찰중') {
+    if (canStopRobot(robot)) {
+      const activePatrolId = effectiveActivePatrolId(robot)
+      setPatrolTarget(null)
       setStopError(
-        robot.activePatrolId == null
+        activePatrolId == null
           ? '진행 중인 순찰 번호를 확인할 수 없습니다. 백엔드 연결과 순찰 기록을 확인해 주세요.'
           : undefined,
       )
-      setStopTarget(robot)
+      setStopTarget({ ...robot, activePatrolId })
+    } else if (robot.status === '대기') {
+      setPatrolError(undefined)
+      setPatrolTarget(robot)
     }
   }
 
@@ -263,6 +375,7 @@ export default function Dashboard() {
   const [donePatrol, setDonePatrol] = useState<PatrolCompletedSseEvent | null>(null)
   usePatrolComplete((patrol) => {
     if (!isPatrolDoneSeen(String(patrol.patrolId))) setDonePatrol(patrol)
+    void refetchRobots()
   })
   const confirmPatrolDone = () => {
     if (donePatrol) markPatrolDoneSeen(String(donePatrol.patrolId))
@@ -335,6 +448,7 @@ export default function Dashboard() {
                   const battery = r.battery
                   const hasBattery = battery != null
                   const picked = !showAllPatrolling && r.id === selectedRobot?.id
+                  const stoppable = canStopRobot(r)
 
                   return (
                     <button
@@ -343,10 +457,10 @@ export default function Dashboard() {
                       className="botitem"
                       aria-pressed={picked}
                       aria-label={
-                        r.status === '대기'
-                          ? `${r.name} 대기 — 지도에 마지막 위치 표시, 순찰 시작 확인창 열기`
-                          : r.status === '순찰중'
-                            ? `${r.name} 순찰중 — 지도에 위치와 이동 경로 표시, 순찰 종료 확인창 열기`
+                        stoppable
+                          ? `${r.name} ${r.status} — 지도에 위치와 이동 경로 표시, 순찰 종료 확인창 열기`
+                          : r.status === '대기'
+                            ? `${r.name} 대기 — 지도에 마지막 위치 표시, 순찰 시작 확인창 열기`
                             : `${r.name} ${r.status} — 지도에 마지막 위치 표시`
                       }
                       onClick={() => pickRobot(r)}
@@ -374,13 +488,13 @@ export default function Dashboard() {
                       </b>
                       {/* 대기 로봇에만 붙는 안내 — 누르면 순찰이 시작된다는 걸 누르기 전에 보여준다.
                           아이콘만 두면 뜻이 전달되지 않으므로 글자를 함께 쓴다 */}
-                      {r.status === '대기' && (
+                      {r.status === '대기' && !stoppable && (
                         <span className="go" aria-hidden>
                           <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg>
                           순찰 시작
                         </span>
                       )}
-                      {r.status === '순찰중' && (
+                      {stoppable && (
                         <span className="go stop" aria-hidden>
                           <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
                           순찰 종료
@@ -407,7 +521,7 @@ export default function Dashboard() {
               <R0KiLiveCam
                 urgent={hasUrgent}
                 clockText={clock}
-                robotId={isPatrolling ? selectedRobot?.backendId : undefined}
+                robotId={shouldStreamSelectedRobot ? selectedRobotBackendId : undefined}
               />
               <div className="camnow">
                 {hasUrgent && urgentLabel && (
