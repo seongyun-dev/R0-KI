@@ -42,7 +42,7 @@ public class PatrolConnectionWatchdog {
             PatrolRobot robot = patrol.getRobot();
             if (robot.getLastConnectedAt() != null
                     && !robot.getLastConnectedAt().isBefore(threshold)) {
-                // pose 또는 status 중 하나라도 최근 수신됐다면 연결이 살아 있는 것으로 판단한다.
+                // 센서·모터 상태가 포함된 status heartbeat가 최근 수신된 경우에만 연결이 살아 있다고 판단한다.
                 continue;
             }
 

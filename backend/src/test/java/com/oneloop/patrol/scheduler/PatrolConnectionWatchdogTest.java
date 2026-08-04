@@ -41,6 +41,7 @@ class PatrolConnectionWatchdogTest {
                 staleTime,
                 null,
                 null);
+        robot.recordConnection(staleTime);
         Patrol patrol = new Patrol(robot, staleTime.minusMinutes(5), "command");
         when(patrolRepository.findAllByStatusIn(
                         List.of(PatrolStatus.IN_PROGRESS, PatrolStatus.STOP_REQUESTED)))
