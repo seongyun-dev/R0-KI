@@ -263,6 +263,9 @@ def _build_mapping_runtime(
         reconnect_interval_sec=float(
             os.getenv("ROKI_MAPPING_GAMEPAD_RECONNECT_SEC", "1.0")
         ),
+        input_lease_sec=float(
+            os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "0.25")
+        ),
     )
     holder: dict[str, Any] = {}
     gamepad_input = LinuxGamepadInput(
@@ -465,18 +468,26 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
     _validate_import_namespaces()
     settings = load_settings()
     mode = _navigation_mode(settings)
-    navigation = _build_navigation_service(
-        route_path,
-        encoder_limited=mode == "encoder_limited",
-    )
-    if mode == "nav2":
+    selected_route = _selected_route_path(route_path)
+    mapping_available = _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True)
+    navigation = None
+    if selected_route.is_file():
+        navigation = _build_navigation_service(
+            selected_route,
+            encoder_limited=mode == "encoder_limited",
+        )
+    elif not mapping_available:
+        raise RuntimeError(f"waypoint route file is missing: {selected_route}")
+    if mode == "nav2" and navigation is not None:
         holder: dict[str, Any] = {"service": None}
         _build_nav2_driver(holder)
     return {
         "robotKey": settings.robot_key,
         "navigationMode": mode,
-        "routeId": navigation.route.route_id,
-        "waypoints": len(navigation.route.waypoints),
+        "routeConfigured": navigation is not None,
+        "routeId": navigation.route.route_id if navigation is not None else None,
+        "waypoints": len(navigation.route.waypoints) if navigation is not None else 0,
+        "mappingAvailable": mapping_available,
         "aiRequired": settings.ai_required_for_patrol,
         "lidarRequired": settings.lidar_required_for_patrol,
         "serialAccessed": False,

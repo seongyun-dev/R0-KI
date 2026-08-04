@@ -1,5 +1,8 @@
 # Hanbakwi Robot runtime
 
+Friday field-test checklist:
+[`docs/friday-field-test-runbook-2026-08-04.md`](docs/friday-field-test-runbook-2026-08-04.md)
+
 `robot/`은 Jetson에서 실행되는 IoT 운영 소스다. 운영 진입점은
 `robot/scripts/run.sh`이며, 이 스크립트는 `roki-iot/run_integrated.py` 하나만
 실행한다. 해당 프로세스만 ESP32 시리얼 포트를 소유한다.

@@ -39,6 +39,7 @@ class GamepadSettings:
     finish_hold_sec: float = 2.0
     loop_interval_sec: float = 0.05
     reconnect_interval_sec: float = 1.0
+    input_lease_sec: float = 0.25
 
     def __post_init__(self) -> None:
         if not self.device_path:
@@ -59,6 +60,8 @@ class GamepadSettings:
             raise ValueError("finish_hold_sec must be positive")
         if self.loop_interval_sec <= 0 or self.reconnect_interval_sec <= 0:
             raise ValueError("gamepad loop intervals must be positive")
+        if self.input_lease_sec <= 0:
+            raise ValueError("gamepad input lease must be positive")
 
 
 @dataclass(frozen=True)
@@ -66,13 +69,19 @@ class JoystickEvent:
     value: int
     event_type: int
     number: int
+    is_initial: bool = False
 
     @classmethod
     def decode(cls, raw: bytes) -> "JoystickEvent":
         if len(raw) != JS_EVENT_SIZE:
             raise ValueError("Linux joystick event must be exactly 8 bytes")
         _timestamp, value, event_type, number = _EVENT.unpack(raw)
-        return cls(value, event_type & ~JS_EVENT_INIT, number)
+        return cls(
+            value,
+            event_type & ~JS_EVENT_INIT,
+            number,
+            is_initial=bool(event_type & JS_EVENT_INIT),
+        )
 
 
 class GamepadState:
@@ -90,22 +99,37 @@ class GamepadState:
         self._buttons: dict[int, bool] = {}
         self._finish_started: float | None = None
         self._finish_emitted = False
+        self._armed = False
 
     def reset(self) -> None:
         self._axes.clear()
         self._buttons.clear()
         self._finish_started = None
         self._finish_emitted = False
+        self._armed = False
+
+    def disarm(self) -> None:
+        """Require a neutral, released control state before motion resumes."""
+
+        self._armed = False
+        self._finish_started = None
+        self._finish_emitted = False
 
     def update(self, event: JoystickEvent) -> None:
+        safe_before_update = self._safe_to_arm()
         if event.event_type == JS_EVENT_AXIS:
             divisor = 32767.0 if event.value >= 0 else 32768.0
             self._axes[event.number] = max(-1.0, min(1.0, event.value / divisor))
         elif event.event_type == JS_EVENT_BUTTON:
             self._buttons[event.number] = event.value != 0
+        if not event.is_initial and not self._armed:
+            self._armed = safe_before_update or self._safe_to_arm()
 
     def decision(self) -> tuple[str | None, str | None, bool, bool]:
         """Return steering key, drive key, stop request and finish request."""
+
+        if not self._armed:
+            return None, None, True, False
 
         finish_pressed = self._button(self._settings.finish_button_a) and self._button(
             self._settings.finish_button_b
@@ -147,6 +171,31 @@ class GamepadState:
     def _button(self, number: int) -> bool:
         return self._buttons.get(number, False)
 
+    @property
+    def finish_pressed(self) -> bool:
+        return self._button(self._settings.finish_button_a) and self._button(
+            self._settings.finish_button_b
+        )
+
+    def _safe_to_arm(self) -> bool:
+        if any(
+            self._button(number)
+            for number in (
+                self._settings.deadman_button,
+                self._settings.stop_button,
+                self._settings.finish_button_a,
+                self._settings.finish_button_b,
+            )
+        ):
+            return False
+        return all(
+            abs(self._axes.get(number, 0.0)) < self._settings.deadzone
+            for number in (
+                self._settings.steering_axis,
+                self._settings.throttle_axis,
+            )
+        )
+
 
 class LinuxGamepadInput:
     """Reconnectable Linux joystick reader with a deadman switch."""
@@ -168,11 +217,13 @@ class LinuxGamepadInput:
         self._opener = opener
         self._reader = reader
         self._closer = closer
+        self._clock = clock
         self._state = GamepadState(settings, clock=clock)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._file_descriptor: int | None = None
         self._command_active = False
+        self._last_input_at: float | None = None
 
     @property
     def device_path(self) -> Path:
@@ -190,6 +241,7 @@ class LinuxGamepadInput:
         self._file_descriptor = descriptor
         self._state.reset()
         self._command_active = False
+        self._last_input_at = None
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run,
@@ -221,6 +273,7 @@ class LinuxGamepadInput:
                     try:
                         self._file_descriptor = self._open()
                         self._state.reset()
+                        self._last_input_at = None
                         print(f"[MAPPING] gamepad reconnected path={self.device_path}")
                     except OSError:
                         continue
@@ -240,6 +293,7 @@ class LinuxGamepadInput:
                         print("[MAPPING] gamepad disconnected; motion stopped")
                         self._close_device()
                         self._state.reset()
+                        self._last_input_at = None
                         self._safe_stop()
                 self._stop_event.wait(self._settings.loop_interval_sec)
         finally:
@@ -257,9 +311,23 @@ class LinuxGamepadInput:
                 return
             if raw == b"":
                 raise OSError(errno.ENODEV, "gamepad disconnected")
-            self._state.update(JoystickEvent.decode(raw))
+            self._accept_event(JoystickEvent.decode(raw))
+
+    def _accept_event(self, event: JoystickEvent) -> None:
+        self._state.update(event)
+        if not event.is_initial:
+            self._last_input_at = self._clock()
 
     def _apply_decision(self) -> None:
+        if (
+            self._last_input_at is None
+            or self._clock() - self._last_input_at
+            > self._settings.input_lease_sec
+        ) and not self._state.finish_pressed:
+            self._state.disarm()
+            self._safe_stop()
+            self._controller.tick()
+            return
         steering, drive, stop, finish = self._state.decision()
         if stop:
             self._safe_stop()
@@ -275,7 +343,11 @@ class LinuxGamepadInput:
             self._command_active = False
         if finish:
             self._stop_event.set()
-            self._finish_callback()
+            threading.Thread(
+                target=self._finish_callback,
+                name="mapping-finish-request",
+                daemon=True,
+            ).start()
 
     def _safe_stop(self) -> None:
         # A released deadman is evaluated every loop.  Emit one STOP on the
