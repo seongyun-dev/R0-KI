@@ -2,9 +2,10 @@ package com.oneloop.patrol.service;
 
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
-import com.oneloop.map.domain.CheckpointType;
-import com.oneloop.map.repository.CheckpointRepository;
+import com.oneloop.map.domain.NavigationWaypoint;
+import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.map.service.NavigationWaypointService;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.dto.mqtt.StartPatrolCommand;
@@ -17,12 +18,16 @@ import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
 import com.oneloop.robot.domain.SensorStatus;
 import com.oneloop.robot.repository.RobotRepository;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PatrolCommandStateService {
 
     private static final long CONNECTION_TIMEOUT_SECONDS = 15;
@@ -43,21 +49,23 @@ public class PatrolCommandStateService {
     private final PatrolRepository patrolRepository;
     private final RobotRepository robotRepository;
     private final PatrolMapRepository patrolMapRepository;
-    private final CheckpointRepository checkpointRepository;
+    private final NavigationWaypointService navigationWaypointService;
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PreparedStart prepareStart(Long apartmentComplexId, PatrolStartRequest request) {
+        // START끼리는 robot 행, 설정 변경과 START는 map 행으로 직렬화한다.
+        // READ_COMMITTED이므로 map 잠금 대기 뒤 route와 active 상태를 최신 커밋 기준으로 다시 읽는다.
         PatrolRobot robot =
                 robotRepository
-                        .findByIdAndApartmentComplexIdAndStatusNot(
+                        .findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                                 request.getRobotId(), apartmentComplexId, RobotStatus.DELETED)
                         .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
 
+        validateReadyForPatrol(robot);
+        validateNavigationRoute(apartmentComplexId);
         if (patrolRepository.existsByRobotIdAndStatusIn(robot.getId(), ACTIVE_PATROL_STATUSES)) {
             throw new BusinessException(ErrorCode.PATROL_ALREADY_IN_PROGRESS);
         }
-        validateReadyForPatrol(robot);
-        validateSingleDestination(apartmentComplexId);
 
         String commandId = UUID.randomUUID().toString();
         Patrol patrol = patrolRepository.save(new Patrol(robot, LocalDateTime.now(), commandId));
@@ -104,6 +112,53 @@ public class PatrolCommandStateService {
                 .ifPresent(Patrol::fail);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Optional<PreparedAutoComplete> prepareAutoComplete(
+            Long robotId, BigDecimal x, BigDecimal y) {
+        Patrol patrol =
+                patrolRepository
+                        .findFirstForUpdateByRobotIdOrderByStartedAtDesc(robotId)
+                        .orElse(null);
+        if (patrol == null || patrol.getStatus() != PatrolStatus.IN_PROGRESS) {
+            return Optional.empty();
+        }
+
+        PatrolMap patrolMap =
+                patrolMapRepository
+                        .findByApartmentComplexId(patrol.getRobot().getApartmentComplex().getId())
+                        .orElse(null);
+        if (patrolMap == null) {
+            return Optional.empty();
+        }
+
+        NavigationWaypoint destination;
+        try {
+            List<NavigationWaypoint> route =
+                    navigationWaypointService.requireValidCurrentRoute(patrolMap);
+            destination = route.get(route.size() - 1);
+        } catch (BusinessException invalidConfig) {
+            log.warn(
+                    "[MQTT] 유효한 순찰 경로가 없어 자동 종료 판정을 건너뜁니다. robotId={}, errorCode={}",
+                    robotId,
+                    invalidConfig.getErrorCode().getCode());
+            return Optional.empty();
+        }
+
+        if (!hasArrived(destination, x, y)) {
+            return Optional.empty();
+        }
+
+        patrol.complete();
+        String commandId = UUID.randomUUID().toString();
+        patrol.updateCommandId(commandId);
+        return Optional.of(
+                new PreparedAutoComplete(
+                        patrol.getId(),
+                        commandId,
+                        patrol.getRobot().getSerialNumber(),
+                        StopPatrolCommand.of(commandId)));
+    }
+
     private void validateReadyForPatrol(PatrolRobot robot) {
         LocalDateTime connectedAt = robot.getLastConnectedAt();
         boolean recentlyConnected =
@@ -119,18 +174,22 @@ public class PatrolCommandStateService {
         }
     }
 
-    private void validateSingleDestination(Long apartmentComplexId) {
-        long destinationCount =
+    private void validateNavigationRoute(Long apartmentComplexId) {
+        PatrolMap patrolMap =
                 patrolMapRepository
-                        .findByApartmentComplexId(apartmentComplexId)
-                        .map(
-                                patrolMap ->
-                                        checkpointRepository.countByPatrolMapIdAndType(
-                                                patrolMap.getId(), CheckpointType.DESTINATION))
-                        .orElse(0L);
-        if (destinationCount != 1L) {
-            throw new BusinessException(ErrorCode.ROBOT_NOT_READY);
-        }
+                        .findForUpdateByApartmentComplexId(apartmentComplexId)
+                        .orElseThrow(
+                                () -> new BusinessException(ErrorCode.NAVIGATION_CONFIG_NOT_READY));
+        navigationWaypointService.requireValidCurrentRoute(patrolMap);
+    }
+
+    private boolean hasArrived(NavigationWaypoint destination, BigDecimal x, BigDecimal y) {
+        double distance =
+                Math.hypot(
+                        x.subtract(destination.getX()).doubleValue(),
+                        y.subtract(destination.getY()).doubleValue());
+        return Double.isFinite(distance)
+                && distance <= destination.getAcceptanceRadius().doubleValue();
     }
 
     public record PreparedStart(
@@ -146,4 +205,7 @@ public class PatrolCommandStateService {
             String robotKey,
             StopPatrolCommand command,
             PatrolStopResponse response) {}
+
+    public record PreparedAutoComplete(
+            Long patrolId, String commandId, String robotKey, StopPatrolCommand command) {}
 }

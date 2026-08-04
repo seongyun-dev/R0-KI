@@ -2,6 +2,7 @@ package com.oneloop.patrol.repository;
 
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolStatus;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -10,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -18,9 +20,15 @@ public interface PatrolRepository extends JpaRepository<Patrol, Long> {
 
     Optional<Patrol> findFirstByRobotIdOrderByStartedAtDesc(Long robotId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Patrol> findFirstForUpdateByRobotIdOrderByStartedAtDesc(Long robotId);
+
     boolean existsByRobotIdAndStatus(Long robotId, PatrolStatus status);
 
     boolean existsByRobotIdAndStatusIn(Long robotId, Collection<PatrolStatus> statuses);
+
+    boolean existsByRobotApartmentComplexIdAndStatusIn(
+            Long apartmentComplexId, Collection<PatrolStatus> statuses);
 
     List<Patrol> findAllByStatusIn(Collection<PatrolStatus> statuses);
 

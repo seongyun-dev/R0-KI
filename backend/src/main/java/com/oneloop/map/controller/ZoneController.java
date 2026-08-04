@@ -14,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -37,6 +38,17 @@ public class ZoneController {
             @Valid @RequestBody ZoneBatchCreateRequest request) {
         return ApiResponse.success(
                 "지도 구역이 생성되었습니다.",
+                zoneService.createAll(principal.getApartmentComplexId(), mapId, request));
+    }
+
+    @PutMapping
+    @Operation(summary = "지도 구역 전체 교체", description = "지도 버전을 확인하고 현재 구역 전체를 원자적으로 교체합니다.")
+    public ApiResponse<List<ZoneResponse>> replace(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable Long mapId,
+            @Valid @RequestBody ZoneBatchCreateRequest request) {
+        return ApiResponse.success(
+                "지도 구역이 저장되었습니다.",
                 zoneService.createAll(principal.getApartmentComplexId(), mapId, request));
     }
 

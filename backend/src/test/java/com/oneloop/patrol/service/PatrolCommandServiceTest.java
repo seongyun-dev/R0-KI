@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -14,11 +15,10 @@ import static org.mockito.Mockito.when;
 import com.oneloop.apartment.domain.ApartmentComplex;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
-import com.oneloop.map.domain.CheckpointType;
+import com.oneloop.map.domain.NavigationWaypoint;
 import com.oneloop.map.domain.PatrolMap;
-import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
-import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.map.service.NavigationWaypointService;
 import com.oneloop.mqtt.MqttPublisher;
 import com.oneloop.mqtt.dto.CommandAck;
 import com.oneloop.patrol.domain.Patrol;
@@ -35,12 +35,14 @@ import com.oneloop.robot.repository.RobotRepository;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -52,8 +54,8 @@ class PatrolCommandServiceTest {
     @Mock private PatrolRepository patrolRepository;
     @Mock private RobotRepository robotRepository;
     @Mock private PatrolMapRepository patrolMapRepository;
-    @Mock private CheckpointRepository checkpointRepository;
-    @Mock private CheckpointLocator checkpointLocator;
+    @Mock private NavigationWaypointService navigationWaypointService;
+    @Mock private NavigationWaypoint destinationWaypoint;
     @Mock private PatrolAiSummaryService patrolAiSummaryService;
     @Mock private ObjectProvider<MqttPublisher> mqttPublisherProvider;
     @Mock private MqttPublisher mqttPublisher;
@@ -68,7 +70,7 @@ class PatrolCommandServiceTest {
                         SensorStatus.NORMAL,
                         SensorStatus.NORMAL,
                         SensorStatus.DISCONNECTED);
-        when(robotRepository.findByIdAndApartmentComplexIdAndStatusNot(
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                         17L, 2L, RobotStatus.DELETED))
                 .thenReturn(Optional.of(robot));
         when(patrolRepository.save(any(Patrol.class)))
@@ -88,6 +90,49 @@ class PatrolCommandServiceTest {
     }
 
     @Test
+    void startLocksRobotThenMapAndChecksActivePatrolAfterCurrentRoute() {
+        PatrolRobot robot =
+                readyRobot(
+                        SensorStatus.NORMAL,
+                        SensorStatus.NORMAL,
+                        SensorStatus.NORMAL,
+                        SensorStatus.DISCONNECTED);
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
+                        17L, 2L, RobotStatus.DELETED))
+                .thenReturn(Optional.of(robot));
+        when(patrolRepository.save(any(Patrol.class)))
+                .thenAnswer(
+                        invocation -> {
+                            Patrol patrol = invocation.getArgument(0);
+                            ReflectionTestUtils.setField(patrol, "id", 29L);
+                            return patrol;
+                        });
+        when(mqttPublisherProvider.getIfAvailable()).thenReturn(mqttPublisher);
+        stubSingleDestination();
+
+        service().start(2L, new PatrolStartRequest(17L));
+
+        InOrder lockAndValidationOrder =
+                inOrder(
+                        robotRepository,
+                        patrolMapRepository,
+                        navigationWaypointService,
+                        patrolRepository);
+        lockAndValidationOrder
+                .verify(robotRepository)
+                .findForUpdateByIdAndApartmentComplexIdAndStatusNot(17L, 2L, RobotStatus.DELETED);
+        lockAndValidationOrder.verify(patrolMapRepository).findForUpdateByApartmentComplexId(2L);
+        lockAndValidationOrder
+                .verify(navigationWaypointService)
+                .requireValidCurrentRoute(patrolMap);
+        lockAndValidationOrder
+                .verify(patrolRepository)
+                .existsByRobotIdAndStatusIn(
+                        17L, List.of(PatrolStatus.IN_PROGRESS, PatrolStatus.STOP_REQUESTED));
+        lockAndValidationOrder.verify(patrolRepository).save(any(Patrol.class));
+    }
+
+    @Test
     void missingMapBlocksPatrolBeforeCommandIsSaved() {
         PatrolRobot robot =
                 readyRobot(
@@ -95,46 +140,40 @@ class PatrolCommandServiceTest {
                         SensorStatus.NORMAL,
                         SensorStatus.NORMAL,
                         SensorStatus.DISCONNECTED);
-        when(robotRepository.findByIdAndApartmentComplexIdAndStatusNot(
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                         17L, 2L, RobotStatus.DELETED))
                 .thenReturn(Optional.of(robot));
-        when(patrolMapRepository.findByApartmentComplexId(2L)).thenReturn(Optional.empty());
-
         assertThatThrownBy(() -> service().start(2L, new PatrolStartRequest(17L)))
                 .isInstanceOfSatisfying(
                         BusinessException.class,
                         exception ->
                                 assertThat(exception.getErrorCode())
-                                        .isEqualTo(ErrorCode.ROBOT_NOT_READY));
+                                        .isEqualTo(ErrorCode.NAVIGATION_CONFIG_NOT_READY));
         verify(patrolRepository, never()).save(any(Patrol.class));
     }
 
-    @ParameterizedTest
-    @ValueSource(longs = {0L, 2L})
-    void missingOrDuplicateDestinationBlocksPatrolBeforeCommandIsSaved(
-            long destinationCount) {
+    @Test
+    void invalidNavigationRouteBlocksPatrolBeforeCommandIsSaved() {
         PatrolRobot robot =
                 readyRobot(
                         SensorStatus.NORMAL,
                         SensorStatus.NORMAL,
                         SensorStatus.NORMAL,
                         SensorStatus.DISCONNECTED);
-        when(robotRepository.findByIdAndApartmentComplexIdAndStatusNot(
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                         17L, 2L, RobotStatus.DELETED))
                 .thenReturn(Optional.of(robot));
-        when(patrolMapRepository.findByApartmentComplexId(2L))
+        when(patrolMapRepository.findForUpdateByApartmentComplexId(2L))
                 .thenReturn(Optional.of(patrolMap));
-        when(patrolMap.getId()).thenReturn(31L);
-        when(checkpointRepository.countByPatrolMapIdAndType(
-                        31L, CheckpointType.DESTINATION))
-                .thenReturn(destinationCount);
+        when(navigationWaypointService.requireValidCurrentRoute(patrolMap))
+                .thenThrow(new BusinessException(ErrorCode.NAVIGATION_CONFIG_NOT_READY));
 
         assertThatThrownBy(() -> service().start(2L, new PatrolStartRequest(17L)))
                 .isInstanceOfSatisfying(
                         BusinessException.class,
                         exception ->
                                 assertThat(exception.getErrorCode())
-                                        .isEqualTo(ErrorCode.ROBOT_NOT_READY));
+                                        .isEqualTo(ErrorCode.NAVIGATION_CONFIG_NOT_READY));
         verify(patrolRepository, never()).save(any(Patrol.class));
     }
 
@@ -147,7 +186,7 @@ class PatrolCommandServiceTest {
                         statusFor("lidar", disconnectedModule),
                         statusFor("motor", disconnectedModule),
                         SensorStatus.DISCONNECTED);
-        when(robotRepository.findByIdAndApartmentComplexIdAndStatusNot(
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                         17L, 2L, RobotStatus.DELETED))
                 .thenReturn(Optional.of(robot));
 
@@ -168,7 +207,7 @@ class PatrolCommandServiceTest {
                         SensorStatus.NORMAL,
                         SensorStatus.DISCONNECTED);
         AtomicReference<Patrol> savedPatrol = new AtomicReference<>();
-        when(robotRepository.findByIdAndApartmentComplexIdAndStatusNot(
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                         17L, 2L, RobotStatus.DELETED))
                 .thenReturn(Optional.of(robot));
         when(patrolRepository.save(any(Patrol.class)))
@@ -221,7 +260,7 @@ class PatrolCommandServiceTest {
                         SensorStatus.NORMAL,
                         SensorStatus.DISCONNECTED);
         AtomicReference<Patrol> savedPatrol = new AtomicReference<>();
-        when(robotRepository.findByIdAndApartmentComplexIdAndStatusNot(
+        when(robotRepository.findForUpdateByIdAndApartmentComplexIdAndStatusNot(
                         17L, 2L, RobotStatus.DELETED))
                 .thenReturn(Optional.of(robot));
         when(patrolRepository.save(any(Patrol.class)))
@@ -277,25 +316,20 @@ class PatrolCommandServiceTest {
     private PatrolCommandService service() {
         return new PatrolCommandService(
                 patrolRepository,
-                patrolMapRepository,
-                checkpointRepository,
-                checkpointLocator,
                 patrolAiSummaryService,
                 mqttPublisherProvider,
                 new PatrolCommandStateService(
                         patrolRepository,
                         robotRepository,
                         patrolMapRepository,
-                        checkpointRepository));
+                        navigationWaypointService));
     }
 
     private void stubSingleDestination() {
-        when(patrolMapRepository.findByApartmentComplexId(2L))
+        when(patrolMapRepository.findForUpdateByApartmentComplexId(2L))
                 .thenReturn(Optional.of(patrolMap));
-        when(patrolMap.getId()).thenReturn(31L);
-        when(checkpointRepository.countByPatrolMapIdAndType(
-                        31L, CheckpointType.DESTINATION))
-                .thenReturn(1L);
+        when(navigationWaypointService.requireValidCurrentRoute(patrolMap))
+                .thenReturn(List.of(destinationWaypoint));
     }
 
     private PatrolRobot readyRobot(

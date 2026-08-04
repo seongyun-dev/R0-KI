@@ -64,10 +64,11 @@ public class PatrolCommandAckService {
         if (patrol.getStatus() == PatrolStatus.IN_PROGRESS) {
             patrol.fail();
             log.info(
-                    "[MQTT] 순찰 시작 거절/실패로 FAILED 처리. patrolId={}, commandId={}, status={}",
+                    "[MQTT] 순찰 시작 거절/실패로 FAILED 처리. patrolId={}, commandId={}, status={}, reason={}",
                     patrol.getId(),
                     ack.commandId(),
-                    ack.status());
+                    ack.status(),
+                    ack.reason());
         } else {
             log.warn(
                     "[MQTT] 허용되지 않은 ACK 상태 전환을 무시합니다. patrolId={}, currentStatus={}, status={}",
@@ -89,9 +90,10 @@ public class PatrolCommandAckService {
         }
         log.warn(
                 "[MQTT] 순찰 종료 명령이 거절/실패했습니다. 로봇이 실제로 정지했는지 확인이 필요합니다."
-                        + " patrolId={}, commandId={}, status={}",
+                        + " patrolId={}, commandId={}, status={}, reason={}",
                 patrol.getId(),
                 ack.commandId(),
-                ack.status());
+                ack.status(),
+                ack.reason());
     }
 }
