@@ -21,6 +21,15 @@ export function useR0KiTheme() {
       return next
     })
   }
+
+  /* 테마를 <html> 에도 심는다 (S15P11E103-295).
+     ui/Modal 은 document.body 로 포털해서 .r0ki 바깥에 그려지므로
+     [data-theme] 셀렉터가 닿지 않는다 — 그래서 야간에도 흰 카드로 떴다.
+     여기서 심어 준 값으로 r0ki.css 끝의 포털 전용 규칙이 걸린다. */
+  useEffect(() => {
+    document.documentElement.dataset.r0kiTheme = theme
+  }, [theme])
+
   return { theme, toggle }
 }
 
