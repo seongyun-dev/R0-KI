@@ -3,6 +3,8 @@ package com.oneloop.patrol.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
+import com.oneloop.event.domain.EventType;
+import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.map.service.MapFileStorage;
 import com.oneloop.patrol.dto.response.PatrolAiSummaryResponse;
@@ -62,6 +64,8 @@ class PatrolPdfServiceTest {
                                         PatrolTimelineResponse.builder()
                                                 .recordedAt(LocalDateTime.of(2026, 8, 4, 9, 15))
                                                 .checkpointName("지하 주차장")
+                                                .eventType(EventType.ILLEGAL_PARKING)
+                                                .processingStatus(ProcessingStatus.COMPLETED)
                                                 .build()))
                         .aiSummary(
                                 PatrolAiSummaryResponse.builder()
@@ -79,7 +83,16 @@ class PatrolPdfServiceTest {
         try (PDDocument document = PDDocument.load(pdf)) {
             String text = new PDFTextStripper().getText(document);
             assertThat(document.getNumberOfPages()).isGreaterThanOrEqualTo(1);
-            assertThat(text).contains("순찰 결과 보고서", "R-01 순찰 로봇", "지하 주차장", "AI 순찰 요약");
+            assertThat(text)
+                    .contains(
+                            "순찰 결과 보고서",
+                            "R-01 순찰 로봇",
+                            "완료",
+                            "지하 주차장",
+                            "불법 주차",
+                            "처리 완료",
+                            "AI 순찰 요약")
+                    .doesNotContain("COMPLETED", "ILLEGAL_PARKING");
 
             Path preview = Path.of("build", "test-pdfs", "patrol-report-page-1.png");
             Files.createDirectories(preview.getParent());

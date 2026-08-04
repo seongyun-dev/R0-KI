@@ -2,6 +2,9 @@ package com.oneloop.patrol.service;
 
 import com.oneloop.patrol.dto.response.PatrolAiSummaryResponse;
 import com.oneloop.map.service.MapFileStorage;
+import com.oneloop.event.domain.EventType;
+import com.oneloop.event.domain.ProcessingStatus;
+import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.dto.response.PatrolBatteryResponse;
 import com.oneloop.patrol.dto.response.PatrolDetailResponse;
 import com.oneloop.patrol.dto.response.PatrolRouteCheckpointResponse;
@@ -94,7 +97,7 @@ public class PatrolPdfService {
         PatrolBatteryResponse battery = detail.getBattery();
         html.append("<table class='summary'><tr>")
                 .append(summaryCell("로봇", detail.getRobotName()))
-                .append(summaryCell("상태", String.valueOf(detail.getPatrolStatus())))
+                .append(summaryCell("상태", patrolStatusLabel(detail.getPatrolStatus())))
                 .append(summaryCell("순찰 시작", format(detail.getStartedAt())))
                 .append(summaryCell("순찰 종료", format(detail.getEndedAt())))
                 .append("</tr></table><table class='summary' style='margin-top:8px'><tr>")
@@ -159,9 +162,9 @@ public class PatrolPdfService {
                     .append("</td><td>")
                     .append(escape(event.getCheckpointName()))
                     .append("</td><td>")
-                    .append(escape(String.valueOf(event.getEventType())))
+                    .append(escape(eventTypeLabel(event.getEventType())))
                     .append("</td><td>")
-                    .append(escape(String.valueOf(event.getProcessingStatus())))
+                    .append(escape(processingStatusLabel(event.getProcessingStatus())))
                     .append("</td></tr>");
         }
         html.append("</tbody></table></div>");
@@ -196,6 +199,37 @@ public class PatrolPdfService {
 
     private int size(List<?> values) {
         return values == null ? 0 : values.size();
+    }
+
+    // enum 이름을 그대로 출력하면 COMPLETED처럼 영문으로 보이므로 보고서 전용 한글 표시명으로 변환한다.
+    private String patrolStatusLabel(PatrolStatus status) {
+        if (status == null) return "-";
+        return switch (status) {
+            case IN_PROGRESS -> "순찰 중";
+            case COMPLETED -> "완료";
+            case STOPPED -> "중단";
+            case FAILED -> "실패";
+        };
+    }
+
+    private String eventTypeLabel(EventType type) {
+        if (type == null) return "-";
+        return switch (type) {
+            case ILLEGAL_PARKING -> "불법 주차";
+            case UNREGISTERED_VEHICLE -> "미등록 차량";
+            case TRASH_DETECTED -> "쓰레기 감지";
+            case RECYCLING_AREA_FULL -> "재활용 구역 포화";
+            case EMERGENCY -> "응급 상황";
+        };
+    }
+
+    private String processingStatusLabel(ProcessingStatus status) {
+        if (status == null) return "-";
+        return switch (status) {
+            case DETECTED -> "감지";
+            case PROCESSING -> "처리 중";
+            case COMPLETED -> "처리 완료";
+        };
     }
 
     private String escape(String value) {
