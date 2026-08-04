@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>RO-KI 새 디자인 미리보기 · S15P11E103-296</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 24px 20px 30px;
+        background: linear-gradient(180deg, #f7fafd 0%, #eef4fb 100%);
+        font-family: Pretendard, system-ui, -apple-system, sans-serif;
+        color: #2b3340;
+      }
+      .head { text-align: center; }
+      h1 { margin: 0 0 4px; font-size: 19px; font-weight: 800; letter-spacing: -.02em; }
+      p  { margin: 0; font-size: 13px; color: #6b7788; }
+
+      .stage {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: min(860px, 94vw);
+        height: min(660px, 72vh);
+        border-radius: 22px;
+        background: #fff;
+        border: 1px solid #dfe7f1;
+        box-shadow: 0 18px 44px rgba(20, 56, 104, .09);
+        overflow: hidden;
+      }
+
+      /* ── 앱(.rd-frame / .rd-3d / .rd-plinth / .rd-cal)과 같은 좌표계 ── */
+      .rd-frame { position: relative; height: 100%; aspect-ratio: 340/400; max-height: 660px; }
+      .rd-3d {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        width: 170%; height: 130%; z-index: 1; pointer-events: none;
+      }
+      .rd-3d canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+      .rd-plinth {
+        position: absolute; left: 50%; top: 83%; transform: translate(-50%, -50%);
+        width: 132%; aspect-ratio: 430/108; pointer-events: none; z-index: 0; border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(255,255,255,1), rgba(255,255,255,.62) 46%, rgba(255,255,255,.16) 70%, transparent 82%);
+      }
+
+      .rd-cal { position: absolute; display: flex; align-items: center; width: max-content; z-index: 2; }
+      .rd-cal.l { right: 69%; }
+      .rd-cal.r { left: 69%; flex-direction: row-reverse; }
+      .rd-cal .box {
+        flex: none; display: flex; flex-direction: column; gap: 5px;
+        padding: 9px 13px; border-radius: 12px;
+        background: rgba(240,246,253,.92); border: 1px solid #dbe4f0;
+        font-size: 12.5px; font-weight: 700; color: #46566c; white-space: nowrap;
+      }
+      .rd-cal.r .box { align-items: flex-end; }
+      .rd-cal .lead { width: clamp(34px, 5vw, 64px); height: 1px; flex: none; position: relative; background: #7b9ec9; opacity: .55; }
+      .rd-cal .lead::after {
+        content: ''; position: absolute; top: -3px; width: 7px; height: 7px; border-radius: 50%;
+        background: #7b9ec9; box-shadow: 0 0 0 3px #fff;
+      }
+      .rd-cal.l .lead::after { right: -3px; }
+      .rd-cal.r .lead::after { left: -3px; }
+
+      /* r0ki.css 와 동일한 값 — 여기서 맞춰 보고 그대로 옮긴다 */
+      .rd-cal.c-cam   { top: 29%; right: 66%; }
+      .rd-cal.c-lidar { top: 6%;  left: 60%; }
+      .rd-cal.c-motor { top: 62%; left: 76%; }
+      .rd-cal.c-drive { top: 75%; right: 83%; }
+
+      .hint { font-size: 12.5px; color: #8a94a4; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <h1>RO-KI · 로봇 상세 진단 뷰 새 디자인</h1>
+      <p>S15P11E103-296 — 앱과 동일한 카메라·조명·프레임 좌표계 (부위 지시선 포함)</p>
+    </div>
+    <div class="stage">
+      <div class="rd-frame">
+        <div class="rd-plinth"></div>
+        <div class="rd-3d" id="stage"></div>
+        <div class="rd-cal l c-cam"><div class="box">카메라 모듈</div><span class="lead"></span></div>
+        <div class="rd-cal r c-lidar"><div class="box">라이다 센서</div><span class="lead"></span></div>
+        <div class="rd-cal r c-motor"><div class="box">좌측 휠 모터</div><span class="lead"></span></div>
+        <div class="rd-cal l c-drive"><div class="box">구동부</div><span class="lead"></span></div>
+      </div>
+    </div>
+    <div class="hint">좌우로 드래그하면 회전합니다 · 라이다 돔은 계속 스캔 회전, 눈은 4.6초마다 깜빡입니다</div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

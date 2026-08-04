@@ -48,8 +48,9 @@ function patrolTime(value: string | null) {
 }
 
 /* 부위 콜아웃 앵커 — parts 순서(카메라/라이다/휠모터/구동부)와 1:1 대응.
-   카메라 모듈은 헤드 우측 센서 포드라 오른쪽, 라이다는 헤드 돔 왼쪽 위 */
-const PART_ANCHORS = ['r c-cam', 'l c-lidar', 'l c-motor', 'r c-drive']
+   RO-KI 4륜형(S15P11E103-296) 기준: 카메라=앞면 페이스 패널(좌), 라이다=상단 돔(우),
+   휠모터=우측 정비창 모터(우), 구동부=휠(좌). 좌우를 번갈아 둬야 지시선이 겹치지 않는다. */
+const PART_ANCHORS = ['l c-cam', 'r c-lidar', 'r c-motor', 'l c-drive']
 
 export default function RobotDetail() {
   const { id } = useParams()

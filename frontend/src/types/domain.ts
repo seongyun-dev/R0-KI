@@ -4,6 +4,7 @@
 export type StatusLabel =
   | '완료' | '이상무' | '정상' | '순찰중' | '온라인' | '활성'
   | '진행중' | '수신됨'
+  | '종료 요청중'
   | '점검필요' | '주의'
   | '긴급' | '응급상황' | '침입'
   // 이벤트 처리 상태 — 경비원 관리 3단계 (와이어프레임 v15)
@@ -14,7 +15,7 @@ export type StatusLabel =
   | '중단' | '실패';
 
 export type RobotStatus = '대기' | '순찰중' | '충전중' | '오류' | '오프라인';
-export type PatrolStatus = '진행중' | '완료' | '중단' | '실패';
+export type PatrolStatus = '진행중' | '종료 요청중' | '완료' | '중단' | '실패';
 export type ProcessingStatus = '탐지' | '처리중' | '처리완료';
 export type RiskLevel = '낮음' | '보통' | '긴급';
 
@@ -114,6 +115,8 @@ export interface Robot {
   odometerKm?: number;              // 12.4 — x,y 위치 로그 기반 이동거리 합산
   weeklyUptime?: number;            // 94 (%) — 가동/정지/전체 시간 비율
   recentPatrols?: RobotRecentPatrol[]
+  /** 대시보드에서 순찰 종료 API를 호출할 때 사용하는 현재 순찰 ID */
+  activePatrolId?: number
 }
 
 export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)
