@@ -40,7 +40,7 @@ export default function Login() {
               })
 
               setAuthPersistence(remember)
-              login(loginId, response.accessToken)
+              login(loginId, response.name, response.accessToken)
 
               /* 계정만 만들고 이탈한 사용자는 로봇·지도가 없다. 그대로 대시보드에 들여보내면
                  지도도 로봇도 없는 빈 관제 화면이 뜨므로, 남은 단계로 되돌린다.
