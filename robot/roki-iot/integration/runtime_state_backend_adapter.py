@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 from backend_state.models import HardwareState
 from backend_state.robot_state_store import RobotStateStore
@@ -49,6 +50,15 @@ class RuntimeStateBackendAdapter:
         )
 
 
+class PatrolStartExpired(RuntimeError):
+    """A validated START expired before this runtime could activate motion."""
+
+    reason = "COMMAND_EXPIRED_DURING_START"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason)
+
+
 class FinalRuntimeService:
     """Final RobotRuntime을 전용 thread에서 실행하는 lifecycle facade."""
 
@@ -59,6 +69,8 @@ class FinalRuntimeService:
         patrol_drive_speed_pwm: int = 51,
         patrol_steering_degrees: int = 80,
         navigation_service: Any | None = None,
+        navigation_provider: Any | None = None,
+        local_navigation_fallback_enabled: bool = False,
         navigation_start_x_m: float = 1.0,
         navigation_start_y_m: float = 2.5,
         navigation_maximum_travel_m: float = 0.70,
@@ -69,6 +81,7 @@ class FinalRuntimeService:
         manual_controller: Any | None = None,
         keyboard_input: Any | None = None,
         allow_legacy_direct_patrol: bool = True,
+        wall_clock: Callable[[], datetime] | None = None,
     ) -> None:
         if (manual_controller is None) != (keyboard_input is None):
             raise ValueError(
@@ -78,6 +91,14 @@ class FinalRuntimeService:
         self._patrol_drive_speed_pwm = patrol_drive_speed_pwm
         self._patrol_steering_degrees = patrol_steering_degrees
         self._navigation_service = navigation_service
+        self._navigation_provider = navigation_provider
+        self._navigation_prepared_from_provider = False
+        self._local_navigation_service = (
+            navigation_service if local_navigation_fallback_enabled else None
+        )
+        self._local_navigation_fallback_enabled = bool(
+            local_navigation_fallback_enabled
+        )
         self._navigation_driver = navigation_driver
         self._destination_listener = destination_listener
         self._deployment_guard = deployment_guard
@@ -85,6 +106,7 @@ class FinalRuntimeService:
         self._keyboard_input = keyboard_input
         self._mapping_runtime: Any | None = None
         self._allow_legacy_direct_patrol = allow_legacy_direct_patrol
+        self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
         self._patrol_lease_held = False
         self._encoder_fallback_enabled = encoder_fallback_enabled
         self._encoder_progress: Any | None = None
@@ -94,6 +116,7 @@ class FinalRuntimeService:
         self._active_patrol_id: int | None = None
         self._paused = False
         self._fault_listener: Any | None = None
+        self._scan_context_listener: Any | None = None
         if navigation_service is not None:
             # Both navigation modes need mission events.  In Nav2 mode this is
             # the only path that advances PASS/SCAN waypoints and observes the
@@ -189,6 +212,30 @@ class FinalRuntimeService:
 
         self._fault_listener = listener
 
+    def set_scan_context_listener(self, listener: Any) -> None:
+        """Expose SCAN waypoint context without coupling navigation to AI."""
+
+        self._scan_context_listener = listener
+
+    def update_scan_context(self, waypoint: Any | None) -> None:
+        """Apply a Nav2 SCAN dwell lifecycle update on the runtime lock."""
+
+        with self._lifecycle_lock:
+            self._publish_scan_context_locked(waypoint)
+
+    def current_heading_deg(self) -> float | None:
+        """Return the latest localized map heading for a one-point null-yaw route."""
+
+        get_pose = getattr(self._runtime.state_store, "get_pose", None)
+        if not callable(get_pose):
+            return None
+        pose = get_pose()
+        heading = getattr(pose, "heading", None) if pose is not None else None
+        try:
+            return None if heading is None else float(heading)
+        except (TypeError, ValueError):
+            return None
+
     def set_mapping_runtime(self, mapping_runtime: Any) -> None:
         """Attach manual mapping to the same reconnect/fault lifecycle."""
 
@@ -213,6 +260,7 @@ class FinalRuntimeService:
         if (
             self._manual_controller is None
             and self._navigation_service is None
+            and self._navigation_provider is None
             and not self._allow_legacy_direct_patrol
         ):
             return False, "PATROL_ROUTE_NOT_CONFIGURED"
@@ -279,21 +327,28 @@ class FinalRuntimeService:
                     raise RuntimeError(f"runtime is not ready: {reason}")
                 lifecycle_marker = self._runtime_lifecycle_marker()
                 patrol_id = parameters.get("patrolId")
+                expires_at = parameters.get("expires_at")
                 try:
                     if self._manual_controller is not None:
+                        self._ensure_start_not_expired(expires_at)
                         self._manual_controller.activate(patrol_id)
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
                     elif self._navigation_service is not None:
                         if self._navigation_driver is not None:
-                            self._start_nav2_patrol(patrol_id=patrol_id)
+                            self._start_nav2_patrol(
+                                patrol_id=patrol_id,
+                                expires_at=expires_at,
+                            )
                         else:
                             self._start_encoder_waypoint_patrol(
-                                patrol_id=patrol_id
+                                patrol_id=patrol_id,
+                                expires_at=expires_at,
                             )
                     else:
                         if not self._allow_legacy_direct_patrol:
                             raise RuntimeError("PATROL_ROUTE_NOT_CONFIGURED")
+                        self._ensure_start_not_expired(expires_at)
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
                         self._runtime.mission.start_patrol(
@@ -304,6 +359,9 @@ class FinalRuntimeService:
                         raise RuntimeError(
                             "runtime lifecycle changed during START_PATROL"
                         )
+                except PatrolStartExpired:
+                    self._rollback_expired_start()
+                    raise
                 except Exception:
                     self._rollback_failed_start()
                     raise
@@ -324,7 +382,12 @@ class FinalRuntimeService:
             self._update_runtime_state("PATROLLING")
             return True
 
-    def _start_encoder_waypoint_patrol(self, *, patrol_id: Any) -> None:
+    def _start_encoder_waypoint_patrol(
+        self,
+        *,
+        patrol_id: Any,
+        expires_at: datetime | None = None,
+    ) -> None:
         if self._encoder_progress is None or self._navigation_service is None:
             raise RuntimeError("encoder waypoint navigation is not configured")
         snapshot = self._runtime.state_store.snapshot()
@@ -346,6 +409,7 @@ class FinalRuntimeService:
             )
             raise RuntimeError(f"runtime safety is not ready: {fault}")
 
+        self._ensure_start_not_expired(expires_at)
         self._encoder_progress.start(
             left_distance_m=motion_state.left_distance_m,
             right_distance_m=motion_state.right_distance_m,
@@ -353,24 +417,45 @@ class FinalRuntimeService:
         self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
+        self._ensure_start_not_expired(expires_at)
         self._runtime.mission.start_patrol(
             speed=self._patrol_drive_speed_pwm,
             steering_deg=self._patrol_steering_degrees,
         )
 
-    def _start_nav2_patrol(self, *, patrol_id: Any) -> None:
+    def _start_nav2_patrol(
+        self,
+        *,
+        patrol_id: Any,
+        expires_at: datetime | None = None,
+    ) -> None:
         if self._navigation_service is None or self._navigation_driver is None:
             raise RuntimeError("Nav2 navigation is not configured")
         ready, reason = self.readiness()
         if not ready:
             raise RuntimeError(f"runtime is not ready: {reason}")
+        self._ensure_start_not_expired(expires_at)
         event = self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
+        self._ensure_start_not_expired(expires_at)
         self._navigation_driver.start_patrol(
             route=self._navigation_service.route,
             first_event=event,
         )
+
+    def _ensure_start_not_expired(
+        self, expires_at: datetime | None
+    ) -> None:
+        if expires_at is None:
+            return
+        if not isinstance(expires_at, datetime) or expires_at.tzinfo is None:
+            raise RuntimeError("START_PATROL deadline must be timezone-aware")
+        now = self._wall_clock()
+        if now.tzinfo is None:
+            raise RuntimeError("runtime wall clock must be timezone-aware")
+        if now >= expires_at:
+            raise PatrolStartExpired()
 
     def apply_motion_command(self, command: Any) -> None:
         """Apply a calibrated Nav2 cmd_vel target through the single runtime."""
@@ -400,6 +485,7 @@ class FinalRuntimeService:
         if self._active_patrol_id is None or self._paused:
             return False
         self._paused = True
+        self._publish_scan_context_locked(None)
         component_failure: Exception | None = None
         try:
             if self._manual_controller is not None:
@@ -477,11 +563,59 @@ class FinalRuntimeService:
                     f"type={type(cleanup_failure).__name__}"
                 )
 
-    def prepare_patrol(self) -> tuple[bool, str]:
-        """Acquire the OTA interlock before AI or actuators can be enabled."""
+    def prepare_patrol(
+        self, *, expires_at: datetime | None = None
+    ) -> tuple[bool, str]:
+        """Refresh the route, then acquire OTA interlock before AI or motion."""
 
         with self._lifecycle_lock:
+            ready, reason = self._refresh_navigation_locked(deadline=expires_at)
+            if not ready:
+                return ready, reason
             return self._prepare_patrol_locked()
+
+    def _refresh_navigation_locked(
+        self, *, deadline: datetime | None = None
+    ) -> tuple[bool, str]:
+        if self._navigation_provider is None:
+            return True, "READY"
+        if self._active_patrol_id is not None:
+            return False, "PATROL_ALREADY_ACTIVE"
+        try:
+            navigation = (
+                self._navigation_provider.load_navigation()
+                if deadline is None
+                else self._navigation_provider.load_navigation(deadline=deadline)
+            )
+        except Exception as exc:
+            reason = str(getattr(exc, "reason", "NAVIGATION_CONFIG_UNAVAILABLE"))
+            if (
+                self._local_navigation_fallback_enabled
+                and self._local_navigation_service is not None
+                and bool(getattr(exc, "local_fallback_allowed", False))
+            ):
+                self._install_navigation_service_locked(
+                    self._local_navigation_service
+                )
+                self._navigation_prepared_from_provider = True
+                print(
+                    "[NAVIGATION] backend config unavailable; "
+                    f"using explicit local fallback reason={reason}"
+                )
+                return True, "LOCAL_ROUTE_FALLBACK"
+            return False, reason
+        self._install_navigation_service_locked(navigation)
+        self._navigation_prepared_from_provider = True
+        return True, "READY"
+
+    def _install_navigation_service_locked(self, navigation: Any) -> None:
+        if navigation is None:
+            raise RuntimeError("NAVIGATION_CONFIG_INVALID")
+        add_listener = getattr(navigation, "add_event_listener", None)
+        if not callable(add_listener):
+            raise RuntimeError("NAVIGATION_CONFIG_INVALID")
+        add_listener(self._on_navigation_event)
+        self._navigation_service = navigation
 
     def _prepare_patrol_locked(self) -> tuple[bool, str]:
         if self._patrol_lease_held or self._deployment_guard is None:
@@ -498,6 +632,10 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             if self._active_patrol_id is None:
                 self._release_patrol_lease()
+                if self._navigation_prepared_from_provider:
+                    self._navigation_service = None
+                    self._navigation_prepared_from_provider = False
+                self._publish_scan_context_locked(None)
 
     def tick(self) -> None:
         """Advance a map-pose mission without taking ownership of ROS."""
@@ -702,6 +840,43 @@ class FinalRuntimeService:
                 f"type={type(cleanup_failure).__name__}"
             )
 
+    def _rollback_expired_start(self) -> None:
+        """Cancel prepared route state without sending a physical STOP."""
+
+        cleanup_failure: Exception | None = None
+        operations = []
+        if self._encoder_progress is not None:
+            operations.append(self._encoder_progress.stop)
+        if self._navigation_service is not None:
+            operations.append(self._navigation_service.stop_patrol)
+        for operation in operations:
+            try:
+                operation()
+            except Exception as exc:
+                if cleanup_failure is None:
+                    cleanup_failure = exc
+                else:
+                    print(
+                        "[RUNTIME] additional expired START cleanup failure "
+                        f"type={type(exc).__name__}"
+                    )
+        self._active_patrol_id = None
+        self._paused = False
+        try:
+            self._release_patrol_lease()
+        except Exception as exc:
+            if cleanup_failure is None:
+                cleanup_failure = exc
+        if self._navigation_prepared_from_provider:
+            self._navigation_service = None
+            self._navigation_prepared_from_provider = False
+        self._publish_scan_context_locked(None)
+        if cleanup_failure is not None:
+            print(
+                "[RUNTIME] expired START cleanup incomplete "
+                f"type={type(cleanup_failure).__name__}"
+            )
+
     def _stop_patrol_from_command(self) -> None:
         """Stop once, always clean local state, then surface delivery failure."""
 
@@ -758,6 +933,7 @@ class FinalRuntimeService:
                         "[RUNTIME] additional patrol cleanup failure "
                         f"type={type(exc).__name__}"
                     )
+        self._publish_scan_context_locked(None)
         return failure
 
     def _update_runtime_state(self, state: str) -> None:
@@ -772,6 +948,10 @@ class FinalRuntimeService:
     def _on_navigation_event_locked(self, event: Any) -> None:
         event_type = getattr(event.mission_event.event_type, "value", "")
         waypoint = getattr(event.mission_event, "waypoint", None)
+        if event_type == "WAYPOINT_REACHED":
+            self._publish_scan_context_locked(None)
+        elif event_type == "ACTION_REQUIRED":
+            self._publish_scan_context_locked(waypoint)
         if event_type in {"WAYPOINT_REACHED", "ACTION_REQUIRED"}:
             print(
                 "[NAVIGATION] "
@@ -796,6 +976,17 @@ class FinalRuntimeService:
             self._update_runtime_state("IDLE" if stop_confirmed else "ERROR")
             if callable(self._destination_listener):
                 self._destination_listener(event)
+
+    def _publish_scan_context_locked(self, waypoint: Any | None) -> None:
+        if not callable(self._scan_context_listener):
+            return
+        try:
+            self._scan_context_listener(waypoint)
+        except Exception as exc:
+            print(
+                "[NAVIGATION] scan context listener failed "
+                f"type={type(exc).__name__}"
+            )
 
     def _release_patrol_lease(self) -> None:
         if not self._patrol_lease_held:

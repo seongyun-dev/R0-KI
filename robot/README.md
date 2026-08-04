@@ -3,6 +3,10 @@
 Friday field-test checklist:
 [`docs/friday-field-test-runbook-2026-08-04.md`](docs/friday-field-test-runbook-2026-08-04.md)
 
+Backend ordered waypoint, 게임패드/encoder, 고정 지도, 차량 좌표와 중복 이벤트의
+최종 실물 기록은
+[`docs/friday-navigation-and-e2e-field-validation-2026-08-05.md`](docs/friday-navigation-and-e2e-field-validation-2026-08-05.md)를 따른다.
+
 `robot/`은 Jetson에서 실행되는 IoT 운영 소스다. 운영 진입점은
 `robot/scripts/run.sh`이며, 이 스크립트는 `roki-iot/run_integrated.py` 하나만
 실행한다. 해당 프로세스만 ESP32 시리얼 포트를 소유한다.
@@ -16,7 +20,8 @@ Friday field-test checklist:
 - `hardware/`: 승인 후에만 실행하는 실물 진단·제한 주행 도구
 - `scripts/`: 설치, 운영 실행, 비이동 smoke, 전체 테스트
 
-운영 흐름은 `START_PATROL` 검증 → AI ENABLE → ESP32 시작 → waypoint 이동 →
+운영 흐름은 `START_PATROL`에서 Backend navigation config/map version 검증 →
+AI ENABLE → ESP32 시작 → waypoint 이동 →
 pose/status 및 AI 이벤트 전달 → 로컬 DESTINATION 즉시 STOP → 백엔드
 `STOP_PATROL` 재확인·ACK → IDLE이다. LiDAR 장애물, 오래된 LiDAR/AI 상태,
 ESP32 안전 오류는 fail-closed로 정지시킨다.

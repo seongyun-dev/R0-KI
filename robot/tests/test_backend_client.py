@@ -1,9 +1,18 @@
 import json
+import errno
+import socket
+import ssl
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 
-from aiot_robot.backend_client import BackendConfig, RobotBackendClient
+from aiot_robot.backend_client import (
+    BackendConfig,
+    BackendError,
+    BackendTransportError,
+    RobotBackendClient,
+)
 
 
 class FakeResponse:
@@ -29,6 +38,15 @@ class CapturingUrlOpen:
         self.request = request
         self.timeout = timeout
         return FakeResponse({"success": True, "code": "SUCCESS", "data": {"eventId": 1}})
+
+
+class RaisingUrlOpen:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def __call__(self, _request, *, timeout):
+        del timeout
+        raise self.error
 
 
 class BackendClientTest(unittest.TestCase):
@@ -63,6 +81,74 @@ class BackendClientTest(unittest.TestCase):
     def test_requires_https(self) -> None:
         with self.assertRaises(ValueError):
             BackendConfig("http://example.com", "secret")
+
+    def test_navigation_config_uses_robot_bearer_get(self) -> None:
+        opener = CapturingUrlOpen()
+        client = RobotBackendClient(
+            BackendConfig("https://i15e103.p.ssafy.io", "robot-token", 3),
+            urlopen=opener,
+        )
+
+        client.get_navigation_config()
+
+        self.assertEqual(opener.request.method, "GET")
+        self.assertIsNone(opener.request.data)
+        self.assertEqual(
+            opener.request.full_url,
+            "https://i15e103.p.ssafy.io/api/robot/navigation-config",
+        )
+        self.assertEqual(
+            opener.request.get_header("Authorization"), "Bearer robot-token"
+        )
+
+    def test_navigation_config_uses_shorter_command_deadline_timeout(self) -> None:
+        opener = CapturingUrlOpen()
+        client = RobotBackendClient(
+            BackendConfig("https://i15e103.p.ssafy.io", "robot-token", 10),
+            urlopen=opener,
+        )
+
+        client.get_navigation_config(timeout_seconds=1.25)
+
+        self.assertEqual(opener.timeout, 1.25)
+
+    def test_dns_timeout_and_connection_refused_are_transport_outages(self) -> None:
+        failures = (
+            socket.gaierror(getattr(socket, "EAI_NONAME", -2), "dns failed"),
+            TimeoutError("timed out"),
+            ConnectionRefusedError(errno.ECONNREFUSED, "refused"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                client = RobotBackendClient(
+                    BackendConfig("https://example.com", "robot-token", 3),
+                    urlopen=RaisingUrlOpen(urllib.error.URLError(failure)),
+                )
+                with self.assertRaises(BackendTransportError):
+                    client.get_navigation_config()
+
+    def test_tls_certificate_and_handshake_failures_never_allow_fallback(self) -> None:
+        certificate_failure = ssl.SSLCertVerificationError(
+            1,
+            "certificate verify failed",
+        )
+        handshake_failure = ssl.SSLError("TLS handshake failed")
+        handshake_failure.__cause__ = ConnectionRefusedError(
+            errno.ECONNREFUSED,
+            "wrapped transport-looking cause",
+        )
+        for failure in (certificate_failure, handshake_failure):
+            with self.subTest(failure=type(failure).__name__):
+                client = RobotBackendClient(
+                    BackendConfig("https://example.com", "robot-token", 3),
+                    urlopen=RaisingUrlOpen(urllib.error.URLError(failure)),
+                )
+                with self.assertRaises(BackendError) as raised:
+                    client.get_navigation_config()
+                self.assertNotIsInstance(
+                    raised.exception,
+                    BackendTransportError,
+                )
 
     def test_upload_map_uses_robot_contract_and_exact_multipart_fields(self) -> None:
         opener = CapturingUrlOpen()

@@ -139,6 +139,7 @@ class FullPatrolSimulationTest(unittest.TestCase):
                 patrol_steering_degrees=80,
                 navigation_service=navigation,
                 encoder_fallback_enabled=True,
+                wall_clock=lambda: now,
             )
             mqtt = FakeMqtt()
             ai = FakeAi()

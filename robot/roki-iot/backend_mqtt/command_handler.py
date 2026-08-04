@@ -36,6 +36,7 @@ class ValidatedCommand:
     patrol_id: int | None
     mapping_session_id: int | None
     fingerprint: str
+    expires_at: datetime
 
 
 ReadinessCheck = Callable[[], tuple[bool, str] | bool]
@@ -339,29 +340,49 @@ class PatrolCommandHandler:
             self._record_and_publish_command(command, "REJECTED")
             return
 
-        ready, reason = self._readiness()
-        if not ready:
-            self._record_and_publish_command(command, "REJECTED")
-            print(f"[COMMAND] START_PATROL readiness rejected reason={reason}")
-            return
-
         prepare = getattr(self._serial_reader, "prepare_patrol", None)
         if callable(prepare):
-            decision = prepare()
+            decision = prepare(expires_at=command.expires_at)
             ready, reason = (
                 decision
                 if isinstance(decision, tuple)
                 else (bool(decision), "OTA_ACTIVATION_IN_PROGRESS")
             )
             if not ready:
-                self._record_and_publish_command(command, "REJECTED")
+                self._cancel_prepared_patrol()
+                self._record_and_publish_command(
+                    command, "REJECTED", reason=reason
+                )
                 print(f"[COMMAND] START_PATROL interlock rejected reason={reason}")
                 return
 
+        ready, reason = self._readiness()
+        if not ready:
+            self._cancel_prepared_patrol()
+            self._record_and_publish_command(
+                command, "REJECTED", reason=reason
+            )
+            print(f"[COMMAND] START_PATROL readiness rejected reason={reason}")
+            return
+
+        # Route fetch, map validation and the OTA lease can consume most of a
+        # short MQTT command TTL. Recheck at the last safe point before AI or
+        # any physical START is allowed.
+        if self._start_command_expired(command):
+            self._reject_expired_start(command, ai_enabled=False)
+            return
+
         try:
             self._enable_ai(command.patrol_id)
+            # AI enable can itself block while a ROS service transitions. The
+            # physical START must get its own immediate expiry check too.
+            if self._start_command_expired(command):
+                self._reject_expired_start(command, ai_enabled=True)
+                return
             self._serial_reader.send_command(
-                "START_PATROL", patrolId=command.patrol_id
+                "START_PATROL",
+                patrolId=command.patrol_id,
+                expires_at=command.expires_at,
             )
             confirm_started = getattr(
                 self._serial_reader,
@@ -383,18 +404,26 @@ class PatrolCommandHandler:
                     )
                 self._state_store.update_robot_state("PATROLLING")
         except Exception as exc:
-            cancel_prepared = getattr(
-                self._serial_reader, "cancel_prepared_patrol", None
+            reason = str(
+                getattr(exc, "reason", type(exc).__name__)
             )
-            if callable(cancel_prepared):
-                cancel_prepared()
+            if reason == "COMMAND_EXPIRED_DURING_START":
+                self._reject_expired_start(
+                    command,
+                    ai_enabled=True,
+                    reason=reason,
+                )
+                return
+            self._cancel_prepared_patrol()
             self._disable_ai("START_PATROL_ROLLBACK")
             try:
                 self._serial_reader.send_command("STOP_PATROL")
             except Exception:
                 pass
             self._state_store.update_robot_state("ERROR")
-            self._record_and_publish_command(command, "FAILED")
+            self._record_and_publish_command(
+                command, "FAILED", reason=reason
+            )
             print(f"[COMMAND] START_PATROL failed type={type(exc).__name__}")
             return
 
@@ -603,11 +632,54 @@ class PatrolCommandHandler:
             if not isinstance(token, str) or not token:
                 raise ValueError("token is required")
         return ValidatedCommand(
+            command=command,
+            command_id=command_id,
+            patrol_id=patrol_id,
+            mapping_session_id=mapping_session_id,
+            fingerprint=fingerprint,
+            expires_at=expires,
+        )
+
+    def _cancel_prepared_patrol(self) -> None:
+        cancel_prepared = getattr(
+            self._serial_reader, "cancel_prepared_patrol", None
+        )
+        if callable(cancel_prepared):
+            cancel_prepared()
+
+    def _start_command_expired(self, command: ValidatedCommand) -> bool:
+        return self._wall_clock() >= command.expires_at
+
+    def _reject_expired_start(
+        self,
+        command: ValidatedCommand,
+        *,
+        ai_enabled: bool,
+        reason: str = "COMMAND_EXPIRED_DURING_PREPARE",
+    ) -> None:
+        try:
+            self._cancel_prepared_patrol()
+        except Exception as exc:
+            print(
+                "[COMMAND] expired START route cleanup failed "
+                f"type={type(exc).__name__}"
+            )
+        if ai_enabled:
+            try:
+                self._disable_ai("COMMAND_EXPIRED_DURING_START")
+            except Exception as exc:
+                print(
+                    "[AI] expired START rollback failed "
+                    f"type={type(exc).__name__}"
+                )
+        self._record_and_publish_command(
             command,
-            command_id,
-            patrol_id,
-            mapping_session_id,
-            fingerprint,
+            "REJECTED",
+            reason=reason,
+        )
+        print(
+            "[COMMAND] START_PATROL rejected "
+            f"reason={reason}"
         )
 
     @staticmethod
@@ -636,13 +708,18 @@ class PatrolCommandHandler:
         return parsed
 
     def _record_and_publish_command(
-        self, command: ValidatedCommand, status: str
+        self,
+        command: ValidatedCommand,
+        status: str,
+        *,
+        reason: str | None = None,
     ) -> None:
         self._record_and_publish(
             command=command.command,
             command_id=command.command_id,
             status=status,
             fingerprint=command.fingerprint,
+            reason=reason,
         )
 
     def _record_and_publish(
@@ -652,8 +729,9 @@ class PatrolCommandHandler:
         command_id: str,
         status: str,
         fingerprint: str,
+        reason: str | None = None,
     ) -> None:
-        ack = self._ack(command, command_id, status)
+        ack = self._ack(command, command_id, status, reason=reason)
         self._cache[command_id] = {"fingerprint": fingerprint, "ack": ack}
         self._cache.move_to_end(command_id)
         while len(self._cache) > self.MAX_CACHE_ENTRIES:
@@ -665,23 +743,38 @@ class PatrolCommandHandler:
         )
 
     def _publish_uncached_ack(
-        self, *, command: str, command_id: str, status: str
+        self,
+        *,
+        command: str,
+        command_id: str,
+        status: str,
+        reason: str | None = None,
     ) -> None:
         self._mqtt_client.publish(
             topic=self._settings.command_response_topic,
-            payload=self._ack(command, command_id, status),
+            payload=self._ack(command, command_id, status, reason=reason),
         )
 
-    def _ack(self, command: str, command_id: str, status: str) -> dict[str, Any]:
+    def _ack(
+        self,
+        command: str,
+        command_id: str,
+        status: str,
+        *,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
         if status not in ACK_STATUSES:
             raise ValueError("invalid ACK status")
-        return {
+        ack = {
             "schemaVersion": self._settings.schema_version,
             "commandId": command_id,
             "command": command,
             "status": status,
             "receivedAt": self._wall_clock().isoformat(timespec="seconds"),
         }
+        if reason:
+            ack["reason"] = str(reason)[:128]
+        return ack
 
     @staticmethod
     def _fingerprint(payload: dict[str, Any]) -> str:

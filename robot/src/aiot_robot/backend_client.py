@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +18,10 @@ from uuid import uuid4
 
 class BackendError(RuntimeError):
     """Backend transport or API contract failure without exposing credentials."""
+
+
+class BackendTransportError(BackendError):
+    """The request could not reach Backend; a configured local route may be used."""
 
 
 UrlOpen = Callable[..., Any]
@@ -65,6 +72,16 @@ class RobotBackendClient:
         if not vehicles:
             raise ValueError("vehicles must not be empty")
         return self._post_json("/api/robot/vehicle-checks", {"vehicles": vehicles})
+
+    def get_navigation_config(
+        self, *, timeout_seconds: float | None = None
+    ) -> Mapping[str, Any]:
+        """Fetch the Robot-token-scoped map, zones and ordered route."""
+
+        return self._get_json(
+            "/api/robot/navigation-config",
+            timeout_seconds=timeout_seconds,
+        )
 
     def upload_evidence(
         self,
@@ -159,6 +176,18 @@ class RobotBackendClient:
         )
         return self._request(endpoint, body, "application/json")
 
+    def _get_json(
+        self,
+        endpoint: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> Mapping[str, Any]:
+        return self._request_json(
+            endpoint,
+            method="GET",
+            timeout_seconds=timeout_seconds,
+        )
+
     @staticmethod
     def _multipart_body(
         *,
@@ -192,27 +221,56 @@ class RobotBackendClient:
     def _request(
         self, endpoint: str, body: bytes, content_type: str
     ) -> Mapping[str, Any]:
+        return self._request_json(
+            endpoint,
+            method="POST",
+            body=body,
+            content_type=content_type,
+        )
+
+    def _request_json(
+        self,
+        endpoint: str,
+        *,
+        method: str,
+        body: bytes | None = None,
+        content_type: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> Mapping[str, Any]:
         url = f"{self._config.base_url.rstrip('/')}{endpoint}"
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self._config.access_token}",
+        }
+        if content_type is not None:
+            headers["Content-Type"] = content_type
         request = urllib.request.Request(
             url,
             data=body,
-            method="POST",
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {self._config.access_token}",
-                "Content-Type": content_type,
-            },
+            method=method,
+            headers=headers,
         )
+        request_timeout = self._config.timeout_seconds
+        if timeout_seconds is not None:
+            if timeout_seconds <= 0:
+                raise ValueError("timeout_seconds must be positive")
+            request_timeout = min(request_timeout, float(timeout_seconds))
         try:
             with self._urlopen(
-                request, timeout=self._config.timeout_seconds
+                request, timeout=request_timeout
             ) as response:
                 response_body = response.read(1024 * 1024)
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", "replace")
             raise BackendError(f"backend HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
-            raise BackendError(f"backend connection failed: {exc.reason}") from exc
+            if _is_genuine_transport_failure(exc):
+                raise BackendTransportError("backend connection failed") from exc
+            raise BackendError("backend secure connection failed") from exc
+        except OSError as exc:
+            if _is_genuine_transport_failure(exc):
+                raise BackendTransportError("backend connection failed") from exc
+            raise BackendError("backend secure connection failed") from exc
 
         try:
             decoded = json.loads(response_body)
@@ -225,3 +283,60 @@ class RobotBackendClient:
                 f"backend rejected request: {decoded.get('code', 'UNKNOWN')}"
             )
         return decoded
+
+
+_TRANSPORT_ERRNOS = frozenset(
+    value
+    for value in (
+        getattr(errno, "ECONNREFUSED", None),
+        getattr(errno, "ECONNRESET", None),
+        getattr(errno, "ENETDOWN", None),
+        getattr(errno, "ENETUNREACH", None),
+        getattr(errno, "EHOSTDOWN", None),
+        getattr(errno, "EHOSTUNREACH", None),
+        getattr(errno, "ETIMEDOUT", None),
+        # Winsock values used by CPython on Windows.
+        10051,
+        10060,
+        10061,
+        10064,
+        10065,
+        11001,
+    )
+    if value is not None
+)
+
+
+def _is_genuine_transport_failure(error: BaseException) -> bool:
+    """Classify outages without treating TLS trust/handshake failures as fallback."""
+
+    chain = tuple(_exception_chain(error))
+    # SSL errors may wrap socket/OSError causes. Trust and handshake failures
+    # always win over an underlying transport-looking errno.
+    if any(isinstance(item, ssl.SSLError) for item in chain):
+        return False
+    for item in chain:
+        if isinstance(item, (TimeoutError, socket.gaierror, ConnectionRefusedError)):
+            return True
+        if isinstance(item, OSError) and item.errno in _TRANSPORT_ERRNOS:
+            return True
+    return False
+
+
+def _exception_chain(error: BaseException):
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        if isinstance(current, urllib.error.URLError) and isinstance(
+            current.reason, BaseException
+        ):
+            pending.append(current.reason)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
