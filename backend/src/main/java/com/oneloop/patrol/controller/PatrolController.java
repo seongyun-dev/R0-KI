@@ -10,6 +10,7 @@ import com.oneloop.patrol.dto.response.PatrolDetailResponse;
 import com.oneloop.patrol.dto.response.PatrolListResponse;
 import com.oneloop.patrol.dto.response.PatrolStartResponse;
 import com.oneloop.patrol.service.PatrolCommandService;
+import com.oneloop.patrol.service.PatrolPdfService;
 import com.oneloop.patrol.service.PatrolService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -18,7 +19,11 @@ import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,6 +43,7 @@ public class PatrolController {
 
     private final PatrolService patrolService;
     private final PatrolCommandService patrolCommandService;
+    private final PatrolPdfService patrolPdfService;
 
     @Operation(summary = "순찰 시작", description = "지정한 로봇에 순찰 시작 명령을 전송합니다.")
     @PostMapping
@@ -78,5 +84,24 @@ public class PatrolController {
                     Long patrolId) {
         return ApiResponse.success(
                 patrolService.findDetail(principal.getApartmentComplexId(), patrolId));
+    }
+
+    @Operation(summary = "순찰 보고서 PDF 다운로드", description = "순찰 상세 내용을 PDF 보고서로 다운로드합니다.")
+    @GetMapping(value = "/{patrolId}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> downloadPdf(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @Parameter(description = "순찰 ID", example = "1", required = true) @PathVariable
+                    Long patrolId) {
+        byte[] pdf = patrolPdfService.generate(principal.getApartmentComplexId(), patrolId);
+        ContentDisposition disposition =
+                ContentDisposition.attachment()
+                        .filename("patrol-report-" + patrolId + ".pdf")
+                        .build();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(pdf.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(pdf);
     }
 }

@@ -71,6 +71,13 @@ public class MapFileStorage {
         }
     }
 
+    public Resource loadByUrl(String mapUrl) {
+        if (mapUrl == null || !mapUrl.startsWith(PUBLIC_URL_PREFIX)) {
+            throw new BusinessException(ErrorCode.MAP_NOT_FOUND);
+        }
+        return load(mapUrl.substring(PUBLIC_URL_PREFIX.length()));
+    }
+
     public void deleteByUrl(String mapUrl) {
         if (mapUrl == null || !mapUrl.startsWith(PUBLIC_URL_PREFIX)) {
             return;
