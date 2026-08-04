@@ -24,6 +24,10 @@ grep -q '^User=e103$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -Eq '^SupplementaryGroups=.*aiot' \
   "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q '^EnvironmentFile=/opt/aiot/secrets/ros.env$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q 'fixed_resolution: true' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \
@@ -36,11 +40,31 @@ grep -q 'use_rotate_to_heading: false' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
 grep -q 'motion_model_for_search: DUBIN' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
+grep -q 'xy_goal_tolerance: \$XY_GOAL_TOLERANCE_M' \
+  "${repository_root}/robot/config/ros/nav2.params.yaml.template"
+grep -q 'nav2_xy_goal_tolerance(os.environ)' \
+  "${repository_root}/robot/roki-iot/run_integrated.py"
 grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/ros-preflight.sh"
 grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/mqtt-e2e-check.sh"
 ! grep -qE 'ROKI_(WHEELBASE_M|ROBOT_RADIUS_M)=[0-9]' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_INITIAL_POSE_X_M=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_INITIAL_POSE_Y_M=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_INITIAL_POSE_YAW_RAD=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAP_ID=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAP_VERSION=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAP_SHA256=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_ROUTE_SHA256=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_NAV2_XY_GOAL_TOLERANCE_M=0.20$' \
   "${repository_root}/infra/jetson/ros.env.example"
 
 install -d "${test_root}/bin" "${test_root}/ai/yolo_pipeline" "${test_root}/current"

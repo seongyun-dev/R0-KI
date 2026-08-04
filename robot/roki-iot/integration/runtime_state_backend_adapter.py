@@ -37,11 +37,14 @@ class RuntimeStateBackendAdapter:
         motor = hardware_status.motor.value
         if motor == "FAULT":
             motor = "ERROR"
+        line_sensor = hardware_status.line_sensor.value
+        if line_sensor == "FAULT":
+            line_sensor = "ERROR"
         self._backend_state_store.update_hardware(
             HardwareState(
                 battery=hardware_status.battery_percent,
                 motor=motor,
-                line_sensor="DISCONNECTED",
+                line_sensor=line_sensor,
             )
         )
 
@@ -83,8 +86,16 @@ class FinalRuntimeService:
         self._encoder_fallback_enabled = encoder_fallback_enabled
         self._encoder_progress: Any | None = None
         self._thread: threading.Thread | None = None
+        self._lifecycle_lock = threading.RLock()
+        self._runtime_fault_generation = 0
         self._active_patrol_id: int | None = None
         self._paused = False
+        self._fault_listener: Any | None = None
+        if navigation_service is not None:
+            # Both navigation modes need mission events.  In Nav2 mode this is
+            # the only path that advances PASS/SCAN waypoints and observes the
+            # final DESTINATION; encoder odometry must not write map pose.
+            navigation_service.add_event_listener(self._on_navigation_event)
         if navigation_service is not None and navigation_driver is None:
             from navigation.encoder_waypoint import (
                 EncoderWaypointProgress,
@@ -98,8 +109,21 @@ class FinalRuntimeService:
                     maximum_travel_m=navigation_maximum_travel_m,
                 )
             )
-            navigation_service.add_event_listener(self._on_navigation_event)
             runtime.add_odometry_listener(self._on_odometry)
+        add_connection_listener = getattr(
+            runtime,
+            "add_connection_listener",
+            None,
+        )
+        if callable(add_connection_listener):
+            add_connection_listener(self._on_runtime_connected)
+        add_safety_fault_listener = getattr(
+            runtime,
+            "add_safety_fault_listener",
+            None,
+        )
+        if callable(add_safety_fault_listener):
+            add_safety_fault_listener(self._on_runtime_safety_fault)
 
     def start(self) -> None:
         if self.is_running():
@@ -146,14 +170,21 @@ class FinalRuntimeService:
 
     @property
     def active_patrol_id(self) -> int | None:
-        return self._active_patrol_id
+        with self._lifecycle_lock:
+            return self._active_patrol_id
 
     @property
     def paused(self) -> bool:
-        return self._paused
+        with self._lifecycle_lock:
+            return self._paused
 
     def set_destination_listener(self, listener: Any) -> None:
         self._destination_listener = listener
+
+    def set_fault_listener(self, listener: Any) -> None:
+        """Receive asynchronous patrol failures after local fail-close."""
+
+        self._fault_listener = listener
 
     def readiness(self) -> tuple[bool, str]:
         """Return the physical/navigation gate without issuing a command."""
@@ -191,58 +222,59 @@ class FinalRuntimeService:
     def send_command(self, command: str, **parameters: Any) -> None:
         """기존 MQTT 명령을 Final Runtime의 Mission 목표로 전달한다."""
 
-        if not self.is_running():
-            raise RuntimeError("Final RobotRuntime is not running")
-        if command == "START_PATROL":
-            if self._active_patrol_id is not None:
-                raise RuntimeError("a patrol is already active")
-            if self._manual_controller is not None:
+        with self._lifecycle_lock:
+            if not self.is_running():
+                raise RuntimeError("Final RobotRuntime is not running")
+            if command == "START_PATROL":
+                if self._active_patrol_id is not None:
+                    raise RuntimeError("a patrol is already active")
+                ready, reason = self.readiness()
+                if not ready:
+                    raise RuntimeError(f"runtime is not ready: {reason}")
+                lifecycle_marker = self._runtime_lifecycle_marker()
                 patrol_id = parameters.get("patrolId")
                 try:
-                    self._manual_controller.activate(patrol_id)
-                    self._active_patrol_id = int(patrol_id)
-                    self._paused = False
+                    if self._manual_controller is not None:
+                        self._manual_controller.activate(patrol_id)
+                        self._active_patrol_id = int(patrol_id)
+                        self._paused = False
+                    elif self._navigation_service is not None:
+                        if self._navigation_driver is not None:
+                            self._start_nav2_patrol(patrol_id=patrol_id)
+                        else:
+                            self._start_encoder_waypoint_patrol(
+                                patrol_id=patrol_id
+                            )
+                    else:
+                        self._active_patrol_id = int(patrol_id)
+                        self._paused = False
+                        self._runtime.mission.start_patrol(
+                            speed=self._patrol_drive_speed_pwm,
+                            steering_deg=self._patrol_steering_degrees,
+                        )
+                    if lifecycle_marker != self._runtime_lifecycle_marker():
+                        raise RuntimeError(
+                            "runtime lifecycle changed during START_PATROL"
+                        )
                 except Exception:
-                    self._manual_controller.deactivate()
-                    self._stop_runtime_patrol("START_PATROL_ROLLBACK")
-                    self._active_patrol_id = None
-                    self._release_patrol_lease()
+                    self._rollback_failed_start()
                     raise
                 return
-            if self._navigation_service is not None:
-                if self._navigation_driver is not None:
-                    self._start_nav2_patrol(patrol_id=parameters.get("patrolId"))
-                else:
-                    self._start_encoder_waypoint_patrol(
-                        patrol_id=parameters.get("patrolId")
-                    )
+            if command == "STOP_PATROL":
+                self._stop_patrol_from_command()
                 return
-            self._active_patrol_id = parameters.get("patrolId")
-            self._runtime.mission.start_patrol(
-                speed=self._patrol_drive_speed_pwm,
-                steering_deg=self._patrol_steering_degrees,
+            raise ValueError(
+                f"unsupported Final RobotRuntime command: {command}"
             )
-            return
-        if command == "STOP_PATROL":
-            if self._manual_controller is not None:
-                self._manual_controller.deactivate()
-                self._stop_runtime_patrol("MQTT_STOP_PATROL")
-                self._active_patrol_id = None
-                self._paused = False
-                self._release_patrol_lease()
-                return
-            if self._encoder_progress is not None:
-                self._encoder_progress.stop()
-            if self._navigation_service is not None:
-                self._navigation_service.stop_patrol()
-            if self._navigation_driver is not None:
-                self._navigation_driver.stop_patrol()
-            self._stop_runtime_patrol("MQTT_STOP_PATROL")
-            self._active_patrol_id = None
-            self._paused = False
-            self._release_patrol_lease()
-            return
-        raise ValueError(f"unsupported Final RobotRuntime command: {command}")
+
+    def confirm_patrol_started(self, patrol_id: int) -> bool:
+        """Linearize PATROLLING publication with reconnect/fault cleanup."""
+
+        with self._lifecycle_lock:
+            if self._active_patrol_id != patrol_id or self._paused:
+                return False
+            self._update_runtime_state("PATROLLING")
+            return True
 
     def _start_encoder_waypoint_patrol(self, *, patrol_id: Any) -> None:
         if self._encoder_progress is None or self._navigation_service is None:
@@ -270,21 +302,13 @@ class FinalRuntimeService:
             left_distance_m=motion_state.left_distance_m,
             right_distance_m=motion_state.right_distance_m,
         )
-        try:
-            self._navigation_service.start_patrol(patrol_id=patrol_id)
-            self._active_patrol_id = int(patrol_id)
-            self._paused = False
-            self._runtime.mission.start_patrol(
-                speed=self._patrol_drive_speed_pwm,
-                steering_deg=self._patrol_steering_degrees,
-            )
-        except Exception:
-            self._active_patrol_id = None
-            self._encoder_progress.stop()
-            self._navigation_service.stop_patrol()
-            self._stop_runtime_patrol("START_PATROL_ROLLBACK")
-            self._release_patrol_lease()
-            raise
+        self._navigation_service.start_patrol(patrol_id=patrol_id)
+        self._active_patrol_id = int(patrol_id)
+        self._paused = False
+        self._runtime.mission.start_patrol(
+            speed=self._patrol_drive_speed_pwm,
+            steering_deg=self._patrol_steering_degrees,
+        )
 
     def _start_nav2_patrol(self, *, patrol_id: Any) -> None:
         if self._navigation_service is None or self._navigation_driver is None:
@@ -295,26 +319,25 @@ class FinalRuntimeService:
         event = self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
-        try:
-            self._navigation_driver.start_patrol(
-                route=self._navigation_service.route,
-                first_event=event,
-            )
-        except Exception:
-            self._active_patrol_id = None
-            self._navigation_service.stop_patrol()
-            self._stop_runtime_patrol("START_PATROL_ROLLBACK")
-            self._release_patrol_lease()
-            raise
+        self._navigation_driver.start_patrol(
+            route=self._navigation_service.route,
+            first_event=event,
+        )
 
     def apply_motion_command(self, command: Any) -> None:
         """Apply a calibrated Nav2 cmd_vel target through the single runtime."""
 
+        with self._lifecycle_lock:
+            self._apply_motion_command_locked(command)
+
+    def _apply_motion_command_locked(self, command: Any) -> None:
         if self._active_patrol_id is None or self._paused:
-            self._stop_runtime_patrol("MOTION_INTERLOCK")
+            self._best_effort_stop_runtime_patrol("MOTION_INTERLOCK")
             return
         if int(command.speed_pwm) == 0:
-            self._stop_runtime_patrol(command.stop_reason or "NAV2_STOP")
+            self._best_effort_stop_runtime_patrol(
+                command.stop_reason or "NAV2_STOP"
+            )
             return
         self._runtime.mission.start_patrol(
             speed=int(command.speed_pwm),
@@ -322,57 +345,94 @@ class FinalRuntimeService:
         )
 
     def pause_patrol(self, reason: str = "OBSTACLE") -> bool:
+        with self._lifecycle_lock:
+            return self._pause_patrol_locked(reason)
+
+    def _pause_patrol_locked(self, reason: str) -> bool:
         if self._active_patrol_id is None or self._paused:
             return False
         self._paused = True
-        if self._manual_controller is not None:
-            self._manual_controller.deactivate()
-            self._stop_runtime_patrol(reason)
-            return True
-        if self._navigation_driver is not None:
-            pause = getattr(self._navigation_driver, "pause_patrol", None)
-            if callable(pause):
-                pause()
-        self._stop_runtime_patrol(reason)
+        component_failure: Exception | None = None
+        try:
+            if self._manual_controller is not None:
+                self._manual_controller.deactivate()
+            elif self._navigation_driver is not None:
+                pause = getattr(self._navigation_driver, "pause_patrol", None)
+                if callable(pause):
+                    pause()
+        except Exception as exc:
+            component_failure = exc
+        stop_confirmed = self._best_effort_stop_runtime_patrol(reason)
+        if component_failure is not None or not stop_confirmed:
+            self._fail_patrol_locked(f"{reason}_PAUSE_FAILED")
+            return False
         return True
 
     def resume_patrol(self) -> bool:
+        with self._lifecycle_lock:
+            return self._resume_patrol_locked()
+
+    def _resume_patrol_locked(self) -> bool:
         if self._active_patrol_id is None or not self._paused:
             return False
+        try:
+            if self._manual_controller is not None:
+                assert self._active_patrol_id is not None
+                self._manual_controller.activate(self._active_patrol_id)
+            elif self._navigation_driver is not None:
+                resume = getattr(self._navigation_driver, "resume_patrol", None)
+                if callable(resume):
+                    resume()
+            else:
+                self._runtime.mission.start_patrol(
+                    speed=self._patrol_drive_speed_pwm,
+                    steering_deg=self._patrol_steering_degrees,
+                )
+        except Exception as exc:
+            self._fail_patrol_locked(
+                f"RESUME_FAILED_{type(exc).__name__}"
+            )
+            return False
         self._paused = False
-        if self._manual_controller is not None:
-            assert self._active_patrol_id is not None
-            self._manual_controller.activate(self._active_patrol_id)
-            return True
-        if self._navigation_driver is not None:
-            resume = getattr(self._navigation_driver, "resume_patrol", None)
-            if callable(resume):
-                resume()
-            return True
-        self._runtime.mission.start_patrol(
-            speed=self._patrol_drive_speed_pwm,
-            steering_deg=self._patrol_steering_degrees,
-        )
         return True
 
     def fail_patrol(self, reason: str) -> None:
-        if self._manual_controller is not None:
-            self._manual_controller.deactivate()
-        if self._encoder_progress is not None:
-            self._encoder_progress.stop()
-        if self._navigation_service is not None:
-            self._navigation_service.stop_patrol()
-        if self._navigation_driver is not None:
-            self._navigation_driver.stop_patrol()
-        self._stop_runtime_patrol(reason)
-        self._active_patrol_id = None
-        self._paused = False
-        self._release_patrol_lease()
-        self._update_runtime_state("ERROR")
+        with self._lifecycle_lock:
+            self._fail_patrol_locked(reason)
+
+    def _fail_patrol_locked(self, reason: str) -> None:
+        had_patrol = (
+            self._active_patrol_id is not None
+            or bool(getattr(self._manual_controller, "active", False))
+            or self._patrol_lease_held
+        )
+        try:
+            self._best_effort_stop_runtime_patrol(reason)
+        finally:
+            cleanup_failure = self._cleanup_patrol_components()
+            self._active_patrol_id = None
+            self._paused = False
+            try:
+                self._release_patrol_lease()
+            except Exception as exc:
+                if cleanup_failure is None:
+                    cleanup_failure = exc
+            self._update_runtime_state("ERROR")
+            if had_patrol:
+                self._notify_fault_listener(reason)
+            if cleanup_failure is not None:
+                print(
+                    "[RUNTIME] patrol failure cleanup incomplete "
+                    f"type={type(cleanup_failure).__name__}"
+                )
 
     def prepare_patrol(self) -> tuple[bool, str]:
         """Acquire the OTA interlock before AI or actuators can be enabled."""
 
+        with self._lifecycle_lock:
+            return self._prepare_patrol_locked()
+
+    def _prepare_patrol_locked(self) -> tuple[bool, str]:
         if self._patrol_lease_held or self._deployment_guard is None:
             return True, "READY"
         decision = self._deployment_guard.acquire()
@@ -384,12 +444,34 @@ class FinalRuntimeService:
         return bool(ready), str(reason)
 
     def cancel_prepared_patrol(self) -> None:
-        if self._active_patrol_id is None:
-            self._release_patrol_lease()
+        with self._lifecycle_lock:
+            if self._active_patrol_id is None:
+                self._release_patrol_lease()
 
     def tick(self) -> None:
         """Advance a map-pose mission without taking ownership of ROS."""
 
+        with self._lifecycle_lock:
+            self._tick_locked()
+
+    def _tick_locked(self) -> None:
+        if self._navigation_driver is not None and self._active_patrol_id is not None:
+            check_health = getattr(
+                self._navigation_driver,
+                "check_health",
+                None,
+            )
+            if callable(check_health):
+                try:
+                    healthy = check_health()
+                except Exception as exc:
+                    self._fail_patrol_locked(
+                        f"NAVIGATION_HEALTH_ERROR_{type(exc).__name__}"
+                    )
+                    return
+                if healthy is False and self._active_patrol_id is not None:
+                    self._fail_patrol_locked("NAVIGATION_HEALTH_FAILED")
+                    return
         if (
             self._navigation_service is None
             or self._active_patrol_id is None
@@ -401,9 +483,14 @@ class FinalRuntimeService:
             return
         from navigation.waypoint_mission import Pose2D
 
-        self._navigation_service.update_pose(
-            Pose2D(float(pose.x), float(pose.y), float(pose.heading))
-        )
+        try:
+            self._navigation_service.update_pose(
+                Pose2D(float(pose.x), float(pose.y), float(pose.heading))
+            )
+        except Exception as exc:
+            self._fail_patrol_locked(
+                f"NAVIGATION_UPDATE_ERROR_{type(exc).__name__}"
+            )
 
     def _on_odometry(self, _odometry: Any, motion_state: Any) -> None:
         progress = self._encoder_progress
@@ -448,12 +535,181 @@ class FinalRuntimeService:
             return
         self._runtime.mission.stop_patrol()
 
+    def _best_effort_stop_runtime_patrol(self, reason: str) -> bool:
+        """Keep safety/idle callbacks non-throwing after fail-closing motion."""
+
+        try:
+            self._stop_runtime_patrol(reason)
+        except Exception as exc:
+            print(
+                "[RUNTIME] physical STOP not confirmed "
+                f"reason={reason} type={type(exc).__name__}"
+            )
+            return False
+        return True
+
+    def _on_runtime_connected(self, generation: int) -> None:
+        """Invalidate all cross-thread patrol state on every Serial generation."""
+
+        with self._lifecycle_lock:
+            self._on_runtime_connected_locked(generation)
+
+    def _on_runtime_connected_locked(self, generation: int) -> None:
+        had_active_patrol = self._active_patrol_id is not None
+        manual_active = bool(
+            getattr(self._manual_controller, "active", False)
+        )
+        lease_held = self._patrol_lease_held
+        # Clear the public interlock before component cleanup. Any concurrent
+        # stale cmd_vel callback then takes MOTION_INTERLOCK instead of rearming.
+        self._active_patrol_id = None
+        self._paused = False
+        cleanup_failure = self._cleanup_patrol_components()
+        try:
+            self._release_patrol_lease()
+        except Exception as exc:
+            if cleanup_failure is None:
+                cleanup_failure = exc
+        if had_active_patrol or manual_active or lease_held:
+            self._update_runtime_state("ERROR")
+            self._notify_fault_listener("SERIAL_CONNECTION_RESET")
+            print(
+                "[RUNTIME] patrol invalidated by Serial connection reset "
+                f"generation={generation}"
+            )
+        if cleanup_failure is not None:
+            # RobotRuntime catches listener errors too, but this adapter keeps
+            # cleanup failures local so every connection can finish handshake.
+            print(
+                "[RUNTIME] connection reset cleanup incomplete "
+                f"generation={generation} "
+                f"type={type(cleanup_failure).__name__}"
+            )
+
+    def _on_runtime_safety_fault(self, reason: str) -> bool:
+        """Linearize an ESP/runtime fault with START and abandon the patrol."""
+
+        # Increment before waiting for the lifecycle lock.  A START blocked in
+        # a component call can then observe that a fault arrived and roll back
+        # instead of returning a successful ACK before this callback runs.
+        self._runtime_fault_generation += 1
+        with self._lifecycle_lock:
+            had_active_patrol = self._active_patrol_id is not None
+            manual_active = bool(
+                getattr(self._manual_controller, "active", False)
+            )
+            if not (
+                had_active_patrol
+                or manual_active
+                or self._patrol_lease_held
+            ):
+                return False
+            self._fail_patrol_locked(reason)
+            return True
+
+    def _runtime_lifecycle_marker(self) -> tuple[int | None, int]:
+        generation = getattr(self._runtime, "connection_generation", None)
+        if not isinstance(generation, int):
+            generation = None
+        return generation, self._runtime_fault_generation
+
+    def _notify_fault_listener(self, reason: str) -> None:
+        if not callable(self._fault_listener):
+            return
+        try:
+            self._fault_listener(reason)
+        except Exception as exc:
+            print(
+                "[RUNTIME] fault listener failed "
+                f"reason={reason} type={type(exc).__name__}"
+            )
+
+    def _rollback_failed_start(self) -> None:
+        """Preserve the START failure while completing best-effort rollback."""
+
+        self._best_effort_stop_runtime_patrol("START_PATROL_ROLLBACK")
+        cleanup_failure = self._cleanup_patrol_components()
+        self._active_patrol_id = None
+        self._paused = False
+        try:
+            self._release_patrol_lease()
+        except Exception as exc:
+            if cleanup_failure is None:
+                cleanup_failure = exc
+        if cleanup_failure is not None:
+            print(
+                "[RUNTIME] START rollback cleanup incomplete "
+                f"type={type(cleanup_failure).__name__}"
+            )
+
+    def _stop_patrol_from_command(self) -> None:
+        """Stop once, always clean local state, then surface delivery failure."""
+
+        failure: Exception | None = None
+        try:
+            self._stop_runtime_patrol("MQTT_STOP_PATROL")
+        except Exception as exc:
+            failure = exc
+        finally:
+            cleanup_failure = self._cleanup_patrol_components()
+            if failure is None:
+                failure = cleanup_failure
+            elif cleanup_failure is not None:
+                print(
+                    "[RUNTIME] additional STOP cleanup failure "
+                    f"type={type(cleanup_failure).__name__}"
+                )
+            self._active_patrol_id = None
+            self._paused = False
+            try:
+                self._release_patrol_lease()
+            except Exception as exc:
+                if failure is None:
+                    failure = exc
+                else:
+                    print(
+                        "[RUNTIME] additional lease release failure "
+                        f"type={type(exc).__name__}"
+                    )
+        if failure is not None:
+            raise failure
+
+    def _cleanup_patrol_components(self) -> Exception | None:
+        """Attempt every local stop even when one component cleanup fails."""
+
+        failure: Exception | None = None
+        operations = []
+        if self._manual_controller is not None:
+            operations.append(self._manual_controller.deactivate)
+        if self._encoder_progress is not None:
+            operations.append(self._encoder_progress.stop)
+        if self._navigation_service is not None:
+            operations.append(self._navigation_service.stop_patrol)
+        if self._navigation_driver is not None:
+            operations.append(self._navigation_driver.stop_patrol)
+        for operation in operations:
+            try:
+                operation()
+            except Exception as exc:
+                if failure is None:
+                    failure = exc
+                else:
+                    print(
+                        "[RUNTIME] additional patrol cleanup failure "
+                        f"type={type(exc).__name__}"
+                    )
+        return failure
+
     def _update_runtime_state(self, state: str) -> None:
         update = getattr(self._runtime.state_store, "update_robot_state", None)
         if callable(update):
             update(state)
 
     def _on_navigation_event(self, event: Any) -> None:
+        with self._lifecycle_lock:
+            self._on_navigation_event_locked(event)
+
+    def _on_navigation_event_locked(self, event: Any) -> None:
         event_type = getattr(event.mission_event.event_type, "value", "")
         waypoint = getattr(event.mission_event, "waypoint", None)
         if event_type in {"WAYPOINT_REACHED", "ACTION_REQUIRED"}:
@@ -469,13 +725,15 @@ class FinalRuntimeService:
         if event_type == "DESTINATION_REACHED":
             if self._encoder_progress is not None:
                 self._encoder_progress.stop()
-            self._stop_runtime_patrol("DESTINATION_REACHED")
+            stop_confirmed = self._best_effort_stop_runtime_patrol(
+                "DESTINATION_REACHED"
+            )
             if self._navigation_driver is not None:
                 self._navigation_driver.stop_patrol()
             self._active_patrol_id = None
             self._paused = False
             self._release_patrol_lease()
-            self._update_runtime_state("IDLE")
+            self._update_runtime_state("IDLE" if stop_confirmed else "ERROR")
             if callable(self._destination_listener):
                 self._destination_listener(event)
 

@@ -145,25 +145,28 @@ class ManualDriveController:
                 )
                 action = "STEER_LEFT" if normalized == "a" else "STEER_RIGHT"
 
-        if action in {"STOP", "LOCAL_STOP", "FORWARD_BLOCKED"}:
-            self._runtime.request_motion_stop(steering)
-        elif action == "FORWARD":
-            self._runtime.request_motion_target(
-                self._settings.forward_target_pwm,
-                steering,
-            )
-        elif action == "REVERSE":
-            self._runtime.request_motion_target(
-                -self._settings.reverse_target_pwm,
-                steering,
-            )
-        else:
-            self._runtime.request_motion_target(
-                0,
-                steering,
-                stationary_steering=True,
-            )
-        return action
+            # Keep the controller lock until the runtime mailbox accepts the
+            # request. A concurrent deactivate() must enqueue its STOP after
+            # any key action that already passed the active-patrol gate.
+            if action in {"STOP", "LOCAL_STOP", "FORWARD_BLOCKED"}:
+                self._runtime.request_motion_stop(steering)
+            elif action == "FORWARD":
+                self._runtime.request_motion_target(
+                    self._settings.forward_target_pwm,
+                    steering,
+                )
+            elif action == "REVERSE":
+                self._runtime.request_motion_target(
+                    -self._settings.reverse_target_pwm,
+                    steering,
+                )
+            else:
+                self._runtime.request_motion_target(
+                    0,
+                    steering,
+                    stationary_steering=True,
+                )
+            return action
 
     def tick(self) -> str | None:
         with self._lock:
@@ -180,8 +183,8 @@ class ManualDriveController:
                 return None
             steering = self._steering_deg
             self._cancel_pulse_locked()
-        self._runtime.request_motion_stop(steering)
-        return "SAFETY_STOP" if must_stop else "PULSE_STOP"
+            self._runtime.request_motion_stop(steering)
+            return "SAFETY_STOP" if must_stop else "PULSE_STOP"
 
     def _forward_allowed(self) -> bool:
         status = self._state_store.get_status()

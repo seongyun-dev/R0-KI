@@ -90,6 +90,7 @@ class RuntimeBootstrapTest(unittest.TestCase):
         self.assertIsNotNone(runtime.state_store.snapshot())
         settings = build_localization_settings(load_robot_config())
         self.assertEqual(settings.map_pose_timeout_sec, 2.0)
+        self.assertEqual(settings.max_future_transform_sec, 0.75)
         bridge = build_ros_tf_pose_bridge(runtime.state_store)
         self.assertIs(bridge.state_store, runtime.state_store)
         lidar_bridge = build_ros_lidar_health_bridge(runtime.state_store)

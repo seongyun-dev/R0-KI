@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from control.manual_drive_controller import (
+    ManualDriveController,
+    ManualDriveSettings,
+)
 from integration.runtime_state_backend_adapter import (
     FinalRuntimeService,
     RuntimeStateBackendAdapter,
@@ -50,6 +54,13 @@ class FakeRuntime:
         self.mission = FakeMissionController()
         self.started = threading.Event()
         self.stopped = threading.Event()
+        self.stop_reasons: list[str] = []
+        self.stop_error: Exception | None = None
+        self.connection_generation = 0
+        self.connection_listeners: list[object] = []
+        self.safety_fault_listeners: list[object] = []
+        self.motion_targets: list[tuple[int, int, bool]] = []
+        self.motion_stops: list[int] = []
 
     def add_hardware_status_listener(self, listener: object) -> None:
         self.hardware_listeners.append(listener)
@@ -57,12 +68,66 @@ class FakeRuntime:
     def add_odometry_listener(self, listener: object) -> None:
         self.odometry_listeners.append(listener)
 
+    def add_connection_listener(self, listener: object) -> None:
+        self.connection_listeners.append(listener)
+
+    def add_safety_fault_listener(self, listener: object) -> None:
+        self.safety_fault_listeners.append(listener)
+
     def run_forever(self) -> None:
         self.started.set()
         self.stopped.wait(timeout=1.0)
 
     def request_stop(self) -> None:
         self.stopped.set()
+
+    def stop_patrol(self, reason: str) -> None:
+        self.stop_reasons.append(reason)
+        self.mission.stop_patrol()
+        if self.stop_error is not None:
+            raise self.stop_error
+
+    def request_motion_target(
+        self,
+        speed: int,
+        steering_deg: int,
+        *,
+        stationary_steering: bool = False,
+    ) -> None:
+        self.motion_targets.append(
+            (speed, steering_deg, stationary_steering)
+        )
+
+    def request_motion_stop(self, steering_deg: int) -> None:
+        self.motion_stops.append(steering_deg)
+
+    def simulate_connection(self) -> None:
+        self.connection_generation += 1
+        for listener in tuple(self.connection_listeners):
+            listener(self.connection_generation)  # type: ignore[operator]
+
+    def simulate_safety_fault(self, reason: str) -> None:
+        self.mission.stop_patrol()
+        for listener in tuple(self.safety_fault_listeners):
+            listener(reason)  # type: ignore[operator]
+
+
+class BlockingManualController:
+    def __init__(self) -> None:
+        self.active = False
+        self.activate_entered = threading.Event()
+        self.release_activate = threading.Event()
+        self.deactivate_calls = 0
+
+    def activate(self, _patrol_id: int) -> None:
+        self.activate_entered.set()
+        if not self.release_activate.wait(timeout=2.0):
+            raise TimeoutError("test did not release manual activation")
+        self.active = True
+
+    def deactivate(self) -> None:
+        self.deactivate_calls += 1
+        self.active = False
 
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
@@ -125,6 +190,388 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         guard.release.assert_called_once_with()
         service.stop()
 
+    def test_stop_write_failure_cleans_navigation_and_releases_lease(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=91)
+        service._paused = True
+        runtime.stop_error = RuntimeError("serial STOP write failed")
+
+        with self.assertRaisesRegex(RuntimeError, "serial STOP write failed"):
+            service.send_command("STOP_PATROL")
+
+        self.assertIn("MQTT_STOP_PATROL", runtime.stop_reasons)
+        navigation.stop_patrol.assert_called_once_with()
+        driver.stop_patrol.assert_called_once_with()
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(service.paused)
+        guard.release.assert_called_once_with()
+
+    def test_stop_write_failure_still_deactivates_manual_demo(self) -> None:
+        runtime = FakeRuntime()
+        manual = Mock()
+        keyboard = Mock()
+        service = FinalRuntimeService(
+            runtime,
+            manual_controller=manual,
+            keyboard_input=keyboard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        service.send_command("START_PATROL", patrolId=92)
+        runtime.stop_error = RuntimeError("serial STOP write failed")
+
+        with self.assertRaisesRegex(RuntimeError, "serial STOP write failed"):
+            service.send_command("STOP_PATROL")
+
+        manual.deactivate.assert_called_once_with()
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(service.paused)
+
+    def test_start_rollback_preserves_start_error_when_stop_write_fails(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        runtime.stop_error = RuntimeError("serial STOP write failed")
+        navigation = Mock()
+        driver = Mock()
+        driver.start_patrol.side_effect = ValueError("Nav2 start failed")
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+
+        with self.assertRaisesRegex(ValueError, "Nav2 start failed"):
+            service.send_command("START_PATROL", patrolId=93)
+
+        self.assertIn("START_PATROL_ROLLBACK", runtime.stop_reasons)
+        navigation.stop_patrol.assert_called_once_with()
+        driver.stop_patrol.assert_called_once_with()
+        self.assertIsNone(service.active_patrol_id)
+        guard.release.assert_called_once_with()
+
+    def test_fail_patrol_remains_non_throwing_when_stop_write_fails(self) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=94)
+        runtime.stop_error = RuntimeError("serial STOP write failed")
+
+        service.fail_patrol("DEMO_SAFETY_FAULT")
+
+        self.assertIn("DEMO_SAFETY_FAULT", runtime.stop_reasons)
+        navigation.stop_patrol.assert_called_once_with()
+        driver.stop_patrol.assert_called_once_with()
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(service.paused)
+        guard.release.assert_called_once_with()
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_reconnect_invalidates_nav2_and_rejects_stale_cmd_vel(self) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+        navigation.reset_mock()
+        driver.reset_mock()
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=95)
+        motion = SimpleNamespace(
+            speed_pwm=45,
+            steering_deg=80,
+            stop_reason=None,
+        )
+        service.apply_motion_command(motion)
+        self.assertEqual(runtime.mission.start_calls, 1)
+
+        runtime.simulate_connection()
+        service.apply_motion_command(motion)
+
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(service.paused)
+        self.assertFalse(runtime.mission.patrol_active)
+        self.assertEqual(runtime.mission.start_calls, 1)
+        navigation.stop_patrol.assert_called_once_with()
+        driver.stop_patrol.assert_called_once_with()
+        guard.release.assert_called_once_with()
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_runtime_safety_fault_cleans_nav_lease_and_notifies_ai_owner(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        failures: list[str] = []
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.set_fault_listener(failures.append)
+        service.start()
+        self.addCleanup(service.stop)
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=97)
+        self.assertTrue(service.confirm_patrol_started(97))
+        self.assertEqual(
+            runtime.state_store.get_status().state,
+            "PATROLLING",
+        )
+
+        runtime.simulate_safety_fault("LINE_SENSOR_FAULT")
+
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(service.paused)
+        navigation.stop_patrol.assert_called_once_with()
+        driver.stop_patrol.assert_called_once_with()
+        guard.release.assert_called_once_with()
+        self.assertEqual(failures, ["LINE_SENSOR_FAULT"])
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+        self.assertFalse(service.confirm_patrol_started(97))
+
+    def test_pause_component_failure_still_stops_and_abandons_patrol(self) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        driver.pause_patrol.side_effect = RuntimeError("cancel failed")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        service.send_command("START_PATROL", patrolId=98)
+
+        self.assertFalse(service.pause_patrol("OBSTACLE"))
+
+        self.assertIsNone(service.active_patrol_id)
+        self.assertIn("OBSTACLE", runtime.stop_reasons)
+        self.assertIn("OBSTACLE_PAUSE_FAILED", runtime.stop_reasons)
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_resume_component_failure_cannot_leave_patrol_unpaused(self) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        service.send_command("START_PATROL", patrolId=99)
+        self.assertTrue(service.pause_patrol("OBSTACLE"))
+        driver.resume_patrol.side_effect = RuntimeError("resume failed")
+
+        self.assertFalse(service.resume_patrol())
+
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(service.paused)
+        self.assertTrue(
+            any(reason.startswith("RESUME_FAILED") for reason in runtime.stop_reasons)
+        )
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_navigation_health_exception_fails_patrol_without_killing_loop(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        service.send_command("START_PATROL", patrolId=100)
+        driver.check_health.side_effect = RuntimeError("health crashed")
+
+        service.tick()
+
+        self.assertIsNone(service.active_patrol_id)
+        self.assertTrue(
+            any(
+                reason.startswith("NAVIGATION_HEALTH_ERROR")
+                for reason in runtime.stop_reasons
+            )
+        )
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_reconnect_deactivates_manual_before_stale_key(self) -> None:
+        runtime = FakeRuntime()
+        runtime.state_store.update_lidar_status("NORMAL")
+        manual = ManualDriveController(
+            runtime=runtime,
+            state_store=runtime.state_store,
+            settings=ManualDriveSettings(),
+        )
+        keyboard = Mock()
+        service = FinalRuntimeService(
+            runtime,
+            manual_controller=manual,
+            keyboard_input=keyboard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+        service.send_command("START_PATROL", patrolId=96)
+        self.assertTrue(manual.active)
+
+        runtime.simulate_connection()
+
+        self.assertFalse(manual.active)
+        self.assertIsNone(service.active_patrol_id)
+        target_count = len(runtime.motion_targets)
+        self.assertEqual(manual.handle_key("w"), "IGNORED")
+        self.assertEqual(len(runtime.motion_targets), target_count)
+        self.assertEqual(runtime.state_store.get_status().state, "ERROR")
+
+    def test_reconnect_during_nav2_start_rolls_back_before_success(self) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_start(**_kwargs) -> None:
+            entered.set()
+            if not release.wait(timeout=2.0):
+                raise TimeoutError("test did not release Nav2 START")
+
+        driver.start_patrol.side_effect = blocking_start
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        failures: list[Exception] = []
+
+        start_thread = threading.Thread(
+            target=lambda: self._capture_error(
+                failures,
+                lambda: service.send_command("START_PATROL", patrolId=101),
+            )
+        )
+        start_thread.start()
+        self.assertTrue(entered.wait(timeout=0.5))
+        reconnect_thread = threading.Thread(target=runtime.simulate_connection)
+        reconnect_thread.start()
+        deadline = time.monotonic() + 0.5
+        while runtime.connection_generation == 0 and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertEqual(runtime.connection_generation, 1)
+        release.set()
+        start_thread.join(timeout=1.0)
+        reconnect_thread.join(timeout=1.0)
+
+        self.assertFalse(start_thread.is_alive())
+        self.assertFalse(reconnect_thread.is_alive())
+        self.assertEqual(len(failures), 1)
+        self.assertRegex(str(failures[0]), "lifecycle changed")
+        self.assertIsNone(service.active_patrol_id)
+        self.assertFalse(runtime.mission.patrol_active)
+        self.assertGreaterEqual(driver.stop_patrol.call_count, 1)
+
+    def test_safety_fault_during_manual_start_cannot_ack_active_patrol(self) -> None:
+        runtime = FakeRuntime()
+        manual = BlockingManualController()
+        service = FinalRuntimeService(
+            runtime,
+            manual_controller=manual,
+            keyboard_input=Mock(),
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        failures: list[Exception] = []
+
+        start_thread = threading.Thread(
+            target=lambda: self._capture_error(
+                failures,
+                lambda: service.send_command("START_PATROL", patrolId=102),
+            )
+        )
+        start_thread.start()
+        self.assertTrue(manual.activate_entered.wait(timeout=0.5))
+        fault_thread = threading.Thread(
+            target=lambda: runtime.simulate_safety_fault("MOTOR_FAULT")
+        )
+        fault_thread.start()
+        deadline = time.monotonic() + 0.5
+        while service._runtime_fault_generation == 0 and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertEqual(service._runtime_fault_generation, 1)
+        manual.release_activate.set()
+        start_thread.join(timeout=1.0)
+        fault_thread.join(timeout=1.0)
+
+        self.assertEqual(len(failures), 1)
+        self.assertRegex(str(failures[0]), "lifecycle changed")
+        self.assertFalse(manual.active)
+        self.assertIsNone(service.active_patrol_id)
+        self.assertGreaterEqual(manual.deactivate_calls, 1)
+
+    @staticmethod
+    def _capture_error(
+        failures: list[Exception],
+        operation: object,
+    ) -> None:
+        try:
+            operation()  # type: ignore[operator]
+        except Exception as exc:
+            failures.append(exc)
+
     def test_listener_updates_only_legacy_hardware_fields(self) -> None:
         runtime = FakeRuntime()
         store = RobotStateStore()
@@ -150,11 +597,37 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         status = store.get_status()
         self.assertEqual(status.battery, 82.5)
         self.assertEqual(status.motor, "NORMAL")
-        self.assertEqual(status.line_sensor, "DISCONNECTED")
+        self.assertEqual(status.line_sensor, "ERROR")
         self.assertEqual(status.camera, "DISCONNECTED")
         self.assertEqual(status.lidar, "DISCONNECTED")
         self.assertEqual(status.obstacle.status, "CLEAR")
         self.assertEqual(status.obstacle.direction, "NONE")
+
+    def test_nav2_registers_events_without_encoder_map_pose_writer(self) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+        )
+
+        navigation.add_event_listener.assert_called_once_with(
+            service._on_navigation_event
+        )
+        self.assertIsNone(service._encoder_progress)
+        self.assertEqual(runtime.odometry_listeners, [])
+
+        event = SimpleNamespace(
+            mission_event=SimpleNamespace(
+                event_type=SimpleNamespace(value="WAYPOINT_REACHED"),
+                waypoint=SimpleNamespace(name="PASS-1"),
+            )
+        )
+        navigation.add_event_listener.call_args.args[0](event)
+        driver.on_navigation_event.assert_called_once_with(event)
 
     def test_final_runtime_service_owns_one_runtime_thread(self) -> None:
         runtime = FakeRuntime()

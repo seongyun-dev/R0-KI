@@ -158,16 +158,41 @@ class PatrolCommandHandler:
             and status.lidar != "NORMAL"
         )
         ai_unready = False
-        if (
-            getattr(self._settings, "ai_required_for_patrol", False)
-            and self._ai_controller is not None
-        ):
+        ai_required = getattr(
+            self._settings,
+            "ai_required_for_patrol",
+            False,
+        )
+        if ai_required and self._ai_controller is None:
+            ai_unready = True
+        elif ai_required:
             readiness = getattr(self._ai_controller, "readiness", None)
             if callable(readiness):
                 decision = readiness()
                 ai_unready = not (
                     decision[0] if isinstance(decision, tuple) else decision
                 )
+            else:
+                ai_unready = True
+            applied = getattr(self._ai_controller, "detection_applied", None)
+            if (
+                not ai_unready
+                and not obstacle_stop
+                and not lidar_stale
+                and callable(applied)
+                and not applied(active_patrol)
+            ):
+                try:
+                    # A stale AI gate sends DISABLE. Confirm the matching
+                    # patrol ENABLE again before the clear-hold may resume.
+                    self._enable_ai(active_patrol)
+                    ai_unready = not applied(active_patrol)
+                except Exception as exc:
+                    ai_unready = True
+                    print(
+                        "[AI] recovery enable failed "
+                        f"type={type(exc).__name__}"
+                    )
         if obstacle_stop or lidar_stale or ai_unready:
             reason = (
                 "OBSTACLE"
@@ -193,6 +218,20 @@ class PatrolCommandHandler:
             return
         if now - self._clear_since < self._settings.obstacle_clear_hold_seconds:
             return
+        if ai_required and self._ai_controller is not None:
+            readiness = getattr(self._ai_controller, "readiness", None)
+            applied = getattr(self._ai_controller, "detection_applied", None)
+            decision = readiness() if callable(readiness) else False
+            ready = decision[0] if isinstance(decision, tuple) else decision
+            if (
+                not ready
+                or not callable(applied)
+                or not applied(active_patrol)
+            ):
+                # Status can change during the hold interval. Re-enter the
+                # paused recovery path instead of resuming drive alone.
+                self._clear_since = None
+                return
         resume = getattr(self._serial_reader, "resume_patrol", None)
         if callable(resume):
             resume()
@@ -228,10 +267,27 @@ class PatrolCommandHandler:
             print(f"[AI] destination disable failed type={type(exc).__name__}")
         self._flush()
 
+    def on_runtime_failure(self, reason: str) -> None:
+        """Close AI and telemetry state after an asynchronous robot failure."""
+
+        self._clear_since = None
+        try:
+            self._disable_ai(reason)
+        except Exception as exc:
+            print(
+                "[AI] runtime failure disable failed "
+                f"type={type(exc).__name__}"
+            )
+        self._state_store.update_robot_state("ERROR")
+        self._flush()
+
     def _handle_start_patrol(self, command: ValidatedCommand) -> None:
         assert command.patrol_id is not None
         status = self._state_store.get_status()
-        if status.state != "IDLE":
+        # ERROR is recoverable only through a new, fully validated backend
+        # START after runtime/AI/LiDAR readiness has become healthy again.
+        # No local telemetry transition can auto-resume the previous patrol.
+        if status.state not in {"IDLE", "ERROR"}:
             self._record_and_publish_command(command, "REJECTED")
             return
 
@@ -259,6 +315,25 @@ class PatrolCommandHandler:
             self._serial_reader.send_command(
                 "START_PATROL", patrolId=command.patrol_id
             )
+            confirm_started = getattr(
+                self._serial_reader,
+                "confirm_patrol_started",
+                None,
+            )
+            if callable(confirm_started):
+                if not confirm_started(command.patrol_id):
+                    raise RuntimeError(
+                        "patrol was invalidated before START confirmation"
+                    )
+            else:
+                if (
+                    getattr(self._serial_reader, "active_patrol_id", None)
+                    != command.patrol_id
+                ):
+                    raise RuntimeError(
+                        "patrol was invalidated before START confirmation"
+                    )
+                self._state_store.update_robot_state("PATROLLING")
         except Exception as exc:
             cancel_prepared = getattr(
                 self._serial_reader, "cancel_prepared_patrol", None
@@ -275,7 +350,6 @@ class PatrolCommandHandler:
             print(f"[COMMAND] START_PATROL failed type={type(exc).__name__}")
             return
 
-        self._state_store.update_robot_state("PATROLLING")
         self._record_and_publish_command(command, "SUCCEEDED")
         self._flush()
         print(

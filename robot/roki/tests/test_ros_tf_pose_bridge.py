@@ -89,6 +89,29 @@ class RosTfPoseBridgeTest(unittest.TestCase):
                 )
                 self.assertIsNone(self.store.get_pose())
 
+    def test_allows_small_amcl_future_stamp_but_rejects_large_future(self) -> None:
+        within_amcl_tolerance = transform(
+            stamp_sec=10,
+            stamp_nanosec=500_000_000,
+        )
+        self.assertTrue(
+            self.bridge.ingest_transform(
+                within_amcl_tolerance,
+                ros_now_sec=10.0,
+                received_at=100.0,
+            )
+        )
+        pose = self.store.get_map_pose()
+        self.assertIsNotNone(pose)
+        assert pose is not None
+        # Freshness remains tied to local receipt time, not the future TF stamp.
+        self.assertEqual(pose.timestamp, 100.0)
+
+        far_future = transform(stamp_sec=11, stamp_nanosec=0)
+        self.assertFalse(
+            self.bridge.ingest_transform(far_future, ros_now_sec=10.0)
+        )
+
     def test_lookup_failure_does_not_create_publishable_pose(self) -> None:
         def fail() -> object:
             raise RuntimeError("TF missing")

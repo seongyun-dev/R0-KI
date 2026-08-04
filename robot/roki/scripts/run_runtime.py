@@ -138,6 +138,7 @@ def build_localization_settings(
         base_frame=str(_required(raw, "base_frame", "robot.yaml.localization")),
         map_pose_timeout_sec=positive_number("map_pose_timeout_sec"),
         tf_poll_interval_sec=positive_number("tf_poll_interval_sec"),
+        max_future_transform_sec=positive_number("max_future_transform_sec"),
     )
 
 

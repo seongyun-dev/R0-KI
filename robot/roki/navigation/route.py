@@ -86,6 +86,17 @@ def parse_route(raw: Mapping[str, Any]) -> Route:
         raise RouteValidationError(
             "route must contain exactly one final DESTINATION waypoint"
         )
+    for previous, current in zip(waypoints, waypoints[1:]):
+        distance = math.hypot(current.x - previous.x, current.y - previous.y)
+        minimum_separation = (
+            previous.acceptance_radius_m + current.acceptance_radius_m
+        )
+        if distance <= minimum_separation:
+            raise RouteValidationError(
+                "consecutive waypoint acceptance areas must not overlap: "
+                f"waypoint {previous.sequence} -> {current.sequence} "
+                f"distance {distance:.3f}m <= {minimum_separation:.3f}m"
+            )
     return Route(
         schema_version,
         map_id,

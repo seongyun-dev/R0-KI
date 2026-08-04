@@ -15,7 +15,11 @@ FIELD_VARIABLES = (
     "ROKI_WHEELBASE_M",
     "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG",
     "ROKI_ROBOT_RADIUS_M",
+    "ROKI_INITIAL_POSE_X_M",
+    "ROKI_INITIAL_POSE_Y_M",
+    "ROKI_INITIAL_POSE_YAW_RAD",
 )
+DEFAULT_NAV2_XY_GOAL_TOLERANCE_M = 0.20
 
 
 def missing_field_variables(environment: Mapping[str, str]) -> list[str]:
@@ -34,6 +38,13 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
     if steering_angle >= 60:
         raise ValueError("ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG must be below 60")
     robot_radius = _positive_float(environment, "ROKI_ROBOT_RADIUS_M")
+    initial_pose_x = _finite_float(environment, "ROKI_INITIAL_POSE_X_M")
+    initial_pose_y = _finite_float(environment, "ROKI_INITIAL_POSE_Y_M")
+    initial_pose_yaw = _finite_float(
+        environment, "ROKI_INITIAL_POSE_YAW_RAD"
+    )
+    if not -math.pi <= initial_pose_yaw <= math.pi:
+        raise ValueError("ROKI_INITIAL_POSE_YAW_RAD must be within -pi..pi")
     desired_speed = _positive_float(
         environment, "ROKI_NAV2_DESIRED_LINEAR_SPEED_MPS", default="0.20"
     )
@@ -45,6 +56,7 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
             "ROKI_NAV2_DESIRED_LINEAR_SPEED_MPS must not exceed "
             "ROKI_MAXIMUM_LINEAR_SPEED_MPS"
         )
+    xy_goal_tolerance = nav2_xy_goal_tolerance(environment)
     minimum_turning_radius = wheelbase / math.tan(math.radians(steering_angle))
     if not math.isfinite(minimum_turning_radius) or minimum_turning_radius <= 0:
         raise ValueError("calculated minimum turning radius is invalid")
@@ -66,10 +78,29 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
         ),
         "DESIRED_LINEAR_SPEED_MPS": _number(desired_speed),
         "MAXIMUM_LINEAR_SPEED_MPS": _number(maximum_speed),
+        "XY_GOAL_TOLERANCE_M": _number(xy_goal_tolerance),
+        "INITIAL_POSE_X_M": _number(initial_pose_x),
+        "INITIAL_POSE_Y_M": _number(initial_pose_y),
+        "INITIAL_POSE_YAW_RAD": _number(initial_pose_yaw),
         "NAV2_BT_XML": (
             posix_bt_xml.as_posix() if posix_bt_xml.is_absolute() else bt_xml.as_posix()
         ),
     }
+
+
+def nav2_xy_goal_tolerance(environment: Mapping[str, str]) -> float:
+    """Return the one tolerance shared by Nav2 and route preflight."""
+
+    value = _positive_float(
+        environment,
+        "ROKI_NAV2_XY_GOAL_TOLERANCE_M",
+        default=str(DEFAULT_NAV2_XY_GOAL_TOLERANCE_M),
+    )
+    if not 0.05 <= value <= 1.0:
+        raise ValueError(
+            "ROKI_NAV2_XY_GOAL_TOLERANCE_M must be within 0.05..1.0"
+        )
+    return value
 
 
 def render_nav2_config(
@@ -101,6 +132,17 @@ def _positive_float(
         raise ValueError(f"{name} must be numeric") from exc
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be positive and finite")
+    return value
+
+
+def _finite_float(environment: Mapping[str, str], name: str) -> float:
+    raw = environment.get(name, "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
     return value
 
 

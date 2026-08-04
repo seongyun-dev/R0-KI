@@ -107,6 +107,7 @@ class AiAdapterNode(Node):
         self.publish_status()
 
     def mark_stopped(self) -> None:
+        self._patrol_activation.disable()
         with self._lock:
             self._state = "STOPPED"
             self._active_patrol_id = None
@@ -128,6 +129,7 @@ class AiAdapterNode(Node):
                 "engineReady": self._engine_ready,
                 "inferenceReady": self._inference_ready,
                 "detectionEnabled": self._patrol_activation.enabled,
+                "patrolId": self._active_patrol_id,
                 "modelVersion": os.getenv("AIOT_AI_MODEL_VERSION") or None,
                 "heartbeatAt": _utc_now(),
                 "errorCode": self._error_code,
@@ -387,6 +389,11 @@ def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[
         type=float,
         default=float(os.getenv("AIOT_AI_MJPEG_MAX_FPS", "5")),
     )
+    parser.add_argument(
+        "--mjpeg-frame-max-age-seconds",
+        type=float,
+        default=float(os.getenv("AIOT_AI_MJPEG_FRAME_MAX_AGE_SEC", "2")),
+    )
     return parser.parse_known_args(argv)
 
 
@@ -412,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             args.mjpeg_port,
             quality=args.mjpeg_quality,
             max_fps=args.mjpeg_max_fps,
+            max_frame_age_seconds=args.mjpeg_frame_max_age_seconds,
         )
         mjpeg_server.start()
         host, port = mjpeg_server.address

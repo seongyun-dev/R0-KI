@@ -66,6 +66,19 @@ class RouteTest(unittest.TestCase):
                 with self.assertRaisesRegex(RouteValidationError, message):
                     parse_route(raw)
 
+    def test_rejects_overlapping_consecutive_acceptance_areas(self) -> None:
+        raw = copy.deepcopy(EXAMPLE)
+        raw["waypoints"][1]["x"] = 0.5
+
+        with self.assertRaisesRegex(
+            RouteValidationError,
+            "acceptance areas must not overlap.*waypoint 1 -> 2",
+        ):
+            parse_route(raw)
+
+        raw["waypoints"][1]["x"] = 0.5001
+        self.assertEqual(parse_route(raw).waypoints[-1].x, 0.5001)
+
 
 if __name__ == "__main__":
     unittest.main()

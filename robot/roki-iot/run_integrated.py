@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import importlib.util
 import logging
 import os
@@ -96,40 +97,150 @@ def _build_navigation_service(
     *,
     encoder_limited: bool,
 ) -> Any:
+    if encoder_limited:
+        raise RuntimeError(
+            "DEMO_NAV2_REQUIRED: encoder_limited is a straight-line diagnostic "
+            "mode and cannot run the fixed-map demo patrol"
+        )
     selected_path = _selected_route_path(route_path)
     if not selected_path.is_file():
         raise RuntimeError(f"waypoint route file is missing: {selected_path}")
-    from navigation.encoder_waypoint import (
-        EncoderWaypointSettings,
-        validate_straight_encoder_route,
+    from navigation.map_metadata import (
+        file_sha256,
+        load_map_metadata,
+        load_occupancy_grid,
+        map_bundle_sha256,
+        validate_map_quality,
+        validate_point_clearance,
+        validate_point_bounds,
+        validate_route_clearance,
+        validate_route_bounds,
     )
-    from navigation.route import load_route
+    from navigation.route import RouteValidationError, load_route
     from navigation.service import WaypointNavigationService
+    from aiot_robot.ros_config import nav2_xy_goal_tolerance
 
     route = load_route(selected_path)
-    if encoder_limited:
-        validate_straight_encoder_route(
-            route,
-            EncoderWaypointSettings(
-                start_x_m=float(os.getenv("ROKI_ROUTE_START_X_M", "1.0")),
-                start_y_m=float(os.getenv("ROKI_ROUTE_START_Y_M", "2.5")),
-                maximum_travel_m=float(
-                    os.getenv("ROKI_ROUTE_MAXIMUM_TRAVEL_M", "0.70")
-                ),
-            ),
+    xy_goal_tolerance_m = nav2_xy_goal_tolerance(os.environ)
+    for waypoint in route.waypoints:
+        if waypoint.acceptance_radius_m < xy_goal_tolerance_m:
+            raise RouteValidationError(
+                f"waypoint {waypoint.sequence} acceptance_radius_m "
+                f"{waypoint.acceptance_radius_m:.3f} is below Nav2 "
+                f"xy_goal_tolerance {xy_goal_tolerance_m:.3f}; Nav2 could "
+                "stop before the mission advances"
+            )
+    raw_map_path = os.getenv("ROKI_MAP_YAML", "").strip()
+    map_path = Path(raw_map_path)
+    if not raw_map_path or not map_path.is_absolute() or not map_path.is_file():
+        raise RuntimeError(
+            "NAV2_MAP_MISSING: ROKI_MAP_YAML must be a readable absolute map YAML"
         )
+    metadata = load_map_metadata(map_path)
+    expected_map_id = _required_environment("ROKI_MAP_ID")
+    expected_map_version = _required_positive_integer("ROKI_MAP_VERSION")
+    if route.map_id != expected_map_id:
+        raise RouteValidationError(
+            f"route map_id {route.map_id!r} does not match ROKI_MAP_ID"
+        )
+    if route.map_version != expected_map_version:
+        raise RouteValidationError(
+            "route map_version does not match ROKI_MAP_VERSION"
+        )
+    expected_map_sha256 = _required_sha256("ROKI_MAP_SHA256")
+    expected_route_sha256 = _required_sha256("ROKI_ROUTE_SHA256")
+    if not hmac.compare_digest(map_bundle_sha256(metadata), expected_map_sha256):
+        raise RouteValidationError("map YAML/image SHA256 does not match deployment")
+    if not hmac.compare_digest(file_sha256(selected_path), expected_route_sha256):
+        raise RouteValidationError("route SHA256 does not match deployment")
+
+    validate_route_bounds(route, metadata)
+    grid = load_occupancy_grid(metadata)
+    validate_map_quality(
+        grid,
+        minimum_known_coverage_ratio=_coverage_ratio(
+            "ROKI_MAP_MIN_KNOWN_COVERAGE_RATIO", "0.10"
+        ),
+        minimum_free_coverage_ratio=_coverage_ratio(
+            "ROKI_MAP_MIN_FREE_COVERAGE_RATIO", "0.10"
+        ),
+    )
+    robot_radius_m = float(_required_environment("ROKI_ROBOT_RADIUS_M"))
+    validate_route_clearance(
+        route,
+        grid,
+        robot_radius_m=robot_radius_m,
+    )
+    dock_x = float(_required_environment("ROKI_INITIAL_POSE_X_M"))
+    dock_y = float(_required_environment("ROKI_INITIAL_POSE_Y_M"))
+    validate_point_bounds(
+        dock_x,
+        dock_y,
+        metadata,
+        label="fixed dock initial pose",
+    )
+    validate_point_clearance(
+        dock_x,
+        dock_y,
+        grid,
+        robot_radius_m=robot_radius_m,
+        label="fixed dock initial pose",
+    )
     return WaypointNavigationService(route)
+
+
+def _required_environment(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"DEMO_CONFIG_MISSING: {name} must be set")
+    return value
+
+
+def _required_positive_integer(name: str) -> int:
+    raw = _required_environment(name)
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be positive")
+    return value
+
+
+def _required_sha256(name: str) -> str:
+    value = _required_environment(name).lower()
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be a SHA256 hex digest")
+    return value
+
+
+def _coverage_ratio(name: str, default: str) -> float:
+    raw = os.getenv(name, default).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be numeric") from exc
+    if not 0.0 <= value <= 1.0:
+        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be within 0.0..1.0")
+    return value
 
 
 def _navigation_mode(settings: Any) -> str:
     mode = settings.navigation_mode
-    if mode != "auto":
-        return mode
-    calibrated = bool(os.getenv("ROKI_WHEELBASE_M")) and bool(
-        os.getenv("ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG")
-    )
-    nav2_available = importlib.util.find_spec("nav2_msgs") is not None
-    return "nav2" if calibrated and nav2_available else "encoder_limited"
+    if mode != "nav2":
+        raise RuntimeError(
+            "DEMO_NAV2_REQUIRED: set ROKI_NAVIGATION_MODE=nav2; automatic "
+            "encoder_limited fallback is disabled for the fixed-map demo"
+        )
+    from aiot_robot.ros_config import build_nav2_values
+
+    try:
+        build_nav2_values(os.environ)
+    except ValueError as exc:
+        raise RuntimeError(f"NAV2_FIELD_CONFIG_INVALID: {exc}") from exc
+    if importlib.util.find_spec("nav2_msgs") is None:
+        raise RuntimeError("NAV2_PACKAGE_MISSING: nav2_msgs is not installed")
+    return "nav2"
 
 
 def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
@@ -159,6 +270,10 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
         cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
         navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
         map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
+        scan_dwell_sec=float(os.getenv("ROKI_SCAN_DWELL_SECONDS", "3.0")),
+        cmd_vel_timeout_sec=float(
+            os.getenv("ROKI_NAV2_CMD_VEL_TIMEOUT_SECONDS", "0.5")
+        ),
     )
     return RosNav2Bridge(
         settings=settings,
@@ -245,6 +360,12 @@ def create_integrated_application(
         or manual_controller is not None
         or keyboard_input is not None
     )
+    if not manual_enabled and navigation_service is not None and navigation_mode != "nav2":
+        raise RuntimeError(
+            "DEMO_NAV2_REQUIRED: fixed-map navigation cannot use encoder progress"
+        )
+    if not manual_enabled and navigation_mode == "nav2" and navigation_service is None:
+        raise RuntimeError("NAV2_ROUTE_REQUIRED: validated navigation service is missing")
     if manual_demo and manual_controller is None and keyboard_input is None:
         manual_controller, keyboard_input = _build_manual_demo_components(runtime)
     service_holder: dict[str, Any] = {}
@@ -330,6 +451,7 @@ def create_integrated_application(
     )
     command_handler.set_flush_telemetry(application.publish_now)
     runtime_service.set_destination_listener(command_handler.on_destination_reached)
+    runtime_service.set_fault_listener(command_handler.on_runtime_failure)
     return application
 
 
@@ -353,6 +475,7 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
         "navigationMode": mode,
         "routeId": navigation.route.route_id,
         "waypoints": len(navigation.route.waypoints),
+        "mapValidated": True,
         "aiRequired": settings.ai_required_for_patrol,
         "lidarRequired": settings.lidar_required_for_patrol,
         "serialAccessed": False,

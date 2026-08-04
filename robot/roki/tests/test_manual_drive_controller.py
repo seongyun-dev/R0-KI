@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 
 from control.manual_drive_controller import ManualDriveController, ManualDriveSettings
@@ -24,6 +25,35 @@ class FakeRuntime:
 
     def request_motion_stop(self, steering_deg: int) -> None:
         self.stops.append(steering_deg)
+
+
+class BlockingRuntime(FakeRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.target_entered = threading.Event()
+        self.release_target = threading.Event()
+        self.order: list[str] = []
+
+    def request_motion_target(
+        self,
+        speed: int,
+        steering_deg: int,
+        *,
+        stationary_steering: bool = False,
+    ) -> None:
+        self.target_entered.set()
+        if not self.release_target.wait(timeout=2.0):
+            raise TimeoutError("test did not release manual target")
+        super().request_motion_target(
+            speed,
+            steering_deg,
+            stationary_steering=stationary_steering,
+        )
+        self.order.append("target")
+
+    def request_motion_stop(self, steering_deg: int) -> None:
+        super().request_motion_stop(steering_deg)
+        self.order.append("stop")
 
 
 class ManualDriveControllerTest(unittest.TestCase):
@@ -75,6 +105,40 @@ class ManualDriveControllerTest(unittest.TestCase):
         self.controller.deactivate()
         self.assertFalse(self.controller.active)
         self.assertFalse(self.runtime.mission.patrol_active)
+
+    def test_concurrent_deactivate_enqueues_stop_after_inflight_key(self) -> None:
+        runtime = BlockingRuntime()
+        controller = ManualDriveController(
+            runtime=runtime,
+            state_store=self.store,
+            settings=ManualDriveSettings(),
+            clock=lambda: self.now,
+        )
+        controller.activate(17)
+        runtime.order.clear()
+
+        key_thread = threading.Thread(target=lambda: controller.handle_key("w"))
+        key_thread.start()
+        self.assertTrue(runtime.target_entered.wait(timeout=1.0))
+
+        deactivate_done = threading.Event()
+
+        def deactivate() -> None:
+            controller.deactivate()
+            deactivate_done.set()
+
+        deactivate_thread = threading.Thread(target=deactivate)
+        deactivate_thread.start()
+        self.assertFalse(deactivate_done.wait(timeout=0.1))
+
+        runtime.release_target.set()
+        key_thread.join(timeout=1.0)
+        deactivate_thread.join(timeout=1.0)
+
+        self.assertFalse(key_thread.is_alive())
+        self.assertFalse(deactivate_thread.is_alive())
+        self.assertEqual(runtime.order, ["target", "stop"])
+        self.assertFalse(controller.active)
 
 
 if __name__ == "__main__":

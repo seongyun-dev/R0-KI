@@ -22,6 +22,7 @@ class RosTfPoseBridgeSettings:
     base_frame: str
     map_pose_timeout_sec: float
     tf_poll_interval_sec: float
+    max_future_transform_sec: float = 0.75
 
     def __post_init__(self) -> None:
         if not self.map_frame.strip():
@@ -35,6 +36,13 @@ class RosTfPoseBridgeSettings:
         if self.tf_poll_interval_sec <= 0:
             raise ValueError(
                 "localization.tf_poll_interval_sec must be positive"
+            )
+        if (
+            not math.isfinite(self.max_future_transform_sec)
+            or self.max_future_transform_sec < 0
+        ):
+            raise ValueError(
+                "localization.max_future_transform_sec must be non-negative"
             )
 
 
@@ -163,7 +171,7 @@ class RosTfPoseBridge:
             age = float(ros_now_sec) - transform_time
             if (
                 not math.isfinite(age)
-                or age < 0
+                or age < -self._settings.max_future_transform_sec
                 or age > self._settings.map_pose_timeout_sec
             ):
                 return False

@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from typing import Callable
 
 from control.motion_controller import MotionController, MotionState, MotionTarget
-from mission.mission_controller import MissionCommand, MissionController
+from mission.mission_controller import (
+    MissionCommand,
+    MissionController,
+    MissionSnapshot,
+)
 from localization.encoder_pose_estimator import EncoderPoseEstimator
 from safety.safety_controller import SafetyController, SafetyDecision
 from serial_comm.protocol import (
@@ -33,6 +37,21 @@ from state.robot_state import RobotStateStore
 logger = logging.getLogger(__name__)
 OdometryListener = Callable[[Odometry, MotionState], None]
 HardwareStatusListener = Callable[[HardwareStatus], None]
+ConnectionListener = Callable[[int], None]
+SafetyFaultListener = Callable[[str], bool | None]
+
+
+ACTIVE_PATROL_FAULTS = frozenset(
+    {
+        "ODOMETRY_TIMEOUT",
+        "HARDWARE_STATUS_TIMEOUT",
+        "MOTOR_FAULT",
+        "MOTOR_DISCONNECTED",
+        "LINE_SENSOR_FAULT",
+        "LINE_SENSOR_DISCONNECTED",
+        "LOW_BATTERY",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -85,10 +104,14 @@ class RobotRuntime:
         self._sequence = SequenceCounter()
         self._odometry_listeners: list[OdometryListener] = []
         self._hardware_status_listeners: list[HardwareStatusListener] = []
+        self._connection_listeners: list[ConnectionListener] = []
+        self._safety_fault_listeners: list[SafetyFaultListener] = []
+        self._connection_generation = 0
         self._stop_requested = False
         self._request_lock = threading.Lock()
         self._pending_motion_request: _MotionRequest | None = None
         self._pending_motion_stop: int | None = None
+        self._manual_motion_active = False
         self._stationary_steering_pending = False
         self._latest_hardware_status: HardwareStatus | None = None
         self._last_logged_line_values: tuple[int, ...] | None = None
@@ -109,6 +132,10 @@ class RobotRuntime:
 
         return self._state_store
 
+    @property
+    def connection_generation(self) -> int:
+        return self._connection_generation
+
     def add_odometry_listener(self, listener: OdometryListener) -> None:
         self._odometry_listeners.append(listener)
 
@@ -117,13 +144,24 @@ class RobotRuntime:
     ) -> None:
         self._hardware_status_listeners.append(listener)
 
+    def add_connection_listener(self, listener: ConnectionListener) -> None:
+        """Observe every new Serial generation on the Serial owner thread."""
+
+        self._connection_listeners.append(listener)
+
+    def add_safety_fault_listener(self, listener: SafetyFaultListener) -> None:
+        """Observe faults that require the active patrol to be abandoned."""
+
+        self._safety_fault_listeners.append(listener)
+
     def request_stop(self) -> None:
         with self._request_lock:
             self._stop_requested = True
             self._pending_motion_request = None
             self._pending_motion_stop = None
+            self._manual_motion_active = False
             self._stationary_steering_pending = False
-        self._mission.emergency_stop()
+            self._mission.emergency_stop()
 
     def request_motion_target(
         self,
@@ -171,8 +209,12 @@ class RobotRuntime:
     def stop_patrol(self, reason: str = "PATROL_STOP") -> None:
         """Clear the motion target and send STOP without waiting for telemetry."""
 
-        self._mission.stop_patrol()
-        self._send_stop(reason)
+        self._fail_closed_mission(reason)
+        if not self._send_stop(reason):
+            raise RuntimeError(
+                "ESP32 STOP was not delivered; mission is fail-closed and "
+                "the firmware watchdog is the remaining stop path"
+            )
 
     def run_forever(self) -> None:
         logger.info("RO-KI headless runtime started")
@@ -194,12 +236,14 @@ class RobotRuntime:
                 message = parse_message(raw, self._protocol_settings)
                 if message is None:
                     logger.warning("Invalid protocol message ignored")
-                    self._send_stop("INVALID_PROTOCOL_MESSAGE")
+                    self._handle_serial_protocol_fault(
+                        "INVALID_PROTOCOL_MESSAGE",
+                        active_only=True,
+                    )
                     continue
                 if message.message_type is MessageType.ERROR:
                     fault = str(message.payload["fault"])
-                    self._safety.latch(f"ESP32_{fault}")
-                    self._send_stop(fault)
+                    self._handle_serial_protocol_fault(f"ESP32_{fault}")
                 elif message.message_type is MessageType.HELLO:
                     logger.info(
                         "ESP32 HELLO: firmware=%s protocol=%s sequence=%s",
@@ -224,15 +268,17 @@ class RobotRuntime:
             with self._request_lock:
                 self._pending_motion_request = None
                 self._pending_motion_stop = None
+                self._manual_motion_active = False
                 self._stationary_steering_pending = False
             self._bridge.close(build_stop_command(self._sequence.next()))
             logger.info("RO-KI headless runtime stopped")
 
     def _on_connected(self) -> None:
-        with self._request_lock:
-            self._pending_motion_request = None
-            self._pending_motion_stop = None
-            self._stationary_steering_pending = False
+        self._connection_generation += 1
+        connection_generation = self._connection_generation
+        # A new Serial generation may represent an ESP32 reboot. Never carry a
+        # previous mission across it; only a subsequent START may arm motion.
+        self._fail_closed_mission("SERIAL_CONNECTION_RESET", log=False)
         self._latest_hardware_status = None
         self._last_logged_line_values = None
         self._last_odometry_uptime_ms = None
@@ -246,6 +292,22 @@ class RobotRuntime:
             self._encoder_pose_estimator.reset_baseline()
         self._safety.reset_connection()
         self._state_store.reset_connection()
+        for listener in tuple(self._connection_listeners):
+            try:
+                listener(connection_generation)
+            except Exception as exc:
+                # A lifecycle adapter must never terminate the only Serial
+                # owner. The post-listener fail-close below also invalidates
+                # motion that a failing callback may have partially rearmed.
+                logger.error(
+                    "Serial connection listener failed: generation=%d "
+                    "type=%s",
+                    connection_generation,
+                    type(exc).__name__,
+                )
+        # Close the window where a stale Nav2/manual callback raced the first
+        # reset or a connection listener partially changed mission state.
+        self._fail_closed_mission("SERIAL_CONNECTION_RESET")
         if not self._bridge.write_line(build_stop_command(self._sequence.next())):
             return
         self._bridge.write_line(build_hello_command(self._sequence.next()))
@@ -290,6 +352,7 @@ class RobotRuntime:
             "ENCODER_ZERO ACK missing after %d attempts; reconnecting Serial",
             self._encoder_zero_attempts,
         )
+        self._fail_closed_mission("ENCODER_ZERO_HANDSHAKE_FAILED")
         self._bridge.close(build_stop_command(self._sequence.next()))
         self._encoder_zero_attempts = 0
         self._encoder_zero_last_sent_at = None
@@ -333,14 +396,8 @@ class RobotRuntime:
                 self._last_odometry_uptime_ms,
                 odometry.uptime_ms,
             )
-            self._latest_hardware_status = None
-            self._last_logged_line_values = None
-            self._motion.reset()
-            if self._encoder_pose_estimator is not None:
-                self._encoder_pose_estimator.reset_baseline()
-            self._safety.reset_connection()
-            self._state_store.reset_connection()
-            self._odometry_baseline_pending = True
+            self._handle_serial_protocol_fault("ESP32_UPTIME_RESET")
+            return
         self._last_odometry_uptime_ms = odometry.uptime_ms
         logger.debug(
             "Odometry: seq=%d uptimeMs=%d leftTicks=%d rightTicks=%d",
@@ -351,14 +408,20 @@ class RobotRuntime:
         )
         self._safety.record_odometry(now)
         decision = self._evaluate_safety(now)
-        mission = self._mission.current()
+        self._enforce_active_patrol_fault(decision)
+        mission = self._mission.snapshot()
+        motion_authorized = mission.patrol_active or self._manual_motion_active
         target = MotionTarget(
             speed=(
-                mission.speed
-                if decision.allowed and not self._odometry_baseline_pending
+                mission.command.speed
+                if (
+                    decision.allowed
+                    and not self._odometry_baseline_pending
+                    and motion_authorized
+                )
                 else 0
             ),
-            steering_deg=mission.steering_deg,
+            steering_deg=mission.command.steering_deg,
         )
         command, motion_state = self._motion.update(odometry, target)
         self._state_store.update_odometry(odometry, motion_state)
@@ -380,30 +443,42 @@ class RobotRuntime:
         if self._drain_motion_requests():
             return
         latest_decision = self._evaluate_safety(self._clock())
-        latest_mission = self._mission.current()
         stationary_steering = self._stationary_steering_pending
-        if (
-            not latest_decision.allowed
-            or latest_mission.emergency_stop
-            or (
-                (command.speed == 0 or latest_mission.speed == 0)
-                and not stationary_steering
-            )
+
+        def write_if_safe(current: MissionSnapshot) -> None:
+            authorized = current.patrol_active or self._manual_motion_active
+            if (
+                not latest_decision.allowed
+                or current.command.emergency_stop
+                or not authorized
+                or (
+                    (command.speed == 0 or current.command.speed == 0)
+                    and not stationary_steering
+                )
+            ):
+                self._stationary_steering_pending = False
+                self._send_stop(latest_decision.fault)
+                return
+            if not self._bridge.write_line(
+                build_control_command(
+                    command.speed,
+                    command.steering_deg,
+                    self._sequence.next(),
+                    self._protocol_settings,
+                )
+            ):
+                logger.warning(
+                    "CONTROL write failed; ESP32 watchdog will stop motors"
+                )
+            else:
+                self._stationary_steering_pending = False
+
+        if not self._mission.run_if_current(
+            mission.generation,
+            write_if_safe,
         ):
             self._stationary_steering_pending = False
-            self._send_stop(latest_decision.fault)
-            return
-        if not self._bridge.write_line(
-            build_control_command(
-                command.speed,
-                command.steering_deg,
-                self._sequence.next(),
-                self._protocol_settings,
-            )
-        ):
-            logger.warning("CONTROL write failed; ESP32 watchdog will stop motors")
-        else:
-            self._stationary_steering_pending = False
+            self._send_stop("MISSION_CHANGED_BEFORE_CONTROL")
 
     def _drain_motion_requests(self) -> bool:
         """Apply cross-thread manual requests only on the Serial owner thread."""
@@ -413,18 +488,45 @@ class RobotRuntime:
             request = self._pending_motion_request
             self._pending_motion_stop = None
             self._pending_motion_request = None
+            if stop_steering is not None:
+                self._stationary_steering_pending = False
+                self._manual_motion_active = False
+                self._mission.submit(MissionCommand(0, stop_steering))
+            elif request is not None:
+                # Keep mailbox removal and mission application atomic against
+                # _fail_closed_mission(), using the same request->mission lock
+                # order. Otherwise STOP can land in this gap and the stale
+                # request can resurrect motion afterwards.
+                self._mission.submit(
+                    MissionCommand(request.speed, request.steering_deg)
+                )
+                self._manual_motion_active = True
+                self._stationary_steering_pending = (
+                    request.stationary_steering
+                )
         if stop_steering is not None:
-            self._stationary_steering_pending = False
-            self._mission.submit(MissionCommand(0, stop_steering))
             self._send_stop("MANUAL_STOP")
             return True
         if request is None:
             return False
-        self._mission.submit(
-            MissionCommand(request.speed, request.steering_deg)
-        )
-        self._stationary_steering_pending = request.stationary_steering
         return True
+
+    def _fail_closed_mission(self, reason: str, *, log: bool = True) -> None:
+        """Invalidate queued and active motion before a mandatory STOP.
+
+        The request lock prevents a pre-reset manual request from being queued
+        between mailbox cleanup and mission invalidation. ``stop_patrol`` also
+        increments the mission generation used to guard the final Serial write.
+        """
+
+        with self._request_lock:
+            self._pending_motion_request = None
+            self._pending_motion_stop = None
+            self._manual_motion_active = False
+            self._stationary_steering_pending = False
+            self._mission.stop_patrol()
+        if log:
+            logger.warning("Motion authorization cleared: reason=%s", reason)
 
     def _handle_hardware_status(
         self, hardware_status: HardwareStatus
@@ -456,7 +558,8 @@ class RobotRuntime:
         for listener in tuple(self._hardware_status_listeners):
             listener(hardware_status)
         decision = self._evaluate_safety(now)
-        if not decision.allowed:
+        self._enforce_active_patrol_fault(decision)
+        if not decision.allowed and decision.fault not in ACTIVE_PATROL_FAULTS:
             self._send_stop(decision.fault)
 
     def _evaluate_safety(self, now: float) -> SafetyDecision:
@@ -471,11 +574,97 @@ class RobotRuntime:
 
     def _evaluate_idle_safety(self) -> None:
         decision = self._evaluate_safety(self._clock())
-        if not decision.allowed:
+        self._enforce_active_patrol_fault(decision)
+        if not decision.allowed and decision.fault not in ACTIVE_PATROL_FAULTS:
             self._send_stop(decision.fault)
 
-    def _send_stop(self, reason: str) -> None:
+    def _enforce_active_patrol_fault(
+        self,
+        decision: SafetyDecision,
+    ) -> None:
+        """Fail the whole patrol for faults that cannot safely auto-resume.
+
+        ``*_NOT_READY`` remains a START/readiness gate.  Once operation has
+        begun, stale telemetry and physical component faults invalidate the
+        mission generation before STOP and notify the integration lifecycle so
+        Nav2/manual control, AI and the deployment lease can be cleared too.
+        """
+
+        if decision.allowed or decision.fault not in ACTIVE_PATROL_FAULTS:
+            return
+        self._fail_closed_mission(decision.fault)
+        self._send_stop(decision.fault)
+        self._notify_safety_fault(decision.fault)
+
+    def _handle_serial_protocol_fault(
+        self,
+        reason: str,
+        *,
+        active_only: bool = False,
+    ) -> None:
+        """STOP/abandon and reconnect, except idle malformed boot output."""
+
+        mission = self._mission.snapshot()
+        local_motion_active = mission.patrol_active or self._manual_motion_active
+        listener_handled = False
+        if active_only and not local_motion_active:
+            # ESP bootloader/banner fragments can be non-JSON before the
+            # ENCODER_ZERO ACK.  STOP and consume them without reopening the
+            # port forever.  A lifecycle listener can still report an outer
+            # Nav2 patrol that is goal-pending before the first cmd_vel.
+            listener_handled = self._notify_safety_fault(reason)
+            if not listener_handled:
+                self._send_stop(reason)
+                return
+        self._safety.latch(reason)
+        self._fail_closed_mission(reason)
+        self._evaluate_safety(self._clock())
+        self._send_stop(reason)
+        if not listener_handled:
+            self._notify_safety_fault(reason)
+        # A valid frame following an ESP ERROR or malformed frame must not
+        # silently re-arm the old mission.  Re-open only through mandatory
+        # STOP/HELLO/ENCODER_ZERO and fresh telemetry in ``_on_connected``.
+        self._bridge.close()
+
+    def _notify_safety_fault(self, reason: str) -> bool:
+        handled = False
+        for listener in tuple(self._safety_fault_listeners):
+            try:
+                handled = bool(listener(reason)) or handled
+            except Exception as exc:
+                # A reporting/cleanup adapter must never kill the only Serial
+                # owner; the mission has already been fail-closed above.
+                logger.error(
+                    "Safety fault listener failed: reason=%s type=%s",
+                    reason,
+                    type(exc).__name__,
+                )
+        return handled
+
+    def _send_stop(self, reason: str) -> bool:
+        """Best-effort STOP used by safety loops; never raise to the caller."""
+
+        delivered = False
         if self._bridge.is_connected():
-            self._bridge.write_line(build_stop_command(self._sequence.next()))
+            try:
+                delivered = bool(
+                    self._bridge.write_line(
+                        build_stop_command(self._sequence.next())
+                    )
+                )
+            except Exception as exc:
+                logger.error(
+                    "STOP write raised; firmware watchdog fallback remains: "
+                    "type=%s",
+                    type(exc).__name__,
+                )
+        if not delivered:
+            logger.error(
+                "STOP delivery is unconfirmed; firmware watchdog fallback "
+                "remains (serialConnected=%s)",
+                self._bridge.is_connected(),
+            )
         if reason != "NONE":
             logger.warning("STOP enforced: reason=%s", reason)
+        return delivered

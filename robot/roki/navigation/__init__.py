@@ -13,8 +13,15 @@ from navigation.encoder_waypoint import (
     validate_straight_encoder_route,
 )
 from navigation.map_metadata import (
+    OccupancyGrid,
     OccupancyMapMetadata,
+    file_sha256,
     load_map_metadata,
+    load_occupancy_grid,
+    map_bundle_sha256,
+    validate_map_quality,
+    validate_point_clearance,
+    validate_route_clearance,
     validate_route_bounds,
 )
 from navigation.route import (
@@ -46,6 +53,7 @@ __all__ = [
     "MissionEventType",
     "MissionState",
     "NavigationEvent",
+    "OccupancyGrid",
     "OccupancyMapMetadata",
     "Pose2D",
     "Route",
@@ -54,9 +62,15 @@ __all__ = [
     "WaypointAction",
     "WaypointMission",
     "WaypointNavigationService",
+    "file_sha256",
     "load_route",
     "load_map_metadata",
+    "load_occupancy_grid",
+    "map_bundle_sha256",
     "parse_route",
+    "validate_map_quality",
+    "validate_point_clearance",
+    "validate_route_clearance",
     "validate_route_bounds",
     "validate_straight_encoder_route",
 ]
