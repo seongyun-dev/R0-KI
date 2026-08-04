@@ -90,7 +90,6 @@ public class PatrolRobot extends BaseEntity {
         this.yCoordinate = y;
         this.heading = heading;
         this.locationUpdatedAt = locationUpdatedAt;
-        this.lastConnectedAt = locationUpdatedAt;
     }
 
     // status 토픽 수신 시 호출 - obstacleDirection/obstacleMessage는 장애물 상태가 아니면 null
@@ -111,9 +110,13 @@ public class PatrolRobot extends BaseEntity {
         this.motorStatus = motorStatus;
         this.lineSensorStatus = lineSensorStatus;
         this.statusReportedAt = statusReportedAt;
-        this.lastConnectedAt = statusReportedAt;
         this.obstacleDirection = obstacleDirection;
         this.obstacleMessage = obstacleMessage;
+    }
+
+    /** MQTT payload timestamp와 분리된 서버 수신 시각을 연결 freshness 판정에 사용한다. */
+    public void recordConnection(LocalDateTime receivedAt) {
+        this.lastConnectedAt = receivedAt;
     }
 
     public void rename(String name) {

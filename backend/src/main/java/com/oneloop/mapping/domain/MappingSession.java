@@ -75,4 +75,14 @@ public class MappingSession extends BaseEntity {
         status = MappingStatus.COMPLETED;
         finishedAt = LocalDateTime.now();
     }
+
+    public void restart(String newCommandId) {
+        if (status == MappingStatus.REQUESTED || status == MappingStatus.MAPPING) {
+            throw new IllegalStateException("진행 중인 지도 생성 세션은 다시 시작할 수 없습니다.");
+        }
+        commandId = newCommandId;
+        status = MappingStatus.REQUESTED;
+        startedAt = null;
+        finishedAt = null;
+    }
 }

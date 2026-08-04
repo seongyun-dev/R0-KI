@@ -106,7 +106,15 @@ class MqttInboundHandler implements MqttCallbackExtended {
     // pose payload를 RobotPoseMessage로 역직렬화해서 좌표 갱신 서비스에 위임
     private void handlePose(String topic, String payload) {
         try {
-            robotTelemetryService.updatePose(objectMapper.readValue(payload, RobotPoseMessage.class));
+            RobotPoseMessage message = objectMapper.readValue(payload, RobotPoseMessage.class);
+            if (!hasMatchingRobotKey(topic, message.robotKey())) {
+                log.warn(
+                        "[MQTT] 토픽과 payload의 robotKey가 다른 pose를 무시합니다. topic={}, payloadRobotKey={}",
+                        topic,
+                        message.robotKey());
+                return;
+            }
+            robotTelemetryService.updatePose(message);
         } catch (Exception e) {
             log.warn("[MQTT] pose 처리 실패. topic={}, payload={}", topic, payload, e);
         }
@@ -115,10 +123,28 @@ class MqttInboundHandler implements MqttCallbackExtended {
     // status payload를 RobotStatusMessage로 역직렬화해서 상태/장애물 갱신 서비스에 위임
     private void handleStatus(String topic, String payload) {
         try {
-            robotTelemetryService.updateStatus(objectMapper.readValue(payload, RobotStatusMessage.class));
+            RobotStatusMessage message = objectMapper.readValue(payload, RobotStatusMessage.class);
+            if (!hasMatchingRobotKey(topic, message.robotKey())) {
+                log.warn(
+                        "[MQTT] 토픽과 payload의 robotKey가 다른 status를 무시합니다. topic={}, payloadRobotKey={}",
+                        topic,
+                        message.robotKey());
+                return;
+            }
+            robotTelemetryService.updateStatus(message);
         } catch (Exception e) {
             log.warn("[MQTT] status 처리 실패. topic={}, payload={}", topic, payload, e);
         }
+    }
+
+    private boolean hasMatchingRobotKey(String topic, String payloadRobotKey) {
+        String[] topicSegments = topic.split("/");
+        return topicSegments.length == 5
+                && "hanbakwi".equals(topicSegments[0])
+                && "v1".equals(topicSegments[1])
+                && "robots".equals(topicSegments[2])
+                && payloadRobotKey != null
+                && topicSegments[3].equals(payloadRobotKey);
     }
 
     // 공용 CommandAck로 파싱한 뒤 robotKey(토픽 4번째 구간)와 command 값으로 도메인 서비스에 위임
