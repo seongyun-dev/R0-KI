@@ -263,6 +263,7 @@ export function notificationDetailToDomain(
 function patrolStatus(value: string): StatusLabel {
   const map: Record<string, StatusLabel> = {
     IN_PROGRESS: '진행중',
+    STOP_REQUESTED: '종료 요청중',
     COMPLETED: '완료',
     STOPPED: '중단',
     FAILED: '실패',
@@ -388,6 +389,7 @@ export function robotListItemToDomain(value: RobotListResponse): Robot {
     status: robotStatusLabel(value.robotStatus),
     battery: value.batteryLevel == null ? undefined : toNumber(value.batteryLevel),
     location: value.location ?? '위치 미확인',
+    activePatrolId: value.activePatrolId ?? undefined,
     parts: [],
   }
 }

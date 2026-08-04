@@ -11,6 +11,7 @@ import { useEmergencyEventStore } from '../features/dashboard/useEmergencyEventS
 import { useSelectedRobotLocation } from '../features/dashboard/useSelectedRobotLocation'
 import { PatrolCompleteModal } from '../features/dashboard/PatrolCompleteModal'
 import { PatrolStartModal } from '../features/dashboard/PatrolStartModal'
+import { PatrolStopModal } from '../features/dashboard/PatrolStopModal'
 import {
   usePatrolComplete,
   isPatrolDoneSeen,
@@ -183,6 +184,9 @@ export default function Dashboard() {
   const [patrolTarget, setPatrolTarget] = useState<Robot | null>(null)
   const [startingPatrol, setStartingPatrol] = useState(false)
   const [patrolError, setPatrolError] = useState<string>()
+  const [stopTarget, setStopTarget] = useState<Robot | null>(null)
+  const [stoppingPatrol, setStoppingPatrol] = useState(false)
+  const [stopError, setStopError] = useState<string>()
   const [toast, setToast] = useState<string>()
 
   // 결과 알림 — 고령 사용자 기준이라 로봇 상세(2.6초)보다 길게 띄운다
@@ -214,15 +218,43 @@ export default function Dashboard() {
     }
   }
 
-  /* 로봇 칩 클릭 — 항상 지도 선택은 하고(대기 로봇의 마지막 위치도 그대로 볼 수 있어야 한다),
-     '대기' 상태일 때만 순찰 시작 확인 모달을 함께 띄운다.
-     순찰중·충전중·오프라인·오류는 지금 시작할 수 있는 상태가 아니라 지도 선택까지만. */
+  const stopPatrol = async () => {
+    if (!stopTarget || stoppingPatrol) return
+    if (stopTarget.activePatrolId == null) {
+      setStopError('진행 중인 순찰 번호를 확인할 수 없습니다. 로봇 목록을 새로고침해 주세요.')
+      return
+    }
+
+    setStoppingPatrol(true)
+    setStopError(undefined)
+    try {
+      // API 성공은 STOP_PATROL 접수이며, 최종 STOPPED 전환은 로봇의 성공 ACK가 처리한다.
+      await patrolsApi.stop(stopTarget.activePatrolId)
+      setToast(`${stopTarget.name} 순찰 종료를 요청했습니다.`)
+      setStopTarget(null)
+      void refetchRobots()
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : '순찰 종료 요청에 실패했습니다.')
+    } finally {
+      setStoppingPatrol(false)
+    }
+  }
+
+  /* 로봇 칩 클릭 — 지도 선택과 함께 대기는 시작 확인, 순찰중은 종료 확인 모달을 연다.
+     순찰 ID가 누락된 경우에도 종료 버튼 자체는 보여주고, 확인 시 모달에서 원인을 안내한다. */
   const pickRobot = (robot: Robot) => {
     setShowAllPatrolling(false)
     setPickedRobotId(robot.id)
     if (robot.status === '대기') {
       setPatrolError(undefined)
       setPatrolTarget(robot)
+    } else if (robot.status === '순찰중') {
+      setStopError(
+        robot.activePatrolId == null
+          ? '진행 중인 순찰 번호를 확인할 수 없습니다. 백엔드 연결과 순찰 기록을 확인해 주세요.'
+          : undefined,
+      )
+      setStopTarget(robot)
     }
   }
 
@@ -310,7 +342,9 @@ export default function Dashboard() {
                       aria-label={
                         r.status === '대기'
                           ? `${r.name} 대기 — 지도에 마지막 위치 표시, 순찰 시작 확인창 열기`
-                          : `${r.name} ${r.status} — 지도에 ${r.status === '순찰중' ? '위치와 이동 경로' : '마지막 위치'} 표시`
+                          : r.status === '순찰중'
+                            ? `${r.name} 순찰중 — 지도에 위치와 이동 경로 표시, 순찰 종료 확인창 열기`
+                            : `${r.name} ${r.status} — 지도에 마지막 위치 표시`
                       }
                       onClick={() => pickRobot(r)}
                     >
@@ -341,6 +375,12 @@ export default function Dashboard() {
                         <span className="go" aria-hidden>
                           <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg>
                           순찰 시작
+                        </span>
+                      )}
+                      {r.status === '순찰중' && (
+                        <span className="go stop" aria-hidden>
+                          <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+                          순찰 종료
                         </span>
                       )}
                     </button>
@@ -456,6 +496,21 @@ export default function Dashboard() {
               setPatrolError(undefined)
             }}
             onConfirm={() => void startPatrol()}
+          />
+        )}
+
+        {/* 순찰 종료 확인 — 순찰중 로봇 칩을 눌렀을 때 */}
+        {stopTarget && (
+          <PatrolStopModal
+            robot={stopTarget}
+            stopping={stoppingPatrol}
+            error={stopError}
+            onCancel={() => {
+              if (stoppingPatrol) return
+              setStopTarget(null)
+              setStopError(undefined)
+            }}
+            onConfirm={() => void stopPatrol()}
           />
         )}
 
