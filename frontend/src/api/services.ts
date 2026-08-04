@@ -24,6 +24,8 @@ import type {
   MapDetailResponse,
   MappingStartResponse,
   MappingStatusEventResponse,
+  NavigationWaypointsReplaceRequest,
+  NavigationWaypointsResponse,
   NotificationDetailResponse,
   NotificationHistoryResponse,
   PatrolCreateRequest,
@@ -53,8 +55,8 @@ import type {
   SignUpResponse,
   VehicleCheckRequest,
   VehicleCheckResponse,
-  ZoneCreateRequest,
   ZoneCreateResponse,
+  ZoneReplaceRequest,
 } from './contracts'
 
 export function unwrapList<T>(response: ListResponse<T>): T[] {
@@ -343,13 +345,28 @@ export const mapApi = {
   detail: (mapId: string | number) =>
     apiRequest<MapDetailResponse>(`/api/map/${encodeURIComponent(mapId)}`),
   file: (mapUrl: string, signal?: AbortSignal) => apiBlob(mapUrl, signal),
-  registerZones: (mapId: string | number, zones: ZoneCreateRequest[]) =>
+  replaceZones: (mapId: string | number, request: ZoneReplaceRequest) =>
     apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
-      method: 'POST',
-      body: jsonBody({ zones }),
+      method: 'PUT',
+      body: jsonBody(request),
     }),
   zones: (mapId: string | number) =>
     apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`),
+  waypoints: (mapId: string | number) =>
+    apiRequest<NavigationWaypointsResponse>(
+      `/api/map/${encodeURIComponent(mapId)}/waypoints`,
+    ),
+  replaceWaypoints: (
+    mapId: string | number,
+    request: NavigationWaypointsReplaceRequest,
+  ) =>
+    apiRequest<NavigationWaypointsResponse>(
+      `/api/map/${encodeURIComponent(mapId)}/waypoints`,
+      {
+        method: 'PUT',
+        body: jsonBody(request),
+      },
+    ),
 }
 
 export const statsApi = {

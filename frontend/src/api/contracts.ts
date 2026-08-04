@@ -534,6 +534,11 @@ export type ZoneCreateRequest = {
   endY: number
 }
 
+export type ZoneReplaceRequest = {
+  mapVersion: number
+  zones: ZoneCreateRequest[]
+}
+
 export type ZoneCreateResponse = {
   zoneId: Id
   name: string
@@ -542,6 +547,34 @@ export type ZoneCreateResponse = {
   minY: number | string
   maxX: number | string
   maxY: number | string
+}
+
+export type WaypointActionCode = 'PASS' | 'SCAN' | 'DESTINATION'
+
+export type NavigationWaypointRequest = {
+  sequence: number
+  x: number
+  y: number
+  action: WaypointActionCode
+  /** ROS/Backend 계약과 동일한 radian 단위. Robot의 yaw_deg 변환은 IoT adapter 책임. */
+  yaw?: number | null
+  acceptanceRadius?: number | null
+  zoneId?: Id | null
+}
+
+export type NavigationWaypointResponse = NavigationWaypointRequest & {
+  waypointId: Id
+}
+
+export type NavigationWaypointsReplaceRequest = {
+  mapVersion: number
+  waypoints: NavigationWaypointRequest[]
+}
+
+export type NavigationWaypointsResponse = {
+  mapId: Id
+  mapVersion: number
+  waypoints: NavigationWaypointResponse[]
 }
 
 /** @deprecated Legacy dashboard mapper shape; no backend monitoring endpoint uses this contract. */
