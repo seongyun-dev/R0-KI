@@ -3,14 +3,13 @@ import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
-import { animateRobotLife, buildRobot } from './robotModel'
+import { ROKI_BASE_YAW, animateRoki, buildRokiCourier } from './rokiCourierModel'
 
-/* 로봇 상세 실시간 진단 — 정면 응시 프리뷰.
-   랜딩 히어로와 같은 로봇 모델(robotModel.ts)을 재사용하되,
-   LED·글로우는 R0-Ki 웹 테마(크리스털 블루)로 이 뷰에서만 덮어쓴다.
-   본체는 제자리 고정, 바이저(눈)만 좌우로 스캔한다. */
+/* 로봇 상세 실시간 진단 — RO-KI 4륜 배송형 로봇 3/4 뷰 (S15P11E103-296).
+   모델은 rokiCourierModel.ts. 랜딩 히어로(robotModel.ts 휴머노이드)와는 별개다.
+   본체는 제자리 고정 — 부위 콜아웃 지시선이 화면 좌표에 붙어 있어 이동하면 어긋난다. */
 
-/** 부드러운 원형 그라데이션 텍스처 (LED 광 웅덩이 / 접지 그림자) */
+/** 부드러운 원형 그라데이션 텍스처 (접지 그림자 / LED 광 웅덩이) */
 function radialTexture(inner: string, mid: string) {
   const c = document.createElement('canvas')
   c.width = c.height = 256
@@ -24,67 +23,44 @@ function radialTexture(inner: string, mid: string) {
   return new THREE.CanvasTexture(c)
 }
 
+/** 휠 바닥 y — 그림자/광 웅덩이를 여기 맞춰 깔아야 로봇이 떠 보이지 않는다 */
+const FLOOR_Y = -1.63
+
 function DiagnosticScene({ reduceMotion }: { reduceMotion: boolean }) {
   const { gl, scene } = useThree()
-  const model = useMemo(buildRobot, [])
+  const model = useMemo(buildRokiCourier, [])
 
-  // 흰 배경용 보정 + LED 링 + 바닥 레이어 (로봇 본체는 그대로)
+  // 흰 배경용 접지 연출 — 그림자 + 은은한 진단 광
   const extras = useMemo(() => {
-    // R0-Ki 웹 테마(크리스털 블루) 톤 — 주황 LED를 --bot-led(#35ACF8) 계열로 교체.
-    // 랜딩 히어로와 재질을 공유하지 않도록 이 뷰 안에서만 덮어쓴다.
-    const LED = 0x35acf8
-    model.visorMat.color.set(0x04101c)
-    model.visorMat.emissive.set(LED)
-
-    // 바이저 글로우 — 주황 텍스처를 파란 광으로 교체
-    const blueGlow = radialTexture('rgba(167,218,251,1)', 'rgba(53,172,248,0.6)')
-    model.glow.material.map = blueGlow
-    model.glow.material.color.set(LED)
-    model.glow2.material.map = blueGlow
-    model.glow2.material.color.set(LED)
-
-    // 베이스 링 → LED 발광 재질로 교체
-    const ledMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a20,
-      emissive: LED,
-      emissiveIntensity: 2.2,
-      roughness: 0.35,
-      metalness: 0.3,
-    })
-    model.baseRing.material = ledMat
-
-    // LED가 바닥에 비치는 광 웅덩이
-    const pool = new THREE.Mesh(
-      new THREE.CircleGeometry(1.6, 48),
-      new THREE.MeshBasicMaterial({
-        map: radialTexture('rgba(53,172,248,0.9)', 'rgba(53,172,248,0.35)'),
-        transparent: true,
-        depthWrite: false,
-      }),
-    )
-    pool.rotation.x = -Math.PI / 2
-    pool.position.y = -1.58
-    pool.renderOrder = 2
-
-    // 접지 그림자 — 흰 배경에서 입체감을 잡아준다
     const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(2.1, 48),
+      new THREE.CircleGeometry(2.3, 48),
       new THREE.MeshBasicMaterial({
-        map: radialTexture('rgba(15,18,22,0.32)', 'rgba(15,18,22,0.12)'),
+        map: radialTexture('rgba(15,18,22,0.30)', 'rgba(15,18,22,0.10)'),
         transparent: true,
         depthWrite: false,
       }),
     )
     shadow.rotation.x = -Math.PI / 2
-    shadow.position.y = -1.62
+    shadow.position.y = FLOOR_Y - 0.01
+    shadow.scale.set(1, 0.72, 1)
     shadow.renderOrder = 1
 
-    // 바이저 글로우 스프라이트는 가산 블렌딩이라 흰 배경에서 사라짐 → 일반 블렌딩으로
-    model.glow.material.blending = THREE.NormalBlending
-    model.glow2.material.blending = THREE.NormalBlending
+    // 진단 중임을 읽히게 하는 바닥 광 — 셸이 흰색이라 세게 깔면 바로 탁해진다
+    const pool = new THREE.Mesh(
+      new THREE.CircleGeometry(1.9, 48),
+      new THREE.MeshBasicMaterial({
+        map: radialTexture('rgba(53,172,248,0.55)', 'rgba(53,172,248,0.20)'),
+        transparent: true,
+        depthWrite: false,
+      }),
+    )
+    pool.rotation.x = -Math.PI / 2
+    pool.position.y = FLOOR_Y - 0.02
+    pool.scale.set(1, 0.72, 1)
+    pool.renderOrder = 0
 
-    return { ledMat, pool, shadow }
-  }, [model])
+    return { shadow, pool }
+  }, [])
 
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl)
@@ -97,35 +73,32 @@ function DiagnosticScene({ reduceMotion }: { reduceMotion: boolean }) {
     }
   }, [gl, scene])
 
-  // 정면 응시 포즈 — 부위 콜아웃 지시선과 좌표를 맞추기 위해 회전 없음
+  // 리듀스드 모션 / 첫 프레임 정지 포즈
   useEffect(() => {
-    model.robot.rotation.y = 0
+    model.root.rotation.y = ROKI_BASE_YAW
   }, [model])
 
   useFrame(({ clock }) => {
     if (reduceMotion) return
     const t = clock.elapsedTime
-    animateRobotLife(model, t)
+    animateRoki(model, t)
 
-    // 본체는 제자리 고정(글라이드 제거) — 머리만 좌우로 두리번거리며 스캔
-    model.head.rotation.y = Math.sin(t * 0.9) * 0.42
-
-    // LED 펄스 — 바닥 광/그림자는 제자리
-    extras.ledMat.emissiveIntensity = 1.9 + Math.sin(t * 2.4) * 0.7
-    const pulse = 0.55 + Math.sin(t * 2.4) * 0.15
+    // 바닥 광만 맥동 — 그림자는 제자리
+    const pulse = 0.5 + Math.sin(t * 2.4) * 0.14
     ;(extras.pool.material as THREE.MeshBasicMaterial).opacity = pulse
-    extras.pool.scale.setScalar(1 + Math.sin(t * 2.4) * 0.06)
+    extras.pool.scale.set(1 + Math.sin(t * 2.4) * 0.04, 0.72, 1)
   })
 
   return (
     <>
-      <primitive object={extras.shadow} />
       <primitive object={extras.pool} />
-      <primitive object={model.robot} />
-      <hemisphereLight args={[0xffffff, 0x8a8a8a, 0.65]} />
-      <directionalLight color={0xffffff} intensity={2.1} position={[-3, 4, 5]} />
-      <directionalLight color={0x6fb4ee} intensity={1.4} position={[4, -1, -3]} />
-      <directionalLight color={0xdfe6ff} intensity={0.5} position={[3, 2, 4]} />
+      <primitive object={extras.shadow} />
+      <primitive object={model.root} />
+      {/* 흰 셸이라 정면광을 세게 주면 바로 날아간다 — 키라이트를 낮추고 환경광에 맡긴다 */}
+      <hemisphereLight args={[0xffffff, 0xd8e2f0, 0.55]} />
+      <directionalLight color={0xffffff} intensity={1.45} position={[-3.4, 4.6, 5]} />
+      <directionalLight color={0x9ec9f5} intensity={0.75} position={[4, -0.6, -3]} />
+      <directionalLight color={0xeef3ff} intensity={0.4} position={[3.4, 2.4, 4]} />
     </>
   )
 }
@@ -149,15 +122,15 @@ export function RobotDiagnosticView({ className }: { className?: string }) {
       <Canvas
         dpr={[1, 2]}
         frameloop={reduceMotion || !visible ? 'demand' : 'always'}
-        camera={{ fov: 35, near: 0.1, far: 50, position: [0, 0.7, 9.6] }}
+        camera={{ fov: 35, near: 0.1, far: 50, position: [0, 2.3, 6.7] }}
         gl={{ antialias: true, alpha: true }}
         onCreated={({ gl, camera }) => {
           gl.setClearColor(0x000000, 0)
           gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.12
-          camera.lookAt(0, 0.3, 0)
+          gl.toneMappingExposure = 1.0
+          camera.lookAt(0, 0.05, 0)
         }}
-        aria-label="R-01 정면 진단 뷰"
+        aria-label="RO-KI 순찰 로봇 진단 뷰"
       >
         <DiagnosticScene reduceMotion={reduceMotion} />
       </Canvas>

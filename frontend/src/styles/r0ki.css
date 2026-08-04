@@ -1111,13 +1111,15 @@
 .r0ki .rd-cal.l .lead::after{right:-3px}
 .r0ki .rd-cal.r .lead::after{left:-3px}
 .r0ki .rd-cal.warn .lead{opacity:.85;height:1.5px}
-/* 부위별 앵커 — 3D 로봇(정면 포즈, 카메라 fov35 · z9.6)의 부위를 프레임 좌표로 투영한 값.
+/* 부위별 앵커 — RO-KI 4륜형(3/4 뷰, 카메라 fov35 · y2.3 z6.7)의 부위를 프레임 좌표로 투영한 값.
    지시선 점(dot)이 부위 가장자리에 닿도록 .l 은 right, .r 은 left 가 앵커다.
-   카메라 모듈=헤드 우측 센서 포드 / 라이다=헤드 돔 상단 / 휠 모터=좌측 발 / 구동부=베이스 링 */
-.r0ki .rd-cal.c-cam  {top:20%;  left:87%}
-.r0ki .rd-cal.c-lidar{top:3.5%; right:73%}
-.r0ki .rd-cal.c-motor{top:75%;  right:71%}
-.r0ki .rd-cal.c-drive{top:78%;  left:73%}
+   카메라=앞면 렌즈 / 라이다=상단 돔 / 휠 모터=우측 정비창 / 구동부=좌측 앞바퀴.
+   .rd-3d 가 프레임보다 크게(170%×130%) 깔려 있어 로봇이 프레임 밖까지 나온다 —
+   구동부(83%)처럼 앵커가 프레임을 벗어나는 값이 정상이다. */
+.r0ki .rd-cal.c-cam  {top:29%; right:66%}
+.r0ki .rd-cal.c-lidar{top:6%;  left:60%}
+.r0ki .rd-cal.c-motor{top:62%; left:76%}
+.r0ki .rd-cal.c-drive{top:75%; right:83%}
 
 /* 하단 프로필 레일 (가로) */
 .r0ki .rd-foot{grid-column:1/-1;grid-row:3;display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
