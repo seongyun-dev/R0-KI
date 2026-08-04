@@ -1,5 +1,9 @@
 package com.oneloop.notification.service;
 
+import com.oneloop.event.domain.DetectedEvent;
+import com.oneloop.event.domain.EventProcessingHistory;
+import com.oneloop.event.domain.ProcessingStatus;
+import com.oneloop.event.repository.EventProcessingHistoryRepository;
 import com.oneloop.notification.domain.Notification;
 import com.oneloop.notification.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,14 +17,33 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificationStatusService {
 
     private final NotificationRepository notificationRepository;
+    private final EventProcessingHistoryRepository eventProcessingHistoryRepository;
 
     @Transactional
     public void markAsSent(Long notificationId) {
-        notificationRepository.findById(notificationId).ifPresent(Notification::markAsSent);
+        notificationRepository
+                .findById(notificationId)
+                .ifPresent(
+                        notification -> {
+                            notification.markAsSent();
+                            completeEvent(notification);
+                        });
     }
 
     @Transactional
     public void markAsFailed(Long notificationId) {
         notificationRepository.findById(notificationId).ifPresent(Notification::markAsFailed);
+    }
+
+    private void completeEvent(Notification notification) {
+        DetectedEvent event = notification.getEvent();
+        if (event.getProcessingStatus() == ProcessingStatus.COMPLETED) {
+            return;
+        }
+
+        event.changeStatus(ProcessingStatus.COMPLETED);
+        eventProcessingHistoryRepository.save(
+                new EventProcessingHistory(
+                        event, null, ProcessingStatus.COMPLETED, "불법주차 SMS 발송 완료"));
     }
 }

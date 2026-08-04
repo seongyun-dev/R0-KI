@@ -105,7 +105,7 @@ public class AuthService {
                                 apartmentComplexId, RobotStatus.DELETED)
                         > 0;
         boolean hasMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId).isPresent();
-        return new SigninResponse(accessToken, hasRobot, hasMap);
+        return new SigninResponse(accessToken, member.getName(), hasRobot, hasMap);
     }
 
     /**
