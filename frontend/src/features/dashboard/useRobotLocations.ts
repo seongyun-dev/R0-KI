@@ -9,6 +9,7 @@ import { env } from '../../config/env'
 import type { ComplexMapData, MapRobot } from '../../types/domain'
 
 const RECONNECT_DELAY_MS = 2_000
+const STATUS_TTL_MS = 15_000
 
 export function toMapRobot(
   location: RobotLocationEvent | RobotMapLocationResponse,
@@ -58,7 +59,7 @@ export function useRobotLocations(map: ComplexMapData | undefined) {
   const [statuses, setStatuses] = useState<Record<string, RobotStatusCode | string>>({})
 
   useEffect(() => {
-    if (env.useMocks || !map) {
+    if (env.useMocks) {
       setLocations([])
       setStatuses({})
       return
@@ -66,10 +67,53 @@ export function useRobotLocations(map: ComplexMapData | undefined) {
 
     const controller = new AbortController()
     let reconnectTimer: number | undefined
+    let connectionGeneration = 0
+    const statusExpiryTimers = new Map<string, number>()
 
-    const updateLocation = (location: RobotLocationEvent | RobotMapLocationResponse) => {
+    if (!map) setLocations([])
+    setStatuses({})
+
+    const clearStatusExpiryTimers = () => {
+      statusExpiryTimers.forEach((timer) => window.clearTimeout(timer))
+      statusExpiryTimers.clear()
+    }
+
+    const clearLiveStatuses = () => {
+      clearStatusExpiryTimers()
+      setStatuses({})
+    }
+
+    const updateStatus = (
+      robotId: string | number,
+      status: RobotStatusCode | string,
+      generation: number,
+    ) => {
+      if (controller.signal.aborted || generation !== connectionGeneration) return
+      const key = String(robotId)
+      const previousTimer = statusExpiryTimers.get(key)
+      if (previousTimer !== undefined) window.clearTimeout(previousTimer)
+
+      setStatuses((current) => ({ ...current, [key]: status }))
+      const expiryTimer = window.setTimeout(() => {
+        if (controller.signal.aborted || generation !== connectionGeneration) return
+        statusExpiryTimers.delete(key)
+        setStatuses((current) => {
+          if (!(key in current)) return current
+          const next = { ...current }
+          delete next[key]
+          return next
+        })
+      }, STATUS_TTL_MS)
+      statusExpiryTimers.set(key, expiryTimer)
+    }
+
+    const updateLocation = (
+      location: RobotLocationEvent | RobotMapLocationResponse,
+      generation: number,
+    ) => {
+      if (!map || controller.signal.aborted || generation !== connectionGeneration) return
       const mapped = toMapRobot(location, map)
-      if (!mapped || controller.signal.aborted) return
+      if (!mapped) return
       setLocations((current) => {
         const previous = current.find((item) => item.id === mapped.id)
         const next = { ...previous, ...mapped, name: mapped.name ?? previous?.name }
@@ -77,45 +121,54 @@ export function useRobotLocations(map: ComplexMapData | undefined) {
       })
     }
 
-    const subscribe = () => {
-      robotsApi.subscribeLocations(
-        () => undefined,
-        updateLocation,
-        (statusUpdate) => {
-          if (controller.signal.aborted) return
-          setStatuses((current) => ({
-            ...current,
-            [String(statusUpdate.robotId)]: statusUpdate.status,
+    const refreshSnapshot = (generation: number) => {
+      if (!map) return
+      void robotsApi.locations()
+        .then((initial) => {
+          if (controller.signal.aborted || generation !== connectionGeneration) return
+          setLocations(initial.flatMap((location) => {
+            const mapped = toMapRobot(location, map)
+            return mapped ? [mapped] : []
           }))
-        },
-        controller.signal,
-      ).then(() => {
-        if (!controller.signal.aborted) {
-          reconnectTimer = window.setTimeout(subscribe, RECONNECT_DELAY_MS)
-        }
-      }).catch(() => {
-        if (!controller.signal.aborted) {
-          reconnectTimer = window.setTimeout(subscribe, RECONNECT_DELAY_MS)
-        }
-      })
+        })
+        .catch(() => {
+          // snapshot 실패와 별개로 SSE heartbeat를 기다린다.
+        })
     }
 
-    robotsApi.locations().then((initial) => {
-      if (!controller.signal.aborted) {
-        setLocations(initial.flatMap((location) => {
-          const mapped = toMapRobot(location, map)
-          return mapped ? [mapped] : []
-        }))
-      }
-    }).catch(() => {
-      // SSE 연결은 초기 조회 실패와 별개로 유지한다.
-    }).finally(() => {
-      if (!controller.signal.aborted) subscribe()
-    })
+    const scheduleReconnect = (generation: number) => {
+      if (controller.signal.aborted || generation !== connectionGeneration) return
+      connectionGeneration += 1
+      // 단절 중 OFFLINE/IDLE 전환을 놓칠 수 있으므로 이전 PATROLLING 상태를 즉시 폐기한다.
+      clearLiveStatuses()
+      reconnectTimer = window.setTimeout(subscribe, RECONNECT_DELAY_MS)
+    }
+
+    const subscribe = () => {
+      if (controller.signal.aborted) return
+      const generation = ++connectionGeneration
+      refreshSnapshot(generation)
+
+      void robotsApi.subscribeLocations(
+        (initial) => initial.forEach((location) => updateLocation(location, generation)),
+        (location) => updateLocation(location, generation),
+        (statusUpdate) => {
+          updateStatus(statusUpdate.robotId, statusUpdate.status, generation)
+        },
+        controller.signal,
+      ).then(
+        () => scheduleReconnect(generation),
+        () => scheduleReconnect(generation),
+      )
+    }
+
+    subscribe()
 
     return () => {
       controller.abort()
+      connectionGeneration += 1
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+      clearStatusExpiryTimers()
     }
   }, [map])
 
