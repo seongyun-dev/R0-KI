@@ -272,13 +272,24 @@
   white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.75);transition:all var(--d-fast) var(--e-glass)}
 .r0ki[data-theme="nocturne"] .themebtn{box-shadow:inset 0 1px 0 rgba(255,255,255,.16)}
 .r0ki .themebtn:hover{transform:translateY(-1px)}
+/* 상단바에서 유일하게 내용 길이가 무한한 항목이다 — 로봇 이름이 길면 줄 전체를 밀어내
+   마지막 항목(로그아웃)이 .r0ki 의 overflow:hidden 에 잘려 사라졌다.
+   접기 규칙(아래 미디어쿼리)은 화면폭 기준이라 내용이 만든 넘침은 못 막는다.
+   min-width:0 을 줘서 이 칩만 줄어들게 하고(다른 항목은 nowrap+min-width:auto 라 안 줄어듦)
+   실제 말줄임은 이름(.nm)에서만 일어나게 한다. */
 .r0ki .statchip{display:inline-flex;align-items:center;gap:9px;height:44px;padding:0 18px;border-radius:var(--r-pill);
   background:var(--track);border:1px solid var(--edge);font-size:14.5px;font-weight:600;color:var(--text-2);white-space:nowrap;
+  min-width:0;max-width:min(420px,30vw);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5)}
+/* 이름만 줄어든다. 상태·배터리는 flex:none 이라 어떤 이름이 와도 온전히 남는다 */
+.r0ki .statchip .nm{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.r0ki .statchip .stt,.r0ki .statchip b{flex:none}
 .r0ki[data-theme="nocturne"] .statchip{box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
 .r0ki .statchip .d{width:7px;height:7px;border-radius:50%;flex:none}
 .r0ki .statchip b{font-weight:700;color:var(--text-1);margin-left:4px}
-@media(max-width:1500px){.r0ki .statchip{display:none}}
+/* 1500px 였을 때는 1500~1700 구간에서 이름이 0px까지 눌려 '이름 없는 칩'만 남았다.
+   실측상 이름이 읽을 만한 폭(100px 이상)을 얻는 건 1760px 부터다 — 그 아래는 통째로 숨긴다. */
+@media(max-width:1760px){.r0ki .statchip{display:none}}
 @media(max-width:1420px){.r0ki .nv{padding:0 15px;font-size:15.5px}.r0ki .alarmbtn{padding:0 16px;font-size:15.5px}}
 /* 더 좁아지면 자리를 만든다 — 시계의 '한국시간' 꼬리표부터 접는다 (.admin .who 와 같은 방식) */
 @media(max-width:1240px){.r0ki .clock{font-size:17px}.r0ki .clock small{display:none}}
