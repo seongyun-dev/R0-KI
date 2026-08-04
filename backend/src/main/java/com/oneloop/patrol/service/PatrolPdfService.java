@@ -206,6 +206,7 @@ public class PatrolPdfService {
         if (status == null) return "-";
         return switch (status) {
             case IN_PROGRESS -> "순찰 중";
+            case STOP_REQUESTED -> "종료 요청 중";
             case COMPLETED -> "완료";
             case STOPPED -> "중단";
             case FAILED -> "실패";
