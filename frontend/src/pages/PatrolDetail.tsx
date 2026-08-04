@@ -385,6 +385,9 @@ export default function PatrolDetail() {
             </div>
           </div>
           <div className="headtools">
+            <Link to="/app/patrol" className="btn btn-s">
+              순찰 목록
+            </Link>
             <button type="button" className="btn btn-s" onClick={() => toast('✓ 재순찰이 요청되었습니다')}>
               재순찰 요청
             </button>

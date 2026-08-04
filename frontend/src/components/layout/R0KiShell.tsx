@@ -89,13 +89,17 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
           <div className="topbar glass g2" style={{ borderRadius: 'var(--r-pill)' }}>
             <div className="brand"><span className="core" /> R0-Ki</div>
             <nav className="nav" aria-label="주 메뉴">
-              {NAV_ITEMS.map((item) =>
-                item.key === active ? (
-                  <span key={item.key} className="nv" aria-pressed="true">{item.label}</span>
-                ) : (
-                  <Link key={item.key} to={item.to} className="nv">{item.label}</Link>
-                ),
-              )}
+              {NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.key}
+                  to={item.to}
+                  className="nv"
+                  aria-current={item.key === active ? 'page' : undefined}
+                  aria-pressed={item.key === active ? 'true' : undefined}
+                >
+                  {item.label}
+                </Link>
+              ))}
             </nav>
             <div className="sp" />
             {statusChip}
