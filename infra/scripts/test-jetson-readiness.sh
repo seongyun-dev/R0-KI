@@ -79,4 +79,24 @@ printf '%s\n' "${output}" | grep -q -- '--source-b /dev/roki_camera_right'
 printf '%s\n' "${output}" | grep -q -- '--capture-width 640'
 grep -q -- 'pixelformat=MJPG' "${test_root}/v4l2.log"
 
+: >"${test_root}/v4l2.log"
+single_output="$(
+  PATH="${test_root}/bin:${PATH}" \
+  AIOT_AI_ROOT="${test_root}/ai" \
+  AIOT_AI_PYTHON="${test_root}/bin/python" \
+  AIOT_AI_PIPELINE_MAIN="${test_root}/ai/yolo_pipeline/main.py" \
+  AIOT_IOT_CURRENT="${test_root}/current" \
+  ROS_SETUP_FILE="${test_root}/ros-setup.bash" \
+  AIOT_AI_SINGLE_CAMERA=true \
+  AIOT_AI_CAMERA_DEVICE=/dev/roki_camera_right \
+  AIOT_AI_CAMERA_LEFT_DEVICE= \
+  AIOT_AI_CAMERA_RIGHT_DEVICE= \
+  V4L2_LOG="${test_root}/v4l2.log" \
+  bash "${repository_root}/infra/jetson/aiot-ai-run.sh"
+)"
+printf '%s\n' "${single_output}" | grep -q -- '--single-camera'
+printf '%s\n' "${single_output}" | grep -q -- '--source-a /dev/roki_camera_right'
+! printf '%s\n' "${single_output}" | grep -q -- '--source-b'
+[ "$(wc -l <"${test_root}/v4l2.log")" -eq 1 ]
+
 echo "Jetson camera, ROS, and field-gate readiness tests passed"

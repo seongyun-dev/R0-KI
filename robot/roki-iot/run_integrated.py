@@ -203,6 +203,107 @@ def _build_manual_demo_components(runtime: Any) -> tuple[Any, Any]:
     )
 
 
+def _environment_enabled(name: str, default: bool = True) -> bool:
+    value = os.getenv(name, "true" if default else "false")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_mapping_runtime(
+    runtime: Any,
+    runtime_service: Any,
+    state_store: Any,
+    settings: Any,
+) -> Any:
+    """Build a dormant gamepad mapper; the device opens only on START_MAPPING."""
+
+    from aiot_robot.mapping_artifacts import MapExportSettings, SlamMapExporter
+    from control.manual_drive_controller import (
+        ManualDriveController,
+        ManualDriveSettings,
+    )
+    from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
+    from integration.mapping_runtime import (
+        ManualMappingRuntime,
+        MappingRuntimeSettings,
+    )
+
+    drive_controller = ManualDriveController(
+        runtime=runtime,
+        state_store=state_store,
+        settings=ManualDriveSettings(
+            forward_target_pwm=int(os.getenv("ROKI_MAPPING_FORWARD_PWM", "45")),
+            reverse_target_pwm=int(os.getenv("ROKI_MAPPING_REVERSE_PWM", "45")),
+            drive_pulse_sec=float(os.getenv("ROKI_MAPPING_DRIVE_PULSE_SEC", "0.2")),
+            steering_center_deg=int(
+                os.getenv("ROKI_MAPPING_STEERING_CENTER_DEG", "80")
+            ),
+            steering_min_deg=int(os.getenv("ROKI_MAPPING_STEERING_MIN_DEG", "60")),
+            steering_max_deg=int(os.getenv("ROKI_MAPPING_STEERING_MAX_DEG", "100")),
+            steering_step_deg=int(os.getenv("ROKI_MAPPING_STEERING_STEP_DEG", "2")),
+            steering_pulse_sec=float(
+                os.getenv("ROKI_MAPPING_STEERING_PULSE_SEC", "0.2")
+            ),
+            # LiDAR obstacles are map input in this explicit manual mode. The
+            # operator and deadman switch own motion; runtime hardware safety
+            # and ESP32 watchdog remain enforced below this controller.
+            require_clear_path=False,
+        ),
+    )
+    gamepad_settings = GamepadSettings(
+        device_path=os.getenv("ROKI_MAPPING_GAMEPAD_DEVICE", "/dev/input/js0"),
+        steering_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_STEERING_AXIS", "0")),
+        throttle_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_THROTTLE_AXIS", "1")),
+        deadman_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON", "4")),
+        stop_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_STOP_BUTTON", "1")),
+        finish_button_a=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A", "6")),
+        finish_button_b=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B", "7")),
+        deadzone=float(os.getenv("ROKI_MAPPING_GAMEPAD_DEADZONE", "0.35")),
+        finish_hold_sec=float(os.getenv("ROKI_MAPPING_FINISH_HOLD_SEC", "2.0")),
+        loop_interval_sec=float(os.getenv("ROKI_MAPPING_GAMEPAD_LOOP_SEC", "0.05")),
+        reconnect_interval_sec=float(
+            os.getenv("ROKI_MAPPING_GAMEPAD_RECONNECT_SEC", "1.0")
+        ),
+    )
+    holder: dict[str, Any] = {}
+    gamepad_input = LinuxGamepadInput(
+        drive_controller,
+        settings=gamepad_settings,
+        finish_callback=lambda: holder["mapping"].finish(),
+    )
+    mapping_runtime = ManualMappingRuntime(
+        runtime_service=runtime_service,
+        state_store=state_store,
+        drive_controller=drive_controller,
+        gamepad_input=gamepad_input,
+        map_exporter=SlamMapExporter(
+            MapExportSettings(
+                Path(os.getenv("AIOT_MAPPING_OUTPUT_DIR", "/var/lib/aiot/maps")),
+                timeout_seconds=float(
+                    os.getenv("AIOT_MAPPING_EXPORT_TIMEOUT_SEC", "30")
+                ),
+                serialize_pose_graph=_environment_enabled(
+                    "AIOT_MAPPING_SERIALIZE_POSE_GRAPH", True
+                ),
+            )
+        ),
+        settings=MappingRuntimeSettings(
+            backend_base_url=os.getenv(
+                "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
+            ),
+            backend_token_file=Path(settings.service_token_file),
+            backend_timeout_sec=float(os.getenv("AIOT_BACKEND_TIMEOUT_SEC", "10")),
+            upload_retry_initial_sec=float(
+                os.getenv("AIOT_MAPPING_UPLOAD_RETRY_INITIAL_SEC", "2")
+            ),
+            upload_retry_max_sec=float(
+                os.getenv("AIOT_MAPPING_UPLOAD_RETRY_MAX_SEC", "30")
+            ),
+        ),
+    )
+    holder["mapping"] = mapping_runtime
+    return mapping_runtime
+
+
 def create_integrated_application(
     *,
     final_runtime: Any | None = None,
@@ -218,9 +319,12 @@ def create_integrated_application(
     manual_demo: bool = False,
     manual_controller: Any | None = None,
     keyboard_input: Any | None = None,
+    mapping_runtime: Any | None = None,
+    allow_legacy_direct_patrol: bool = True,
 ) -> Any:
     """Compose all production components around exactly one RobotRuntime."""
 
+    build_default_runtime = final_runtime is None
     if final_runtime is None:
         runtime, default_pose_bridge, default_lidar_bridge = _build_final_components()
         pose_bridge = pose_bridge or default_pose_bridge
@@ -250,7 +354,11 @@ def create_integrated_application(
     service_holder: dict[str, Any] = {}
     navigation_driver = (
         _build_nav2_driver(service_holder)
-        if navigation_mode == "nav2" and not manual_enabled
+        if (
+            navigation_mode == "nav2"
+            and not manual_enabled
+            and navigation_service is not None
+        )
         else None
     )
     runtime_service = FinalRuntimeService(
@@ -274,8 +382,18 @@ def create_integrated_application(
         ),
         manual_controller=manual_controller,
         keyboard_input=keyboard_input,
+        allow_legacy_direct_patrol=allow_legacy_direct_patrol,
     )
     service_holder["service"] = runtime_service
+    if mapping_runtime is None and build_default_runtime and _environment_enabled(
+        "AIOT_MAPPING_GAMEPAD_ENABLED", True
+    ):
+        mapping_runtime = _build_mapping_runtime(
+            runtime,
+            runtime_service,
+            state_store,
+            settings,
+        )
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
@@ -285,7 +403,12 @@ def create_integrated_application(
         outbox = DetectionOutbox(
             os.getenv("AIOT_EVENT_OUTBOX_DIR", "/var/lib/aiot/outbox")
         )
-        recorder = DetectionRecorder(outbox, state_store)
+        recorder = DetectionRecorder(
+            outbox,
+            state_store,
+            vehicle_range_source=lidar_health_bridge,
+            camera_yaw_deg=float(os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0")),
+        )
         ai_controller = ai_controller or RosAiCoordinator(recorder, state_store)
         event_worker = event_worker or EventDeliveryWorker(
             outbox,
@@ -314,6 +437,7 @@ def create_integrated_application(
         pipeline_runner=pipeline_runner,
         pipeline_enabled=False,
         ai_controller=ai_controller,
+        mapping_runtime=mapping_runtime,
         readiness_checks=readiness_checks,
     )
     application = RokiPublisherApplication(
@@ -397,20 +521,29 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings()
     mode = "manual" if args.manual_keyboard else _navigation_mode(settings)
-    navigation = (
-        None
-        if args.manual_keyboard
-        else _build_navigation_service(
-            args.route,
-            encoder_limited=mode == "encoder_limited",
-        )
-    )
+    navigation = None
+    if not args.manual_keyboard:
+        selected_route = _selected_route_path(args.route)
+        if selected_route.is_file():
+            navigation = _build_navigation_service(
+                selected_route,
+                encoder_limited=mode == "encoder_limited",
+            )
+        elif not _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True):
+            raise RuntimeError(f"waypoint route file is missing: {selected_route}")
+        else:
+            logging.getLogger(__name__).warning(
+                "Patrol route is missing; mapping remains available but "
+                "START_PATROL will be rejected: %s",
+                selected_route,
+            )
     application = create_integrated_application(
         start_serial_runtime=not args.pose_only,
         navigation_service=navigation,
         navigation_mode=mode,
         operational_ai=True,
         manual_demo=args.manual_keyboard,
+        allow_legacy_direct_patrol=False,
     )
 
     def stop_handler(_signum: int, _frame: object) -> None:

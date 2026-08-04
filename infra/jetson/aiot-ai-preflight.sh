@@ -12,7 +12,13 @@ evidence_dir="${AIOT_AI_EVIDENCE_DIR:-/var/lib/aiot/evidence}"
 required_engines="${AIOT_AI_REQUIRED_ENGINE_PATHS:-}"
 camera_left="${AIOT_AI_CAMERA_LEFT_DEVICE:-${AIOT_AI_CAMERA_FRONT_DEVICE:-${AIOT_AI_CAMERA_DEVICE:-}}}"
 camera_right="${AIOT_AI_CAMERA_RIGHT_DEVICE:-${AIOT_AI_CAMERA_REAR_DEVICE:-}}"
-camera_devices=("${camera_left}" "${camera_right}")
+single_camera="${AIOT_AI_SINGLE_CAMERA:-false}"
+camera_single="${AIOT_AI_CAMERA_DEVICE:-${camera_right:-${camera_left}}}"
+if [ "${single_camera}" = true ]; then
+  camera_devices=("${camera_single}")
+else
+  camera_devices=("${camera_left}" "${camera_right}")
+fi
 
 if [ "${ROS_LOCALHOST_ONLY:-1}" != "1" ]; then
   echo "ROS_LOCALHOST_ONLY must be 1 for Jetson-local AI/Robot traffic" >&2
@@ -47,7 +53,16 @@ if [ ! -d "$(dirname "${ready_file}")" ] || \
   echo "AI readiness directory is not writable: $(dirname "${ready_file}")" >&2
   exit 1
 fi
-if [ "${AIOT_AI_REQUIRE_DUAL_CAMERAS:-false}" = true ]; then
+if [ "${single_camera}" = true ]; then
+  if [ "${AIOT_AI_REQUIRE_DUAL_CAMERAS:-false}" = true ]; then
+    echo "Single-camera and dual-camera requirements conflict" >&2
+    exit 1
+  fi
+  if [ -z "${camera_single}" ]; then
+    echo "A camera device is required in single-camera mode" >&2
+    exit 1
+  fi
+elif [ "${AIOT_AI_REQUIRE_DUAL_CAMERAS:-false}" = true ]; then
   if [ -z "${camera_left}" ] || [ -z "${camera_right}" ] || \
      [ "${camera_left}" = "${camera_right}" ]; then
     echo "Two distinct AI camera devices are required" >&2

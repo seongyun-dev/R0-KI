@@ -33,6 +33,7 @@ class ValidatedCommand:
     command: str
     command_id: str
     patrol_id: int | None
+    mapping_session_id: int | None
     fingerprint: str
 
 
@@ -59,6 +60,7 @@ class PatrolCommandHandler:
         pipeline_runner: PatrolPipelineRunner,
         pipeline_enabled: bool = False,
         ai_controller: Any | None = None,
+        mapping_runtime: Any | None = None,
         readiness_checks: Iterable[ReadinessCheck] = (),
         flush_telemetry: TelemetryFlush | None = None,
         command_cache_path: str | Path | None = None,
@@ -72,6 +74,7 @@ class PatrolCommandHandler:
         self._pipeline_runner = pipeline_runner
         self._pipeline_enabled = pipeline_enabled
         self._ai_controller = ai_controller
+        self._mapping_runtime = mapping_runtime
         self._readiness_checks = tuple(readiness_checks)
         self._flush_telemetry = flush_telemetry
         self._wall_clock = wall_clock or (lambda: datetime.now(tz=SEOUL))
@@ -141,8 +144,7 @@ class PatrolCommandHandler:
         elif command.command == "SET_TOKEN":
             self._handle_set_token(command, str(payload["token"]))
         else:
-            self._record_and_publish_command(command, "REJECTED")
-            print("[COMMAND] START_MAPPING is not supported by patrol runtime")
+            self._handle_start_mapping(command)
 
     def tick(self) -> None:
         """Advance map pose and enforce the LiDAR stop/resume interlock."""
@@ -202,6 +204,12 @@ class PatrolCommandHandler:
         """Safe shutdown order: physical STOP, AI disable, final telemetry."""
 
         stop_failed = False
+        if self._mapping_runtime is not None:
+            try:
+                self._mapping_runtime.stop()
+            except Exception as exc:
+                stop_failed = True
+                print(f"[SHUTDOWN] mapping STOP failed: {type(exc).__name__}")
         try:
             self._serial_reader.send_command("STOP_PATROL")
         except Exception as exc:
@@ -230,6 +238,10 @@ class PatrolCommandHandler:
 
     def _handle_start_patrol(self, command: ValidatedCommand) -> None:
         assert command.patrol_id is not None
+        if self._mapping_runtime is not None and self._mapping_runtime.active:
+            self._record_and_publish_command(command, "REJECTED")
+            print("[COMMAND] START_PATROL rejected reason=MAPPING_ACTIVE")
+            return
         status = self._state_store.get_status()
         if status.state != "IDLE":
             self._record_and_publish_command(command, "REJECTED")
@@ -302,6 +314,39 @@ class PatrolCommandHandler:
         print(
             "[COMMAND] STOP_PATROL completed "
             f"commandId={command.command_id} errors={len(errors)}"
+        )
+
+    def _handle_start_mapping(self, command: ValidatedCommand) -> None:
+        assert command.mapping_session_id is not None
+        if self._mapping_runtime is None:
+            self._record_and_publish_command(command, "REJECTED")
+            print("[COMMAND] START_MAPPING rejected reason=MAPPING_RUNTIME_MISSING")
+            return
+        status = self._state_store.get_status()
+        if status.state != "IDLE" or getattr(
+            self._serial_reader, "active_patrol_id", None
+        ) is not None:
+            self._record_and_publish_command(command, "REJECTED")
+            print("[COMMAND] START_MAPPING rejected reason=ROBOT_NOT_IDLE")
+            return
+        try:
+            ready, reason = self._mapping_runtime.start(
+                command.mapping_session_id,
+                command.command_id,
+            )
+        except Exception as exc:
+            self._record_and_publish_command(command, "FAILED")
+            print(f"[COMMAND] START_MAPPING failed type={type(exc).__name__}")
+            return
+        if not ready:
+            self._record_and_publish_command(command, "REJECTED")
+            print(f"[COMMAND] START_MAPPING rejected reason={reason}")
+            return
+        self._record_and_publish_command(command, "SUCCEEDED")
+        print(
+            "[COMMAND] START_MAPPING succeeded "
+            f"commandId={command.command_id} "
+            f"mappingSessionId={command.mapping_session_id}"
         )
 
     def _handle_set_token(self, command: ValidatedCommand, token: str) -> None:
@@ -414,11 +459,27 @@ class PatrolCommandHandler:
                 raise ValueError("patrolId must be a positive integer")
         else:
             patrol_id = None
+        mapping_session_id = payload.get("mappingSessionId")
+        if command == "START_MAPPING":
+            if (
+                isinstance(mapping_session_id, bool)
+                or not isinstance(mapping_session_id, int)
+                or mapping_session_id <= 0
+            ):
+                raise ValueError("mappingSessionId must be a positive integer")
+        else:
+            mapping_session_id = None
         if command == "SET_TOKEN":
             token = payload.get("token")
             if not isinstance(token, str) or not token:
                 raise ValueError("token is required")
-        return ValidatedCommand(command, command_id, patrol_id, fingerprint)
+        return ValidatedCommand(
+            command,
+            command_id,
+            patrol_id,
+            mapping_session_id,
+            fingerprint,
+        )
 
     @staticmethod
     def _required_timestamp(payload: dict[str, Any], field: str) -> datetime:

@@ -76,6 +76,24 @@ class ManualDriveControllerTest(unittest.TestCase):
         self.assertFalse(self.controller.active)
         self.assertFalse(self.runtime.mission.patrol_active)
 
+    def test_mapping_mode_does_not_block_forward_on_obstacle(self) -> None:
+        controller = ManualDriveController(
+            runtime=self.runtime,
+            state_store=self.store,
+            settings=ManualDriveSettings(
+                steering_min_deg=60,
+                steering_max_deg=100,
+                require_clear_path=False,
+            ),
+            clock=lambda: self.now,
+        )
+        controller.activate(9)
+        self.store.update_lidar_status("DISCONNECTED")
+        self.store.update_obstacle(ObstacleState("STOP", "FRONT", "mapped"))
+
+        self.assertEqual(controller.handle_key("w"), "FORWARD")
+        self.assertEqual(self.runtime.targets[-1], (45, 80, False))
+
 
 if __name__ == "__main__":
     unittest.main()

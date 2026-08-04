@@ -40,6 +40,12 @@ ROKI_ROUTE_FILE=robot/roki/maps/dummy_rectangle/route.short-straight.yaml \
 [`docs/manual-patrol-ai-demo.md`](docs/manual-patrol-ai-demo.md)를 따른다. 수동 모드는
 foreground에서 `--manual-keyboard`를 명시할 때만 활성화되며 운영 기본값을 바꾸지 않는다.
 
+Frontend의 기존 지도 생성 버튼부터 게임패드 수동 주행, SLAM 저장, Backend 지도
+업로드까지의 맵핑 흐름은
+[`docs/manual-gamepad-mapping.md`](docs/manual-gamepad-mapping.md)를 따른다. 맵핑은
+순찰 route·AI·카메라 없이 시작할 수 있지만 LiDAR, odometry, hardware safety,
+SLAM Toolbox와 deadman 입력은 반드시 준비돼야 한다.
+
 배포·진단·복구와 현장 검증 순서는
 [`docs/integrated-runtime-operations.md`](docs/integrated-runtime-operations.md)를
 따른다. 아직 실측하지 않은 값과 현장 합격 기준은
@@ -49,4 +55,8 @@ Robot-AI 메시지는
 [`roki/docs/COMMUNICATION_CONTRACT.md`](roki/docs/COMMUNICATION_CONTRACT.md)가
 기준이다. 2026-08-02 Goal 인수인계의 구현 결과는
 [`docs/goal-mode-integration-handoff-2026-08-02.md`](docs/goal-mode-integration-handoff-2026-08-02.md)
+
+2026-08-04 실제 지도 스냅샷, 단일 BRIO 설정, 차량 LiDAR 좌표와 Backend
+불법주차 계약 대조 결과는
+[`docs/mapping-parking-integration-status-2026-08-04.md`](docs/mapping-parking-integration-status-2026-08-04.md)에 정리했다.
 맨 위 완료 갱신을 우선해서 읽는다.

@@ -7,5 +7,9 @@ safety:
   # LOW_BATTERY 판정을 비활성화한다. SoC 보정 완료 후 다시 설정한다.
   low_battery_percent: null
 
+  # Line tracing is not part of the map/waypoint product. A disconnected or
+  # faulty line sensor must not block manual mapping motion.
+  require_line_sensor: false
+
   # TODO(calibration): 정상 부하 encoder 특성 측정 후 구현한다.
   stall_timeout_ms: null

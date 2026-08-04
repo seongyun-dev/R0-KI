@@ -18,6 +18,7 @@ class ManualDriveSettings:
     steering_max_deg: int = 90
     steering_step_deg: int = 2
     steering_pulse_sec: float = 0.5
+    require_clear_path: bool = True
 
     def __post_init__(self) -> None:
         if self.forward_target_pwm <= 0 or self.reverse_target_pwm <= 0:
@@ -184,6 +185,8 @@ class ManualDriveController:
         return "SAFETY_STOP" if must_stop else "PULSE_STOP"
 
     def _forward_allowed(self) -> bool:
+        if not self._settings.require_clear_path:
+            return True
         status = self._state_store.get_status()
         return status.lidar == "NORMAL" and status.obstacle.status != "STOP"
 

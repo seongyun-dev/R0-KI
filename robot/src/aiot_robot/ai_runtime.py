@@ -264,6 +264,8 @@ def run_pipeline(
     pipeline_args: list[str],
     capture_settings: CaptureSettings,
     mjpeg_server: MjpegStreamServer | None = None,
+    *,
+    single_camera: bool = False,
 ) -> int:
     try:
         module = _load_pipeline(pipeline_main)
@@ -284,7 +286,17 @@ def run_pipeline(
                         pass
                     if not rclpy.ok():
                         raise RuntimeError("AI runtime is stopping")
-                result = self._delegate.track_pair(*args, **kwargs)
+                if single_camera:
+                    track_frame = getattr(self._delegate, "track_frame", None)
+                    if not callable(track_frame):
+                        raise RuntimeError(
+                            "single-camera mode requires detector.track_frame"
+                        )
+                    if not args:
+                        raise RuntimeError("single-camera detector received no frame")
+                    result = (track_frame(args[0]), [])
+                else:
+                    result = self._delegate.track_pair(*args, **kwargs)
                 if not self._warmup_complete:
                     self._warmup_complete = True
                     node.mark_inference_ready()
@@ -298,7 +310,7 @@ def run_pipeline(
             original_hconcat = module.cv2.hconcat
 
             def hconcat_with_preview(images: Any) -> Any:
-                view = original_hconcat(images)
+                view = images[0] if single_camera else original_hconcat(images)
                 if node.detection_enabled:
                     mjpeg_server.publisher.publish(view, module.cv2)
                 return view
@@ -307,12 +319,29 @@ def run_pipeline(
         original_open_capture = module.open_capture
         camera_count = 0
 
+        class PlaceholderCapture:
+            """Second batch slot without opening another V4L2 device."""
+
+            def read(self) -> tuple[bool, Any]:
+                import numpy as np
+
+                frame = np.zeros(
+                    (capture_settings.height, capture_settings.width, 3),
+                    dtype=np.uint8,
+                )
+                return True, frame
+
+            def release(self) -> None:
+                return None
+
         def open_capture(source: Any) -> Any:
             nonlocal camera_count
+            camera_count += 1
+            if single_camera and camera_count == 2:
+                return PlaceholderCapture()
             capture = original_open_capture(source)
             configure_capture(capture, module.cv2, capture_settings)
-            camera_count += 1
-            if camera_count >= 2:
+            if camera_count >= (1 if single_camera else 2):
                 node.mark_camera_ready()
             return capture
 
@@ -367,6 +396,12 @@ def parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[
         "--capture-buffer-size",
         type=int,
         default=int(os.getenv("AIOT_AI_CAPTURE_BUFFER_SIZE", "1")),
+    )
+    parser.add_argument(
+        "--single-camera",
+        action="store_true",
+        default=_env_flag("AIOT_AI_SINGLE_CAMERA", default=False),
+        help="use one physical camera and the detector's single-frame path",
     )
     parser.add_argument(
         "--mjpeg-bind",
@@ -429,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipeline_args,
                 capture_settings,
                 mjpeg_server,
+                single_camera=args.single_camera,
             )
         ),
         name="ai-model-pipeline",

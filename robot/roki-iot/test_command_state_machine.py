@@ -102,7 +102,13 @@ class FakeAi:
             self.order.append("ai-disable")
 
 
-def payload(command: str, command_id: str, *, patrol_id: int | None = None) -> dict:
+def payload(
+    command: str,
+    command_id: str,
+    *,
+    patrol_id: int | None = None,
+    mapping_session_id: int | None = None,
+) -> dict:
     result = {
         "schemaVersion": 1,
         "command": command,
@@ -112,7 +118,27 @@ def payload(command: str, command_id: str, *, patrol_id: int | None = None) -> d
     }
     if patrol_id is not None:
         result["patrolId"] = patrol_id
+    if mapping_session_id is not None:
+        result["mappingSessionId"] = mapping_session_id
     return result
+
+
+class FakeMappingRuntime:
+    def __init__(self) -> None:
+        self.active = False
+        self.starts: list[tuple[int, str]] = []
+        self.stops = 0
+        self.start_decision = (True, "READY")
+
+    def start(self, mapping_session_id: int, command_id: str):
+        self.starts.append((mapping_session_id, command_id))
+        if self.start_decision[0]:
+            self.active = True
+        return self.start_decision
+
+    def stop(self) -> None:
+        self.stops += 1
+        self.active = False
 
 
 class CommandStateMachineTest(unittest.TestCase):
@@ -134,6 +160,7 @@ class CommandStateMachineTest(unittest.TestCase):
         self.store = FakeStore()
         self.runtime = FakeRuntimeService()
         self.ai = FakeAi()
+        self.mapping = FakeMappingRuntime()
         self.now_monotonic = 0.0
         self.handler = PatrolCommandHandler(
             settings=self.settings,
@@ -142,6 +169,7 @@ class CommandStateMachineTest(unittest.TestCase):
             state_store=self.store,
             pipeline_runner=SimpleNamespace(),
             ai_controller=self.ai,
+            mapping_runtime=self.mapping,
             command_cache_path=self.settings.command_cache_file,
             wall_clock=lambda: NOW,
             monotonic_clock=lambda: self.now_monotonic,
@@ -256,6 +284,34 @@ class CommandStateMachineTest(unittest.TestCase):
         self.assertEqual(token_path.read_text(encoding="utf-8").strip(), "runtime-secret")
         cache = Path(self.settings.command_cache_file).read_text(encoding="utf-8")
         self.assertNotIn("runtime-secret", cache)
+
+    def test_start_mapping_uses_existing_backend_contract(self) -> None:
+        self.handler.handle(
+            self.settings.command_topic,
+            payload(
+                "START_MAPPING",
+                "map-command",
+                mapping_session_id=12,
+            ),
+        )
+
+        self.assertEqual(self.mapping.starts, [(12, "map-command")])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+
+    def test_mapping_requires_session_id_and_blocks_patrol_concurrency(self) -> None:
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_MAPPING", "missing-session"),
+        )
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+
+        self.mapping.active = True
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "patrol-during-map", patrol_id=7),
+        )
+        self.assertEqual(self.runtime.calls, [])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
 
 
 if __name__ == "__main__":

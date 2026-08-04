@@ -65,6 +65,7 @@ class FinalRuntimeService:
         deployment_guard: Any | None = None,
         manual_controller: Any | None = None,
         keyboard_input: Any | None = None,
+        allow_legacy_direct_patrol: bool = True,
     ) -> None:
         if (manual_controller is None) != (keyboard_input is None):
             raise ValueError(
@@ -79,6 +80,7 @@ class FinalRuntimeService:
         self._deployment_guard = deployment_guard
         self._manual_controller = manual_controller
         self._keyboard_input = keyboard_input
+        self._allow_legacy_direct_patrol = allow_legacy_direct_patrol
         self._patrol_lease_held = False
         self._encoder_fallback_enabled = encoder_fallback_enabled
         self._encoder_progress: Any | None = None
@@ -160,6 +162,12 @@ class FinalRuntimeService:
 
         if not self.is_running():
             return False, "SERIAL_RUNTIME_NOT_RUNNING"
+        if (
+            self._manual_controller is None
+            and self._navigation_service is None
+            and not self._allow_legacy_direct_patrol
+        ):
+            return False, "PATROL_ROUTE_NOT_CONFIGURED"
         snapshot_method = getattr(self._runtime.state_store, "snapshot", None)
         if not callable(snapshot_method):
             return True, "READY"
@@ -186,6 +194,27 @@ class FinalRuntimeService:
                         return False, str(decision[1])
                 elif not decision:
                     return False, "NAV2_NOT_READY"
+        return True, "READY"
+
+    def mapping_readiness(self) -> tuple[bool, str]:
+        """Require only the Serial/odometry safety needed for manual mapping."""
+
+        if not self.is_running():
+            return False, "SERIAL_RUNTIME_NOT_RUNNING"
+        snapshot_method = getattr(self._runtime.state_store, "snapshot", None)
+        if not callable(snapshot_method):
+            return True, "READY"
+        snapshot = snapshot_method()
+        motion_state = getattr(snapshot, "motion_state", None)
+        if (
+            motion_state is None
+            or getattr(motion_state, "left_distance_m", None) is None
+            or getattr(motion_state, "right_distance_m", None) is None
+        ):
+            return False, "ODOMETRY_NOT_READY"
+        safety = getattr(snapshot, "safety_decision", None)
+        if safety is None or not getattr(safety, "allowed", False):
+            return False, str(getattr(safety, "fault", "SAFETY_NOT_READY"))
         return True, "READY"
 
     def send_command(self, command: str, **parameters: Any) -> None:
@@ -217,6 +246,8 @@ class FinalRuntimeService:
                         patrol_id=parameters.get("patrolId")
                     )
                 return
+            if not self._allow_legacy_direct_patrol:
+                raise RuntimeError("patrol route is not configured")
             self._active_patrol_id = parameters.get("patrolId")
             self._runtime.mission.start_patrol(
                 speed=self._patrol_drive_speed_pwm,

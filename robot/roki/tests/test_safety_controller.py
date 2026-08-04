@@ -110,6 +110,22 @@ class SafetyControllerTest(unittest.TestCase):
             "LINE_SENSOR_DISCONNECTED",
         )
 
+    def test_line_sensor_can_be_excluded_when_product_does_not_use_it(self) -> None:
+        safety = SafetyController(
+            SafetySettings(0.3, 1.0, 20.0, require_line_sensor=False)
+        )
+        safety.record_odometry(10.0)
+        safety.record_hardware_status(10.0)
+        decision = safety.evaluate(
+            now=10.1,
+            connected=True,
+            hardware_status=hardware_status(
+                line_sensor=LineSensorStatus.DISCONNECTED
+            ),
+            emergency_stop=False,
+        )
+        self.assertTrue(decision.allowed)
+
     def test_low_battery_uses_hardware_status_percent(self) -> None:
         self.assertEqual(
             self.evaluate(status=hardware_status(battery=19.9)).fault,

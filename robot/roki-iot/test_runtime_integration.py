@@ -188,6 +188,23 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         time.sleep(0.01)
         self.assertFalse(service.is_running())
 
+    def test_mapping_can_be_ready_when_patrol_route_is_not_configured(self) -> None:
+        runtime = FakeRuntime()
+        service = FinalRuntimeService(
+            runtime,
+            allow_legacy_direct_patrol=False,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+
+        self.assertEqual(
+            service.readiness(),
+            (False, "PATROL_ROUTE_NOT_CONFIGURED"),
+        )
+        self.assertEqual(service.mapping_readiness(), (True, "READY"))
+        with self.assertRaisesRegex(RuntimeError, "route is not configured"):
+            service.send_command("START_PATROL", patrolId=7)
+
     def test_integrated_di_does_not_construct_legacy_serial_reader(self) -> None:
         from run_integrated import create_integrated_application
 
