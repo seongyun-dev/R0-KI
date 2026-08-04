@@ -1,5 +1,6 @@
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { type ProjectedAnchor, layoutLeader } from '../components/robot/rokiLeaders'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { RobotEditDrawer } from '../features/robots/RobotEditDrawer'
 import { useDeleteRobot, useRobot, useUpdateRobot } from '../features/robots/useRobot'
@@ -47,10 +48,10 @@ function patrolTime(value: string | null) {
   })
 }
 
-/* 부위 콜아웃 앵커 — parts 순서(카메라/라이다/휠모터/구동부)와 1:1 대응.
-   RO-KI 4륜형(S15P11E103-296) 기준: 카메라=앞면 페이스 패널(좌), 라이다=상단 돔(우),
-   휠모터=우측 정비창 모터(우), 구동부=휠(좌). 좌우를 번갈아 둬야 지시선이 겹치지 않는다. */
-const PART_ANCHORS = ['l c-cam', 'r c-lidar', 'r c-motor', 'l c-drive']
+/* 부위 콜아웃 박스 자리 — parts 순서(카메라/라이다/휠모터/구동부)와 1:1 대응.
+   박스는 로봇에서 멀찍이 떨어뜨려 고정하고, 부위까지 잇는 지시선은 3D 좌표를
+   투영해 SVG로 그린다 — 로봇이 회전하므로 CSS 고정 좌표로는 부위를 따라갈 수 없다. */
+const PART_SLOTS = ['l c-cam', 'r c-lidar', 'r c-motor', 'l c-drive']
 
 export default function RobotDetail() {
   const { id } = useParams()
@@ -66,6 +67,37 @@ export default function RobotDetail() {
   const [toast, setToast] = useState<string>()
   const [isStartingPatrol, setIsStartingPatrol] = useState(false)
   const [patrolStarted, setPatrolStarted] = useState(false)
+
+  // 지시선 — 3D 뷰가 넘겨준 부위 좌표로 매 프레임 SVG를 직접 갱신한다.
+  // 상태로 두면 초당 30번 리렌더가 돌아 무대 전체가 다시 그려진다.
+  const frameRef = useRef<HTMLDivElement>(null)
+  const leadRefs = useRef<(SVGGElement | null)[]>([])
+  const boxRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  const handleAnchors = useCallback((anchors: ProjectedAnchor[]) => {
+    const frame = frameRef.current
+    const canvas = frame?.querySelector<HTMLElement>('.rd-3d')
+    if (!frame || !canvas) return
+    const fr = frame.getBoundingClientRect()
+    const cr = canvas.getBoundingClientRect()
+
+    anchors.forEach((a, i) => {
+      const g = leadRefs.current[i]
+      const box = boxRefs.current[i]
+      if (!g || !box) return
+
+      const l = layoutLeader(a, fr, cr, box.getBoundingClientRect())
+      const line = g.firstElementChild as SVGLineElement | null
+      const dot = g.lastElementChild as SVGCircleElement | null
+      line?.setAttribute('x1', String(l.x1))
+      line?.setAttribute('y1', String(l.y1))
+      line?.setAttribute('x2', String(l.x2))
+      line?.setAttribute('y2', String(l.y2))
+      dot?.setAttribute('cx', String(l.x2))
+      dot?.setAttribute('cy', String(l.y2))
+      g.style.opacity = String(l.opacity)
+    })
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -203,21 +235,43 @@ export default function RobotDetail() {
 
             {/* 중앙: 로봇 무대 */}
             <div className="rd-bot">
-              <div className="rd-frame">
+              <div className="rd-frame" ref={frameRef}>
                 <div className="rd-plinth" aria-hidden="true" />
                 <Suspense fallback={null}>
-                  <RobotDiagnosticView className="rd-3d" />
+                  <RobotDiagnosticView className="rd-3d" onAnchors={handleAnchors} />
                 </Suspense>
+
+                {/* 지시선 — viewBox 없이 두면 SVG 사용자 단위가 CSS px과 1:1이라
+                    handleAnchors 가 계산한 프레임 기준 px을 그대로 쓸 수 있다 */}
+                <svg className="rd-leads" aria-hidden="true">
+                  {robot.parts.slice(0, 4).map((part, i) => (
+                    <g
+                      key={part.name}
+                      ref={(el) => {
+                        leadRefs.current[i] = el
+                      }}
+                      className={part.status !== '정상' ? 'warn' : undefined}
+                    >
+                      <line x1="0" y1="0" x2="0" y2="0" />
+                      <circle cx="0" cy="0" r="3.5" />
+                    </g>
+                  ))}
+                </svg>
+
                 {robot.parts.slice(0, 4).map((part, i) => (
                   <div
                     key={part.name}
-                    className={`rd-cal ${PART_ANCHORS[i]}${part.status !== '정상' ? ' warn' : ''}`}
+                    className={`rd-cal ${PART_SLOTS[i]}${part.status !== '정상' ? ' warn' : ''}`}
                   >
-                    <div className="box">
+                    <div
+                      className="box"
+                      ref={(el) => {
+                        boxRefs.current[i] = el
+                      }}
+                    >
                       <span className="n">{part.name}</span>
                       <span className="st"><i style={{ background: dot(part.status) }} />{part.status}</span>
                     </div>
-                    <span className="lead" />
                   </div>
                 ))}
               </div>
