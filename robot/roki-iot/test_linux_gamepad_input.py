@@ -35,6 +35,14 @@ class GamepadStateTest(unittest.TestCase):
         self.button(self.settings.deadman_button)
         self.assertEqual(self.state.decision(), (None, "w", False, False))
 
+    def test_deadman_can_be_disabled_for_field_rc_control(self) -> None:
+        settings = GamepadSettings(deadman_required=False)
+        state = GamepadState(settings)
+        state.update(JoystickEvent(0, JS_EVENT_AXIS, settings.throttle_axis))
+        state.update(JoystickEvent(-32767, JS_EVENT_AXIS, settings.throttle_axis))
+
+        self.assertEqual(state.decision(), (None, "w", False, False))
+
     def test_axes_map_to_reverse_and_right_steering(self) -> None:
         self.button(self.settings.deadman_button)
         self.axis(self.settings.throttle_axis, 32767)

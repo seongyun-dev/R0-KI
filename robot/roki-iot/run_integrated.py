@@ -532,6 +532,10 @@ def _build_mapping_runtime(
         steering_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_STEERING_AXIS", "0")),
         throttle_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_THROTTLE_AXIS", "1")),
         deadman_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON", "4")),
+        deadman_required=_environment_enabled(
+            "ROKI_MAPPING_GAMEPAD_DEADMAN_REQUIRED",
+            True,
+        ),
         stop_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_STOP_BUTTON", "1")),
         finish_button_a=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A", "6")),
         finish_button_b=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B", "7")),
@@ -716,6 +720,16 @@ def create_integrated_application(
         )
     if mapping_runtime is not None:
         runtime_service.set_mapping_runtime(mapping_runtime)
+    if lidar_health_bridge is not None:
+        set_obstacle_activity_check = getattr(
+            lidar_health_bridge,
+            "set_obstacle_activity_check",
+            None,
+        )
+        if callable(set_obstacle_activity_check):
+            set_obstacle_activity_check(
+                runtime_service.is_obstacle_detection_active
+            )
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
@@ -774,6 +788,9 @@ def create_integrated_application(
         pipeline_runner=pipeline_runner,
         pose_source=pose_bridge,
         lidar_health_source=lidar_health_bridge,
+        pose_publish_activity_check=(
+            runtime_service.is_obstacle_detection_active
+        ),
         runtime_components=tuple(runtime_components),
         start_serial_reader=start_serial_runtime,
     )

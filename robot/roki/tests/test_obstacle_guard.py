@@ -69,6 +69,16 @@ class FrontObstacleDetectorTest(unittest.TestCase):
         self.assertEqual(cleared.direction, "NONE")
         self.assertIsNone(cleared.reason_message)
 
+    def test_reset_clears_hysteresis_before_next_operation(self) -> None:
+        ranges = self.clear_scan()
+        ranges[9] = 0.4
+        self.assertEqual(self.evaluate(ranges).obstacle.status, "STOP")
+
+        self.detector.reset()
+        ranges[9] = 0.65
+
+        self.assertEqual(self.evaluate(ranges).obstacle.status, "CLEAR")
+
     def test_side_obstacle_outside_sector_is_ignored(self) -> None:
         ranges = self.clear_scan()
         ranges[13] = 0.2  # +40 degrees

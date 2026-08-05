@@ -32,9 +32,9 @@ MQTT command → PatrolCommandHandler
 
 from __future__ import annotations
 
-import time
 import threading
-from typing import Any
+import time
+from typing import Any, Callable
 
 from backend_config.settings import (
     AppSettings,
@@ -70,6 +70,7 @@ class RokiPublisherApplication:
         pipeline_runner: PatrolPipelineRunner,
         pose_source: Any | None = None,
         lidar_health_source: Any | None = None,
+        pose_publish_activity_check: Callable[[], bool] | None = None,
         runtime_components: tuple[Any, ...] = (),
         start_serial_reader: bool = True,
     ) -> None:
@@ -81,6 +82,11 @@ class RokiPublisherApplication:
         self._pipeline_runner = pipeline_runner
         self._pose_source = pose_source
         self._lidar_health_source = lidar_health_source
+        self._pose_publish_activity_check = (
+            pose_publish_activity_check
+            if pose_publish_activity_check is not None
+            else lambda: True
+        )
         self._runtime_components = runtime_components
         self._started_runtime_components: list[Any] = []
         self._start_serial_reader = start_serial_reader
@@ -244,6 +250,9 @@ class RokiPublisherApplication:
         실제 Pose가 존재하고 발행 주기가 지난 경우
         Pose를 MQTT로 발행한다.
         """
+
+        if not self._pose_publish_activity_check():
+            return
 
         publish_due = (
             current_time

@@ -242,6 +242,21 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             self._mapping_runtime = mapping_runtime
 
+    def is_obstacle_detection_active(self) -> bool:
+        """Return whether patrol or mapping still owns an operation lifecycle.
+
+        ``active_patrol_id`` intentionally remains present while an obstacle
+        pauses patrol, allowing CLEAR detection to resume the same patrol.
+        Mapping is internal and keeps the public Backend state IDLE, so its
+        dedicated lifecycle flag is consulted without changing MQTT enums.
+        """
+
+        with self._lifecycle_lock:
+            if self._active_patrol_id is not None:
+                return True
+            mapping_runtime = self._mapping_runtime
+        return bool(getattr(mapping_runtime, "motion_active", False))
+
     def mapping_lifecycle_marker(self) -> tuple[int | None, int]:
         """Return a conservative lock-free snapshot for mapping START races.
 

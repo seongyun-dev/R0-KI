@@ -32,6 +32,7 @@ class GamepadSettings:
     steering_axis: int = 0
     throttle_axis: int = 1
     deadman_button: int = 4
+    deadman_required: bool = True
     stop_button: int = 1
     finish_button_a: int = 6
     finish_button_b: int = 7
@@ -156,7 +157,10 @@ class GamepadState:
 
         if self._button(self._settings.stop_button):
             return None, None, True, False
-        if not self._button(self._settings.deadman_button):
+        if (
+            self._settings.deadman_required
+            and not self._button(self._settings.deadman_button)
+        ):
             return None, None, True, False
 
         steering_value = self._axes.get(self._settings.steering_axis, 0.0)
@@ -203,7 +207,7 @@ class GamepadState:
 
 
 class LinuxGamepadInput:
-    """Reconnectable Linux joystick reader with a deadman switch."""
+    """Reconnectable Linux joystick reader with an optional deadman switch."""
 
     def __init__(
         self,

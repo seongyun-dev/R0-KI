@@ -14,7 +14,7 @@ Frontend 지도 생성 시작
      ESP32 runtime + odometry + hardware safety + LiDAR + SLAM Toolbox
      + 게임패드 + Robot service token + 지도 저장 경로
   -> ACK SUCCEEDED
-  -> LB(deadman)를 누른 동안 게임패드로 저속 수동 주행
+  -> 기본은 LB(deadman)를 누른 동안 게임패드로 저속 수동 주행
   -> Back + Start를 2초간 눌러 지도 제작 종료
   -> 즉시 STOP 및 수동 제어 해제
   -> nav2_map_server map_saver_cli
@@ -42,7 +42,7 @@ Jetson 로컬에 보존한다.
 
 | 입력 | 동작 |
 |---|---|
-| LB | deadman. 누르고 있는 동안에만 주행·조향 입력 허용 |
+| LB | deadman. 기본 설정에서는 누르고 있는 동안에만 주행·조향 입력 허용 |
 | 왼쪽 스틱 상/하 | 전진/후진, PWM 45 |
 | 왼쪽 스틱 좌/우 | 서보 60~100도 범위 조향 |
 | B | 즉시 STOP |
@@ -57,6 +57,7 @@ ROKI_MAPPING_GAMEPAD_DEVICE=/dev/input/js0
 ROKI_MAPPING_GAMEPAD_STEERING_AXIS=0
 ROKI_MAPPING_GAMEPAD_THROTTLE_AXIS=1
 ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON=4
+ROKI_MAPPING_GAMEPAD_DEADMAN_REQUIRED=true
 ROKI_MAPPING_GAMEPAD_STOP_BUTTON=1
 ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A=6
 ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B=7
@@ -67,7 +68,9 @@ Linux joystick은 값이 바뀔 때만 새 이벤트를 보내므로 이벤트�
 수신기 단절을 판정할 수 없다. 기본값 `0`에서는 열린 장치의 LB와 스틱 상태를 주기적으로
 짧은 pulse로 변환한다. LB 해제, B, 수신기 분리, 맵핑 종료는 즉시 STOP하며 프로세스가
 멈추면 ESP32 watchdog이 남은 명령을 종료한다. 주기 이벤트를 보장하는 별도 수신기에만
-양수 lease를 선택적으로 설정한다.
+양수 lease를 선택적으로 설정한다. 현장 RC식 조작이 필요하면
+`ROKI_MAPPING_GAMEPAD_DEADMAN_REQUIRED=false`로 바꿀 수 있다. 이 경우에도 중립 상태에서
+입력을 시작해야 하며 B, 수신기 분리, 프로세스 장애, ESP32 watchdog 정지는 유지된다.
 
 장치 권한을 위해 release 설치 과정은 운영 사용자 `e103`을 Linux `input` 그룹에
 추가한다. 그룹 변경이 처음 적용된 뒤에는 서비스 재시작 또는 재로그인이 필요하다.
@@ -88,9 +91,9 @@ PYTHONPATH=robot/roki-iot python3 robot/roki-iot/tools/gamepad_probe.py \
 LiDAR 장애물 판정은 맵핑 주행을 자동 정지시키지 않는다. 벽과 물체에 접근해 지도를
 그리는 작업 자체가 필요하기 때문이다. 대신 아래 안전장치는 그대로 유지한다.
 
-- LB deadman 해제, B, 종료 조합, 게임패드 분리 시 STOP
-- 0.2초 motion pulse를 유효한 deadman 상태에서만 갱신
-- 스틱을 고정해도 LB가 눌린 동안 짧은 pulse만 반복 갱신
+- deadman 사용 시 LB 해제, B, 종료 조합, 게임패드 분리 시 STOP
+- 0.2초 motion pulse를 유효한 조작 상태에서만 갱신
+- 스틱을 고정해도 짧은 pulse만 반복 갱신
 - ESP32 watchdog 및 유일한 시리얼 소유자
 - 모터/encoder/odometry/hardware safety 오류 시 fail-closed
 - LiDAR와 실제 SLAM Toolbox service가 준비되지 않으면 시작 거절
