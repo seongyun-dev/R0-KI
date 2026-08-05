@@ -112,7 +112,7 @@ export default function Stats() {
           </div>
           <div className="headtools tight">
             <R0KiDropdown
-              allLabel="달 단위"
+              allLabel="월 단위"
               options={UNIT_OPTIONS}
               value={unitKey}
               onChange={onUnitChange}
