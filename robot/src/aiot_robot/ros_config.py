@@ -65,10 +65,29 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
         "ROKI_NAV2_BT_XML",
         "/opt/aiot/iot/current/robot/config/ros/nav2_fixed_path.xml",
     )
-    bt_xml = Path(bt_xml_raw)
-    posix_bt_xml = PurePosixPath(bt_xml_raw)
-    if not bt_xml.is_absolute() and not posix_bt_xml.is_absolute():
-        raise ValueError("ROKI_NAV2_BT_XML must be an absolute path")
+    through_poses_bt_xml_raw = environment.get(
+        "ROKI_NAV2_THROUGH_POSES_BT_XML",
+        "/opt/aiot/iot/current/robot/config/ros/"
+        "nav2_fixed_path_through_poses.xml",
+    )
+    bt_paths = {
+        "NAV2_BT_XML": ("ROKI_NAV2_BT_XML", bt_xml_raw),
+        "NAV2_THROUGH_POSES_BT_XML": (
+            "ROKI_NAV2_THROUGH_POSES_BT_XML",
+            through_poses_bt_xml_raw,
+        ),
+    }
+    rendered_bt_paths: dict[str, str] = {}
+    for output_name, (environment_name, raw_path) in bt_paths.items():
+        native_path = Path(raw_path)
+        posix_path = PurePosixPath(raw_path)
+        if not native_path.is_absolute() and not posix_path.is_absolute():
+            raise ValueError(f"{environment_name} must be an absolute path")
+        rendered_bt_paths[output_name] = (
+            posix_path.as_posix()
+            if posix_path.is_absolute()
+            else native_path.as_posix()
+        )
     return {
         "ROBOT_RADIUS_M": _number(robot_radius),
         "INFLATION_RADIUS_M": _number(robot_radius + 0.15),
@@ -82,9 +101,7 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
         "INITIAL_POSE_X_M": _number(initial_pose_x),
         "INITIAL_POSE_Y_M": _number(initial_pose_y),
         "INITIAL_POSE_YAW_RAD": _number(initial_pose_yaw),
-        "NAV2_BT_XML": (
-            posix_bt_xml.as_posix() if posix_bt_xml.is_absolute() else bt_xml.as_posix()
-        ),
+        **rendered_bt_paths,
     }
 
 

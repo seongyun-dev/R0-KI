@@ -84,6 +84,12 @@ class RosConfigTest(unittest.TestCase):
 
             self.assertIn("nav2_recovery_node_bt_node", rendered)
             self.assertIn("nav2_navigate_through_poses_action_bt_node", rendered)
+            self.assertIn(
+                "default_nav_through_poses_bt_xml: "
+                "/opt/aiot/iot/current/robot/config/ros/"
+                "nav2_fixed_path_through_poses.xml",
+                rendered,
+            )
 
     def test_zero_initial_pose_is_rendered_as_ros_double(self):
         with tempfile.TemporaryDirectory() as directory:
