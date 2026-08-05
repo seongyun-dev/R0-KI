@@ -424,7 +424,6 @@ function zoneType(value: string): ZoneType {
   if (
     value === '주차장' ||
     value === '분리수거장' ||
-    value === '위험구역' ||
     value === '출입구' ||
     value === '도착지'
   ) {
@@ -504,8 +503,7 @@ function zoneToDomain(
     도착지: '🏁',
     주차장: '🅿',
     분리수거장: '🗑',
-    위험구역: '⚠',
-  }
+    }
   return {
     zone: {
       id: String(value.checkpointId),

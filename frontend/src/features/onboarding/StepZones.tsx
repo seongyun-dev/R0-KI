@@ -15,12 +15,11 @@ const COLS = 14 // 열 A~N
 const ROWS = 7 // 행 1~7
 const colLabel = (i: number) => String.fromCharCode(65 + i)
 
-const ZONE_TYPES: ZoneType[] = ['주차장', '분리수거장', '위험구역', '출입구', '도착지']
+const ZONE_TYPES: ZoneType[] = ['주차장', '분리수거장', '출입구', '도착지']
 
 const zoneTypeCode: Record<string, ZoneTypeCode> = {
   주차장: 'PARKING',
   분리수거장: 'RECYCLING_AREA',
-  위험구역: 'DANGER_ZONE',
   출입구: 'START',
   도착지: 'DESTINATION',
 }
@@ -29,7 +28,6 @@ const zoneTypeCode: Record<string, ZoneTypeCode> = {
 const zoneTone: Record<ZoneType, string> = {
   주차장: 'patrol',
   분리수거장: 'charge',
-  위험구역: 'alert',
   출입구: 'detect',
   도착지: 'offline',
   기타: 'offline',

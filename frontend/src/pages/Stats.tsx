@@ -24,7 +24,6 @@ const UNIT_OPTIONS = [
 const ZONE_OPTIONS = [
   { value: 'parking', label: '구역: 주차장' },
   { value: 'recycle', label: '구역: 분리수거장' },
-  { value: 'danger', label: '구역: 위험구역' },
 ]
 
 export default function Stats() {

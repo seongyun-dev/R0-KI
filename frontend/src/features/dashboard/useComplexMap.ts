@@ -16,7 +16,6 @@ const zoneTypeLabel: Record<ZoneTypeCode, ZoneType> = {
   START: '출입구',
   PARKING: '주차장',
   RECYCLING_AREA: '분리수거장',
-  DANGER_ZONE: '위험구역',
   DESTINATION: '도착지',
 }
 
@@ -24,7 +23,6 @@ const zoneIcon: Record<ZoneTypeCode, string> = {
   START: '🚪',
   PARKING: '🅿️',
   RECYCLING_AREA: '♻️',
-  DANGER_ZONE: '⚠️',
   DESTINATION: '🏁',
 }
 
