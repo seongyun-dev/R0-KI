@@ -59,6 +59,10 @@ class MappingArtifactsTest(unittest.TestCase):
         self.assertIn("map_saver_cli", commands[0])
         self.assertIn("save_map_timeout:=24.0", commands[0])
         self.assertIn("/slam_toolbox/serialize_map", commands[1])
+        normalized_yaml = artifact.yaml_path.read_text(encoding="utf-8")
+        self.assertIn("mode: trinary", normalized_yaml)
+        self.assertIn("occupied_thresh: 0.65", normalized_yaml)
+        self.assertIn("free_thresh: 0.15", normalized_yaml)
 
     def test_readiness_requires_live_slam_toolbox_service(self) -> None:
         exporter = SlamMapExporter(
