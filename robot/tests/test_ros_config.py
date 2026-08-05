@@ -69,6 +69,27 @@ class RosConfigTest(unittest.TestCase):
                 output.read_text(encoding="utf-8"),
             )
 
+    def test_zero_initial_pose_is_rendered_as_ros_double(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "nav2.yaml"
+            environment = self.environment()
+            environment["ROKI_INITIAL_POSE_X_M"] = "0"
+            environment["ROKI_INITIAL_POSE_Y_M"] = "0.0"
+            environment["ROKI_INITIAL_POSE_YAW_RAD"] = "0"
+            template = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / "ros"
+                / "nav2.params.yaml.template"
+            )
+
+            render_nav2_config(template, output, environment)
+            rendered = output.read_text(encoding="utf-8")
+
+            self.assertIn("      x: 0.0", rendered)
+            self.assertIn("      y: 0.0", rendered)
+            self.assertIn("      yaw: 0.0", rendered)
+
     def test_rejects_missing_or_invalid_fixed_initial_pose(self):
         for name, value, message in (
             ("ROKI_INITIAL_POSE_X_M", "", "ROKI_INITIAL_POSE_X_M"),

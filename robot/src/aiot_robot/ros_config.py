@@ -147,7 +147,12 @@ def _finite_float(environment: Mapping[str, str], name: str) -> float:
 
 
 def _number(value: float) -> str:
-    return f"{value:.6f}".rstrip("0").rstrip(".")
+    rendered = f"{value:.6f}".rstrip("0").rstrip(".")
+    # ROS 2 parameters are strongly typed. YAML scalars such as ``0`` are
+    # integers, so AMCL rejects them for its double-valued initial pose even
+    # though the source environment was parsed as a float. Keep every
+    # rendered measurement explicitly floating-point.
+    return rendered if "." in rendered else f"{rendered}.0"
 
 
 def main(argv: list[str] | None = None) -> int:

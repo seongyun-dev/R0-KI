@@ -11,7 +11,10 @@ ydlidar_ros2_driver_node:
     intensity_bit: 0
     sample_rate: 5
     abnormal_check_count: 4
-    fixed_resolution: true
+    # This single-channel unit varies by one or two samples per revolution.
+    # Fixed resolution makes the SDK drop those frames ("Real points > fixed
+    # points"), which intermittently starves /scan and RF2O/Nav2.
+    fixed_resolution: false
     reversion: false
     inverted: false
     auto_reconnect: true
