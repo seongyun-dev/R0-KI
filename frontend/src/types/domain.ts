@@ -144,7 +144,7 @@ export interface Patrol {
   date: string;                     // 07/15
   start: string;                    // 09:00
   end?: string | null;              // 09:42 (진행중이면 null)
-  routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 위험구역(B2), 출발지]
+  routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 지하주차장 B2, 출발지]
   routeSummary?: string;            // 상세 요약용 경로 표기 (1e: "101동→102동→103동")
   eventCount: number;               // 2
   status: StatusLabel;              // 완료 / 진행중

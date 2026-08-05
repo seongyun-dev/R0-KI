@@ -12,7 +12,6 @@ import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneT
    · 구역: 상태 명도 램프(--patrol/--charge/--alert/--detect/--offline).
      온보딩 구역 편집기(.au-zone)와 같은 반투명 레시피(채움 13% · 테두리 62%)라
      등록 화면에서 그린 구역이 대시보드에서 같은 색으로 이어진다.
-   · 위험구역은 색에만 기대지 않고 해칭을 겹친다(색맹 대응 · 이중 표기).
    · 구조물(격자·외곽): currentColor + 낮은 불투명도.
    · 로봇/경로: --graphic. 긴급 핀만 --urgent (모노크롬 규칙의 유일한 예외).
 
@@ -405,10 +404,6 @@ export function ComplexMap({
             <stop offset="0" stopColor="#fff" stopOpacity=".5" />
             <stop offset="1" stopColor="#fff" stopOpacity="0" />
           </radialGradient>
-          {/* 위험구역 해칭 — 색 외 이중 표기 */}
-          <pattern id="cmapHatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--alert)" strokeOpacity=".28" strokeWidth="1.6" />
-          </pattern>
         </defs>
 
         <g

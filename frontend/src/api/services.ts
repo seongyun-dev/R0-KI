@@ -372,11 +372,11 @@ export const mapApi = {
 
 export const statsApi = {
   /**
-   * 드롭다운 구역 키(parking/recycle/danger)를 by-zone 결과의 zoneId 목록으로 변환한다.
+   * 드롭다운 구역 키(parking/recycle)를 by-zone 결과의 zoneId 목록으로 변환한다.
    *
    * <p>백엔드는 checkpoint_type 필터 파라미터가 아직 없으므로,
    * 1차는 zoneName 키워드 매칭으로 zoneIds를 만든 뒤 기존 zoneIds 필터 API를 재사용한다.
-   * (예: parking -> "주차", recycle -> "분리수거", danger -> "위험")
+   * (예: parking -> "주차", recycle -> "분리수거")
    */
   resolveZoneIds: (
     byZone: AnalyticsByZoneResponse,
@@ -386,7 +386,6 @@ export const statsApi = {
     const keywordByZone: Record<string, string> = {
       parking: '주차',
       recycle: '분리수거',
-      danger: '위험',
     }
     const keyword = keywordByZone[zone]
     if (!keyword) return undefined
@@ -404,7 +403,7 @@ export const statsApi = {
    * assembleStatsDashboard 매퍼가 Stats 화면 형태로 합친다.
    *
    * @param range resolveAnalyticsRange() 결과 (from/to, +09:00)
-   * @param zone 구역 드롭다운 값. parking/recycle/danger를 zoneIds로 변환해 함께 적용한다.
+   * @param zone 구역 드롭다운 값. parking/recycle를 zoneIds로 변환해 함께 적용한다.
    * @param options.trendBucket 추이 버킷. 연간은 month, 그 외 day.
    */
   fetchDashboard: async (
