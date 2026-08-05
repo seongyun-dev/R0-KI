@@ -293,7 +293,7 @@ public class AnalyticsQueryService {
 
     /**
      * [이벤트 처리 현황]
-     * 전체/주차/쓰레기/위험구역 라벨별로 처리·미처리 건수와 비율을 계산한다.
+     * 전체/주차/쓰레기 라벨별로 처리·미처리 건수와 비율을 계산한다.
      *
      * <p>상태 규칙 (확정):
      * - handled = COMPLETED
@@ -301,7 +301,7 @@ public class AnalyticsQueryService {
      *
      * <p>유형 묶음: {@link AnalyticsEventGroup}
      * - 전체: 필터 없이 모든 이벤트
-     * - 주차/쓰레기/위험구역: 해당 그룹 EventType만
+     * - 주차/쓰레기: 해당 그룹 EventType만
      *
      * @param apartmentComplexId 로그인 관리자 소속 단지 ID
      * @param from 조회 시작 시각
@@ -329,7 +329,7 @@ public class AnalyticsQueryService {
         List<HandlingResponse.HandlingItem> items = new ArrayList<>();
         // 1) 전체
         items.add(buildHandlingItem("전체", events));
-        // 2) 그룹별 (주차 → 쓰레기 → 위험구역)
+        // 2) 그룹별 (주차 → 쓰레기 )
         for (AnalyticsEventGroup group : AnalyticsEventGroup.values()) {
             List<DetectedEvent> groupEvents =
                     events.stream().filter(e -> group.contains(e.getType())).toList();

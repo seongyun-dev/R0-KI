@@ -8,6 +8,7 @@ import com.oneloop.map.dto.request.ZoneBatchCreateRequest;
 import com.oneloop.map.dto.request.ZoneCreateRequest;
 import com.oneloop.map.dto.response.ZoneResponse;
 import com.oneloop.map.repository.CheckpointRepository;
+import com.oneloop.map.repository.NavigationWaypointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import java.math.BigDecimal;
 import java.util.List;
@@ -22,30 +23,22 @@ public class ZoneService {
 
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
+    private final NavigationWaypointRepository navigationWaypointRepository;
+    private final NavigationConfigurationGuard navigationConfigurationGuard;
 
     @Transactional
     public List<ZoneResponse> createAll(
             Long apartmentComplexId, Long mapId, ZoneBatchCreateRequest request) {
-        PatrolMap patrolMap = findMap(apartmentComplexId, mapId);
-        return saveAll(patrolMap, request);
-    }
-
-    @Transactional
-    public List<ZoneResponse> replaceAll(
-            Long apartmentComplexId, Long mapId, ZoneBatchCreateRequest request) {
-        PatrolMap patrolMap = findMap(apartmentComplexId, mapId);
-        checkpointRepository.deleteAllByPatrolMapId(mapId);
-        checkpointRepository.flush();
-        return saveAll(patrolMap, request);
-    }
-
-    private List<ZoneResponse> saveAll(
-            PatrolMap patrolMap, ZoneBatchCreateRequest request) {
+        PatrolMap patrolMap = findMapForUpdate(apartmentComplexId, mapId);
+        validateMapVersion(patrolMap, request.getMapVersion());
         List<Checkpoint> checkpoints =
                 request.getZones().stream()
                         .map(zone -> toCheckpoint(patrolMap, zone))
                         .toList();
 
+        navigationConfigurationGuard.assertMutable(apartmentComplexId);
+        navigationWaypointRepository.deleteAllByPatrolMapId(mapId);
+        checkpointRepository.deactivateAllByPatrolMapId(mapId);
         return checkpointRepository.saveAll(checkpoints).stream()
                 .map(ZoneResponse::from)
                 .toList();
@@ -61,6 +54,12 @@ public class ZoneService {
     private PatrolMap findMap(Long apartmentComplexId, Long mapId) {
         return patrolMapRepository
                 .findByIdAndApartmentComplexId(mapId, apartmentComplexId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MAP_NOT_FOUND));
+    }
+
+    private PatrolMap findMapForUpdate(Long apartmentComplexId, Long mapId) {
+        return patrolMapRepository
+                .findForUpdateByIdAndApartmentComplexId(mapId, apartmentComplexId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MAP_NOT_FOUND));
     }
 
@@ -85,6 +84,12 @@ public class ZoneService {
             BigDecimal minX, BigDecimal minY, BigDecimal maxX, BigDecimal maxY) {
         if (minX.compareTo(maxX) == 0 || minY.compareTo(maxY) == 0) {
             throw new BusinessException(ErrorCode.INVALID_ZONE_BOUNDS);
+        }
+    }
+
+    private void validateMapVersion(PatrolMap patrolMap, Integer requestedMapVersion) {
+        if (requestedMapVersion != null && !requestedMapVersion.equals(patrolMap.getMapVersion())) {
+            throw new BusinessException(ErrorCode.MAP_VERSION_CONFLICT);
         }
     }
 }

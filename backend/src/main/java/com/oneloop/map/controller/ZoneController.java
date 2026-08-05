@@ -42,16 +42,14 @@ public class ZoneController {
     }
 
     @PutMapping
-    @Operation(
-            summary = "지도 구역 전체 교체",
-            description = "기존 체크포인트를 모두 제거하고 요청한 구역 목록으로 교체합니다.")
+    @Operation(summary = "지도 구역 전체 교체", description = "지도 버전을 확인하고 현재 구역 전체를 원자적으로 교체합니다.")
     public ApiResponse<List<ZoneResponse>> replace(
             @AuthenticationPrincipal CustomUserDetails principal,
             @PathVariable Long mapId,
             @Valid @RequestBody ZoneBatchCreateRequest request) {
         return ApiResponse.success(
-                "지도 구역을 교체했습니다.",
-                zoneService.replaceAll(principal.getApartmentComplexId(), mapId, request));
+                "지도 구역이 저장되었습니다.",
+                zoneService.createAll(principal.getApartmentComplexId(), mapId, request));
     }
 
     @GetMapping
