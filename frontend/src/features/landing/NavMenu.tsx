@@ -14,7 +14,7 @@ const items: { label: string; target?: string; to?: string }[] = [
   { label: '기능', target: 'features' },
   { label: '작동방식', target: 'how' },
   { label: '로그인', to: '/login' },
-  { label: '회원가입', to: '/signup/onboarding' },
+  { label: '회원가입', to: '/signup/onboarding?new=1' },
 ]
 
 /** 풀스크린 내비 메뉴 (landing.html 포팅) */
@@ -71,7 +71,7 @@ export function NavMenu({ open, clock, onClose, onScrollTo }: NavMenuProps) {
       </nav>
       <div className="shell navmenu__bottom">
         <span>관제 시각 · <span className="font-mono tabular">{clock}</span></span>
-        <button type="button" className="nm-start" onClick={() => { onClose(); navigate('/signup/onboarding') }} tabIndex={open ? 0 : -1}>
+        <button type="button" className="nm-start" onClick={() => { onClose(); navigate('/signup/onboarding?new=1') }} tabIndex={open ? 0 : -1}>
           회원가입하기 →
         </button>
       </div>

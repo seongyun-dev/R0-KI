@@ -128,7 +128,7 @@ export default function Login() {
             </button>
           </div>
           <div className="au-foot">
-            아직 계정이 없으신가요? <Link to="/signup/onboarding">회원가입 →</Link>
+            아직 계정이 없으신가요? <Link to="/signup/onboarding?new=1">회원가입 →</Link>
           </div>
         </form>
       </div>

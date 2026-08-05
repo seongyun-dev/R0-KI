@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { R0KiAuthShell } from '../components/layout/R0KiAuthShell'
 import { StepAccount } from '../features/onboarding/StepAccount'
 import { StepMapScan } from '../features/onboarding/StepMapScan'
@@ -68,12 +68,14 @@ function AuthStepper({ current }: { current: number }) {
 /** 회원가입 · 최초 가입자 온보딩 (1u→1v→1w→1y) — R0Kiauth 시안 pNew→pRobot→pMap */
 export default function SignupOnboarding() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const startsNewSignup = searchParams.get('new') === '1'
   const login = useAuthStore((state) => state.login)
   const currentLoginId = useAuthStore((state) => state.loginId)
   const onboardingOwner = useOnboardingProgress((state) => state.ownerLoginId)
   const storedPhase = useOnboardingProgress((state) => state.phase)
   const ownsStoredProgress =
-    currentLoginId != null && onboardingOwner === currentLoginId
+    !startsNewSignup && currentLoginId != null && onboardingOwner === currentLoginId
   const storedRobotId = useOnboardingProgress((state) => state.robotId)
   const storedMapId = useOnboardingProgress((state) => state.mapId)
   const robotId = ownsStoredProgress ? storedRobotId : null
@@ -101,6 +103,13 @@ export default function SignupOnboarding() {
   const logout = useAuthStore((s) => s.logout)
   // 계정 등록을 마친 직후 안내 모달 — 닫으면 로봇 등록 단계가 그대로 드러난다
   const [signedUpId, setSignedUpId] = useState<string>()
+
+  useEffect(() => {
+    if (!startsNewSignup) return
+    logout()
+    resetOnboarding()
+    navigate('/signup/onboarding', { replace: true })
+  }, [logout, navigate, resetOnboarding, startsNewSignup])
 
   /* 모달을 열어둔 채 이 화면을 벗어나면(뒤로 가기 등) 로그아웃한다.
      계정은 만들어졌지만 로봇·지도가 없는 상태라, 세션을 남겨두면 로그인 화면에
