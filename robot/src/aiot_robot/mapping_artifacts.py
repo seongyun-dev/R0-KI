@@ -128,7 +128,10 @@ class SlamMapExporter:
                     str(prefix),
                     "--ros-args",
                     "-p",
-                    f"save_map_timeout:={saver_timeout:g}",
+                    # Nav2 declares this parameter as double.  ``:g`` turns
+                    # an integral float such as 24.0 into ``24``, which ROS
+                    # then rejects as an integer override.
+                    f"save_map_timeout:={saver_timeout}",
                 ),
                 self._settings.timeout_seconds,
             )

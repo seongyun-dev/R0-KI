@@ -57,6 +57,7 @@ class MappingArtifactsTest(unittest.TestCase):
         self.assertEqual((artifact.origin_x, artifact.origin_y), (-1.0, -2.0))
         self.assertEqual(len(commands), 2)
         self.assertIn("map_saver_cli", commands[0])
+        self.assertIn("save_map_timeout:=24.0", commands[0])
         self.assertIn("/slam_toolbox/serialize_map", commands[1])
 
     def test_readiness_requires_live_slam_toolbox_service(self) -> None:
