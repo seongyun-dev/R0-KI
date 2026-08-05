@@ -1,8 +1,23 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
-import type { MapDetailResponse, ZoneCreateRequest, ZoneTypeCode } from '../../api/contracts'
+import type {
+  Id,
+  MapDetailResponse,
+  ZoneCreateRequest,
+  ZoneCreateResponse,
+  ZoneTypeCode,
+} from '../../api/contracts'
 import { mapApi } from '../../api/services'
 import { R0KiModal } from '../../components/layout/R0KiModal'
 import type { Zone, ZoneType } from '../../types/domain'
+import {
+  assertSupportedMapCoordinates,
+  gridRectToWorldBounds,
+  worldBoundsToGridRect,
+  zoneBounds,
+  type GridRect,
+  type WorldBounds,
+} from './mapCoordinates'
+import { StepWaypoints } from './StepWaypoints'
 
 export type StepZonesProps = {
   mapId: string | number
@@ -25,6 +40,14 @@ const zoneTypeCode: Record<string, ZoneTypeCode> = {
   도착지: 'DESTINATION',
 }
 
+const zoneTypeLabel: Record<ZoneTypeCode, ZoneType> = {
+  START: '출입구',
+  PARKING: '주차장',
+  RECYCLING_AREA: '분리수거장',
+  DANGER_ZONE: '위험구역',
+  DESTINATION: '도착지',
+}
+
 /* 구역 색 — 상태 명도 램프 토큰. 색만으로 구분하지 않도록 이름을 함께 표기(3중 표기) */
 const zoneTone: Record<ZoneType, string> = {
   주차장: 'patrol',
@@ -36,8 +59,16 @@ const zoneTone: Record<ZoneType, string> = {
 }
 const toneVar = (type: ZoneType) => ({ '--z': `var(--${zoneTone[type]})` }) as CSSProperties
 
-type Rect = { x: number; y: number; w: number; h: number }
-type DraftZone = { id: number; type: ZoneType; label: string; rect: Rect }
+type Rect = GridRect
+type DraftZone = {
+  id: string | number
+  zoneId?: Id
+  type: ZoneType
+  label: string
+  rect: Rect
+  /** 서버에서 불러온 구역은 다시 저장할 때 정수 그리드로 양자화하지 않는다. */
+  bounds?: WorldBounds
+}
 
 const toRect = (a: { c: number; r: number }, b: { c: number; r: number }): Rect => ({
   x: Math.min(a.c, b.c),
@@ -66,8 +97,11 @@ const rectStyle = (r: Rect) => ({
 export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const gridRef = useRef<HTMLDivElement>(null)
   const idRef = useRef(0)
+  const [editorStage, setEditorStage] = useState<'zones' | 'waypoints'>('zones')
   const [selectedType, setSelectedType] = useState<ZoneType>('주차장')
   const [zones, setZones] = useState<DraftZone[]>([])
+  const [savedZones, setSavedZones] = useState<ZoneCreateResponse[]>([])
+  const [isZoneDirty, setIsZoneDirty] = useState(false)
   // 드래그 상태는 ref가 진실원천(포인터 이벤트가 리렌더보다 빠를 수 있음), state는 프리뷰 렌더용
   const dragRef = useRef<{ start: { c: number; r: number }; cur: { c: number; r: number } } | null>(null)
   const [drag, setDrag] = useState<typeof dragRef.current>(null)
@@ -76,12 +110,13 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const [nameInput, setNameInput] = useState('')
   const [draftRect, setDraftRect] = useState<Rect | null>(null)
   const [draftType, setDraftType] = useState<ZoneType>('주차장')
-  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<string | number | null>(null)
   const [map, setMap] = useState<MapDetailResponse>()
   const [mapImageUrl, setMapImageUrl] = useState<string>()
   const [loadError, setLoadError] = useState<string>()
   const [saveError, setSaveError] = useState<string>()
   const [isSaving, setIsSaving] = useState(false)
+  const savingRef = useRef(false)
   // 겹침 등 경고 칩 (시안 .au-warn) — 잠시 떴다 사라진다
   const [warn, setWarn] = useState<string>()
   const warnTimer = useRef<number>()
@@ -97,11 +132,28 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     let objectUrl: string | undefined
     const loadMap = async () => {
       try {
-        const detail = await mapApi.detail(mapId)
+        const [detail, registeredZones] = await Promise.all([
+          mapApi.detail(mapId),
+          mapApi.zones(mapId),
+        ])
+        assertSupportedMapCoordinates(detail)
         const blob = await mapApi.file(detail.mapUrl, controller.signal)
         objectUrl = URL.createObjectURL(blob)
         setMap(detail)
         setMapImageUrl(objectUrl)
+        setSavedZones(registeredZones)
+        setIsZoneDirty(false)
+        setZones(registeredZones.map((zone) => {
+          const bounds = zoneBounds(zone)
+          return {
+            id: zone.zoneId,
+            zoneId: zone.zoneId,
+            type: zoneTypeLabel[zone.type],
+            label: zone.name,
+            rect: worldBoundsToGridRect(detail, bounds, COLS, ROWS),
+            bounds,
+          }
+        }))
       } catch (reason) {
         if (!controller.signal.aborted) {
           setLoadError(reason instanceof Error ? reason.message : '지도를 불러오지 못했습니다.')
@@ -123,6 +175,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   }
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (savingRef.current) return
     const cell = cellAt(e)
     try {
       gridRef.current!.setPointerCapture(e.pointerId)
@@ -133,7 +186,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     setDrag(dragRef.current)
   }
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragRef.current) return
+    if (savingRef.current || !dragRef.current) return
     dragRef.current = { ...dragRef.current, cur: cellAt(e) }
     setDrag(dragRef.current)
   }
@@ -142,6 +195,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     if (!d) return
     dragRef.current = null
     setDrag(null)
+    if (savingRef.current) return
     const rect = toRect(d.start, d.cur)
 
     // 겹침 방지: 기존 구역과 겹치면 등록 취소
@@ -165,6 +219,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   }
 
   const openEdit = (z: DraftZone) => {
+    if (savingRef.current) return
     setEditingId(z.id)
     setDraftRect(z.rect)
     setDraftType(z.type)
@@ -181,6 +236,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
 
   const confirmName = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (savingRef.current) return
     // 유형 변경으로 도착지가 둘이 되는 것도 막는다
     if (
       draftType === '도착지' &&
@@ -194,46 +250,64 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     if (editingId != null) {
       setZones((zs) => zs.map((z) => (z.id === editingId ? { ...z, type: draftType, label } : z)))
     } else if (draftRect) {
-      setZones((zs) => [...zs, { id: ++idRef.current, type: draftType, label, rect: draftRect }])
+      setZones((zs) => [
+        ...zs,
+        { id: `draft-${++idRef.current}`, type: draftType, label, rect: draftRect },
+      ])
     }
+    setIsZoneDirty(true)
     closeNameModal()
   }
 
   const removeEditing = () => {
+    if (savingRef.current) return
     if (editingId != null) {
       setZones((zs) => zs.filter((z) => z.id !== editingId))
+      setIsZoneDirty(true)
     }
     closeNameModal()
   }
 
   const saveZones = async () => {
-    if (!map) return
-    const resolution = Number(map.resolution)
-    const originX = Number(map.originX)
-    const originY = Number(map.originY)
+    if (!map || savingRef.current) return
     const requests: ZoneCreateRequest[] = zones.map((zone) => {
-      const leftPixel = (zone.rect.x / COLS) * map.width
-      const rightPixel = ((zone.rect.x + zone.rect.w) / COLS) * map.width
-      const topPixel = (zone.rect.y / ROWS) * map.height
-      const bottomPixel = ((zone.rect.y + zone.rect.h) / ROWS) * map.height
+      const bounds = zone.bounds ?? gridRectToWorldBounds(map, zone.rect, COLS, ROWS)
       return {
         name: zone.label,
         type: zoneTypeCode[zone.type],
-        startX: originX + leftPixel * resolution,
-        startY: originY + (map.height - bottomPixel) * resolution,
-        endX: originX + rightPixel * resolution,
-        endY: originY + (map.height - topPixel) * resolution,
+        startX: bounds.minX,
+        startY: bounds.minY,
+        endX: bounds.maxX,
+        endY: bounds.maxY,
       }
     })
 
+    savingRef.current = true
     setIsSaving(true)
     setSaveError(undefined)
     try {
-      await mapApi.registerZones(mapId, requests)
-      onComplete(zones.map((z) => ({ id: `Z-${z.id}`, type: z.type, label: z.label, rect: z.rect })))
+      const registeredZones = await mapApi.replaceZones(mapId, {
+        mapVersion: map.mapVersion,
+        zones: requests,
+      })
+      setSavedZones(registeredZones)
+      setIsZoneDirty(false)
+      setZones(registeredZones.map((zone) => {
+        const bounds = zoneBounds(zone)
+        return {
+          id: zone.zoneId,
+          zoneId: zone.zoneId,
+          type: zoneTypeLabel[zone.type],
+          label: zone.name,
+          rect: worldBoundsToGridRect(map, bounds, COLS, ROWS),
+          bounds,
+        }
+      }))
+      setEditorStage('waypoints')
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : '구역 저장에 실패했습니다.')
     } finally {
+      savingRef.current = false
       setIsSaving(false)
     }
   }
@@ -241,8 +315,29 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const dragRect = drag ? toRect(drag.start, drag.cur) : null
   const dragBad = dragRect != null && zones.some((z) => overlaps(z.rect, dragRect))
 
+  if (editorStage === 'waypoints' && map && mapImageUrl) {
+    return (
+      <StepWaypoints
+        map={map}
+        mapImageUrl={mapImageUrl}
+        zones={savedZones}
+        onPrev={() => setEditorStage('zones')}
+        onComplete={() => onComplete(savedZones.map((zone) => ({
+          id: String(zone.zoneId),
+          type: zoneTypeLabel[zone.type],
+          label: zone.name,
+          rect: worldBoundsToGridRect(map, zoneBounds(zone), COLS, ROWS),
+        })))}
+      />
+    )
+  }
+
   return (
     <div>
+      <div className="au-editor-steps" aria-label="맵 등록 세부 단계">
+        <span aria-current="step">1. 구역 설정</span>
+        <span>2. 순찰 경로 설정</span>
+      </div>
       <div className="au-map">
         {/* 좌: 구역 유형 팔레트 */}
         <div className="au-kinds">
@@ -251,8 +346,11 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
               key={t}
               type="button"
               className="au-kind"
-              onClick={() => setSelectedType(t)}
+              onClick={() => {
+                if (!savingRef.current) setSelectedType(t)
+              }}
               aria-pressed={selectedType === t}
+              disabled={isSaving}
             >
               <span className="sw" style={toneVar(t)} />
               {t}
@@ -287,6 +385,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
               ref={gridRef}
               role="application"
               aria-label="IoT 맵 — 드래그하여 구역 지정"
+              aria-disabled={isSaving}
               className="au-cells"
               style={{
                 gridTemplateColumns: `repeat(${COLS}, 1fr)`,
@@ -314,15 +413,19 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                   title={`${z.label} · ${rangeName(z.rect)}`}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => openEdit(z)}
+                  aria-disabled={isSaving}
                 >
                   <span className="zl">{z.label}</span>
                   <button
                     type="button"
                     className="zx"
                     aria-label={`${z.label} 삭제`}
+                    disabled={isSaving}
                     onClick={(e) => {
                       e.stopPropagation()
+                      if (savingRef.current) return
                       setZones((zs) => zs.filter((x) => x.id !== z.id))
+                      setIsZoneDirty(true)
                     }}
                   >
                     <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -347,26 +450,49 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
         <div className="au-mfoot">
           <span className="au-note">
             <svg viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></svg>
-            <span><b>맵 등록 완료!</b> 드래그한 구역 <b className="num">{zones.length}</b>곳이 저장됩니다.</span>
+            <span>
+              {savedZones.length > 0 && !isZoneDirty
+                ? <>저장된 구역 <b className="num">{zones.length}</b>곳을 유지하면 기존 경로만 바로 편집할 수 있습니다.</>
+                : <>구역 <b className="num">{zones.length}</b>곳을 저장한 뒤 순찰 지점을 순서대로 설정합니다.</>}
+            </span>
           </span>
         </div>
       )}
       {loadError && <p role="alert" className="au-err">{loadError}</p>}
       {saveError && <p role="alert" className="au-err">{saveError}</p>}
 
-      <div className="au-act">
-        <button type="button" className="btn btn-s btn-add" onClick={onPrev}>
+      <div className="au-act au-editor-actions">
+        <button
+          type="button"
+          className="btn btn-s btn-add"
+          onClick={() => {
+            if (!savingRef.current) onPrev()
+          }}
+          disabled={isSaving}
+        >
           <svg viewBox="0 0 24 24"><path d="M19 12H6M13 5l-7 7 7 7" /></svg>
           이전
         </button>
         <span className="grow" />
+        {savedZones.length > 0 && !isZoneDirty && (
+          <button
+            type="button"
+            className="btn btn-s"
+            onClick={() => {
+              if (!savingRef.current) setEditorStage('waypoints')
+            }}
+            disabled={isSaving}
+          >
+            기존 구역 유지 · 경로만 편집
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-p btn-add"
           onClick={saveZones}
           disabled={zones.length === 0 || !map || isSaving}
         >
-          {isSaving ? '저장 중…' : '가입 완료'}
+          {isSaving ? '저장 중…' : '구역 저장 후 경로 설정'}
           <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
         </button>
       </div>
@@ -374,7 +500,9 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
       {/* 구역 이름 지정/수정 모달 */}
       <R0KiModal
         open={nameModalOpen}
-        onClose={closeNameModal}
+        onClose={() => {
+          if (!savingRef.current) closeNameModal()
+        }}
         title={editingId != null ? '구역 정보 수정' : '구역 이름 지정'}
       >
         <form onSubmit={confirmName}>
@@ -392,6 +520,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                 type="button"
                 onClick={() => setDraftType(t)}
                 aria-pressed={draftType === t}
+                disabled={isSaving}
               >
                 <span className="sw" style={toneVar(t)} />
                 {t}
@@ -407,18 +536,19 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
             maxLength={20}
             placeholder="예: 지하 1층 주차장"
             autoFocus
+            disabled={isSaving}
           />
           <p className="mdhelp">경비원이 알림에서 보게 될 이름입니다. 비워두면 유형 이름으로 저장됩니다.</p>
 
           <div className="mdact split">
             {editingId != null ? (
-              <button type="button" className="mddel" onClick={removeEditing}>구역 삭제</button>
+              <button type="button" className="mddel" onClick={removeEditing} disabled={isSaving}>구역 삭제</button>
             ) : (
               <span />
             )}
             <span className="right">
-              <button type="button" className="btn btn-s" onClick={closeNameModal}>취소</button>
-              <button type="submit" className="btn btn-p">{editingId != null ? '저장' : '등록'}</button>
+              <button type="button" className="btn btn-s" onClick={closeNameModal} disabled={isSaving}>취소</button>
+              <button type="submit" className="btn btn-p" disabled={isSaving}>{editingId != null ? '저장' : '등록'}</button>
             </span>
           </div>
         </form>

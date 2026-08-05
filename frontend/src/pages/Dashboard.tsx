@@ -387,11 +387,14 @@ export default function Dashboard() {
     <>
       <R0KiShell
         active="dashboard"
+        /* 로봇 이름은 길이 제한이 없어 상단바를 밀어낸다(로그아웃이 잘려 나갔다).
+           이름만 따로 떼어 말줄임하고, 상태·배터리는 항상 온전히 남긴다. */
         statusChip={
           lead ? (
-            <span className="statchip">
+            <span className="statchip" title={`${lead.name} ${lead.status}`}>
               <span className={hasUrgent ? 'd live' : 'd'} style={{ background: hasUrgent ? 'var(--urgent)' : 'var(--patrol)' }} />
-              {hasUrgent ? `${lead.name} 긴급 대응 중` : `${lead.name} ${lead.status}`}
+              <span className="nm">{lead.name}</span>
+              <span className="stt">{hasUrgent ? '긴급 대응 중' : lead.status}</span>
               <b>
                 배터리 {lead.battery != null ? `${lead.battery}%` : '확인 불가'}
               </b>
@@ -412,21 +415,26 @@ export default function Dashboard() {
                   checkpoints={mapData.checkpoints}
                   patrolling={isPatrolling}
                   bottomRight={
-                    patrollingRobots.length > 0 ? (
-                      <button
-                        type="button"
-                        className="botall"
-                        aria-pressed={showAllPatrolling}
-                        onClick={() => setShowAllPatrolling(true)}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden>
-                          <circle cx="7" cy="8" r="2.6" />
-                          <circle cx="17" cy="8" r="2.6" />
-                          <circle cx="12" cy="16.5" r="2.6" />
-                        </svg>
-                        순찰 중 로봇 전체 보기
-                      </button>
-                    ) : undefined
+                    <>
+                      <Link className="mapsetup-mapbtn" to="/app/test/map-setup">
+                        지도/순찰 경로 재설정
+                      </Link>
+                      {patrollingRobots.length > 0 && (
+                        <button
+                          type="button"
+                          className="botall"
+                          aria-pressed={showAllPatrolling}
+                          onClick={() => setShowAllPatrolling(true)}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden>
+                            <circle cx="7" cy="8" r="2.6" />
+                            <circle cx="17" cy="8" r="2.6" />
+                            <circle cx="12" cy="16.5" r="2.6" />
+                          </svg>
+                          순찰 중 로봇 전체 보기
+                        </button>
+                      )}
+                    </>
                   }
                 />
               ) : (
