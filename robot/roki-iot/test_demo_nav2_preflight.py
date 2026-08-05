@@ -13,7 +13,12 @@ from navigation.map_metadata import (
     map_bundle_sha256,
 )
 from navigation.route import RouteValidationError
-from run_integrated import _build_navigation_service, _navigation_mode
+from run_integrated import (
+    _build_navigation_service,
+    _navigation_mode,
+    _validate_backend_map_metadata_against_local,
+)
+from aiot_robot.navigation_config import NavigationConfigError
 
 
 class DemoNav2PreflightTest(unittest.TestCase):
@@ -230,6 +235,42 @@ waypoints:
                     "route SHA256",
                 ):
                     _build_navigation_service(route_path, encoder_limited=False)
+
+    def test_backend_map_metadata_must_match_local_occupancy_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            map_path, _route_path = self.make_map_and_route(root)
+            map_path.write_text(
+                """image: map.pgm
+resolution: 0.05004
+origin: [0.1234, -0.5678, 0.004]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25
+""",
+                encoding="utf-8",
+            )
+            config = {
+                "resolution": 0.05,
+                "originX": 0.123,
+                "originY": -0.568,
+                "originYaw": 0.0,
+                "width": 100,
+                "height": 100,
+            }
+            with patch.dict(os.environ, {"ROKI_MAP_YAML": str(map_path)}):
+                # Backend DECIMAL scales may round the original YAML by up to
+                # half of the stored unit; this is the same uploaded map.
+                _validate_backend_map_metadata_against_local(config)
+                config["originX"] = 0.1241
+                with self.assertRaises(NavigationConfigError) as raised:
+                    _validate_backend_map_metadata_against_local(config)
+
+            self.assertEqual(
+                raised.exception.reason,
+                "NAVIGATION_MAP_METADATA_MISMATCH",
+            )
+            self.assertFalse(raised.exception.local_fallback_allowed)
 
 
 if __name__ == "__main__":

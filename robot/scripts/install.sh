@@ -41,6 +41,28 @@ if [ "$(id -u)" -eq 0 ]; then
   if id "${runtime_user}" >/dev/null 2>&1 && getent group input >/dev/null 2>&1; then
     usermod -a -G input "${runtime_user}"
   fi
+
+  install -d -m 0755 -o root -g root \
+    /opt/aiot/bin \
+    /etc/systemd/system/aiot-ros.service.d \
+    /etc/systemd/system/aiot-robot.service.d
+  install -m 0755 -o root -g root \
+    "${robot_root}/scripts/apply-map-activation.sh" \
+    /opt/aiot/bin/aiot-map-activate
+  install -m 0644 -o root -g root \
+    "${robot_root}/config/systemd/aiot-current-map.conf" \
+    /etc/systemd/system/aiot-ros.service.d/20-current-map.conf
+  install -m 0644 -o root -g root \
+    "${robot_root}/config/systemd/aiot-current-map.conf" \
+    /etc/systemd/system/aiot-robot.service.d/20-current-map.conf
+  install -m 0644 -o root -g root \
+    "${robot_root}/config/systemd/aiot-map-activate.service" \
+    /etc/systemd/system/aiot-map-activate.service
+  install -m 0644 -o root -g root \
+    "${robot_root}/config/systemd/aiot-map-activate.path" \
+    /etc/systemd/system/aiot-map-activate.path
+  systemctl daemon-reload
+  systemctl enable --now aiot-map-activate.path
 fi
 
 echo "Robot runtime installed without sending movement commands"

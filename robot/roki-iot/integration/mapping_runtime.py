@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from aiot_robot.backend_client import BackendConfig, RobotBackendClient
+from aiot_robot.backend_client import (
+    BackendConfig,
+    BackendError,
+    BackendHttpError,
+    BackendTransportError,
+    RobotBackendClient,
+)
 from aiot_robot.mapping_artifacts import MapArtifact
 
 
@@ -47,6 +53,7 @@ class ManualMappingRuntime:
         drive_controller: Any,
         gamepad_input: Any,
         map_exporter: Any,
+        map_activator: Any,
         settings: MappingRuntimeSettings,
         client_factory: ClientFactory | None = None,
     ) -> None:
@@ -55,6 +62,7 @@ class ManualMappingRuntime:
         self._drive_controller = drive_controller
         self._gamepad_input = gamepad_input
         self._map_exporter = map_exporter
+        self._map_activator = map_activator
         self._settings = settings
         self._client_factory = client_factory or self._build_client
         self._lock = threading.Lock()
@@ -242,7 +250,7 @@ class ManualMappingRuntime:
         if not reason:
             raise ValueError("mapping abort reason is required")
         with self._lock:
-            if self._state not in {"STARTING", "MAPPING", "STOPPING"}:
+            if self._state == "IDLE":
                 return None
             command_id = self._command_id
             self._state = "ABORTING"
@@ -297,34 +305,54 @@ class ManualMappingRuntime:
         while not self._shutdown.is_set():
             try:
                 response = self._upload(mapping_session_id, command_id, artifact)
-                data = response.get("data")
-                if (
-                    not isinstance(data, dict)
-                    or data.get("mappingStatus") != "COMPLETED"
-                ):
-                    raise RuntimeError(
-                        "backend map upload did not complete the session"
-                    )
-                print(
-                    "[MAPPING] upload completed "
-                    f"mappingSessionId={mapping_session_id} mapId={data.get('mapId')} "
-                    f"mapVersion={data.get('mapVersion')}"
-                )
-                with self._lock:
-                    self._reset_locked()
-                    self._last_error = None
-                self._completed.set()
+            except BackendTransportError as exc:
+                delay = self._schedule_upload_retry(exc, delay)
+                continue
+            except BackendHttpError as exc:
+                if exc.retryable:
+                    delay = self._schedule_upload_retry(exc, delay)
+                    continue
+                self._terminal_failure("MAPPING_UPLOAD_REJECTED", exc)
+                return
+            except BackendError as exc:
+                self._terminal_failure("MAPPING_UPLOAD_INVALID_RESPONSE", exc)
                 return
             except Exception as exc:
-                with self._lock:
-                    self._last_error = type(exc).__name__
-                print(
-                    "[MAPPING] upload retry scheduled "
-                    f"type={type(exc).__name__} delaySec={delay:g}"
+                self._terminal_failure("MAPPING_UPLOAD_FAILED", exc)
+                return
+
+            data = response.get("data")
+            if (
+                not isinstance(data, dict)
+                or data.get("mappingStatus") != "COMPLETED"
+                or data.get("mapId") is None
+                or data.get("mapVersion") is None
+            ):
+                self._terminal_failure(
+                    "MAPPING_UPLOAD_INVALID_RESPONSE",
+                    RuntimeError("backend map upload did not complete the session"),
                 )
-                if self._shutdown.wait(delay):
-                    return
-                delay = min(delay * 2.0, self._settings.upload_retry_max_sec)
+                return
+            try:
+                activated = self._map_activator.activate(
+                    artifact,
+                    map_id=data["mapId"],
+                    map_version=data["mapVersion"],
+                )
+            except Exception as exc:
+                self._terminal_failure("MAPPING_ACTIVATION_FAILED", exc)
+                return
+
+            print(
+                "[MAPPING] upload and activation completed "
+                f"mappingSessionId={mapping_session_id} mapId={activated.map_id} "
+                f"mapVersion={activated.map_version}"
+            )
+            with self._lock:
+                self._reset_locked()
+                self._last_error = None
+            self._completed.set()
+            return
 
     def _upload(
         self,
@@ -364,6 +392,23 @@ class ManualMappingRuntime:
         if not token:
             raise RuntimeError("BACKEND_TOKEN_UNAVAILABLE")
         return token
+
+    def _schedule_upload_retry(self, exc: Exception, delay: float) -> float:
+        with self._lock:
+            self._last_error = type(exc).__name__
+        print(
+            "[MAPPING] transient upload retry scheduled "
+            f"type={type(exc).__name__} delaySec={delay:g}"
+        )
+        if self._shutdown.wait(delay):
+            return delay
+        return min(delay * 2.0, self._settings.upload_retry_max_sec)
+
+    def _terminal_failure(self, reason: str, exc: Exception) -> None:
+        with self._lock:
+            self._last_error = type(exc).__name__
+        print(f"[MAPPING] terminal failure reason={reason} type={type(exc).__name__}")
+        self._notify_failure(reason)
 
     def _capture_lifecycle_marker(self) -> object | None:
         marker = getattr(self._runtime_service, "mapping_lifecycle_marker", None)
@@ -424,7 +469,7 @@ class ManualMappingRuntime:
                 )
         # The production listener aborts and publishes the FAILED command ACK.
         # Keep standalone/test compositions fail-closed if it is absent or fails.
-        if self.motion_active:
+        if self.active:
             self.abort(reason)
 
     def _reset_locked(self) -> None:

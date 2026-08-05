@@ -12,7 +12,7 @@ Frontend POST /api/patrols
        -> AI READY + LiDAR + ESP32/odometry + OTA lock 확인
        -> /ai/control ENABLE
        -> 유일한 RobotRuntime -> /dev/roki_esp32
-       -> route.local.yaml + map pose/Nav2 또는 encoder_limited
+       -> START마다 Backend navigation config + local map pose/Nav2
        -> MQTT pose 1s / status 5s+변경즉시 / command ACK
        -> AI detection + 현재 pose -> durable outbox -> Backend REST
        -> DESTINATION 즉시 물리 STOP + 최종 pose/status
@@ -78,7 +78,14 @@ sudo install -m 0600 -o root -g root \
 
 ### route와 map
 
-운영 route는 릴리스가 아니라 persistent 경로에 둔다.
+운영 route의 진실원천은 Robot service token으로 읽는 Backend
+`GET /api/robot/navigation-config`다. Robot은 `START_PATROL`마다 최신 map version,
+zone과 ordered waypoint를 받아 기존 Route/Nav2 계약으로 검증한다. 응답이 없거나
+local map identity와 다르면 AI나 모터를 켜기 전에 거절한다.
+
+`route.local.yaml`은 릴리스가 아니라 persistent 경로에 보존하지만 현장/디버그
+fallback일 뿐이다. fallback은 운영자가 원인을 확인한 뒤
+`AIOT_NAVIGATION_LOCAL_FALLBACK_ENABLED=true`를 명시한 경우에만 허용한다.
 
 ```bash
 sudo install -m 0660 -o aiot -g aiot \
@@ -89,9 +96,36 @@ sudo -u aiot env \
   /opt/aiot/iot/current/robot/scripts/run.sh --check
 ```
 
-route의 `frame_id`, 좌표, yaw는 저장한 occupancy map의 `map` frame과 같아야 한다.
+`AIOT_NAVIGATION_CONFIG_SOURCE=backend`의 `--check`는 네트워크를 열지 않는다.
+출력의 `backendNavigationFetchDeferred=true` 및
+`localMapSafetyValidationDeferred=true`는 Backend route fetch와 local map
+bundle/hash/occupancy/clearance 검증이 `START_PATROL`까지 보류됐다는 뜻이다.
+따라서 이 결과만으로 실제 경로 안전성이 검증됐다고 판정하면 안 된다.
+
+local fallback은 명시적으로 활성화했더라도 DNS/연결/timeout 같은 Backend
+transport 불가에만 허용된다. TLS certificate/hostname/handshake, HTTP/auth,
+schema, map id/version, local map hash, occupancy 및 clearance 오류는 fallback 없이
+`START_PATROL`을 거부한다.
+Backend의 resolution/originX/originY/originYaw/width/height도
+`ROKI_MAP_YAML`이 가리키는 실제 occupancy map metadata와 일치해야 하며,
+다르면 `NAVIGATION_MAP_METADATA_MISMATCH`로 거부한다.
+수치 비교는 Backend DECIMAL 저장 scale의 반 단위까지 허용한다
+(resolution 0.00005, origin x/y 0.0005, yaw 0.005); width/height는 exact다.
+
+Backend navigation API의 `yaw`는 rad이며 Robot adapter가 기존 Route의 `yaw_deg`로
+변환한다. Backend route와 local fallback의 `frame_id`, 좌표, yaw는 저장한 occupancy map의
+`map` frame과 같아야 한다.
 sequence는 1부터 연속이고 마지막 action은 `DESTINATION`이어야 한다. 주차·스캔
 지점은 `SCAN`, 통과점은 `PASS`를 사용한다.
+
+`yaw`가 명시되면 기존과 같이 그 각도를 사용한다. `yaw=null`이면 Robot은
+다음 waypoint 방향을 사용하고, 마지막 waypoint는 직전 진행 방향을 유지한다.
+경로가 한 점뿐이면 최신 localization heading을 사용하며, heading도 없으면
+`NAV2_GOAL_YAW_UNRESOLVABLE`로 fail-closed 한다. 0도로 자동 치환하지 않는다.
+
+Backend ordered waypoint의 `acceptanceRadius` 계약은 `0.20..1.00 m`다.
+내부 legacy local Route parser는 기존 진단 파일 호환을 위해 더 작은 값을 읽을 수
+있지만, Backend provider는 0.20 m 미만을 `NAVIGATION_CONFIG_INVALID`로 거부한다.
 
 ### 반드시 실측할 값
 

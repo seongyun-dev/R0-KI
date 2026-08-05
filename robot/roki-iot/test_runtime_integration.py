@@ -4,7 +4,7 @@ import threading
 import time
 import unittest
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -14,6 +14,7 @@ from control.manual_drive_controller import (
 )
 from integration.runtime_state_backend_adapter import (
     FinalRuntimeService,
+    PatrolStartExpired,
     RuntimeStateBackendAdapter,
 )
 from backend_state.robot_state_store import RobotStateStore
@@ -189,6 +190,120 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         service.send_command("STOP_PATROL")
         guard.release.assert_called_once_with()
         service.stop()
+
+    def test_prepare_patrol_replaces_local_route_with_fresh_backend_route(self) -> None:
+        runtime = FakeRuntime()
+        local_navigation = Mock()
+        remote_navigation = Mock()
+        provider = Mock()
+        provider.load_navigation.return_value = remote_navigation
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=local_navigation,
+            navigation_provider=provider,
+            local_navigation_fallback_enabled=False,
+            navigation_driver=Mock(),
+        )
+
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+
+        provider.load_navigation.assert_called_once_with()
+        remote_navigation.add_event_listener.assert_called_once_with(
+            service._on_navigation_event
+        )
+        self.assertIs(service._navigation_service, remote_navigation)
+
+    def test_prepare_patrol_fails_closed_when_backend_route_is_unavailable(self) -> None:
+        runtime = FakeRuntime()
+        provider = Mock()
+        failure = RuntimeError("hidden transport detail")
+        failure.reason = "NAVIGATION_CONFIG_UNAVAILABLE"
+        provider.load_navigation.side_effect = failure
+        service = FinalRuntimeService(
+            runtime,
+            navigation_provider=provider,
+            local_navigation_fallback_enabled=False,
+            navigation_driver=Mock(),
+        )
+
+        self.assertEqual(
+            service.prepare_patrol(),
+            (False, "NAVIGATION_CONFIG_UNAVAILABLE"),
+        )
+        self.assertIsNone(service._navigation_service)
+
+    def test_prepare_patrol_uses_only_explicit_local_fallback(self) -> None:
+        runtime = FakeRuntime()
+        local_navigation = Mock()
+        provider = Mock()
+        failure = RuntimeError("unavailable")
+        failure.reason = "NAVIGATION_CONFIG_UNAVAILABLE"
+        failure.local_fallback_allowed = True
+        provider.load_navigation.side_effect = failure
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=local_navigation,
+            navigation_provider=provider,
+            local_navigation_fallback_enabled=True,
+            navigation_driver=Mock(),
+        )
+
+        self.assertEqual(
+            service.prepare_patrol(),
+            (True, "READY"),
+        )
+        self.assertIs(service._navigation_service, local_navigation)
+
+    def test_local_fallback_rejects_contract_and_map_safety_failures(self) -> None:
+        for reason in (
+            "NAVIGATION_MAP_MISMATCH",
+            "NAVIGATION_MAP_METADATA_MISMATCH",
+            "NAVIGATION_CONFIG_INVALID",
+            "NAVIGATION_ROUTE_UNSAFE",
+        ):
+            with self.subTest(reason=reason):
+                runtime = FakeRuntime()
+                local_navigation = Mock()
+                provider = Mock()
+                failure = RuntimeError("unsafe")
+                failure.reason = reason
+                failure.local_fallback_allowed = False
+                provider.load_navigation.side_effect = failure
+                service = FinalRuntimeService(
+                    runtime,
+                    navigation_service=local_navigation,
+                    navigation_provider=provider,
+                    local_navigation_fallback_enabled=True,
+                    navigation_driver=Mock(),
+                )
+
+                self.assertEqual(service.prepare_patrol(), (False, reason))
+                self.assertIs(service._navigation_service, local_navigation)
+
+    def test_prepare_passes_command_deadline_and_cancel_discards_remote_route(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        remote_navigation = Mock()
+        provider = Mock()
+        provider.load_navigation.return_value = remote_navigation
+        service = FinalRuntimeService(
+            runtime,
+            navigation_provider=provider,
+            navigation_driver=Mock(),
+        )
+        deadline = datetime(2026, 8, 5, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            service.prepare_patrol(expires_at=deadline),
+            (True, "READY"),
+        )
+        provider.load_navigation.assert_called_once_with(deadline=deadline)
+        self.assertIs(service._navigation_service, remote_navigation)
+
+        service.cancel_prepared_patrol()
+
+        self.assertIsNone(service._navigation_service)
 
     def test_stop_write_failure_cleans_navigation_and_releases_lease(
         self,
@@ -553,6 +668,166 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         self.assertIsNone(service.active_patrol_id)
         self.assertFalse(runtime.mission.patrol_active)
         self.assertGreaterEqual(driver.stop_patrol.call_count, 1)
+
+    def test_start_expiring_while_waiting_for_lifecycle_lock_never_activates(
+        self,
+    ) -> None:
+        class ObservableRLock:
+            def __init__(self) -> None:
+                self._lock = threading.RLock()
+                self.enter_attempted = threading.Event()
+
+            def acquire(self) -> bool:
+                return self._lock.acquire()
+
+            def release(self) -> None:
+                self._lock.release()
+
+            def __enter__(self) -> "ObservableRLock":
+                self.enter_attempted.set()
+                self._lock.acquire()
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                self._lock.release()
+
+        runtime = FakeRuntime()
+        manual = Mock()
+        manual.active = False
+        now = [datetime(2026, 8, 5, tzinfo=timezone.utc)]
+        deadline = now[0] + timedelta(seconds=10)
+        service = FinalRuntimeService(
+            runtime,
+            manual_controller=manual,
+            keyboard_input=Mock(),
+            wall_clock=lambda: now[0],
+        )
+        service.is_running = Mock(return_value=True)
+        service.readiness = Mock(return_value=(True, "READY"))
+        lifecycle_lock = ObservableRLock()
+        service._lifecycle_lock = lifecycle_lock
+        failures: list[Exception] = []
+
+        def start_after_handler_check() -> None:
+            self._capture_error(
+                failures,
+                lambda: service.send_command(
+                    "START_PATROL",
+                    patrolId=103,
+                    expires_at=deadline,
+                ),
+            )
+
+        service._lifecycle_lock.acquire()
+        try:
+            start_thread = threading.Thread(target=start_after_handler_check)
+            start_thread.start()
+            self.assertTrue(lifecycle_lock.enter_attempted.wait(timeout=0.5))
+            self.assertTrue(start_thread.is_alive())
+            now[0] = deadline
+        finally:
+            service._lifecycle_lock.release()
+        start_thread.join(timeout=1.0)
+
+        self.assertFalse(start_thread.is_alive())
+        self.assertEqual(len(failures), 1)
+        self.assertIsInstance(failures[0], PatrolStartExpired)
+        self.assertEqual(
+            getattr(failures[0], "reason", None),
+            "COMMAND_EXPIRED_DURING_START",
+        )
+        manual.activate.assert_not_called()
+        self.assertEqual(runtime.mission.start_calls, 0)
+        self.assertEqual(runtime.mission.stop_calls, 0)
+        self.assertEqual(runtime.stop_reasons, [])
+        self.assertIsNone(service.active_patrol_id)
+
+    def test_nav2_deadline_crossing_after_route_start_never_starts_driver(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        now = [datetime(2026, 8, 5, tzinfo=timezone.utc)]
+        deadline = now[0] + timedelta(seconds=10)
+
+        def prepare_first_event(*, patrol_id: int) -> object:
+            self.assertEqual(patrol_id, 104)
+            now[0] = deadline
+            return object()
+
+        navigation.start_patrol.side_effect = prepare_first_event
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            wall_clock=lambda: now[0],
+        )
+        service.is_running = Mock(return_value=True)
+        service.readiness = Mock(return_value=(True, "READY"))
+
+        with self.assertRaises(PatrolStartExpired):
+            service.send_command(
+                "START_PATROL",
+                patrolId=104,
+                expires_at=deadline,
+            )
+
+        navigation.start_patrol.assert_called_once_with(patrol_id=104)
+        driver.start_patrol.assert_not_called()
+        driver.stop_patrol.assert_not_called()
+        self.assertEqual(runtime.mission.start_calls, 0)
+        self.assertEqual(runtime.mission.stop_calls, 0)
+        self.assertEqual(runtime.stop_reasons, [])
+        self.assertIsNone(service.active_patrol_id)
+
+    def test_encoder_deadline_crossing_before_motor_start_never_starts_motor(
+        self,
+    ) -> None:
+        runtime = FakeRuntime()
+        runtime.state_store = Mock()
+        runtime.state_store.snapshot.return_value = SimpleNamespace(
+            motion_state=SimpleNamespace(
+                left_distance_m=0.0,
+                right_distance_m=0.0,
+            ),
+            safety_decision=SimpleNamespace(allowed=True),
+        )
+        navigation = Mock()
+        now = [datetime(2026, 8, 5, tzinfo=timezone.utc)]
+        deadline = now[0] + timedelta(seconds=10)
+
+        def prepare_route(*, patrol_id: int) -> object:
+            self.assertEqual(patrol_id, 105)
+            now[0] = deadline
+            return object()
+
+        navigation.start_patrol.side_effect = prepare_route
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            wall_clock=lambda: now[0],
+        )
+        service._encoder_progress = Mock()
+        service.is_running = Mock(return_value=True)
+        service.readiness = Mock(return_value=(True, "READY"))
+
+        with self.assertRaises(PatrolStartExpired):
+            service.send_command(
+                "START_PATROL",
+                patrolId=105,
+                expires_at=deadline,
+            )
+
+        service._encoder_progress.start.assert_called_once_with(
+            left_distance_m=0.0,
+            right_distance_m=0.0,
+        )
+        navigation.start_patrol.assert_called_once_with(patrol_id=105)
+        self.assertEqual(runtime.mission.start_calls, 0)
+        self.assertEqual(runtime.mission.stop_calls, 0)
+        self.assertEqual(runtime.stop_reasons, [])
+        self.assertIsNone(service.active_patrol_id)
 
     def test_safety_fault_during_manual_start_cannot_ack_active_patrol(self) -> None:
         runtime = FakeRuntime()

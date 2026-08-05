@@ -7,6 +7,7 @@ import argparse
 import hmac
 import importlib.util
 import logging
+import math
 import os
 import signal
 import sys
@@ -105,6 +106,28 @@ def _build_navigation_service(
     selected_path = _selected_route_path(route_path)
     if not selected_path.is_file():
         raise RuntimeError(f"waypoint route file is missing: {selected_path}")
+    from navigation.route import load_route
+
+    return _build_navigation_service_from_route(
+        load_route(selected_path),
+        encoder_limited=encoder_limited,
+        route_path=selected_path,
+    )
+
+
+def _build_navigation_service_from_route(
+    route: Any,
+    *,
+    encoder_limited: bool,
+    route_path: Path | None = None,
+) -> Any:
+    """Validate either a local file route or a freshly fetched Backend route."""
+
+    if encoder_limited:
+        raise RuntimeError(
+            "DEMO_NAV2_REQUIRED: encoder_limited is a straight-line diagnostic "
+            "mode and cannot run the fixed-map demo patrol"
+        )
     from navigation.map_metadata import (
         file_sha256,
         load_map_metadata,
@@ -116,11 +139,10 @@ def _build_navigation_service(
         validate_route_clearance,
         validate_route_bounds,
     )
-    from navigation.route import RouteValidationError, load_route
+    from navigation.route import RouteValidationError
     from navigation.service import WaypointNavigationService
     from aiot_robot.ros_config import nav2_xy_goal_tolerance
 
-    route = load_route(selected_path)
     xy_goal_tolerance_m = nav2_xy_goal_tolerance(os.environ)
     for waypoint in route.waypoints:
         if waypoint.acceptance_radius_m < xy_goal_tolerance_m:
@@ -148,11 +170,12 @@ def _build_navigation_service(
             "route map_version does not match ROKI_MAP_VERSION"
         )
     expected_map_sha256 = _required_sha256("ROKI_MAP_SHA256")
-    expected_route_sha256 = _required_sha256("ROKI_ROUTE_SHA256")
     if not hmac.compare_digest(map_bundle_sha256(metadata), expected_map_sha256):
         raise RouteValidationError("map YAML/image SHA256 does not match deployment")
-    if not hmac.compare_digest(file_sha256(selected_path), expected_route_sha256):
-        raise RouteValidationError("route SHA256 does not match deployment")
+    if route_path is not None:
+        expected_route_sha256 = _required_sha256("ROKI_ROUTE_SHA256")
+        if not hmac.compare_digest(file_sha256(route_path), expected_route_sha256):
+            raise RouteValidationError("route SHA256 does not match deployment")
 
     validate_route_bounds(route, metadata)
     grid = load_occupancy_grid(metadata)
@@ -281,6 +304,10 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
             command
         ),
         failure_sink=lambda reason: service_holder["service"].fail_patrol(reason),
+        scan_context_sink=lambda waypoint: service_holder[
+            "service"
+        ].update_scan_context(waypoint),
+        heading_source=lambda: service_holder["service"].current_heading_deg(),
     )
 
 
@@ -330,6 +357,131 @@ def _mapping_mode_requested() -> bool:
     )
 
 
+def _legacy_mapping_only_selected(settings: Any, route_path: Path) -> bool:
+    """Preserve the pre-route mapping bootstrap used before Nav2 is configured."""
+
+    return (
+        _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True)
+        and settings.navigation_mode == "encoder_limited"
+        and not route_path.is_file()
+    )
+
+
+def _require_legacy_route_when_mapping_disabled(
+    settings: Any, route_path: Path
+) -> None:
+    if settings.navigation_mode == "encoder_limited" and not route_path.is_file():
+        raise RuntimeError(f"waypoint route file is missing: {route_path}")
+
+
+def _navigation_config_source() -> str:
+    source = os.getenv("AIOT_NAVIGATION_CONFIG_SOURCE", "backend").strip().lower()
+    if source not in {"backend", "local"}:
+        raise RuntimeError(
+            "NAVIGATION_CONFIG_SOURCE_INVALID: "
+            "AIOT_NAVIGATION_CONFIG_SOURCE must be backend or local"
+        )
+    return source
+
+
+def _event_delivery_owner() -> str:
+    owner = os.getenv("AIOT_EVENT_DELIVERY_OWNER", "robot").strip().lower()
+    if owner != "robot":
+        raise RuntimeError(
+            "EVENT_DELIVERY_OWNER_INVALID: AIOT_EVENT_DELIVERY_OWNER must be robot"
+        )
+    return owner
+
+
+def _build_backend_navigation_provider(settings: Any) -> Any:
+    """Build a deferred Robot-token client; no network is used until START."""
+
+    from aiot_robot.backend_client import BackendConfig, RobotBackendClient
+    from aiot_robot.navigation_config import (
+        BackendNavigationConfigProvider,
+        NavigationConfigIdentity,
+    )
+
+    token_file = Path(settings.service_token_file)
+
+    def backend_factory() -> Any:
+        token = os.getenv("AIOT_BACKEND_ACCESS_TOKEN", "").strip()
+        if not token:
+            try:
+                token = token_file.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise RuntimeError("backend token is unavailable") from exc
+        if not token:
+            raise RuntimeError("backend token is unavailable")
+        return RobotBackendClient(
+            BackendConfig(
+                base_url=_required_environment("AIOT_BACKEND_BASE_URL"),
+                access_token=token,
+                timeout_seconds=float(os.getenv("AIOT_BACKEND_TIMEOUT_SEC", "10")),
+            )
+        )
+
+    return BackendNavigationConfigProvider(
+        backend_factory=backend_factory,
+        navigation_factory=lambda route: _build_navigation_service_from_route(
+            route,
+            encoder_limited=False,
+        ),
+        identity=NavigationConfigIdentity(
+            map_id=_required_environment("ROKI_MAP_ID"),
+            map_version=_required_positive_integer("ROKI_MAP_VERSION"),
+        ),
+        default_acceptance_radius_m=float(
+            os.getenv("ROKI_WAYPOINT_ACCEPTANCE_RADIUS_M", "0.30")
+        ),
+        map_metadata_validator=_validate_backend_map_metadata_against_local,
+    )
+
+
+def _validate_backend_map_metadata_against_local(map_config: Any) -> None:
+    """Bind Backend pixel/world metadata to the exact local Nav2 map bundle."""
+
+    from aiot_robot.navigation_config import NavigationConfigError
+    from navigation.map_metadata import load_map_metadata
+
+    raw_map_path = os.getenv("ROKI_MAP_YAML", "").strip()
+    map_path = Path(raw_map_path)
+    if not raw_map_path or not map_path.is_absolute() or not map_path.is_file():
+        raise NavigationConfigError("NAVIGATION_MAP_METADATA_MISMATCH")
+    try:
+        local = load_map_metadata(map_path)
+        # Backend DECIMAL scales intentionally round the uploaded ROS YAML:
+        # resolution(6,4), origin x/y(10,3), yaw(6,2). Accept at most one
+        # half-unit in the stored scale, plus floating-point epsilon.
+        numeric_pairs = (
+            ("resolution", local.resolution_m, 5e-5 + 1e-12),
+            ("originX", local.origin_x, 5e-4 + 1e-12),
+            ("originY", local.origin_y, 5e-4 + 1e-12),
+            ("originYaw", local.origin_yaw_rad, 5e-3 + 1e-12),
+        )
+        for key, local_value, absolute_tolerance in numeric_pairs:
+            if not math.isclose(
+                float(map_config[key]),
+                float(local_value),
+                rel_tol=0.0,
+                abs_tol=absolute_tolerance,
+            ):
+                raise NavigationConfigError(
+                    "NAVIGATION_MAP_METADATA_MISMATCH"
+                )
+        if (
+            int(map_config["width"]) != local.width_px
+            or int(map_config["height"]) != local.height_px
+        ):
+            raise NavigationConfigError("NAVIGATION_MAP_METADATA_MISMATCH")
+    except NavigationConfigError:
+        raise
+    except Exception as exc:
+        raise NavigationConfigError(
+            "NAVIGATION_MAP_METADATA_MISMATCH"
+        ) from exc
+
+
 def _build_mapping_runtime(
     runtime: Any,
     runtime_service: Any,
@@ -344,6 +496,10 @@ def _build_mapping_runtime(
         ManualDriveSettings,
     )
     from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
+    from integration.map_activation import (
+        CurrentMapActivator,
+        MapActivationSettings,
+    )
     from integration.mapping_runtime import (
         ManualMappingRuntime,
         MappingRuntimeSettings,
@@ -411,6 +567,28 @@ def _build_mapping_runtime(
                 ),
             )
         ),
+        map_activator=CurrentMapActivator(
+            MapActivationSettings(
+                maps_directory=Path(
+                    os.getenv(
+                        "AIOT_ACTIVE_MAP_DIR",
+                        "/var/lib/aiot/maps/active",
+                    )
+                ),
+                environment_file=Path(
+                    os.getenv(
+                        "AIOT_ACTIVE_MAP_ENV_FILE",
+                        "/var/lib/aiot/config/current-map.env",
+                    )
+                ),
+                restart_request_file=Path(
+                    os.getenv(
+                        "AIOT_MAP_ACTIVATION_REQUEST_FILE",
+                        "/var/lib/aiot/state/map-activation.pending",
+                    )
+                ),
+            )
+        ),
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -436,6 +614,8 @@ def create_integrated_application(
     lidar_health_bridge: Any | None = None,
     start_serial_runtime: bool = True,
     navigation_service: Any | None = None,
+    navigation_provider: Any | None = None,
+    local_navigation_fallback_enabled: bool = False,
     navigation_mode: str = "encoder_limited",
     operational_ai: bool = False,
     ai_controller: Any | None = None,
@@ -478,7 +658,12 @@ def create_integrated_application(
         raise RuntimeError(
             "DEMO_NAV2_REQUIRED: fixed-map navigation cannot use encoder progress"
         )
-    if not manual_enabled and navigation_mode == "nav2" and navigation_service is None:
+    if (
+        not manual_enabled
+        and navigation_mode == "nav2"
+        and navigation_service is None
+        and navigation_provider is None
+    ):
         raise RuntimeError("NAV2_ROUTE_REQUIRED: validated navigation service is missing")
     if manual_demo and manual_controller is None and keyboard_input is None:
         manual_controller, keyboard_input = _build_manual_demo_components(runtime)
@@ -488,7 +673,7 @@ def create_integrated_application(
         if (
             navigation_mode == "nav2"
             and not manual_enabled
-            and navigation_service is not None
+            and (navigation_service is not None or navigation_provider is not None)
         )
         else None
     )
@@ -497,6 +682,10 @@ def create_integrated_application(
         patrol_drive_speed_pwm=settings.patrol_drive_speed_pwm,
         patrol_steering_degrees=settings.patrol_steering_degrees,
         navigation_service=None if manual_enabled else navigation_service,
+        navigation_provider=None if manual_enabled else navigation_provider,
+        local_navigation_fallback_enabled=(
+            False if manual_enabled else local_navigation_fallback_enabled
+        ),
         navigation_start_x_m=float(os.getenv("ROKI_ROUTE_START_X_M", "1.0")),
         navigation_start_y_m=float(os.getenv("ROKI_ROUTE_START_Y_M", "2.5")),
         navigation_maximum_travel_m=float(
@@ -542,6 +731,7 @@ def create_integrated_application(
             vehicle_range_source=lidar_health_bridge,
             camera_yaw_deg=float(os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0")),
         )
+        runtime_service.set_scan_context_listener(recorder.set_scan_context)
         ai_controller = ai_controller or RosAiCoordinator(recorder, state_store)
         event_worker = event_worker or EventDeliveryWorker(
             outbox,
@@ -603,20 +793,37 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
     selected_route = _selected_route_path(route_path)
     mapping_available = _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True)
     mapping_requested = _mapping_mode_requested()
+    legacy_mapping_only = _legacy_mapping_only_selected(settings, selected_route)
+    config_source = _navigation_config_source()
+    local_fallback = _environment_enabled(
+        "AIOT_NAVIGATION_LOCAL_FALLBACK_ENABLED", False
+    )
     navigation = None
-    if mapping_requested:
+    if mapping_requested or legacy_mapping_only:
         mode = "mapping"
-    elif selected_route.is_file():
+    elif config_source == "local":
+        if not selected_route.is_file():
+            raise RuntimeError(f"waypoint route file is missing: {selected_route}")
         mode = _navigation_mode(settings)
         navigation = _build_navigation_service(
             selected_route,
             encoder_limited=mode == "encoder_limited",
         )
-    elif mapping_available:
-        mode = "mapping"
     else:
-        raise RuntimeError(f"waypoint route file is missing: {selected_route}")
-    if mode == "nav2" and navigation is not None:
+        _require_legacy_route_when_mapping_disabled(settings, selected_route)
+        mode = _navigation_mode(settings)
+        _build_backend_navigation_provider(settings)
+        if local_fallback:
+            if not selected_route.is_file():
+                raise RuntimeError(
+                    "LOCAL_ROUTE_FALLBACK_MISSING: "
+                    f"waypoint route file is missing: {selected_route}"
+                )
+            navigation = _build_navigation_service(
+                selected_route,
+                encoder_limited=False,
+            )
+    if mode == "nav2":
         holder: dict[str, Any] = {"service": None}
         _build_nav2_driver(holder)
     return {
@@ -628,8 +835,21 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
         "mapValidated": navigation is not None,
         "mappingAvailable": mapping_available,
         "mappingModeRequested": mapping_requested,
+        "legacyMappingOnlySelected": legacy_mapping_only,
+        "navigationConfigSource": config_source,
+        "localRouteFallbackEnabled": local_fallback,
+        "navigationProviderConfigured": (
+            config_source == "backend" and mode != "mapping"
+        ),
+        "backendNavigationFetchDeferred": (
+            config_source == "backend" and mode != "mapping"
+        ),
+        "localMapSafetyValidationDeferred": (
+            config_source == "backend" and navigation is None and mode != "mapping"
+        ),
         "aiRequired": settings.ai_required_for_patrol,
         "lidarRequired": settings.lidar_required_for_patrol,
+        "eventDeliveryOwner": _event_delivery_owner(),
         "serialAccessed": False,
     }
 
@@ -673,29 +893,47 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings()
     mode = "manual" if args.manual_keyboard else "mapping"
     navigation = None
+    navigation_provider = None
+    local_navigation_fallback_enabled = False
+    _event_delivery_owner()
     if not args.manual_keyboard:
         selected_route = _selected_route_path(args.route)
-        if _mapping_mode_requested():
+        if _mapping_mode_requested() or _legacy_mapping_only_selected(
+            settings, selected_route
+        ):
             logging.getLogger(__name__).info(
-                "Explicit ROS mapping mode selected; patrol route validation is deferred"
+                "Mapping-only mode selected; patrol route validation is deferred"
             )
-        elif selected_route.is_file():
+        elif _navigation_config_source() == "local":
+            if not selected_route.is_file():
+                raise RuntimeError(f"waypoint route file is missing: {selected_route}")
             mode = _navigation_mode(settings)
             navigation = _build_navigation_service(
                 selected_route,
                 encoder_limited=mode == "encoder_limited",
             )
-        elif not _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True):
-            raise RuntimeError(f"waypoint route file is missing: {selected_route}")
         else:
-            logging.getLogger(__name__).warning(
-                "Patrol route is missing; mapping remains available but "
-                "START_PATROL will be rejected: %s",
-                selected_route,
+            _require_legacy_route_when_mapping_disabled(settings, selected_route)
+            mode = _navigation_mode(settings)
+            navigation_provider = _build_backend_navigation_provider(settings)
+            local_navigation_fallback_enabled = _environment_enabled(
+                "AIOT_NAVIGATION_LOCAL_FALLBACK_ENABLED", False
             )
+            if local_navigation_fallback_enabled:
+                if not selected_route.is_file():
+                    raise RuntimeError(
+                        "LOCAL_ROUTE_FALLBACK_MISSING: "
+                        f"waypoint route file is missing: {selected_route}"
+                    )
+                navigation = _build_navigation_service(
+                    selected_route,
+                    encoder_limited=False,
+                )
     application = create_integrated_application(
         start_serial_runtime=not args.pose_only,
         navigation_service=navigation,
+        navigation_provider=navigation_provider,
+        local_navigation_fallback_enabled=local_navigation_fallback_enabled,
         navigation_mode=mode,
         operational_ai=True,
         manual_demo=args.manual_keyboard,
