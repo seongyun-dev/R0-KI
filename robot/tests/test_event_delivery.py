@@ -11,7 +11,11 @@ from aiot_robot.event_delivery import DetectionRecorder, EventDeliveryWorker
 from aiot_robot.outbox import DetectionOutbox
 
 
-def detection(event_id: str = "event-1") -> DetectionEvent:
+def detection(
+    event_id: str = "event-1",
+    *,
+    confidence: float = 0.93,
+) -> DetectionEvent:
     return DetectionEvent.from_json(
         json.dumps(
             {
@@ -21,7 +25,7 @@ def detection(event_id: str = "event-1") -> DetectionEvent:
                 "eventType": "TRASH_DETECTED",
                 "cameraId": "front",
                 "trackId": "track-42",
-                "confidence": 0.93,
+                "confidence": confidence,
                 "observedAt": "2026-08-03T00:00:00Z",
                 "evidencePath": f"/var/lib/aiot/evidence/{event_id}.jpg",
                 "bbox": {"x": 0, "y": 0, "width": 1, "height": 1},
@@ -55,6 +59,23 @@ class FakeBackend:
 
 
 class EventDeliveryTest(unittest.TestCase):
+    def test_recorder_drops_detection_below_confidence_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
+            )
+            recorder = DetectionRecorder(outbox, store, minimum_confidence=0.5)
+
+            recorder(detection("low-confidence", confidence=0.499))
+            recorder(detection("threshold-confidence", confidence=0.5))
+
+            self.assertEqual(outbox.pending_count(), 1)
+            self.assertEqual(
+                outbox.read(outbox.pending_paths()[0])["eventId"],
+                "threshold-confidence",
+            )
+
     def test_vehicle_without_plate_is_completed_without_invalid_backend_event(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             outbox = DetectionOutbox(directory)
@@ -138,6 +159,24 @@ class EventDeliveryTest(unittest.TestCase):
             self.assertEqual(outbox.pending_count(), 0)
             self.assertEqual(backend.payload["x"], 1.2)
             self.assertEqual(backend.payload["riskLevel"], "NORMAL")
+
+    def test_recorder_carries_current_scan_waypoint_context(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.2, y=2.3, heading=45.0)
+            )
+            recorder = DetectionRecorder(outbox, store)
+            recorder.set_scan_context(
+                SimpleNamespace(sequence=4, name="주차장 스캔", zone_id=12)
+            )
+            recorder(detection("scan-context"))
+            backend = FakeBackend()
+            worker = EventDeliveryWorker(outbox, backend_factory=lambda: backend)
+
+            self.assertEqual(worker.process_available(), 1)
+            self.assertIn("scanSequence=4", backend.payload["eventDetails"])
+            self.assertIn("scanZoneId=12", backend.payload["eventDetails"])
 
     def test_evidence_retry_does_not_recreate_event(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

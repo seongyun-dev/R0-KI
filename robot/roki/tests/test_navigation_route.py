@@ -79,6 +79,15 @@ class RouteTest(unittest.TestCase):
         raw["waypoints"][1]["x"] = 0.5001
         self.assertEqual(parse_route(raw).waypoints[-1].x, 0.5001)
 
+    def test_optional_yaw_preserves_none_and_explicit_local_yaml_value(self) -> None:
+        raw = copy.deepcopy(EXAMPLE)
+        del raw["waypoints"][0]["yaw_deg"]
+
+        route = parse_route(raw)
+
+        self.assertIsNone(route.waypoints[0].yaw_deg)
+        self.assertEqual(route.waypoints[1].yaw_deg, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

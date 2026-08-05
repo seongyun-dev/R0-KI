@@ -12,6 +12,13 @@ from backend_mqtt.command_handler import PatrolCommandHandler
 NOW = datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc)
 
 
+class FakePatrolStartExpired(RuntimeError):
+    reason = "COMMAND_EXPIRED_DURING_START"
+
+    def __init__(self) -> None:
+        super().__init__(self.reason)
+
+
 class FakeMqtt:
     def __init__(self, order: list[str] | None = None) -> None:
         self.messages: list[tuple[str, dict]] = []
@@ -55,11 +62,19 @@ class FakeRuntimeService:
         self.start_error: Exception | None = None
         self.invalidate_after_start = False
         self.stop_error: Exception | None = None
+        self.prepare_callback = None
+        self.prepared_expires_at = None
+        self.start_dispatch_callback = None
+        self.wall_clock = None
+        self.actual_start_count = 0
 
     def readiness(self):
         return self.ready_decision
 
-    def prepare_patrol(self):
+    def prepare_patrol(self, *, expires_at=None):
+        self.prepared_expires_at = expires_at
+        if self.prepare_callback is not None:
+            self.prepare_callback()
         return self.prepare_decision
 
     def cancel_prepared_patrol(self) -> None:
@@ -70,8 +85,18 @@ class FakeRuntimeService:
         if self.order is not None:
             self.order.append("serial-start" if command == "START_PATROL" else "serial-stop")
         if command == "START_PATROL":
+            if self.start_dispatch_callback is not None:
+                self.start_dispatch_callback()
+            expires_at = parameters.get("expires_at")
+            if (
+                expires_at is not None
+                and self.wall_clock is not None
+                and self.wall_clock() >= expires_at
+            ):
+                raise FakePatrolStartExpired()
             if self.start_error is not None:
                 raise self.start_error
+            self.actual_start_count += 1
             self.active_patrol_id = parameters["patrolId"]
             if self.invalidate_after_start:
                 self.active_patrol_id = None
@@ -101,6 +126,7 @@ class FakeAi:
         self.order = order
         self.ready = True
         self.applied_patrol_id: int | None = None
+        self.enable_callback = None
 
     def readiness(self):
         return self.ready, "AI_READY" if self.ready else "AI_STATUS_STALE"
@@ -108,6 +134,8 @@ class FakeAi:
     def enable(self, patrol_id: int) -> None:
         self.enabled.append(patrol_id)
         self.applied_patrol_id = patrol_id
+        if self.enable_callback is not None:
+            self.enable_callback()
         if self.order is not None:
             self.order.append("ai-enable")
 
@@ -198,6 +226,7 @@ class CommandStateMachineTest(unittest.TestCase):
         self.ai = FakeAi()
         self.mapping = FakeMappingRuntime()
         self.now_monotonic = 0.0
+        self.now_wall = NOW
         self.handler = PatrolCommandHandler(
             settings=self.settings,
             mqtt_client=self.mqtt,
@@ -207,7 +236,7 @@ class CommandStateMachineTest(unittest.TestCase):
             ai_controller=self.ai,
             mapping_runtime=self.mapping,
             command_cache_path=self.settings.command_cache_file,
-            wall_clock=lambda: NOW,
+            wall_clock=lambda: self.now_wall,
             monotonic_clock=lambda: self.now_monotonic,
         )
 
@@ -216,7 +245,18 @@ class CommandStateMachineTest(unittest.TestCase):
         self.handler.handle(self.settings.command_topic, command)
         self.handler.handle(self.settings.command_topic, command)
 
-        self.assertEqual(self.runtime.calls, [("START_PATROL", {"patrolId": 7})])
+        self.assertEqual(
+            self.runtime.calls,
+            [
+                (
+                    "START_PATROL",
+                    {
+                        "patrolId": 7,
+                        "expires_at": NOW + timedelta(seconds=10),
+                    },
+                )
+            ],
+        )
         self.assertEqual(self.ai.enabled, [7])
         self.assertEqual([m[1]["status"] for m in self.mqtt.messages], ["SUCCEEDED", "SUCCEEDED"])
 
@@ -269,6 +309,10 @@ class CommandStateMachineTest(unittest.TestCase):
             payload("START_PATROL", "recover-not-ready", patrol_id=7),
         )
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"], "ODOMETRY_NOT_READY"
+        )
+        self.assertEqual(self.runtime.cancel_count, 1)
         self.assertEqual(self.runtime.calls, [])
 
         self.runtime.ready_decision = (True, "READY")
@@ -416,6 +460,116 @@ class CommandStateMachineTest(unittest.TestCase):
         self.assertEqual(self.runtime.calls, [])
         self.assertEqual(self.ai.enabled, [])
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "OTA_ACTIVATION_IN_PROGRESS",
+        )
+
+    def test_slow_route_prepare_cannot_start_after_command_expiry(self) -> None:
+        self.runtime.prepare_callback = lambda: setattr(
+            self, "now_wall", NOW + timedelta(seconds=11)
+        )
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "slow-route", patrol_id=7),
+        )
+
+        self.assertEqual(
+            self.runtime.prepared_expires_at,
+            NOW + timedelta(seconds=10),
+        )
+        self.assertEqual(self.runtime.cancel_count, 1)
+        self.assertEqual(self.runtime.calls, [])
+        self.assertEqual(self.ai.enabled, [])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "COMMAND_EXPIRED_DURING_PREPARE",
+        )
+
+    def test_slow_ai_enable_cannot_start_motor_after_command_expiry(self) -> None:
+        self.ai.enable_callback = lambda: setattr(
+            self, "now_wall", NOW + timedelta(seconds=11)
+        )
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "slow-ai", patrol_id=7),
+        )
+
+        self.assertEqual(self.runtime.calls, [])
+        self.assertEqual(self.runtime.cancel_count, 1)
+        self.assertEqual(self.ai.enabled, [7])
+        self.assertEqual(self.ai.disabled, ["COMMAND_EXPIRED_DURING_START"])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "COMMAND_EXPIRED_DURING_PREPARE",
+        )
+
+    def test_runtime_dispatch_expiry_is_rejected_without_start_or_stop(self) -> None:
+        self.runtime.wall_clock = lambda: self.now_wall
+        self.runtime.start_dispatch_callback = lambda: setattr(
+            self, "now_wall", NOW + timedelta(seconds=10)
+        )
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "dispatch-expired", patrol_id=7),
+        )
+
+        self.assertEqual(self.runtime.actual_start_count, 0)
+        self.assertEqual(
+            self.runtime.calls,
+            [
+                (
+                    "START_PATROL",
+                    {
+                        "patrolId": 7,
+                        "expires_at": NOW + timedelta(seconds=10),
+                    },
+                )
+            ],
+        )
+        self.assertEqual(self.runtime.cancel_count, 1)
+        self.assertEqual(self.ai.enabled, [7])
+        self.assertEqual(self.ai.disabled, ["COMMAND_EXPIRED_DURING_START"])
+        self.assertEqual(self.store.state, "IDLE")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "COMMAND_EXPIRED_DURING_START",
+        )
+
+    def test_expired_start_still_disables_ai_and_acks_when_cleanup_fails(
+        self,
+    ) -> None:
+        self.runtime.wall_clock = lambda: self.now_wall
+        self.runtime.start_dispatch_callback = lambda: setattr(
+            self, "now_wall", NOW + timedelta(seconds=10)
+        )
+
+        def fail_cleanup() -> None:
+            self.runtime.cancel_count += 1
+            raise RuntimeError("lease release failed")
+
+        self.runtime.cancel_prepared_patrol = fail_cleanup
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "cleanup-failed", patrol_id=7),
+        )
+
+        self.assertEqual(self.runtime.actual_start_count, 0)
+        self.assertEqual(self.runtime.cancel_count, 1)
+        self.assertEqual(self.ai.disabled, ["COMMAND_EXPIRED_DURING_START"])
+        self.assertEqual(self.store.state, "IDLE")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "COMMAND_EXPIRED_DURING_START",
+        )
 
     def test_retained_token_is_written_outside_git_and_not_in_cache(self) -> None:
         command = payload("SET_TOKEN", "token-1")

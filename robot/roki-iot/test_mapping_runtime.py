@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from aiot_robot.backend_client import BackendHttpError, BackendTransportError
 from aiot_robot.mapping_artifacts import MapArtifact
 from integration.mapping_runtime import ManualMappingRuntime, MappingRuntimeSettings
 
@@ -83,13 +84,28 @@ class FakeExporter:
 class FakeClient:
     def __init__(self) -> None:
         self.uploads: list[tuple] = []
+        self.errors: list[Exception] = []
 
     def upload_map(self, *args, **kwargs):
         self.uploads.append((args, kwargs))
+        if self.errors:
+            raise self.errors.pop(0)
         return {
             "success": True,
             "data": {"mappingStatus": "COMPLETED", "mapId": 3, "mapVersion": 1},
         }
+
+
+class FakeActivator:
+    def __init__(self) -> None:
+        self.activations: list[tuple[MapArtifact, object, object]] = []
+        self.error: Exception | None = None
+
+    def activate(self, artifact, *, map_id, map_version):
+        self.activations.append((artifact, map_id, map_version))
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(map_id=int(map_id), map_version=int(map_version))
 
 
 class RacingRuntimeService:
@@ -126,6 +142,7 @@ class MappingRuntimeTest(unittest.TestCase):
         self.drive = FakeDrive()
         self.gamepad = FakeGamepad()
         self.client = FakeClient()
+        self.activator = FakeActivator()
         self.exporter = FakeExporter(self.artifact)
         self.settings = MappingRuntimeSettings(
             "https://example.com", token, 3, 0.01, 0.02
@@ -142,6 +159,7 @@ class MappingRuntimeTest(unittest.TestCase):
             drive_controller=self.drive,
             gamepad_input=self.gamepad,
             map_exporter=self.exporter,
+            map_activator=self.activator,
             settings=self.settings,
             client_factory=lambda: self.client,
         )
@@ -166,6 +184,68 @@ class MappingRuntimeTest(unittest.TestCase):
         args, kwargs = self.client.uploads[0]
         self.assertEqual(args[:3], (12, "command-12", self.artifact.png_path))
         self.assertEqual(kwargs["resolution"], 0.05)
+        self.assertEqual(self.activator.activations, [(self.artifact, 3, 1)])
+
+    def test_transient_upload_failure_retries_then_activates(self) -> None:
+        self.client.errors.append(BackendTransportError("offline"))
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+
+        self.assertTrue(self.runtime.finish())
+        self.assertTrue(self.runtime.wait_for_completion(1.0))
+
+        self.assertEqual(len(self.client.uploads), 2)
+        self.assertEqual(len(self.activator.activations), 1)
+
+    def test_retryable_http_failure_retries_then_activates(self) -> None:
+        self.client.errors.append(BackendHttpError(503, "unavailable"))
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+
+        self.assertTrue(self.runtime.finish())
+        self.assertTrue(self.runtime.wait_for_completion(1.0))
+
+        self.assertEqual(len(self.client.uploads), 2)
+        self.assertEqual(len(self.activator.activations), 1)
+
+    def test_permanent_http_failure_stops_without_retry(self) -> None:
+        self.client.errors.append(BackendHttpError(401, "unauthorized"))
+        failed = threading.Event()
+        reasons: list[str] = []
+
+        def on_failure(reason: str) -> None:
+            reasons.append(reason)
+            self.runtime.abort(reason)
+            failed.set()
+
+        self.runtime.set_failure_listener(on_failure)
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+
+        self.assertTrue(self.runtime.finish())
+        self.assertTrue(failed.wait(1.0))
+
+        self.assertEqual(reasons, ["MAPPING_UPLOAD_REJECTED"])
+        self.assertEqual(len(self.client.uploads), 1)
+        self.assertEqual(self.activator.activations, [])
+        self.assertFalse(self.runtime.active)
+
+    def test_activation_failure_is_terminal(self) -> None:
+        self.activator.error = RuntimeError("disk full")
+        failed = threading.Event()
+        reasons: list[str] = []
+
+        def on_failure(reason: str) -> None:
+            reasons.append(reason)
+            self.runtime.abort(reason)
+            failed.set()
+
+        self.runtime.set_failure_listener(on_failure)
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+
+        self.assertTrue(self.runtime.finish())
+        self.assertTrue(failed.wait(1.0))
+
+        self.assertEqual(reasons, ["MAPPING_ACTIVATION_FAILED"])
+        self.assertEqual(len(self.client.uploads), 1)
+        self.assertFalse(self.runtime.active)
 
     def test_finish_stop_failure_attempts_both_and_reports_failure(self) -> None:
         failures: list[tuple[str, str, bool]] = []
@@ -297,6 +377,7 @@ class MappingRuntimeTest(unittest.TestCase):
             drive_controller=self.drive,
             gamepad_input=self.gamepad,
             map_exporter=FakeExporter(self.artifact),
+            map_activator=self.activator,
             settings=self.settings,
             client_factory=lambda: self.client,
         )
@@ -322,6 +403,7 @@ class MappingRuntimeTest(unittest.TestCase):
             drive_controller=self.drive,
             gamepad_input=self.gamepad,
             map_exporter=FakeExporter(self.artifact),
+            map_activator=self.activator,
             settings=self.settings,
             client_factory=lambda: self.client,
         )

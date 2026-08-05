@@ -22,6 +22,8 @@ from navigation.cmd_vel_adapter import (
 
 MotionSink = Callable[[CmdVelCommand], None]
 FailureSink = Callable[[str], None]
+ScanContextSink = Callable[[Any | None], None]
+HeadingSource = Callable[[], float | None]
 TimerFactory = Callable[[float, Callable[[], None]], Any]
 LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +68,8 @@ class RosNav2Bridge:
         settings: RosNav2BridgeSettings,
         motion_sink: MotionSink,
         failure_sink: FailureSink | None = None,
+        scan_context_sink: ScanContextSink | None = None,
+        heading_source: HeadingSource | None = None,
         timer_factory: TimerFactory = threading.Timer,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -73,6 +77,8 @@ class RosNav2Bridge:
         self._adapter = CmdVelToEsp32Adapter(settings.ackermann)
         self._motion_sink = motion_sink
         self._failure_sink = failure_sink
+        self._scan_context_sink = scan_context_sink
+        self._heading_source = heading_source
         self._timer_factory = timer_factory
         self._clock = clock
         self._lock = threading.Lock()
@@ -178,6 +184,7 @@ class RosNav2Bridge:
         if stale_timer is not None:
             stale_timer.cancel()
         self._cancel_goal_best_effort(stale_handle)
+        self._publish_scan_context(None)
         self._send_sequence(1)
 
     def stop_patrol(self) -> None:
@@ -194,6 +201,7 @@ class RosNav2Bridge:
             timer.cancel()
         self._motion_sink(CmdVelCommand(0, 80, "NAV2_PATROL_STOPPED"))
         self._cancel_goal_best_effort(handle)
+        self._publish_scan_context(None)
 
     def pause_patrol(self) -> None:
         with self._lock:
@@ -206,6 +214,7 @@ class RosNav2Bridge:
             timer.cancel()
         self._motion_sink(CmdVelCommand(0, 80, "OBSTACLE"))
         self._cancel_goal_best_effort(handle)
+        self._publish_scan_context(None)
 
     def resume_patrol(self) -> None:
         with self._lock:
@@ -260,6 +269,7 @@ class RosNav2Bridge:
             stale_handle = self._invalidate_goal_locked()
             generation = self._scan_generation
             self._pending_scan = (scan_sequence, next_sequence)
+            scan_waypoint = self._route.waypoints[scan_sequence - 1]
             self._cmd_vel_hold_reason = "SCAN_DWELL"
             timer = self._timer_factory(
                 self._settings.scan_dwell_sec,
@@ -282,6 +292,7 @@ class RosNav2Bridge:
             )
         )
         self._cancel_goal_best_effort(stale_handle)
+        self._publish_scan_context(scan_waypoint)
         timer.start()
 
     def _finish_scan_dwell(
@@ -303,6 +314,7 @@ class RosNav2Bridge:
             self._scan_timer = None
             self._pending_scan = None
             self._current_sequence = next_sequence
+        self._publish_scan_context(None)
         self._send_sequence(next_sequence)
 
     def _cancel_scan_dwell_locked(self, *, clear_pending: bool = True) -> Any:
@@ -398,11 +410,17 @@ class RosNav2Bridge:
             if self._paused or self._route is None or self._pending_scan is not None:
                 return
             waypoint = self._route.waypoints[sequence - 1]
+            route = self._route
             stale_handle = self._invalidate_goal_locked()
             generation = self._goal_generation
             self._cmd_vel_hold_reason = "NAV2_GOAL_PENDING"
             self._last_cmd_vel_at = None
         self._cancel_goal_best_effort(stale_handle)
+        try:
+            yaw_deg = self._resolve_goal_yaw_deg(route, sequence)
+        except (TypeError, ValueError) as exc:
+            self._fail(f"NAV2_GOAL_YAW_UNRESOLVABLE:{exc}")
+            return
         assert self._navigate_type is not None
         assert self._pose_type is not None
         assert self._node is not None
@@ -412,7 +430,7 @@ class RosNav2Bridge:
         pose.header.stamp = self._node.get_clock().now().to_msg()
         pose.pose.position.x = float(waypoint.x)
         pose.pose.position.y = float(waypoint.y)
-        yaw = math.radians(float(waypoint.yaw_deg))
+        yaw = math.radians(yaw_deg)
         pose.pose.orientation.z = math.sin(yaw / 2.0)
         pose.pose.orientation.w = math.cos(yaw / 2.0)
         goal.pose = pose
@@ -499,8 +517,41 @@ class RosNav2Bridge:
             timer.cancel()
         self._motion_sink(CmdVelCommand(0, 80, reason))
         self._cancel_goal_best_effort(handle)
+        self._publish_scan_context(None)
         if self._failure_sink is not None:
             self._failure_sink(reason)
+
+    def _resolve_goal_yaw_deg(self, route: Any, sequence: int) -> float:
+        """Preserve explicit yaw; otherwise follow route geometry/current pose."""
+
+        waypoint = route.waypoints[sequence - 1]
+        if waypoint.yaw_deg is not None:
+            return float(waypoint.yaw_deg)
+        if sequence < len(route.waypoints):
+            neighbor = route.waypoints[sequence]
+            return math.degrees(
+                math.atan2(neighbor.y - waypoint.y, neighbor.x - waypoint.x)
+            )
+        if sequence > 1:
+            neighbor = route.waypoints[sequence - 2]
+            return math.degrees(
+                math.atan2(waypoint.y - neighbor.y, waypoint.x - neighbor.x)
+            )
+        if self._heading_source is not None:
+            heading = self._heading_source()
+            if heading is not None and math.isfinite(float(heading)):
+                return float(heading)
+        raise ValueError("no route direction or current map heading")
+
+    def _publish_scan_context(self, waypoint: Any | None) -> None:
+        if self._scan_context_sink is None:
+            return
+        try:
+            self._scan_context_sink(waypoint)
+        except Exception as exc:
+            LOGGER.warning(
+                "SCAN context update failed: %s", type(exc).__name__
+            )
 
     def _spin(self) -> None:
         try:

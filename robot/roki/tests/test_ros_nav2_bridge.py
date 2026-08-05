@@ -119,6 +119,7 @@ class RosNav2BridgeTest(unittest.TestCase):
     def test_pass_advances_immediately_but_scan_waits_before_next_goal(self) -> None:
         commands = []
         timers = []
+        scan_contexts = []
 
         def timer_factory(seconds, callback):
             timer = ManualTimer(seconds, callback)
@@ -131,6 +132,7 @@ class RosNav2BridgeTest(unittest.TestCase):
                 scan_dwell_sec=4.0,
             ),
             motion_sink=commands.append,
+            scan_context_sink=scan_contexts.append,
             timer_factory=timer_factory,
         )
         route = demo_route()
@@ -151,12 +153,14 @@ class RosNav2BridgeTest(unittest.TestCase):
         self.assertEqual(timers[-1].seconds, 4.0)
         self.assertTrue(timers[-1].started)
         self.assertTrue(timers[-1].daemon)
+        self.assertIs(scan_contexts[-1], route.waypoints[1])
 
         blocked = bridge.record_cmd_vel(0.2, 0.0)
         self.assertTrue(blocked.stopped)
         self.assertEqual(blocked.stop_reason, "SCAN_DWELL")
 
         timers[-1].fire_even_if_cancelled()
+        self.assertIsNone(scan_contexts[-1])
         bridge._send_sequence.assert_called_once_with(3)
         self.assertEqual(bridge._current_sequence, 3)
 
@@ -165,6 +169,7 @@ class RosNav2BridgeTest(unittest.TestCase):
             with self.subTest(operation=operation):
                 timers = []
                 failures = []
+                scan_contexts = []
 
                 def timer_factory(seconds, callback):
                     del seconds
@@ -178,6 +183,7 @@ class RosNav2BridgeTest(unittest.TestCase):
                     ),
                     motion_sink=lambda _command: None,
                     failure_sink=failures.append,
+                    scan_context_sink=scan_contexts.append,
                     timer_factory=timer_factory,
                 )
                 route = demo_route()
@@ -201,13 +207,90 @@ class RosNav2BridgeTest(unittest.TestCase):
                 timer.fire_even_if_cancelled()
                 bridge._send_sequence.assert_not_called()
                 if operation == "pause":
+                    self.assertIsNone(scan_contexts[-1])
                     bridge.resume_patrol()
                     self.assertEqual(len(timers), 2)
                     self.assertTrue(timers[-1].started)
+                    self.assertIs(scan_contexts[-1], route.waypoints[1])
                     timers[-1].fire_even_if_cancelled()
+                    self.assertIsNone(scan_contexts[-1])
                     bridge._send_sequence.assert_called_once_with(3)
+                else:
+                    self.assertIsNone(scan_contexts[-1])
                 if operation == "fail":
                     self.assertEqual(failures, ["TEST_FAILURE"])
+
+    def test_null_yaw_uses_route_direction_instead_of_zero_default(self) -> None:
+        route = parse_route(
+            {
+                "schema_version": 1,
+                "map_id": "demo-map",
+                "map_version": 1,
+                "route_id": "nullable-yaw",
+                "frame_id": "map",
+                "waypoints": [
+                    {
+                        "sequence": 1,
+                        "name": "PASS",
+                        "x": 1.0,
+                        "y": 1.0,
+                        "yaw_deg": None,
+                        "acceptance_radius_m": 0.2,
+                        "action": "PASS",
+                    },
+                    {
+                        "sequence": 2,
+                        "name": "DESTINATION",
+                        "x": 1.0,
+                        "y": 2.0,
+                        "yaw_deg": None,
+                        "acceptance_radius_m": 0.2,
+                        "action": "DESTINATION",
+                    },
+                ],
+            }
+        )
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=lambda _command: None,
+        )
+
+        self.assertIsNone(route.waypoints[0].yaw_deg)
+        self.assertAlmostEqual(bridge._resolve_goal_yaw_deg(route, 1), 90.0)
+        self.assertAlmostEqual(bridge._resolve_goal_yaw_deg(route, 2), 90.0)
+
+    def test_single_null_yaw_uses_current_localization_heading(self) -> None:
+        route = parse_route(
+            {
+                "schema_version": 1,
+                "map_id": "demo-map",
+                "map_version": 1,
+                "route_id": "single-null-yaw",
+                "frame_id": "map",
+                "waypoints": [
+                    {
+                        "sequence": 1,
+                        "name": "DESTINATION",
+                        "x": 1.0,
+                        "y": 1.0,
+                        "yaw_deg": None,
+                        "acceptance_radius_m": 0.2,
+                        "action": "DESTINATION",
+                    }
+                ],
+            }
+        )
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=lambda _command: None,
+            heading_source=lambda: 37.5,
+        )
+
+        self.assertEqual(bridge._resolve_goal_yaw_deg(route, 1), 37.5)
 
     def test_stale_goal_callbacks_cannot_restart_scan_motion_or_fail_patrol(self) -> None:
         failures = []

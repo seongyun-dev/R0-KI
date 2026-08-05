@@ -8,8 +8,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
-import yaml
-
 
 class RouteValidationError(ValueError):
     """Raised when a route cannot be executed safely."""
@@ -27,9 +25,13 @@ class Waypoint:
     name: str
     x: float
     y: float
-    yaw_deg: float
+    # ``None`` means that the execution bridge must derive a heading from the
+    # route geometry.  Existing local YAML files with an explicit yaw remain
+    # byte-for-byte compatible and keep their exact behavior.
+    yaw_deg: float | None
     acceptance_radius_m: float
     action: WaypointAction
+    zone_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,8 @@ class Route:
 
 
 def load_route(path: str | Path) -> Route:
+    import yaml
+
     route_path = Path(path)
     with route_path.open("r", encoding="utf-8") as source:
         raw = yaml.safe_load(source)
@@ -117,7 +121,12 @@ def _parse_waypoint(raw: Any, *, index: int) -> Waypoint:
     )
     x = _finite_number(raw.get("x"), f"waypoint {index} x")
     y = _finite_number(raw.get("y"), f"waypoint {index} y")
-    yaw_deg = _finite_number(raw.get("yaw_deg"), f"waypoint {index} yaw_deg")
+    raw_yaw_deg = raw.get("yaw_deg")
+    yaw_deg = (
+        None
+        if raw_yaw_deg is None
+        else _finite_number(raw_yaw_deg, f"waypoint {index} yaw_deg")
+    )
     radius = _finite_number(
         raw.get("acceptance_radius_m"),
         f"waypoint {index} acceptance_radius_m",
@@ -133,7 +142,14 @@ def _parse_waypoint(raw: Any, *, index: int) -> Waypoint:
         raise RouteValidationError(
             f"waypoint {index} action must be PASS, SCAN or DESTINATION"
         ) from error
-    return Waypoint(sequence, name, x, y, yaw_deg, radius, action)
+    zone_id = raw.get("zone_id")
+    if zone_id is not None:
+        zone_id = _integer(zone_id, f"waypoint {index} zone_id")
+        if zone_id <= 0:
+            raise RouteValidationError(
+                f"waypoint {index} zone_id must be positive"
+            )
+    return Waypoint(sequence, name, x, y, yaw_deg, radius, action, zone_id)
 
 
 def _integer(value: Any, field: str) -> int:

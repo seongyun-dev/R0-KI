@@ -22,12 +22,17 @@ Frontend 지도 생성 시작
   -> POST /api/map/mapping-sessions/{mappingSessionId}/map
      mapImage(PNG), commandId, resolution, originX/Y/Yaw
   -> Backend mappingStatus=COMPLETED
+  -> 응답의 mapId/version과 로컬 YAML·PGM 묶음을 SHA-256으로 결합
+  -> /var/lib/aiot/maps/active/ 아래 불변 버전 디렉터리에 원자적으로 설치
+  -> current-map.env를 새 지도와 patrol 모드로 원자적 교체
+  -> root path unit이 Robot 정지 → ROS Nav2 재시작 → Robot 재시작
   -> Frontend의 기존 SSE/조회 흐름으로 완료 표시
 ```
 
 Frontend와 Backend 계약은 바꾸지 않는다. IoT가 기존 `START_MAPPING`과 multipart
-업로드 계약을 구현한다. 업로드가 일시적으로 실패하면 현재 Robot 프로세스가 살아
-있는 동안 2초부터 최대 30초 간격으로 계속 재시도한다.
+업로드 계약을 구현한다. 연결 실패, HTTP 408/425/429와 5xx만 2초부터 최대 30초
+간격으로 재시도한다. 인증·권한·요청 형식 같은 영구 오류는 즉시 FAILED ACK로 끝내며
+무한 재시도하지 않는다.
 
 지도 원본은 `/var/lib/aiot/maps/mapping-<session>-*/`에 남는다. Backend에는 화면 표시와
 구역 편집에 필요한 PNG 및 좌표 메타데이터를 보내며, Nav2용 YAML·PGM·pose graph는
@@ -107,8 +112,9 @@ LiDAR 위치 값과 alias도 기존 ROS preflight를 통과해야 한다. 실제
 게임패드 수신기는 Jetson에 직접 연결한다. EC2나 별도 runner를 경유하지 않는다.
 
 완전히 새 지도를 다시 만들 때는 이전 SLAM graph를 이어 쓰지 않도록 맵핑 시작 전에
-`aiot-ros.service`의 SLAM Toolbox를 새로 기동해야 한다. Robot 프로세스가 systemd를
-임의 재시작하도록 만들지는 않았다. 서비스 조작은 현장 승인 후 운영자가 수행한다.
+`aiot-ros.service`의 SLAM Toolbox를 새로 기동해야 한다. 지도 업로드가 Backend에서
+완료된 이후의 patrol 전환만 `aiot-map-activate.path`가 root 권한으로 수행한다. Robot
+프로세스 자체에는 systemd 권한을 주지 않는다.
 
 ## 5. 실물 승인 후 검증 순서
 
@@ -123,15 +129,17 @@ LiDAR 위치 값과 alias도 기존 ROS preflight를 통과해야 한다. 실제
    지도 겹침을 확인한다.
 6. Back + Start 2초로 종료하고 로컬 map 파일, Backend 완료 응답, Frontend 지도 표시를
    같은 `mappingSessionId`로 확인한다.
-7. 지도 좌표와 실제 공간이 맞는지 확인한 뒤 Frontend에서 구역을 표시한다.
-8. 검토된 로컬 map YAML·PGM을 `/var/lib/aiot/config/`에 설치하고 ROS를 `patrol` 모드로
-   전환한다. waypoint/route 확정은 그 다음 단계다.
+7. `/var/lib/aiot/config/current-map.env`의 mapId/version/hash와
+   `/var/lib/aiot/maps/active/`의 YAML·PGM, ROS/Robot 재기동 성공을 확인한다.
+8. 지도 좌표와 실제 공간이 맞는지 확인한 뒤 Frontend에서 구역과 waypoint/route를
+   확정한다. initial pose 실측값은 자동 생성하지 않는다.
 
 ## 6. 아직 자동화하지 않은 경계
 
-- Backend 완료 뒤 SLAM 모드에서 Nav2 순찰 모드로 자동 전환하지 않는다.
 - Backend에는 PNG만 업로드하므로 Jetson의 Nav2 원본 파일을 삭제하면 복구할 수 없다.
 - Robot 프로세스가 지도 저장 뒤 종료되면 재기동 후 자동 업로드 재개는 아직 없다.
+- 새 맵핑 시작을 위해 patrol에서 mapping으로 바꾸는 작업과 initial pose 실측은 운영자가
+  현장에서 수행한다. 업로드 완료 뒤 mapping에서 patrol로 돌아오는 작업만 자동화했다.
 - 현재 Frontend 좌표 변환이 회전된 map origin을 처리하지 않으므로 `originYaw != 0`인
   지도는 업로드하지 않고 오류로 남긴다.
 - 게임패드 실제 axis/button 번호와 조향 방향은 수신기가 있을 때 최종 확정한다.

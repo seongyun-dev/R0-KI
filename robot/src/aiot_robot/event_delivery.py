@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -15,6 +16,7 @@ from .vehicle_localization import project_front_vehicle
 
 
 BackendFactory = Callable[[], RobotBackendClient]
+DEFAULT_MIN_DETECTION_CONFIDENCE = 0.5
 
 
 class DetectionRecorder:
@@ -27,13 +29,46 @@ class DetectionRecorder:
         *,
         vehicle_range_source: Any | None = None,
         camera_yaw_deg: float = 0.0,
+        minimum_confidence: float | None = None,
     ) -> None:
         self._outbox = outbox
         self._state_store = state_store
         self._vehicle_range_source = vehicle_range_source
         self._camera_yaw_deg = float(camera_yaw_deg)
+        self._minimum_confidence = (
+            float(os.getenv("AIOT_MIN_DETECTION_CONFIDENCE", "0.5"))
+            if minimum_confidence is None
+            else float(minimum_confidence)
+        )
+        if (
+            not math.isfinite(self._minimum_confidence)
+            or not 0.0 <= self._minimum_confidence <= 1.0
+        ):
+            raise ValueError("minimum detection confidence must be between 0 and 1")
+        self._scan_context_lock = threading.Lock()
+        self._scan_context: dict[str, Any] | None = None
+
+    def set_scan_context(self, waypoint: Any | None) -> None:
+        """Receive the current SCAN hook from the navigation runtime."""
+
+        context = None
+        if waypoint is not None:
+            context = {
+                "sequence": int(getattr(waypoint, "sequence")),
+                "name": str(getattr(waypoint, "name", "SCAN")),
+                "zoneId": getattr(waypoint, "zone_id", None),
+            }
+        with self._scan_context_lock:
+            self._scan_context = context
 
     def __call__(self, event: DetectionEvent) -> None:
+        if event.confidence < self._minimum_confidence:
+            print(
+                "[EVENT] detection dropped below confidence threshold "
+                f"eventId={event.event_id} confidence={event.confidence:.3f} "
+                f"threshold={self._minimum_confidence:.3f}"
+            )
+            return
         pose = self._state_store.get_pose()
         if pose is None:
             print(f"[EVENT] detection dropped without map pose eventId={event.event_id}")
@@ -41,6 +76,14 @@ class DetectionRecorder:
         x = float(pose.x)
         y = float(pose.y)
         context = {"x": x, "y": y, "heading": float(pose.heading)}
+        with self._scan_context_lock:
+            scan_context = (
+                dict(self._scan_context)
+                if self._scan_context is not None
+                else None
+            )
+        if scan_context is not None:
+            context["scan"] = scan_context
         if event.event_type == "VEHICLE_DETECTED":
             get_range = getattr(self._vehicle_range_source, "get_front_range", None)
             range_m = get_range() if callable(get_range) else None
@@ -207,6 +250,12 @@ class EventDeliveryWorker:
             f"{payload['eventType']}, confidence={confidence:.2f}, "
             f"camera={payload['cameraId']}, trackId={payload['trackId']}"
         )
+        scan = context.get("scan")
+        if isinstance(scan, Mapping):
+            details += (
+                f", scanSequence={scan.get('sequence')}, "
+                f"scanZoneId={scan.get('zoneId')}"
+            )
         if isinstance(plate, str) and plate.strip():
             response = client.check_vehicles(
                 [
