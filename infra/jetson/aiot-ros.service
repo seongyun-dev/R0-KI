@@ -17,6 +17,7 @@ Environment=ROS_LOG_DIR=/var/lib/aiot/ros/log
 EnvironmentFile=/opt/aiot/secrets/ros.env
 RuntimeDirectory=aiot
 RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 ExecStartPre=/opt/aiot/iot/current/robot/scripts/ros-preflight.sh
 ExecStart=/opt/aiot/iot/current/robot/scripts/run-ros.sh
 Restart=on-failure
