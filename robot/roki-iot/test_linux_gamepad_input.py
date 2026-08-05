@@ -35,6 +35,14 @@ class GamepadStateTest(unittest.TestCase):
         self.button(self.settings.deadman_button)
         self.assertEqual(self.state.decision(), (None, "w", False, False))
 
+    def test_deadman_can_be_disabled_for_field_rc_control(self) -> None:
+        settings = GamepadSettings(deadman_required=False)
+        state = GamepadState(settings)
+        state.update(JoystickEvent(0, JS_EVENT_AXIS, settings.throttle_axis))
+        state.update(JoystickEvent(-32767, JS_EVENT_AXIS, settings.throttle_axis))
+
+        self.assertEqual(state.decision(), (None, "w", False, False))
+
     def test_axes_map_to_reverse_and_right_steering(self) -> None:
         self.button(self.settings.deadman_button)
         self.axis(self.settings.throttle_axis, 32767)
@@ -101,7 +109,39 @@ class GamepadStateTest(unittest.TestCase):
 
 
 class LinuxGamepadInputTest(unittest.TestCase):
-    def test_default_input_lease_is_bounded_to_one_second(self) -> None:
+    def test_diagnostic_snapshot_tracks_latest_motion_decision(self) -> None:
+        class FakeController:
+            def handle_key(self, _key: str) -> None:
+                pass
+
+            def tick(self):
+                return None
+
+        now = 1.0
+        settings = GamepadSettings()
+        gamepad = LinuxGamepadInput(
+            FakeController(),
+            settings=settings,
+            finish_callback=lambda: None,
+            clock=lambda: now,
+        )
+        gamepad._accept_event(  # type: ignore[attr-defined]
+            JoystickEvent(1, JS_EVENT_BUTTON, settings.deadman_button)
+        )
+        gamepad._accept_event(  # type: ignore[attr-defined]
+            JoystickEvent(-32767, JS_EVENT_AXIS, settings.throttle_axis)
+        )
+        gamepad._apply_decision()  # type: ignore[attr-defined]
+        now = 1.25
+
+        snapshot = gamepad.diagnostic_snapshot()
+
+        self.assertEqual(snapshot["lastGamepadDecision"], "W")
+        self.assertEqual(snapshot["lastGamepadDecisionAgoMs"], 250.0)
+        self.assertFalse(snapshot["gamepadDeviceOpen"])
+        self.assertFalse(snapshot["gamepadThreadAlive"])
+
+    def test_default_holds_command_while_device_remains_connected(self) -> None:
         class FakeController:
             def __init__(self) -> None:
                 self.keys: list[str] = []
@@ -131,11 +171,11 @@ class LinuxGamepadInputTest(unittest.TestCase):
         gamepad._apply_decision()  # type: ignore[attr-defined]
         now = 1.0
         gamepad._apply_decision()  # type: ignore[attr-defined]
-        now = 1.01
+        now = 30.0
         gamepad._apply_decision()  # type: ignore[attr-defined]
 
-        self.assertEqual(settings.input_lease_sec, 1.0)
-        self.assertEqual(controller.keys, ["w", "w", " "])
+        self.assertEqual(settings.input_lease_sec, 0.0)
+        self.assertEqual(controller.keys, ["w", "w", "w"])
 
     def test_deadman_release_emits_only_one_stop(self) -> None:
         class FakeController:

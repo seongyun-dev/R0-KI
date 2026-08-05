@@ -462,7 +462,11 @@ class PatrolCommandHandler:
     def _handle_start_mapping_locked(self, command: ValidatedCommand) -> None:
         assert command.mapping_session_id is not None
         if self._mapping_runtime is None:
-            self._record_and_publish_command(command, "REJECTED")
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason="MAPPING_RUNTIME_MISSING",
+            )
             print("[COMMAND] START_MAPPING rejected reason=MAPPING_RUNTIME_MISSING")
             return
         status = self._state_store.get_status()
@@ -474,7 +478,11 @@ class PatrolCommandHandler:
         if status.state not in {"IDLE", "ERROR"} or getattr(
             self._serial_reader, "active_patrol_id", None
         ) is not None:
-            self._record_and_publish_command(command, "REJECTED")
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason="ROBOT_NOT_IDLE",
+            )
             print("[COMMAND] START_MAPPING rejected reason=ROBOT_NOT_IDLE")
             return
         try:
@@ -483,7 +491,11 @@ class PatrolCommandHandler:
                 command.command_id,
             )
         except Exception as exc:
-            self._record_and_publish_command(command, "FAILED")
+            self._record_and_publish_command(
+                command,
+                "FAILED",
+                reason=type(exc).__name__,
+            )
             print(f"[COMMAND] START_MAPPING failed type={type(exc).__name__}")
             return
         if not ready:
@@ -496,6 +508,7 @@ class PatrolCommandHandler:
             self._record_and_publish_command(
                 command,
                 "FAILED" if lifecycle_failure else "REJECTED",
+                reason=reason,
             )
             print(f"[COMMAND] START_MAPPING rejected reason={reason}")
             return

@@ -90,15 +90,20 @@ class SlamMapExporter:
                 (
                     self._ros2_command,
                     "service",
-                    "type",
-                    "/slam_toolbox/serialize_map",
+                    "list",
+                    "-t",
+                    "--no-daemon",
                 ),
                 min(self._settings.timeout_seconds, 5.0),
             )
         except (OSError, subprocess.SubprocessError):
             return False, "SLAM_TOOLBOX_NOT_READY"
-        service_type = str(getattr(result, "stdout", "")).strip()
-        if "slam_toolbox/srv/SerializePoseGraph" not in service_type:
+        service_graph = str(getattr(result, "stdout", ""))
+        expected_service = (
+            "/slam_toolbox/serialize_map "
+            "[slam_toolbox/srv/SerializePoseGraph]"
+        )
+        if expected_service not in service_graph:
             return False, "SLAM_TOOLBOX_NOT_READY"
         return True, "READY"
 
@@ -128,7 +133,10 @@ class SlamMapExporter:
                     str(prefix),
                     "--ros-args",
                     "-p",
-                    f"save_map_timeout:={saver_timeout:g}",
+                    # Nav2 declares this parameter as double.  ``:g`` turns
+                    # an integral float such as 24.0 into ``24``, which ROS
+                    # then rejects as an integer override.
+                    f"save_map_timeout:={saver_timeout}",
                 ),
                 self._settings.timeout_seconds,
             )
@@ -139,6 +147,7 @@ class SlamMapExporter:
         pgm_path = prefix.with_suffix(".pgm")
         if not yaml_path.is_file() or not pgm_path.is_file():
             raise MapExportError("map saver did not create map.yaml and map.pgm")
+        _normalize_map_thresholds(yaml_path)
         metadata = _load_metadata(yaml_path)
         origin_x, origin_y, origin_yaw = metadata["origin"]
         if self._settings.require_zero_origin_yaw and not math.isclose(
@@ -203,6 +212,38 @@ def _load_metadata(path: Path) -> dict[str, Any]:
             _finite(value, f"origin[{index}]") for index, value in enumerate(origin)
         ),
     }
+
+
+def _normalize_map_thresholds(path: Path) -> None:
+    """Keep canonical ROS unknown pixels unknown during Nav2 patrol.
+
+    ``map_saver_cli`` commonly writes ``free_thresh: 0.25``. For a trinary
+    PGM, the canonical unknown shade (205/255) has occupancy about 0.196 and
+    would therefore be classified as FREE. The runtime correctly rejects that
+    unsafe map, so normalize saved maps before hashing, upload and activation.
+    """
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise MapExportError("map YAML is unreadable") from exc
+    if not isinstance(raw, Mapping):
+        raise MapExportError("map YAML root must be an object")
+    normalized = dict(raw)
+    normalized["mode"] = "trinary"
+    normalized["occupied_thresh"] = 0.65
+    normalized["free_thresh"] = 0.15
+    temporary = path.with_name(f".{path.name}.thresholds.tmp")
+    try:
+        temporary.write_text(
+            yaml.safe_dump(normalized, sort_keys=False),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except OSError as exc:
+        raise MapExportError("map thresholds could not be normalized") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _finite(value: Any, field: str) -> float:

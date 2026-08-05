@@ -115,7 +115,7 @@ waypoints:
                 "nav2",
             )
 
-    def test_production_route_and_fixed_dock_are_validated_against_map(self) -> None:
+    def test_production_route_identity_and_bounds_are_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             map_path, route_path = self.make_map_and_route(root)
@@ -148,7 +148,9 @@ waypoints:
                         encoder_limited=False,
                     )
 
-    def test_out_of_bounds_route_and_dock_are_rejected(self) -> None:
+    def test_out_of_bounds_route_is_rejected_but_dock_is_not_a_route_gate(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             map_path, route_path = self.make_map_and_route(
@@ -163,10 +165,11 @@ waypoints:
             environment = self.deployment_environment(map_path, valid_route)
             environment["ROKI_INITIAL_POSE_X_M"] = "10.0"
             with patch.dict(os.environ, environment, clear=True):
-                with self.assertRaisesRegex(
-                    RouteValidationError, "fixed dock initial pose.*outside"
-                ):
-                    _build_navigation_service(valid_route, encoder_limited=False)
+                service = _build_navigation_service(
+                    valid_route,
+                    encoder_limited=False,
+                )
+            self.assertEqual(service.route.route_id, "demo-route")
 
     def test_non_map_route_and_encoder_diagnostic_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -181,7 +184,7 @@ waypoints:
                 with self.assertRaisesRegex(RuntimeError, "DEMO_NAV2_REQUIRED"):
                     _build_navigation_service(route_path, encoder_limited=True)
 
-    def test_rejects_mostly_unknown_314_percent_map(self) -> None:
+    def test_mostly_unknown_map_is_left_to_nav2_live_costmaps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pixels = bytes([255]) * 314 + bytes([128]) * 9_686
@@ -192,13 +195,13 @@ waypoints:
             environment = self.deployment_environment(map_path, route_path)
 
             with patch.dict(os.environ, environment, clear=True):
-                with self.assertRaisesRegex(
-                    RouteValidationError,
-                    "known coverage.*3.14%.*10.00%",
-                ):
-                    _build_navigation_service(route_path, encoder_limited=False)
+                service = _build_navigation_service(
+                    route_path,
+                    encoder_limited=False,
+                )
+            self.assertEqual(service.route.route_id, "demo-route")
 
-    def test_rejects_non_free_waypoint_footprint(self) -> None:
+    def test_waypoint_footprint_is_left_to_nav2_live_costmaps(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pixels = bytearray([255] * 10_000)
@@ -211,11 +214,11 @@ waypoints:
             environment = self.deployment_environment(map_path, route_path)
 
             with patch.dict(os.environ, environment, clear=True):
-                with self.assertRaisesRegex(
-                    RouteValidationError,
-                    "waypoint 1 robot footprint intersects occupied",
-                ):
-                    _build_navigation_service(route_path, encoder_limited=False)
+                service = _build_navigation_service(
+                    route_path,
+                    encoder_limited=False,
+                )
+            self.assertEqual(service.route.route_id, "demo-route")
 
     def test_rejects_missing_or_mismatched_deployment_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

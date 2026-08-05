@@ -131,12 +131,7 @@ def _build_navigation_service_from_route(
     from navigation.map_metadata import (
         file_sha256,
         load_map_metadata,
-        load_occupancy_grid,
         map_bundle_sha256,
-        validate_map_quality,
-        validate_point_clearance,
-        validate_point_bounds,
-        validate_route_clearance,
         validate_route_bounds,
     )
     from navigation.route import RouteValidationError
@@ -177,38 +172,12 @@ def _build_navigation_service_from_route(
         if not hmac.compare_digest(file_sha256(route_path), expected_route_sha256):
             raise RouteValidationError("route SHA256 does not match deployment")
 
+    # Keep only deployment identity and coordinate sanity here.  Occupancy,
+    # unknown-space and robot-footprint decisions belong to Nav2's live
+    # costmaps, where current LiDAR data can be considered.  Static rejection
+    # made a usable field map impossible to patrol and also incorrectly tied
+    # every route to one preconfigured dock coordinate.
     validate_route_bounds(route, metadata)
-    grid = load_occupancy_grid(metadata)
-    validate_map_quality(
-        grid,
-        minimum_known_coverage_ratio=_coverage_ratio(
-            "ROKI_MAP_MIN_KNOWN_COVERAGE_RATIO", "0.10"
-        ),
-        minimum_free_coverage_ratio=_coverage_ratio(
-            "ROKI_MAP_MIN_FREE_COVERAGE_RATIO", "0.10"
-        ),
-    )
-    robot_radius_m = float(_required_environment("ROKI_ROBOT_RADIUS_M"))
-    validate_route_clearance(
-        route,
-        grid,
-        robot_radius_m=robot_radius_m,
-    )
-    dock_x = float(_required_environment("ROKI_INITIAL_POSE_X_M"))
-    dock_y = float(_required_environment("ROKI_INITIAL_POSE_Y_M"))
-    validate_point_bounds(
-        dock_x,
-        dock_y,
-        metadata,
-        label="fixed dock initial pose",
-    )
-    validate_point_clearance(
-        dock_x,
-        dock_y,
-        grid,
-        robot_radius_m=robot_radius_m,
-        label="fixed dock initial pose",
-    )
     return WaypointNavigationService(route)
 
 
@@ -234,17 +203,6 @@ def _required_sha256(name: str) -> str:
     value = _required_environment(name).lower()
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be a SHA256 hex digest")
-    return value
-
-
-def _coverage_ratio(name: str, default: str) -> float:
-    raw = os.getenv(name, default).strip()
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be numeric") from exc
-    if not 0.0 <= value <= 1.0:
-        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be within 0.0..1.0")
     return value
 
 
@@ -532,6 +490,10 @@ def _build_mapping_runtime(
         steering_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_STEERING_AXIS", "0")),
         throttle_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_THROTTLE_AXIS", "1")),
         deadman_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON", "4")),
+        deadman_required=_environment_enabled(
+            "ROKI_MAPPING_GAMEPAD_DEADMAN_REQUIRED",
+            True,
+        ),
         stop_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_STOP_BUTTON", "1")),
         finish_button_a=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A", "6")),
         finish_button_b=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B", "7")),
@@ -542,7 +504,7 @@ def _build_mapping_runtime(
             os.getenv("ROKI_MAPPING_GAMEPAD_RECONNECT_SEC", "1.0")
         ),
         input_lease_sec=float(
-            os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "1.0")
+            os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "0")
         ),
     )
     holder: dict[str, Any] = {}
@@ -716,6 +678,16 @@ def create_integrated_application(
         )
     if mapping_runtime is not None:
         runtime_service.set_mapping_runtime(mapping_runtime)
+    if lidar_health_bridge is not None:
+        set_obstacle_activity_check = getattr(
+            lidar_health_bridge,
+            "set_obstacle_activity_check",
+            None,
+        )
+        if callable(set_obstacle_activity_check):
+            set_obstacle_activity_check(
+                runtime_service.is_obstacle_detection_active
+            )
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
@@ -774,6 +746,10 @@ def create_integrated_application(
         pipeline_runner=pipeline_runner,
         pose_source=pose_bridge,
         lidar_health_source=lidar_health_bridge,
+        # A fresh AMCL/TF pose is useful while IDLE too: the dashboard must
+        # reflect the robot at the marked dock before START_PATROL.  The pose
+        # bridge already rejects missing or stale transforms, so patrol state
+        # is not an additional validity condition.
         runtime_components=tuple(runtime_components),
         start_serial_reader=start_serial_runtime,
     )

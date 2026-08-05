@@ -177,7 +177,7 @@ class NavigationConfigProviderTest(unittest.TestCase):
         )
         with self.assertRaises(NavigationConfigError) as raised:
             unsafe_route.load_navigation()
-        self.assertEqual(raised.exception.reason, "NAVIGATION_ROUTE_UNSAFE")
+        self.assertEqual(raised.exception.reason, "NAVIGATION_ROUTE_INVALID")
         self.assertFalse(raised.exception.local_fallback_allowed)
 
     def test_navigation_fetch_timeout_is_bounded_by_command_deadline(self) -> None:

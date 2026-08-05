@@ -32,6 +32,7 @@ class GamepadSettings:
     steering_axis: int = 0
     throttle_axis: int = 1
     deadman_button: int = 4
+    deadman_required: bool = True
     stop_button: int = 1
     finish_button_a: int = 6
     finish_button_b: int = 7
@@ -39,7 +40,12 @@ class GamepadSettings:
     finish_hold_sec: float = 2.0
     loop_interval_sec: float = 0.05
     reconnect_interval_sec: float = 1.0
-    input_lease_sec: float = 1.0
+    # Linux js devices normally emit events only when a value changes.  A
+    # positive lease is therefore an optional receiver-specific safety policy,
+    # not a device-liveness check.  Zero keeps a held deadman/stick command
+    # active while the device remains open; release, STOP and disconnect still
+    # stop immediately.
+    input_lease_sec: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.device_path:
@@ -60,8 +66,8 @@ class GamepadSettings:
             raise ValueError("finish_hold_sec must be positive")
         if self.loop_interval_sec <= 0 or self.reconnect_interval_sec <= 0:
             raise ValueError("gamepad loop intervals must be positive")
-        if self.input_lease_sec <= 0:
-            raise ValueError("gamepad input lease must be positive")
+        if self.input_lease_sec < 0:
+            raise ValueError("gamepad input lease must not be negative")
 
 
 @dataclass(frozen=True)
@@ -151,7 +157,10 @@ class GamepadState:
 
         if self._button(self._settings.stop_button):
             return None, None, True, False
-        if not self._button(self._settings.deadman_button):
+        if (
+            self._settings.deadman_required
+            and not self._button(self._settings.deadman_button)
+        ):
             return None, None, True, False
 
         steering_value = self._axes.get(self._settings.steering_axis, 0.0)
@@ -198,7 +207,7 @@ class GamepadState:
 
 
 class LinuxGamepadInput:
-    """Reconnectable Linux joystick reader with a deadman switch."""
+    """Reconnectable Linux joystick reader with an optional deadman switch."""
 
     def __init__(
         self,
@@ -224,6 +233,9 @@ class LinuxGamepadInput:
         self._file_descriptor: int | None = None
         self._command_active = False
         self._last_input_at: float | None = None
+        self._diagnostic_lock = threading.Lock()
+        self._last_decision: str | None = None
+        self._last_decision_at: float | None = None
 
     @property
     def device_path(self) -> Path:
@@ -257,6 +269,25 @@ class LinuxGamepadInput:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
         self._thread = None
+
+    def diagnostic_snapshot(self) -> dict[str, object]:
+        """Return read-only liveness/input context without affecting control."""
+
+        now = self._clock()
+        with self._diagnostic_lock:
+            decision = self._last_decision
+            decision_at = self._last_decision_at
+        thread = self._thread
+        return {
+            "gamepadDeviceOpen": self._file_descriptor is not None,
+            "gamepadThreadAlive": thread is not None and thread.is_alive(),
+            "lastGamepadDecision": decision or "unavailable",
+            "lastGamepadDecisionAgoMs": (
+                None
+                if decision_at is None
+                else round(max(0.0, (now - decision_at) * 1000.0), 3)
+            ),
+        }
 
     def _open(self) -> int:
         return self._opener(
@@ -319,29 +350,41 @@ class LinuxGamepadInput:
             self._last_input_at = self._clock()
 
     def _apply_decision(self) -> None:
-        if (
+        lease_enabled = self._settings.input_lease_sec > 0
+        lease_expired = (
             self._last_input_at is None
             or self._clock() - self._last_input_at
             > self._settings.input_lease_sec
-        ) and not self._state.finish_pressed:
+        )
+        if lease_enabled and lease_expired and not self._state.finish_pressed:
             self._state.disarm()
+            if self._command_active:
+                self._record_decision("LEASE_STOP")
             self._safe_stop()
             self._controller.tick()
             return
         steering, drive, stop, finish = self._state.decision()
         if stop:
+            if self._command_active:
+                self._record_decision("STOP")
             self._safe_stop()
         else:
+            decisions: list[str] = []
             if steering is not None:
                 self._controller.handle_key(steering)
                 self._command_active = True
+                decisions.append(steering.upper())
             if drive is not None:
                 self._controller.handle_key(drive)
                 self._command_active = True
+                decisions.append(drive.upper())
+            if decisions:
+                self._record_decision("+".join(decisions))
         result = self._controller.tick()
         if result is not None:
             self._command_active = False
         if finish:
+            self._record_decision("FINISH")
             self._stop_event.set()
             threading.Thread(
                 target=self._finish_callback,
@@ -355,6 +398,12 @@ class LinuxGamepadInput:
         if self._command_active:
             self._controller.handle_key(" ")
         self._command_active = False
+
+    def _record_decision(self, decision: str) -> None:
+        now = self._clock()
+        with self._diagnostic_lock:
+            self._last_decision = decision
+            self._last_decision_at = now
 
     def _close_device(self) -> None:
         descriptor = self._file_descriptor
