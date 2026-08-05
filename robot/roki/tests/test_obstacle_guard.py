@@ -75,6 +75,28 @@ class FrontObstacleDetectorTest(unittest.TestCase):
 
         self.assertEqual(self.evaluate(ranges).obstacle.status, "CLEAR")
 
+    def test_shifted_lidar_mount_uses_configured_forward_center(self) -> None:
+        detector = FrontObstacleDetector(
+            ObstacleDetectorSettings(
+                front_angle_deg=30.0,
+                stop_distance_m=0.6,
+                clear_distance_m=0.7,
+                center_angle_deg=90.0,
+            )
+        )
+        ranges = [1.0] * 19
+        ranges[18] = 0.4  # +90 degrees is robot-forward for this mount.
+        detection = detector.evaluate_scan(
+            ranges=ranges,
+            angle_min_rad=math.radians(-90),
+            angle_increment_rad=math.radians(10),
+            range_min_m=0.12,
+            range_max_m=12.0,
+        )
+
+        self.assertEqual(detection.obstacle.status, "STOP")
+        self.assertEqual(detection.front_distance_m, 0.4)
+
     def test_invalid_ranges_are_ignored_and_previous_state_is_kept(self) -> None:
         stopped = self.clear_scan()
         stopped[9] = 0.4
