@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { R0KiDropdown } from '../components/ui/R0KiDropdown'
 import { useEvents } from '../features/events/useEvents'
@@ -45,6 +45,48 @@ const PERIOD_OPTIONS = [
   { value: 'LAST_7_DAYS', label: '최근 7일' },
 ]
 
+type EventListFilters = {
+  type: EventTypeCode | ''
+  status: ProcessingStatusCode | ''
+  period: EventPeriodCode | ''
+}
+
+const TYPE_VALUES = new Set(TYPE_OPTIONS.map((option) => option.value))
+const STATE_VALUES = new Set(STATE_OPTIONS.map((option) => option.value))
+const PERIOD_VALUES = new Set(PERIOD_OPTIONS.map((option) => option.value))
+
+function filtersFromSearchParams(params: URLSearchParams): EventListFilters {
+  const type = params.get('type') ?? ''
+  const status = params.get('status') ?? ''
+  const period = params.get('period') ?? ''
+  return {
+    type: TYPE_VALUES.has(type) ? (type as EventTypeCode) : '',
+    status: STATE_VALUES.has(status) ? (status as ProcessingStatusCode) : '',
+    period: PERIOD_VALUES.has(period) ? (period as EventPeriodCode) : '',
+  }
+}
+
+function pageFromSearchParams(params: URLSearchParams) {
+  const raw = params.get('page')
+  if (!raw) return 0
+  const page = Number(raw)
+  return Number.isInteger(page) && page >= 0 ? page : 0
+}
+
+function buildSearchParams(filters: EventListFilters, page: number) {
+  const params = new URLSearchParams()
+  if (filters.type) params.set('type', filters.type)
+  if (filters.status) params.set('status', filters.status)
+  if (filters.period) params.set('period', filters.period)
+  if (page > 0) params.set('page', String(page))
+  return params
+}
+
+function toListSearch(filters: EventListFilters, page: number) {
+  const query = buildSearchParams(filters, page).toString()
+  return query ? `?${query}` : ''
+}
+
 // const RISK_OPTIONS = [
 //   { value: 'EMERGENCY', label: '긴급' },
 //   { value: 'NORMAL', label: '보통' },
@@ -53,14 +95,16 @@ const PERIOD_OPTIONS = [
 
 export default function EventList() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const applied = filtersFromSearchParams(searchParams)
+  const page = pageFromSearchParams(searchParams)
+  const listSearch = toListSearch(applied, page)
   // 입력 중 필터 / 적용된 필터 분리 — 검색 버튼으로 확정
-  const [draft, setDraft] = useState<{
-    type: EventTypeCode | ''
-    status: ProcessingStatusCode | ''
-    period: EventPeriodCode | ''
-  }>({ type: '', status: '', period: '' })
-  const [applied, setApplied] = useState(draft)
-  const [page, setPage] = useState(0)
+  const [draft, setDraft] = useState<EventListFilters>(applied)
+
+  useEffect(() => {
+    setDraft(applied)
+  }, [applied.period, applied.status, applied.type, page])
 
   const {
     data: events,
@@ -103,10 +147,7 @@ export default function EventList() {
             <button
               type="button"
               className="btn btn-p"
-              onClick={() => {
-                setPage(0)
-                setApplied({ ...draft })
-              }}
+              onClick={() => setSearchParams(buildSearchParams({ ...draft }, 0))}
             >
               검색
             </button>
@@ -137,7 +178,12 @@ export default function EventList() {
                 </thead>
                 <tbody>
                   {rows.map((e) => (
-                    <tr key={e.id} onClick={() => navigate(`/app/events/${e.id}`)}>
+                    <tr
+                      key={e.id}
+                      onClick={() =>
+                        navigate(`/app/events/${e.id}`, { state: { listSearch } })
+                      }
+                    >
                       <td className="id">{e.id}</td>
                       <td className="tm">{e.time}</td>
                       <td className="ty">{e.type}</td>
@@ -200,7 +246,7 @@ export default function EventList() {
                   type="button"
                   className="btn btn-s"
                   disabled={first || isLoading}
-                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                  onClick={() => setSearchParams(buildSearchParams(applied, Math.max(0, page - 1)))}
                 >
                   이전
                 </button>
@@ -211,7 +257,7 @@ export default function EventList() {
                   type="button"
                   className="btn btn-s"
                   disabled={last || isLoading}
-                  onClick={() => setPage((current) => current + 1)}
+                  onClick={() => setSearchParams(buildSearchParams(applied, page + 1))}
                 >
                   다음
                 </button>
