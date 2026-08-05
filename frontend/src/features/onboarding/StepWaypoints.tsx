@@ -47,7 +47,6 @@ const zoneTone: Record<ZoneTypeCode, string> = {
   START: 'detect',
   PARKING: 'patrol',
   RECYCLING_AREA: 'charge',
-  DANGER_ZONE: 'alert',
   DESTINATION: 'offline',
 }
 
