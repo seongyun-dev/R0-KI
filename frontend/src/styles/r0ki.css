@@ -545,6 +545,13 @@
     box-shadow var(--d-fast) var(--e-glass)}
 .r0ki .botall svg{width:clamp(10px,1.6cqw,15px);height:clamp(10px,1.6cqw,15px);flex:none;fill:currentColor}
 .r0ki .botall:hover{transform:translateY(-1px);border-color:var(--graphic)}
+.r0ki .mapsetup-mapbtn{display:inline-flex;align-items:center;
+  padding:clamp(4px,.7cqw,8px) clamp(8px,1.4cqw,14px);
+  border:1px solid var(--hair);border-radius:var(--r-pill);background:var(--focus-in);
+  color:var(--text-1);font-family:var(--sans);font-size:clamp(8px,1.3cqw,12px);font-weight:700;
+  text-decoration:none;white-space:nowrap;box-shadow:var(--sh-1);
+  transition:transform var(--d-fast) var(--e-glass),border-color var(--d-fast) var(--e-glass)}
+.r0ki .mapsetup-mapbtn:hover{transform:translateY(-1px);border-color:var(--graphic)}
 /* 켜진 상태는 채운 강조색 — 작아도 지금 무엇이 선택됐는지 한눈에 읽힌다 */
 .r0ki .botall[aria-pressed="true"]{border-color:transparent;color:var(--accent-ink);
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
@@ -1526,6 +1533,9 @@
 .r0ki .au-colh span,.r0ki .au-rowh span{display:grid;place-items:center}
 .r0ki .au-rowh{grid-column:1;grid-row:2}
 .r0ki .au-cells{grid-column:2;grid-row:2;position:relative;display:grid;cursor:crosshair;touch-action:none}
+.r0ki .au-cells[aria-disabled="true"]{cursor:wait}
+.r0ki .au-cells[aria-disabled="true"]::after{content:'';position:absolute;inset:0;z-index:20;
+  background:color-mix(in srgb,var(--page) 42%,transparent)}
 .r0ki .au-cells .cell{border:1px solid var(--hair);border-width:0 1px 1px 0}
 .r0ki .au-cells>img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none}
 .r0ki .au-zone{position:absolute;border-radius:9px;cursor:pointer;
@@ -1546,6 +1556,104 @@
 .r0ki .au-draft.bad{border-color:var(--urgent);background:var(--urgent-bg)}
 .r0ki .au-mfoot{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4)}
 .r0ki .au-mfoot .au-note{flex:1}
+
+/* ── 맵 등록 내부 단계 · 순서형 순찰 경로 편집기 ── */
+.r0ki .au-editor-steps{display:flex;align-items:center;gap:8px;margin-bottom:var(--s4);flex-wrap:wrap}
+.r0ki .au-editor-steps span{display:inline-flex;align-items:center;min-height:36px;padding:0 14px;
+  border-radius:var(--r-pill);border:1px solid var(--edge);background:var(--track);
+  color:var(--text-3);font-size:13px;font-weight:700}
+.r0ki .au-editor-steps span[aria-current="step"]{border-color:transparent;color:var(--accent-ink);
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 4px 12px var(--accent-glow)}
+.r0ki .au-editor-steps span.done{color:var(--text-2);border-color:var(--graphic-soft)}
+.r0ki .au-route-editor{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:var(--s4);align-items:start;min-width:0}
+.r0ki .au-route-editor>div{min-width:0}
+.r0ki .au-route-editor .au-mhead .hint{margin-left:0}
+.r0ki .au-route-canvas{min-width:0}
+.r0ki .au-route-canvas .au-cells{cursor:crosshair;isolation:isolate}
+.r0ki .au-route-canvas .au-cells:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.r0ki .au-route-zone{position:absolute;z-index:2;border-radius:8px;overflow:hidden;pointer-events:none;
+  padding:4px 6px;border:1px solid color-mix(in srgb,var(--z) 55%,transparent);
+  background:color-mix(in srgb,var(--z) 10%,transparent);color:var(--z);
+  font-size:10px;font-weight:700;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
+.r0ki .au-route-line{position:absolute;inset:0;z-index:3;width:100%;height:100%;pointer-events:none;overflow:visible}
+.r0ki .au-route-line polyline{fill:none;stroke:var(--graphic);stroke-width:1.8;stroke-dasharray:2 1.5;
+  stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.r0ki .au-keyboard-cursor{position:absolute;z-index:4;width:24px;height:24px;transform:translate(-50%,-50%);
+  border:2px solid var(--focus);border-radius:7px;box-shadow:0 0 0 3px var(--focus-in);opacity:0;
+  pointer-events:none;transition:opacity var(--d-fast) var(--e-glass)}
+.r0ki .au-route-canvas .au-cells:focus-visible .au-keyboard-cursor{opacity:1}
+.r0ki .au-waypoint{position:absolute;z-index:4;width:32px;height:32px;transform:translate(-50%,-50%);
+  border-radius:50%;border:2px solid var(--page);display:grid;place-items:center;cursor:pointer;
+  background:var(--graphic);color:var(--page);font-family:var(--mono);font-size:12px;font-weight:800;
+  box-shadow:0 2px 7px rgba(20,56,104,.4);transition:transform var(--d-fast) var(--e-glass)}
+.r0ki .au-waypoint.scan{background:var(--patrol)}
+.r0ki .au-waypoint.destination{background:var(--offline)}
+.r0ki .au-waypoint:hover,.r0ki .au-waypoint.selected{transform:translate(-50%,-50%) scale(1.12)}
+.r0ki .au-waypoint.selected{box-shadow:0 0 0 3px var(--focus-in),0 2px 8px rgba(20,56,104,.42)}
+.r0ki .au-route-mask{position:absolute;inset:0;z-index:5;background:color-mix(in srgb,var(--page) 50%,transparent);
+  cursor:not-allowed}
+
+.r0ki .au-route-side{min-width:0;max-height:min(570px,70vh);display:flex;flex-direction:column;
+  border-radius:var(--r-inner);border:1px solid var(--edge);background:var(--track);overflow:hidden;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+.r0ki[data-theme="nocturne"] .au-route-side{box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.r0ki .au-route-side-head{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 var(--s4);
+  border-bottom:1px solid var(--hair);font-size:14px;font-weight:700;color:var(--text-1)}
+.r0ki .au-route-side-head .num{margin-left:auto;color:var(--accent)}
+.r0ki .au-route-empty{min-height:180px;padding:var(--s5);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:var(--s3);text-align:center;font-size:13px;line-height:1.5;color:var(--text-3)}
+.r0ki .au-route-empty.bad{color:var(--urgent-text)}
+.r0ki .au-route-empty .au-spin{width:28px;height:28px}
+.r0ki .au-route-list{list-style:none;min-height:0;overflow-y:auto;padding:var(--s2);display:flex;flex-direction:column;gap:8px}
+.r0ki .au-route-list::-webkit-scrollbar{width:5px}
+.r0ki .au-route-list::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .au-route-list>li{padding:12px;border-radius:var(--r-inner);border:1px solid var(--edge);background:var(--page);
+  box-shadow:0 1px 3px rgba(20,56,104,.06)}
+.r0ki .au-route-list>li.selected{border-color:var(--graphic);box-shadow:0 0 0 2px var(--focus-in)}
+.r0ki .au-route-item-head{display:flex;align-items:center;gap:8px;min-width:0}
+.r0ki .au-route-number{width:30px;height:30px;flex:none;border-radius:50%;border:0;cursor:pointer;
+  background:var(--graphic);color:var(--page);font-family:var(--mono);font-size:12px;font-weight:800}
+.r0ki .au-route-position{flex:1;min-width:0;display:flex;align-items:center;gap:7px;
+  font-size:11.5px;color:var(--text-3)}
+.r0ki .au-route-position b{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:26px;
+  padding:0 8px;border-radius:var(--r-pill);background:var(--track);color:var(--text-1);
+  font-family:var(--mono);font-size:12px}
+.r0ki .au-route-move{display:flex;gap:3px;flex:none}
+.r0ki .au-route-move button{width:30px;height:30px;border-radius:9px;border:1px solid var(--edge);
+  background:var(--track);color:var(--text-2);font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer}
+.r0ki .au-route-move button:disabled{opacity:.35;cursor:default}
+.r0ki .au-route-move button.del{color:var(--urgent-text)}
+.r0ki .au-route-fields{margin-top:10px}
+.r0ki .au-route-fields label{display:flex;align-items:center;gap:10px;min-width:0}
+.r0ki .au-route-fields label>span{flex:1;font-size:11.5px;font-weight:700;color:var(--text-2)}
+.r0ki .au-route-fields select{width:150px;height:38px;min-width:0;padding:0 10px;
+  border-radius:10px;border:1px solid var(--edge);background:var(--track);color:var(--text-1);
+  font-family:var(--sans);font-size:12px;outline:none}
+.r0ki .au-route-fields select:focus{
+  box-shadow:0 0 0 2px var(--focus-in);border-color:var(--graphic)}
+.r0ki .au-route-errors{margin-top:var(--s4);padding:12px var(--s4);border-radius:var(--r-inner);
+  border:1px solid var(--urgent-edge);background:var(--urgent-bg);color:var(--urgent-text);
+  font-size:12.5px;line-height:1.55}
+.r0ki .au-route-errors b{display:block;margin-bottom:4px}
+.r0ki .au-route-errors ul{margin:0;padding-left:18px}
+.r0ki .au-kind:disabled,.r0ki .zkinds button:disabled,.r0ki .mddel:disabled,
+.r0ki .au-route-number:disabled,.r0ki .au-waypoint:disabled,
+.r0ki .au-route-fields select:disabled{
+  opacity:.5;cursor:default}
+
+@media(max-width:900px){
+  .r0ki .au-route-editor{grid-template-columns:1fr}
+  .r0ki .au-route-side{max-height:none}
+  .r0ki .au-route-list{max-height:430px}
+}
+@media(max-width:600px){
+  .r0ki .au-route-fields label{align-items:stretch;flex-direction:column;gap:6px}
+  .r0ki .au-route-fields select{width:100%}
+  .r0ki .au-editor-actions{align-items:stretch;flex-wrap:wrap}
+  .r0ki .au-editor-actions .grow{display:none}
+  .r0ki .au-editor-actions .btn{width:100%;white-space:normal;text-align:center}
+}
 
 /* ── 모달 확장 — 구역 지정 · 단지 검색 (.modalwrap/.modal 위에 얹는 위젯) ── */
 .r0ki .mdsub{font-size:13.5px;color:var(--text-3);font-weight:600;margin:-12px 0 var(--s5)}
