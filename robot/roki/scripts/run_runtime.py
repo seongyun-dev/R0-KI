@@ -267,14 +267,25 @@ def build_ros_lidar_health_bridge(
             )
         return float(value)
 
+    # LaserScan angles are expressed in laser_frame.  A LiDAR mounted with a
+    # yaw offset therefore needs a raw-scan forward angle independently from
+    # the camera yaw used later to project a detection into the map frame.
+    lidar_forward_center_angle_deg = float(
+        os.getenv("AIOT_LIDAR_FORWARD_CENTER_ANGLE_DEG", "0")
+    )
+    vehicle_lidar_center_angle_deg = float(
+        os.getenv(
+            "AIOT_VEHICLE_LIDAR_CENTER_ANGLE_DEG",
+            str(lidar_forward_center_angle_deg),
+        )
+    )
+
     return RosLidarHealthBridge(
         state_store=state_store,
         settings=RosLidarHealthSettings(
             scan_topic=str(_required(raw, "scan_topic", "lidar.yaml.lidar")),
             scan_timeout_sec=float(timeout),
-            vehicle_center_angle_deg=float(
-                os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0")
-            ),
+            vehicle_center_angle_deg=vehicle_lidar_center_angle_deg,
             vehicle_half_angle_deg=float(
                 os.getenv("AIOT_VEHICLE_FRONT_HALF_ANGLE_DEG", "8")
             ),
@@ -293,6 +304,7 @@ def build_ros_lidar_health_bridge(
                 front_angle_deg=obstacle_number("front_angle_deg"),
                 stop_distance_m=obstacle_number("stop_distance_m"),
                 clear_distance_m=obstacle_number("clear_distance_m"),
+                center_angle_deg=lidar_forward_center_angle_deg,
             )
         ),
     )

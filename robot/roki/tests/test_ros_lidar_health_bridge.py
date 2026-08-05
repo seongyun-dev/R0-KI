@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 from types import SimpleNamespace
 
@@ -76,6 +77,28 @@ class RosLidarHealthBridgeTest(unittest.TestCase):
 
         self.assertIsNone(distance)
         self.assertIsNone(self.bridge.get_front_range(now=10.5))
+
+    def test_vehicle_range_uses_lidar_frame_center_angle(self) -> None:
+        bridge = RosLidarHealthBridge(
+            state_store=self.store,
+            settings=RosLidarHealthSettings(
+                scan_topic="/scan",
+                scan_timeout_sec=1.0,
+                vehicle_center_angle_deg=90.0,
+            ),
+            monotonic_clock=lambda: 10.0,
+        )
+
+        distance = bridge.ingest_scan(
+            ranges=[0.4, 3.0, 1.2],
+            angle_min_rad=0.0,
+            angle_increment_rad=math.pi / 4,
+            range_min_m=0.12,
+            range_max_m=12.0,
+            received_at=10.0,
+        )
+
+        self.assertAlmostEqual(distance, 1.2)
 
     def test_scan_updates_obstacle_without_touching_motion_or_safety(self) -> None:
         bridge = RosLidarHealthBridge(

@@ -19,10 +19,13 @@ class ObstacleDetectorSettings:
     front_angle_deg: float
     stop_distance_m: float
     clear_distance_m: float
+    center_angle_deg: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0 < self.front_angle_deg <= 180:
             raise ValueError("obstacle.front_angle_deg must be in (0, 180]")
+        if not math.isfinite(self.center_angle_deg):
+            raise ValueError("obstacle.center_angle_deg must be finite")
         if self.stop_distance_m <= 0:
             raise ValueError("obstacle.stop_distance_m must be positive")
         if self.clear_distance_m <= self.stop_distance_m:
@@ -88,11 +91,16 @@ class FrontObstacleDetector:
         range_max_m: float,
     ) -> float | None:
         sector_limit = math.radians(self._settings.front_angle_deg)
+        sector_center = math.radians(self._settings.center_angle_deg)
         valid: list[float] = []
         for index, raw_distance in enumerate(ranges):
             distance = float(raw_distance)
             angle = angle_min_rad + index * angle_increment_rad
-            normalized_angle = math.atan2(math.sin(angle), math.cos(angle))
+            angle_delta = angle - sector_center
+            normalized_angle = math.atan2(
+                math.sin(angle_delta),
+                math.cos(angle_delta),
+            )
             if abs(normalized_angle) > sector_limit:
                 continue
             if not math.isfinite(distance) or distance <= 0:
