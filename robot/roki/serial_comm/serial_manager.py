@@ -20,6 +20,7 @@ from serial import SerialException
 
 
 logger = logging.getLogger(__name__)
+MAX_SERIAL_LINE_BYTES = 4096
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class SerialManager:
 
         self._settings = settings
         self._serial: Optional[serial.Serial] = None
+        self._read_buffer = bytearray()
 
         # 여러 스레드가 동시에 데이터를 전송하면 문자열이 섞일 수 있으므로
         # 쓰기 작업은 Lock으로 보호한다.
@@ -83,15 +85,26 @@ class SerialManager:
             return True
 
         try:
-            self._serial = serial.Serial(
-                port=self._settings.port,
+            connection = serial.Serial(
+                port=None,
                 baudrate=self._settings.baudrate,
                 timeout=self._settings.timeout_sec,
                 exclusive=True,
             )
+            # Opening a CP2102 with pyserial defaults can pulse DTR/RTS and
+            # reset the ESP32. Configure both lines before opening, matching
+            # the field-proven hardware tools and preserving the running
+            # operating firmware across Robot service restarts.
+            connection.dtr = False
+            connection.rts = False
+            connection.port = self._settings.port
+            connection.open()
+            self._serial = connection
+            self._read_buffer.clear()
 
-            # Opening the CP2102 port resets the ESP32. Wait for setup() and
-            # discard boot/partial telemetry before the runtime sends HELLO.
+            # Allow any already-running telemetry record to finish, then start
+            # the mandatory STOP/HELLO/ENCODER_ZERO handshake on a clean RX
+            # boundary.
             time.sleep(self._settings.startup_wait_sec)
             self._serial.reset_input_buffer()
             original_timeout = self._serial.timeout
@@ -122,6 +135,7 @@ class SerialManager:
 
         serial_port = self._serial
         self._serial = None
+        self._read_buffer.clear()
 
         if serial_port is None:
             return
@@ -201,10 +215,32 @@ class SerialManager:
             if not raw_data:
                 return None
 
-            return raw_data.decode(
+            # ``pyserial.readline()`` may return a partial record when its
+            # timeout expires before the trailing LF arrives.  Jetson load
+            # during ROS/SLAM startup made this happen consistently and the
+            # old code tried to parse each fragment as standalone JSON. Keep
+            # fragments until a complete newline-delimited record exists.
+            self._read_buffer.extend(raw_data)
+            if b"\n" not in self._read_buffer:
+                if len(self._read_buffer) > MAX_SERIAL_LINE_BYTES:
+                    logger.warning(
+                        "Serial record exceeded %d bytes; dropping partial data",
+                        MAX_SERIAL_LINE_BYTES,
+                    )
+                    self._read_buffer.clear()
+                return None
+
+            complete_line, _, remainder = self._read_buffer.partition(b"\n")
+            self._read_buffer = bytearray(remainder)
+
+            decoded = complete_line.decode(
                 "utf-8",
                 errors="replace",
             ).strip()
+            # A CP2102/ESP32 reset can leave CR/LF-only records in the RX
+            # queue. They carry no protocol information and must be treated
+            # like a read timeout, not as a hardware/protocol fault.
+            return decoded or None
 
         except (SerialException, OSError) as error:
             logger.warning(

@@ -48,9 +48,42 @@ set_mode "${ros_env}"
 set_mode "${current_map_env}"
 
 systemctl restart aiot-ros.service
+robot_journal_cursor="$({
+  journalctl -u aiot-robot.service -n 0 --show-cursor --no-pager 2>/dev/null \
+    || true
+} | sed -n 's/^-- cursor: //p' | tail -n 1)"
 systemctl start aiot-robot.service
 systemctl is-active --quiet aiot-ros.service
 systemctl is-active --quiet aiot-robot.service
+
+esp32_ready=false
+for _ in $(seq 1 20); do
+  if [ -n "${robot_journal_cursor}" ]; then
+    robot_logs="$(
+      journalctl -u aiot-robot.service \
+        --after-cursor "${robot_journal_cursor}" --no-pager -o cat 2>/dev/null \
+        || true
+    )"
+  else
+    robot_logs="$(
+      journalctl -u aiot-robot.service --since '30 seconds ago' \
+        --no-pager -o cat 2>/dev/null || true
+    )"
+  fi
+  if grep -q 'ESP32_HANDSHAKE_READY' <<<"${robot_logs}"; then
+    esp32_ready=true
+    break
+  fi
+  if grep -q 'ENCODER_ZERO_HANDSHAKE_FAILED' <<<"${robot_logs}"; then
+    break
+  fi
+  sleep 1
+done
+if [ "${esp32_ready}" != true ]; then
+  echo "ESP32 STOP/HELLO/ENCODER_ZERO handshake did not become ready." >&2
+  echo "Mapping remains stopped; inspect aiot-robot.service logs." >&2
+  exit 1
+fi
 
 slam_ready=false
 for _ in $(seq 1 20); do

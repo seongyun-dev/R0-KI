@@ -371,8 +371,12 @@ class RobotRuntime:
         self._state_store.reset_connection()
         self._encoder_zero_acknowledged = True
         self._encoder_zero_wait_logged = False
-        logger.info(
-            "ENCODER_ZERO acknowledged after attempt=%d; awaiting fresh operating data",
+        # This warning-level marker is intentionally stable: the field
+        # preparation command waits for it before claiming that mapping is
+        # ready. The production logger defaults to WARNING, so INFO would
+        # create a false-positive readiness result.
+        logger.warning(
+            "ESP32_HANDSHAKE_READY encoder_zero_attempt=%d",
             self._encoder_zero_attempts,
         )
 
