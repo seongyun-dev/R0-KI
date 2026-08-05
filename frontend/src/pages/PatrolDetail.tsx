@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { MapDetailResponse, ZoneCreateResponse } from '../api/contracts'
 import { mapApi, patrolsApi } from '../api/services'
-import { env } from '../config/env'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { useToast } from '../components/ui'
 import { usePatrol } from '../features/patrol/usePatrols'
@@ -289,7 +288,7 @@ export default function PatrolDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const { data: patrol, isLoading, error, refetch } = usePatrol(id)
-  const mapId = useAuthStore((state) => state.mapId) ?? env.defaultMapId
+  const mapId = useAuthStore((state) => state.mapId)
   const [mapImageUrl, setMapImageUrl] = useState<string>()
   const [mapDetail, setMapDetail] = useState<MapDetailResponse>()
   const [checkpointZones, setCheckpointZones] = useState<ZoneCreateResponse[]>([])
