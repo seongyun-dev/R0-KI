@@ -59,7 +59,8 @@ PYTHONPATH=robot/roki-iot python3 robot/roki-iot/tools/gamepad_probe.py \
 
 - `e103`이 장치를 읽을 수 있고 `input` 그룹 적용 상태다.
 - 각 입력을 하나씩 조작했을 때 한 axis/button 번호만 의도대로 바뀐다.
-- 수신기 분리, 1초 무입력 lease, 재연결 직후 모두 STOP이다.
+- 수신기 분리와 재연결 직후 모두 STOP이다.
+- 스틱 고정 중에는 deadman이 눌린 동안 CONTROL pulse가 계속 갱신된다.
 - 재연결 뒤 init event만으로 움직이지 않는다. 스틱 중립 + deadman 해제 후 다시 눌러야 재무장된다.
 
 | 기능 | 기대 기본값 | 실측 axis/button | 눌림/방향 값 | 합격 |
@@ -75,11 +76,11 @@ PYTHONPATH=robot/roki-iot python3 robot/roki-iot/tools/gamepad_probe.py \
 |---|---|---|---:|---|---|
 | deadman 해제 | 짧은 pulse 중 LB 해제 | 즉시 STOP | | 없어야 함 | |
 | radio loss | 짧은 pulse 중 수신기 분리 | 즉시 STOP | | 없어야 함 | |
-| 무입력 lease | stick 고정, 새 event 없음 | 1초 이내 STOP/disarm | | 없어야 함 | |
+| 홀드 갱신 | stick 고정, 새 event 없음 | deadman 동안 CONTROL 갱신 | | 해당 없음 | |
 | 재연결 | stick/LB 상태를 유지한 채 연결 | init event 무시 | | 중립+재누름 전 0 | |
 | finish | Back+Start 2초 | STOP 후 map 저장 | | 해당 없음 | |
 
-실패 시: 모터 전원을 켜지 말고 실제 번호·권한만 기록한다. lease를 1초보다 늘려 우회하지 않는다.
+실패 시: 모터 전원을 켜지 말고 실제 번호·권한만 기록한다. 양수 lease로 우회하지 않는다.
 
 ## 2. 구동·encoder·물리 차단
 

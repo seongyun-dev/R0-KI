@@ -101,7 +101,7 @@ class GamepadStateTest(unittest.TestCase):
 
 
 class LinuxGamepadInputTest(unittest.TestCase):
-    def test_default_input_lease_is_bounded_to_one_second(self) -> None:
+    def test_default_holds_command_while_device_remains_connected(self) -> None:
         class FakeController:
             def __init__(self) -> None:
                 self.keys: list[str] = []
@@ -131,11 +131,11 @@ class LinuxGamepadInputTest(unittest.TestCase):
         gamepad._apply_decision()  # type: ignore[attr-defined]
         now = 1.0
         gamepad._apply_decision()  # type: ignore[attr-defined]
-        now = 1.01
+        now = 30.0
         gamepad._apply_decision()  # type: ignore[attr-defined]
 
-        self.assertEqual(settings.input_lease_sec, 1.0)
-        self.assertEqual(controller.keys, ["w", "w", " "])
+        self.assertEqual(settings.input_lease_sec, 0.0)
+        self.assertEqual(controller.keys, ["w", "w", "w"])
 
     def test_deadman_release_emits_only_one_stop(self) -> None:
         class FakeController:

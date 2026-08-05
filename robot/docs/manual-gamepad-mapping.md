@@ -42,7 +42,7 @@ Jetson 로컬에 보존한다.
 
 | 입력 | 동작 |
 |---|---|
-| LB | deadman. 누르고 있고 1초 입력 lease가 유효할 때만 주행·조향 입력 허용 |
+| LB | deadman. 누르고 있는 동안에만 주행·조향 입력 허용 |
 | 왼쪽 스틱 상/하 | 전진/후진, PWM 45 |
 | 왼쪽 스틱 좌/우 | 서보 60~100도 범위 조향 |
 | B | 즉시 STOP |
@@ -60,13 +60,14 @@ ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON=4
 ROKI_MAPPING_GAMEPAD_STOP_BUTTON=1
 ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A=6
 ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B=7
-ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC=1.0
+ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC=0
 ```
 
-Linux joystick은 값이 바뀔 때만 새 이벤트를 보내는 수신기가 있다. 마지막 정상 입력 뒤
-1초 동안 새 이벤트가 없으면 LB와 스틱을 계속 누르고 있어도 STOP하고 입력을 disarm한다.
-다시 움직이려면 스틱을 중립으로 돌리고 LB를 놓은 뒤 다시 눌러 명령한다. 현장에서는
-연속 주행을 가정하지 말고 제한된 pulse를 반복하며, lease를 1초보다 늘리지 않는다.
+Linux joystick은 값이 바뀔 때만 새 이벤트를 보내므로 이벤트가 없다는 사실만으로
+수신기 단절을 판정할 수 없다. 기본값 `0`에서는 열린 장치의 LB와 스틱 상태를 주기적으로
+짧은 pulse로 변환한다. LB 해제, B, 수신기 분리, 맵핑 종료는 즉시 STOP하며 프로세스가
+멈추면 ESP32 watchdog이 남은 명령을 종료한다. 주기 이벤트를 보장하는 별도 수신기에만
+양수 lease를 선택적으로 설정한다.
 
 장치 권한을 위해 release 설치 과정은 운영 사용자 `e103`을 Linux `input` 그룹에
 추가한다. 그룹 변경이 처음 적용된 뒤에는 서비스 재시작 또는 재로그인이 필요하다.
@@ -89,7 +90,7 @@ LiDAR 장애물 판정은 맵핑 주행을 자동 정지시키지 않는다. 벽
 
 - LB deadman 해제, B, 종료 조합, 게임패드 분리 시 STOP
 - 0.2초 motion pulse를 유효한 deadman 상태에서만 갱신
-- 마지막 정상 입력 뒤 1초간 이벤트가 없으면 STOP하고 중립/deadman 재무장 요구
+- 스틱을 고정해도 LB가 눌린 동안 짧은 pulse만 반복 갱신
 - ESP32 watchdog 및 유일한 시리얼 소유자
 - 모터/encoder/odometry/hardware safety 오류 시 fail-closed
 - LiDAR와 실제 SLAM Toolbox service가 준비되지 않으면 시작 거절
@@ -123,8 +124,8 @@ LiDAR 위치 값과 alias도 기존 ROS preflight를 통과해야 한다. 실제
 3. `AIOT_ROS_MODE=mapping`으로 LiDAR·RF2O·SLAM Toolbox를 시작하고 `/scan`, odom,
    `map -> odom -> base_link -> laser_frame` TF를 확인한다.
 4. 바퀴를 띄운 상태에서 Frontend 지도 생성을 한 번 시작한다. ACK와 deadman/STOP,
-   전후진 방향, 60/80/100도 조향을 확인한다. 입력을 1초 넘게 고정해 STOP되는지와
-   중립·LB 해제 후에만 다시 움직이는지도 확인한다.
+   전후진 방향, 60/80/100도 조향을 확인한다. 스틱 고정 중 pulse가 갱신되고 LB 해제와
+   수신기 분리 시 즉시 STOP하는지도 확인한다.
 5. PWM 45로 빈 공간을 천천히 한 바퀴 수동 주행한다. 출발점으로 돌아와 loop closure와
    지도 겹침을 확인한다.
 6. Back + Start 2초로 종료하고 로컬 map 파일, Backend 완료 응답, Frontend 지도 표시를

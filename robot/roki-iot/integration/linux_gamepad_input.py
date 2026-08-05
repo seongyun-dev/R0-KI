@@ -39,7 +39,12 @@ class GamepadSettings:
     finish_hold_sec: float = 2.0
     loop_interval_sec: float = 0.05
     reconnect_interval_sec: float = 1.0
-    input_lease_sec: float = 1.0
+    # Linux js devices normally emit events only when a value changes.  A
+    # positive lease is therefore an optional receiver-specific safety policy,
+    # not a device-liveness check.  Zero keeps a held deadman/stick command
+    # active while the device remains open; release, STOP and disconnect still
+    # stop immediately.
+    input_lease_sec: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.device_path:
@@ -60,8 +65,8 @@ class GamepadSettings:
             raise ValueError("finish_hold_sec must be positive")
         if self.loop_interval_sec <= 0 or self.reconnect_interval_sec <= 0:
             raise ValueError("gamepad loop intervals must be positive")
-        if self.input_lease_sec <= 0:
-            raise ValueError("gamepad input lease must be positive")
+        if self.input_lease_sec < 0:
+            raise ValueError("gamepad input lease must not be negative")
 
 
 @dataclass(frozen=True)
@@ -319,11 +324,13 @@ class LinuxGamepadInput:
             self._last_input_at = self._clock()
 
     def _apply_decision(self) -> None:
-        if (
+        lease_enabled = self._settings.input_lease_sec > 0
+        lease_expired = (
             self._last_input_at is None
             or self._clock() - self._last_input_at
             > self._settings.input_lease_sec
-        ) and not self._state.finish_pressed:
+        )
+        if lease_enabled and lease_expired and not self._state.finish_pressed:
             self._state.disarm()
             self._safe_stop()
             self._controller.tick()

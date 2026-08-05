@@ -542,7 +542,7 @@ def _build_mapping_runtime(
             os.getenv("ROKI_MAPPING_GAMEPAD_RECONNECT_SEC", "1.0")
         ),
         input_lease_sec=float(
-            os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "1.0")
+            os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "0")
         ),
     )
     holder: dict[str, Any] = {}
