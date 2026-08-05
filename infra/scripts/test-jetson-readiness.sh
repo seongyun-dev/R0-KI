@@ -32,6 +32,8 @@ grep -q '^EnvironmentFile=/opt/aiot/secrets/ros.env$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q '^Environment=PYTHONUNBUFFERED=1$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q 'fixed_resolution: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \

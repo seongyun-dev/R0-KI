@@ -643,7 +643,29 @@ class CommandStateMachineTest(unittest.TestCase):
         )
 
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "RUNTIME_LIFECYCLE_CHANGED",
+        )
         self.assertEqual(self.store.state, "ERROR")
+
+    def test_mapping_readiness_rejection_publishes_reason(self) -> None:
+        self.mapping.start_decision = (False, "ODOMETRY_NOT_READY")
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload(
+                "START_MAPPING",
+                "map-not-ready",
+                mapping_session_id=12,
+            ),
+        )
+
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "ODOMETRY_NOT_READY",
+        )
 
     def test_mapping_requires_session_id_and_blocks_patrol_concurrency(self) -> None:
         self.handler.handle(
