@@ -290,7 +290,14 @@ def json_payload_from_publish(line: str) -> dict[str, Any] | None:
     return decoded
 
 
-def infer_ack_command(line: str) -> str | None:
+PATROL_START_SUCCESS_MESSAGE = "순찰 시작 ACK 처리 완료"
+PATROL_STOP_SUCCESS_MESSAGE = "순찰 종료 ACK 처리 완료"
+MAPPING_ACK_MESSAGE = "매핑 명령 ACK 처리 완료"
+
+
+def infer_ack_command(
+    line: str, correlated_command: str | None = None
+) -> str | None:
     explicit = field_from_line(line, "command")
     if explicit in COMMANDS:
         return explicit
@@ -300,17 +307,42 @@ def infer_ack_command(line: str) -> str | None:
         return "START_PATROL"
     if "순찰 종료" in line or "STOP_PATROL" in line:
         return "STOP_PATROL"
+    if correlated_command in COMMANDS:
+        return correlated_command
+    # Windows PowerShell 5 native pipelines can replace Korean output from
+    # ssh with '?'. Keep this as a narrow fallback for ACK-only log input;
+    # commandId correlation above remains the preferred path.
+    if "MappingCommandAckService" in line:
+        return "START_MAPPING"
     return None
 
 
-def infer_ack_status(line: str) -> str | None:
+def infer_ack_status(
+    line: str,
+    *,
+    command: str | None,
+    correlated_command: str | None,
+) -> str | None:
     explicit = field_from_line(line, "status")
     if explicit in ACK_STATUSES:
         return explicit
-    if "ACK 처리 완료" in line:
+    if PATROL_START_SUCCESS_MESSAGE in line or PATROL_STOP_SUCCESS_MESSAGE in line:
         return "SUCCEEDED"
-    if "거절/실패로 FAILED 처리" in line:
+    if "순찰 시작 거절/실패로 FAILED 처리" in line:
         return "FAILED"
+    # The two Patrol success messages above become the same
+    # "?? ?? ACK ?? ??." text in Windows PowerShell 5. Only infer success
+    # when the line is still a Patrol ACK-service record and commandId already
+    # correlated it to a published START/STOP command. This does not turn an
+    # arbitrary ACK line into success.
+    if (
+        correlated_command in {"START_PATROL", "STOP_PATROL"}
+        and command == correlated_command
+        and "PatrolCommandAckService" in line
+        and "[MQTT]" in line
+        and " ACK " in line
+    ):
+        return "SUCCEEDED"
     return None
 
 
@@ -345,11 +377,18 @@ def parse_operations(lines: Iterable[str]) -> list[Operation]:
             "ACK" not in line
             and "ack=" not in line.lower()
             and field_from_line(line, "status") not in ACK_STATUSES
+            and "순찰 시작 거절/실패로 FAILED 처리" not in line
         ):
             continue
         command_id = field_from_line(line, "commandId")
-        command = infer_ack_command(line)
-        status = infer_ack_status(line)
+        existing = operations.get(command_id) if command_id else None
+        correlated_command = existing.command if existing is not None else None
+        command = infer_ack_command(line, correlated_command)
+        status = infer_ack_status(
+            line,
+            command=command,
+            correlated_command=correlated_command,
+        )
         if not command_id or command not in COMMANDS or status not in ACK_STATUSES:
             continue
         operation = operations.setdefault(command_id, Operation(command_id))

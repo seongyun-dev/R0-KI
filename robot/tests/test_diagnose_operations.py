@@ -281,5 +281,219 @@ class DiagnoseOperationsTest(unittest.TestCase):
         self.assertEqual(operation.duplicate_ack_count, 1)
 
 
+class OperationalAckFormatTest(unittest.TestCase):
+    LOGGER_PREFIX = (
+        " INFO 1 --- [oneloop] [worker] "
+        "c.o.p.service.PatrolCommandAckService : [MQTT] "
+    )
+
+    def test_operational_patrol_start_success_message(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:41:49.687+09:00",
+                "operational-start-success",
+                "START_PATROL",
+                patrol_id=36,
+            ),
+            "2026-08-05T21:41:50.008+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 ACK 처리 완료. patrolId=36, "
+            "commandId=operational-start-success",
+        ]
+        operation = diagnose.parse_operations(lines)[0]
+        self.assertEqual(operation.final_result, "SUCCEEDED")
+        self.assertEqual(operation.patrol_id, 36)
+
+    def test_operational_patrol_stop_success_message(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:42:22.198+09:00",
+                "operational-stop-success",
+                "STOP_PATROL",
+            ),
+            "2026-08-05T21:42:22.351+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 종료 ACK 처리 완료. patrolId=36, "
+            "commandId=operational-stop-success",
+        ]
+        operation = diagnose.parse_operations(lines)[0]
+        self.assertEqual(operation.final_result, "SUCCEEDED")
+
+    def test_operational_start_failure_reason_without_equals(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:10:42.145+09:00",
+                "operational-unsafe",
+                "START_PATROL",
+                patrol_id=34,
+            ),
+            "2026-08-05T21:10:42.522+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 거절/실패로 FAILED 처리. patrolId=34, "
+            "commandId=operational-unsafe, status=REJECTED, "
+            "reasonNAVIGATION_ROUTE_UNSAFE",
+        ]
+        operation = diagnose.parse_operations(lines)[0]
+        self.assertEqual(operation.final_result, "REJECTED")
+        self.assertEqual(operation.final_reason, "NAVIGATION_ROUTE_UNSAFE")
+
+    def test_operational_start_failure_reason_with_equals(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:35:53.681+09:00",
+                "operational-nav2",
+                "START_PATROL",
+                patrol_id=35,
+            ),
+            "2026-08-05T21:35:53.925+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 거절/실패로 FAILED 처리. patrolId=35, "
+            "commandId=operational-nav2, status=REJECTED, "
+            "reason=NAV2_ACTION_SERVER_NOT_READY",
+        ]
+        operation = diagnose.parse_operations(lines)[0]
+        self.assertEqual(operation.final_reason, "NAV2_ACTION_SERVER_NOT_READY")
+        self.assertEqual(diagnose.classify(operation).layer, "L8_NAV2")
+
+    def test_operational_start_failure_without_status_or_reason(self) -> None:
+        line = (
+            "2026-08-05T21:10:42.522+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 거절/실패로 FAILED 처리. patrolId=34, "
+            "commandId=operational-unspecified"
+        )
+        operation = diagnose.parse_operations([line])[0]
+        self.assertEqual(operation.final_result, "FAILED")
+        self.assertIsNone(operation.final_reason)
+        self.assertEqual(diagnose.classify(operation).layer, "UNKNOWN")
+
+    def test_operational_mapping_ack_message(self) -> None:
+        line = (
+            "2026-08-05T19:56:47.732+09:00 INFO "
+            "c.o.m.service.MappingCommandAckService : [MQTT] "
+            "매핑 명령 ACK 처리 완료. sessionId=9, "
+            "commandId=operational-mapping, status=SUCCEEDED, reason=null"
+        )
+        operation = diagnose.parse_operations([line])[0]
+        self.assertEqual(operation.command, "START_MAPPING")
+        self.assertEqual(operation.final_result, "SUCCEEDED")
+        self.assertEqual(operation.mapping_session_id, 9)
+
+    def test_stop_publish_is_enriched_with_ack_patrol_id(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:42:22.198+09:00",
+                "stop-without-patrol-id",
+                "STOP_PATROL",
+            ),
+            "2026-08-05T21:42:22.351+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 종료 ACK 처리 완료. patrolId=36, "
+            "commandId=stop-without-patrol-id",
+        ]
+        operation = diagnose.parse_operations(lines)[0]
+        self.assertEqual(operation.patrol_id, 36)
+
+    def test_combined_operational_fixture_links_by_command_id(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:10:42.145+09:00",
+                "fixture-34",
+                "START_PATROL",
+                patrol_id=34,
+            ),
+            "2026-08-05T21:10:42.522+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 거절/실패로 FAILED 처리. patrolId=34, "
+            "commandId=fixture-34, status=REJECTED, "
+            "reason=NAVIGATION_ROUTE_UNSAFE",
+            publish(
+                "2026-08-05T21:35:53.681+09:00",
+                "fixture-35",
+                "START_PATROL",
+                patrol_id=35,
+            ),
+            "2026-08-05T21:35:53.925+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 거절/실패로 FAILED 처리. patrolId=35, "
+            "commandId=fixture-35, status=REJECTED, "
+            "reason=NAV2_ACTION_SERVER_NOT_READY",
+            publish(
+                "2026-08-05T21:41:49.687+09:00",
+                "fixture-36-start",
+                "START_PATROL",
+                patrol_id=36,
+            ),
+            "2026-08-05T21:41:50.008+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 시작 ACK 처리 완료. patrolId=36, "
+            "commandId=fixture-36-start",
+            publish(
+                "2026-08-05T21:42:22.198+09:00",
+                "fixture-36-stop",
+                "STOP_PATROL",
+            ),
+            "2026-08-05T21:42:22.351+09:00"
+            + self.LOGGER_PREFIX
+            + "순찰 종료 ACK 처리 완료. patrolId=36, "
+            "commandId=fixture-36-stop",
+        ]
+        operations = {
+            operation.command_id: operation
+            for operation in diagnose.parse_operations(lines)
+        }
+        self.assertEqual(operations["fixture-34"].final_result, "REJECTED")
+        self.assertEqual(
+            diagnose.classify(operations["fixture-34"]).layer,
+            "L8_MAP_ROUTE",
+        )
+        self.assertEqual(operations["fixture-35"].final_result, "REJECTED")
+        self.assertEqual(
+            diagnose.classify(operations["fixture-35"]).layer,
+            "L8_NAV2",
+        )
+        self.assertEqual(operations["fixture-36-start"].final_result, "SUCCEEDED")
+        self.assertEqual(operations["fixture-36-stop"].final_result, "SUCCEEDED")
+
+    def test_operational_set_token_ack_remains_excluded(self) -> None:
+        line = (
+            "2026-08-05T21:48:23.186+09:00 INFO [MQTT] 처리 대상이 아닌 "
+            "커맨드 ACK, 로그만 남김. ack=CommandAck[schemaVersion=1, "
+            "commandId=token-operational, command=SET_TOKEN, "
+            "status=SUCCEEDED, reason=null]"
+        )
+        self.assertEqual(diagnose.parse_operations([line]), [])
+
+    def test_powershell_redacted_korean_still_links_correlated_ack(self) -> None:
+        lines = [
+            publish(
+                "2026-08-05T21:10:42.145+09:00",
+                "redacted-failure",
+                "START_PATROL",
+                patrol_id=34,
+            ),
+            "2026-08-05T21:10:42.522+09:00 INFO "
+            "c.o.p.service.PatrolCommandAckService : [MQTT] "
+            "?? ?? ??/??? FAILED ??. patrolId=34, "
+            "commandId=redacted-failure, status=REJECTED, "
+            "reason=NAVIGATION_ROUTE_UNSAFE",
+            publish(
+                "2026-08-05T21:41:49.687+09:00",
+                "redacted-success",
+                "START_PATROL",
+                patrol_id=36,
+            ),
+            "2026-08-05T21:41:50.008+09:00 INFO "
+            "c.o.p.service.PatrolCommandAckService : [MQTT] "
+            "?? ?? ACK ?? ??. patrolId=36, commandId=redacted-success",
+        ]
+        operations = {
+            operation.command_id: operation
+            for operation in diagnose.parse_operations(lines)
+        }
+        self.assertEqual(operations["redacted-failure"].final_result, "REJECTED")
+        self.assertEqual(operations["redacted-success"].final_result, "SUCCEEDED")
+
+
 if __name__ == "__main__":
     unittest.main()
