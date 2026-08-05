@@ -1,0 +1,2 @@
+ALTER TABLE patrols
+    ADD COLUMN completion_requested BOOLEAN NOT NULL DEFAULT FALSE;

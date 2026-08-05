@@ -8,7 +8,17 @@ public record CommandAck(
         String commandId,
         String command,
         AckStatus status,
-        OffsetDateTime receivedAt) {
+        OffsetDateTime receivedAt,
+        String reason) {
+
+    public CommandAck(
+            int schemaVersion,
+            String commandId,
+            String command,
+            AckStatus status,
+            OffsetDateTime receivedAt) {
+        this(schemaVersion, commandId, command, status, receivedAt, null);
+    }
 
     public enum AckStatus {
         SUCCEEDED,

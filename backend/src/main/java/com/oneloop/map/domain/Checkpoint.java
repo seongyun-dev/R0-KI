@@ -38,6 +38,9 @@ public class Checkpoint extends BaseEntity {
     @Column(name = "max_y", nullable = false, precision = 10, scale = 3)
     private BigDecimal maxY;
 
+    @Column(name = "active", nullable = false)
+    private boolean active = true;
+
     public Checkpoint(
             PatrolMap patrolMap,
             CheckpointType type,
@@ -53,5 +56,6 @@ public class Checkpoint extends BaseEntity {
         this.minY = minY;
         this.maxX = maxX;
         this.maxY = maxY;
+        this.active = true;
     }
 }

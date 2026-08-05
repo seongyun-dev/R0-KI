@@ -26,6 +26,11 @@ public enum ErrorCode {
     INVALID_MAP_FILE(HttpStatus.BAD_REQUEST, "MAP_001", "지도 이미지 파일이 올바르지 않습니다."),
     MAP_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "MAP_002", "지도 파일 저장에 실패했습니다."),
     MAP_NOT_FOUND(HttpStatus.NOT_FOUND, "MAP_003", "지도를 찾을 수 없습니다."),
+    MAP_VERSION_CONFLICT(HttpStatus.CONFLICT, "MAP_004", "지도 버전이 변경되었습니다. 최신 지도를 다시 조회해 주세요."),
+    INVALID_WAYPOINT_ROUTE(HttpStatus.BAD_REQUEST, "MAP_005", "순찰 경로 설정이 올바르지 않습니다."),
+    NAVIGATION_CONFIG_NOT_READY(
+            HttpStatus.CONFLICT, "MAP_006", "로봇이 사용할 수 있는 지도와 순찰 경로 설정이 준비되지 않았습니다."),
+    MAP_CONFIGURATION_LOCKED(HttpStatus.CONFLICT, "MAP_007", "순찰 중에는 지도·구역·경로 설정을 변경할 수 없습니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
     PATROL_ALREADY_IN_PROGRESS(HttpStatus.CONFLICT, "PATROL_002", "해당 로봇은 이미 순찰 중입니다."),
     PATROL_INVALID_STATE(HttpStatus.CONFLICT, "PATROL_003", "현재 상태에서는 순찰을 종료할 수 없습니다."),
