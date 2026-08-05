@@ -286,7 +286,7 @@ class PatrolCommandHandler:
         with self._mapping_lifecycle_lock:
             mapping_command_id = None
             if self._mapping_runtime is not None and bool(
-                getattr(self._mapping_runtime, "motion_active", False)
+                getattr(self._mapping_runtime, "active", False)
             ):
                 try:
                     mapping_command_id = self._mapping_runtime.abort(reason)

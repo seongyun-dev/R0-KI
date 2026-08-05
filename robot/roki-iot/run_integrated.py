@@ -496,6 +496,10 @@ def _build_mapping_runtime(
         ManualDriveSettings,
     )
     from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
+    from integration.map_activation import (
+        CurrentMapActivator,
+        MapActivationSettings,
+    )
     from integration.mapping_runtime import (
         ManualMappingRuntime,
         MappingRuntimeSettings,
@@ -560,6 +564,28 @@ def _build_mapping_runtime(
                 ),
                 serialize_pose_graph=_environment_enabled(
                     "AIOT_MAPPING_SERIALIZE_POSE_GRAPH", True
+                ),
+            )
+        ),
+        map_activator=CurrentMapActivator(
+            MapActivationSettings(
+                maps_directory=Path(
+                    os.getenv(
+                        "AIOT_ACTIVE_MAP_DIR",
+                        "/var/lib/aiot/maps/active",
+                    )
+                ),
+                environment_file=Path(
+                    os.getenv(
+                        "AIOT_ACTIVE_MAP_ENV_FILE",
+                        "/var/lib/aiot/config/current-map.env",
+                    )
+                ),
+                restart_request_file=Path(
+                    os.getenv(
+                        "AIOT_MAP_ACTIVATION_REQUEST_FILE",
+                        "/var/lib/aiot/state/map-activation.pending",
+                    )
                 ),
             )
         ),

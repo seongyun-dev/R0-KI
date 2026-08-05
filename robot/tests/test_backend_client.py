@@ -10,6 +10,7 @@ from pathlib import Path
 from aiot_robot.backend_client import (
     BackendConfig,
     BackendError,
+    BackendHttpError,
     BackendTransportError,
     RobotBackendClient,
 )
@@ -149,6 +150,28 @@ class BackendClientTest(unittest.TestCase):
                     raised.exception,
                     BackendTransportError,
                 )
+
+    def test_http_errors_preserve_status_and_retry_policy(self) -> None:
+        for status, retryable in ((401, False), (409, False), (429, True), (503, True)):
+            with self.subTest(status=status):
+                response = urllib.error.HTTPError(
+                    "https://example.com/api/map",
+                    status,
+                    "failed",
+                    {},
+                    None,
+                )
+                response.read = lambda _limit: b'{"code":"FAILED"}'
+                client = RobotBackendClient(
+                    BackendConfig("https://example.com", "robot-token", 3),
+                    urlopen=RaisingUrlOpen(response),
+                )
+
+                with self.assertRaises(BackendHttpError) as raised:
+                    client.get_navigation_config()
+
+                self.assertEqual(raised.exception.status_code, status)
+                self.assertEqual(raised.exception.retryable, retryable)
 
     def test_upload_map_uses_robot_contract_and_exact_multipart_fields(self) -> None:
         opener = CapturingUrlOpen()

@@ -24,6 +24,15 @@ class BackendTransportError(BackendError):
     """The request could not reach Backend; a configured local route may be used."""
 
 
+class BackendHttpError(BackendError):
+    """Backend returned an HTTP error with a machine-readable retry policy."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        self.status_code = int(status_code)
+        self.retryable = self.status_code in {408, 425, 429} or self.status_code >= 500
+        super().__init__(f"backend HTTP {self.status_code}: {detail}")
+
+
 UrlOpen = Callable[..., Any]
 
 
@@ -262,7 +271,7 @@ class RobotBackendClient:
                 response_body = response.read(1024 * 1024)
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", "replace")
-            raise BackendError(f"backend HTTP {exc.code}: {detail}") from exc
+            raise BackendHttpError(exc.code, detail) from exc
         except urllib.error.URLError as exc:
             if _is_genuine_transport_failure(exc):
                 raise BackendTransportError("backend connection failed") from exc

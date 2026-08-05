@@ -127,17 +127,22 @@ ros2 run tf2_ros tf2_echo map base_link
 지도에 다중 벽 윤곽이 생기거나 정지 drift가 누적되면 해당 map을 Backend에 올리지 않는다.
 최종 저장물의 resolution, origin, width/height와 map ID/version을 함께 기록한다.
 
-## 4. mapping 종료 후 명시적 localization/Nav2 전환
+## 4. mapping 종료 후 localization/Nav2 전환
 
-자동 전환·자동 서비스 재시작은 구현 범위가 아니다. 사용자 승인 후 운영자가 다음 순서로 한다.
+Backend가 업로드를 `COMPLETED`로 승인하면 Robot은 응답의 mapId/version과 정확한
+YAML·PGM bundle hash를 묶어 `/var/lib/aiot/maps/active/`에 설치한다. 설치가 끝나기
+전에는 기존 `current-map.env`를 건드리지 않는다. 이후 root path unit이 Robot을 먼저
+정지하고 ROS를 patrol/Nav2로 재시작한 뒤 Robot을 다시 시작한다. 실패하면 pending
+marker를 남겨 같은 승인 지도로 재시도하며 이전 선택 파일은 보존한다.
 
-1. Front/Backend에서 최종 mapId/version을 확인한다.
-2. 동일한 YAML/image를 persistent config 경로에 설치하고 SHA-256을 계산한다.
-3. Front에서 구역과 ordered waypoint를 저장한다. 마지막 지점은 유일한 `DESTINATION`이다.
-4. Robot/ROS의 비밀이 아닌 map identity, hash, initial pose, `AIOT_ROS_MODE=patrol`을 맞춘다.
-5. 서비스를 바꾸기 전에 `--check`로 local map과 field parameter를 검증한다.
-6. 승인 후 ROS를 patrol localization/Nav2 모드로 시작하고 TF/AMCL/Nav2 lifecycle을 확인한다.
-7. 바퀴를 띄운 채 START_PATROL config fetch와 즉시 STOP을 먼저 검증한다.
+운영자는 다음 항목을 확인한다.
+
+1. Front/Backend의 최종 mapId/version과 `current-map.env`가 일치하는지 확인한다.
+2. Front에서 구역과 ordered waypoint를 저장한다. 마지막 지점은 유일한 `DESTINATION`이다.
+3. 자동 생성할 수 없는 fixed initial pose 실측값을 `ros.env`에 맞춘다.
+4. `--check`로 local map, route와 field parameter를 검증한다.
+5. TF/AMCL/Nav2 lifecycle을 확인한다.
+6. 바퀴를 띄운 채 START_PATROL config fetch와 즉시 STOP을 먼저 검증한다.
 
 ```bash
 cd /opt/aiot/iot/current
