@@ -215,7 +215,7 @@ export type ComplexMapProps = {
   pins?: MapPin[]
   /** 순찰 체크포인트 — 배열 순서가 곧 순찰 경로 */
   checkpoints?: MapCheckpoint[]
-  /** 로봇이 순찰 중인가. false 면 이동 경로·진행 방향을 그리지 않고 마지막 위치만 찍는다 */
+  /** 로봇이 순찰 중인가. false 면 완료 구간 없이 예정 경로와 마지막 위치만 찍는다 */
   patrolling?: boolean
   /** 지도 우측 하단에 얹을 화면별 조작키 */
   bottomRight?: ReactNode
@@ -313,8 +313,12 @@ export function ComplexMap({
   const shownRobots = robots && robots.length > 0 ? robots : robot ? [robot] : []
   /* 진행률·스캔 콘은 한 대만 볼 때 계산한다 (여러 대는 누구 기준인지 정해지지 않는다) */
   const soloRobot = shownRobots.length === 1 ? shownRobots[0] : undefined
-  const routePts: Pt[] =
-    soloRobot?.routePoints?.map((point) => ({ x: px(point.x), y: py(point.y) })) ?? []
+  /* 저장된 웨이포인트 순서가 예정 경로다. 위치 이력(routePoints)은 실제 이동
+     기록이므로 아직 지나지 않은 구간을 표현할 수 없어 계획 경로로 사용하지 않는다. */
+  const routePts: Pt[] = checkpoints.map((checkpoint) => ({
+    x: px(checkpoint.x),
+    y: py(checkpoint.y),
+  }))
   const cpIdx = checkpoints.map((checkpoint) => {
     let nearest = -1
     let nearestDistance = Infinity
@@ -328,12 +332,12 @@ export function ComplexMap({
     return nearest
   })
 
-  /* 이동 경로는 순찰 중일 때만 — 대기·충전중이면 마지막 위치만 찍는다 */
-  const showRoute = patrolling && routePts.length > 1
+  /* 예정 경로는 대기 상태에도 표시하고, 완료 구간만 순찰 중에 계산한다. */
+  const showRoute = routePts.length > 1
 
   /* 진행률 — 로봇 위치를 경로에 사영해 완료 구간과 예정 구간을 가른다 */
   let prog: { seg: number; p: Pt } | null = null
-  if (showRoute && soloRobot) {
+  if (patrolling && showRoute && soloRobot) {
     const r = { x: px(soloRobot.x), y: py(soloRobot.y) }
     let bestD = Infinity
     for (let i = 0; i < routePts.length - 1; i++) {
@@ -535,7 +539,7 @@ export function ComplexMap({
               )
             })}
 
-            {/* ── 순찰 경로 — 예정 점선 위에 완료 실선을 겹친다 (순찰 중일 때만) ── */}
+            {/* ── 순찰 경로 — 예정 점선은 항상, 완료 실선은 순찰 중에만 표시 ── */}
             {showRoute && (
               <g aria-hidden>
                 <path className="cmroute" d={roundedPath(routePts, CORNER)} />
@@ -609,7 +613,9 @@ export function ComplexMap({
                   <g className="bot" transform={`translate(${rx},${ry}) rotate(${heading})`}>
                     <circle r="30" fill="url(#cmapHalo)" />
                     {/* 진행 방향 스캔 콘 — 한 대를 이동 중으로 볼 때만 */}
-                    {solo && showRoute && <path d="M0 0 L40 -19 A44 44 0 0 1 40 19 Z" fill="url(#cmapCone)" />}
+                    {solo && patrolling && showRoute && (
+                      <path d="M0 0 L40 -19 A44 44 0 0 1 40 19 Z" fill="url(#cmapCone)" />
+                    )}
                     <circle r="7" fill="none" stroke="var(--graphic)" strokeWidth="1.5">
                       <animate attributeName="r" values="7;20;7" dur="2.8s" repeatCount="indefinite" />
                       <animate attributeName="opacity" values=".8;0;.8" dur="2.8s" repeatCount="indefinite" />
@@ -705,7 +711,7 @@ export function ComplexMap({
           ) : showRoute ? (
             <span className="lg">
               <i className="d" />
-              순찰 경로 · 순찰 중 로봇 {shownRobots.length}대
+              예정 순찰 경로 · 지점 {checkpoints.length}곳
             </span>
           ) : (
             <span className="lg">
