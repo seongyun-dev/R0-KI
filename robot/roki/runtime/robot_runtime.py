@@ -483,6 +483,7 @@ class RobotRuntime:
     def _drain_motion_requests(self) -> bool:
         """Apply cross-thread manual requests only on the Serial owner thread."""
 
+        mission_changed = False
         with self._request_lock:
             stop_steering = self._pending_motion_stop
             request = self._pending_motion_request
@@ -497,9 +498,20 @@ class RobotRuntime:
                 # _fail_closed_mission(), using the same request->mission lock
                 # order. Otherwise STOP can land in this gap and the stale
                 # request can resurrect motion afterwards.
-                self._mission.submit(
-                    MissionCommand(request.speed, request.steering_deg)
+                requested_command = MissionCommand(
+                    request.speed,
+                    request.steering_deg,
                 )
+                current = self._mission.snapshot()
+                duplicate_active_target = (
+                    self._manual_motion_active
+                    and current.command == requested_command
+                    and self._stationary_steering_pending
+                    == request.stationary_steering
+                )
+                if not duplicate_active_target:
+                    self._mission.submit(requested_command)
+                    mission_changed = True
                 self._manual_motion_active = True
                 self._stationary_steering_pending = (
                     request.stationary_steering
@@ -509,7 +521,12 @@ class RobotRuntime:
             return True
         if request is None:
             return False
-        return True
+        # A newly applied target invalidates the mission snapshot already
+        # calculated by _handle_odometry(), so that cycle must stop here.
+        # Identical gamepad refreshes keep the generation unchanged and may
+        # continue to the CONTROL write; otherwise a 20 Hz input loop can
+        # starve a similarly paced odometry loop forever.
+        return mission_changed
 
     def _fail_closed_mission(self, reason: str, *, log: bool = True) -> None:
         """Invalidate queued and active motion before a mandatory STOP.
