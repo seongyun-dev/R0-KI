@@ -11,4 +11,6 @@ public interface CheckpointRepository extends JpaRepository<Checkpoint, Long> {
     List<Checkpoint> findAllByPatrolMapIdOrderByIdAsc(Long mapId);
 
     long countByPatrolMapIdAndType(Long mapId, CheckpointType type);
+
+    void deleteAllByPatrolMapId(Long mapId);
 }

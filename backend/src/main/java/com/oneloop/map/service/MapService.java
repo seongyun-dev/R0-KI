@@ -110,6 +110,14 @@ public class MapService {
         return MapDetailResponse.from(patrolMap);
     }
 
+    public MapDetailResponse getCurrent(Long apartmentComplexId) {
+        PatrolMap patrolMap =
+                patrolMapRepository
+                        .findByApartmentComplexId(apartmentComplexId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.MAP_NOT_FOUND));
+        return MapDetailResponse.from(patrolMap);
+    }
+
     public Resource getFile(Long apartmentComplexId, String storedName) {
         String mapUrl = MAP_FILE_URL_PREFIX + storedName;
         patrolMapRepository

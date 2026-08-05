@@ -27,6 +27,20 @@ public class ZoneService {
     public List<ZoneResponse> createAll(
             Long apartmentComplexId, Long mapId, ZoneBatchCreateRequest request) {
         PatrolMap patrolMap = findMap(apartmentComplexId, mapId);
+        return saveAll(patrolMap, request);
+    }
+
+    @Transactional
+    public List<ZoneResponse> replaceAll(
+            Long apartmentComplexId, Long mapId, ZoneBatchCreateRequest request) {
+        PatrolMap patrolMap = findMap(apartmentComplexId, mapId);
+        checkpointRepository.deleteAllByPatrolMapId(mapId);
+        checkpointRepository.flush();
+        return saveAll(patrolMap, request);
+    }
+
+    private List<ZoneResponse> saveAll(
+            PatrolMap patrolMap, ZoneBatchCreateRequest request) {
         List<Checkpoint> checkpoints =
                 request.getZones().stream()
                         .map(zone -> toCheckpoint(patrolMap, zone))
