@@ -443,6 +443,10 @@ class FinalRuntimeService:
             route=self._navigation_service.route,
             first_event=event,
         )
+        # Nav2 start does not complete until the first action goal is accepted.
+        # Recheck the backend command deadline after that asynchronous boundary
+        # so an expired command can never be acknowledged as PATROLLING.
+        self._ensure_start_not_expired(expires_at)
 
     def _ensure_start_not_expired(
         self, expires_at: datetime | None

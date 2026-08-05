@@ -119,6 +119,7 @@ class PatrolCommandHandler:
                     command=command_text,
                     command_id=command_id,
                     status="REJECTED",
+                    reason="DUPLICATE_PAYLOAD_MISMATCH",
                 )
             return
 
@@ -136,6 +137,7 @@ class PatrolCommandHandler:
                     command_id=command_id,
                     status="REJECTED",
                     fingerprint=fingerprint,
+                    reason=str(exc),
                 )
             print(f"[COMMAND] rejected reason={exc}")
             return
@@ -329,7 +331,9 @@ class PatrolCommandHandler:
     def _handle_start_patrol(self, command: ValidatedCommand) -> None:
         assert command.patrol_id is not None
         if self._mapping_runtime is not None and self._mapping_runtime.active:
-            self._record_and_publish_command(command, "REJECTED")
+            self._record_and_publish_command(
+                command, "REJECTED", reason="MAPPING_ACTIVE"
+            )
             print("[COMMAND] START_PATROL rejected reason=MAPPING_ACTIVE")
             return
         status = self._state_store.get_status()
@@ -337,7 +341,9 @@ class PatrolCommandHandler:
         # START after runtime/AI/LiDAR readiness has become healthy again.
         # No local telemetry transition can auto-resume the previous patrol.
         if status.state not in {"IDLE", "ERROR"}:
-            self._record_and_publish_command(command, "REJECTED")
+            self._record_and_publish_command(
+                command, "REJECTED", reason="ROBOT_NOT_IDLE"
+            )
             return
 
         prepare = getattr(self._serial_reader, "prepare_patrol", None)
@@ -439,16 +445,18 @@ class PatrolCommandHandler:
         try:
             self._serial_reader.send_command("STOP_PATROL")
         except Exception as exc:
-            errors.append(type(exc).__name__)
+            errors.append(str(exc) or type(exc).__name__)
         try:
             self._disable_ai("STOP_PATROL")
         except Exception as exc:
-            errors.append(type(exc).__name__)
+            errors.append(str(exc) or type(exc).__name__)
 
         self._state_store.update_robot_state("IDLE" if not errors else "ERROR")
         self._flush()
         self._record_and_publish_command(
-            command, "SUCCEEDED" if not errors else "FAILED"
+            command,
+            "SUCCEEDED" if not errors else "FAILED",
+            reason=";".join(errors) if errors else None,
         )
         print(
             "[COMMAND] STOP_PATROL completed "
@@ -731,6 +739,8 @@ class PatrolCommandHandler:
         fingerprint: str,
         reason: str | None = None,
     ) -> None:
+        if status != "SUCCEEDED" and not reason:
+            reason = "UNSPECIFIED_FAILURE"
         ack = self._ack(command, command_id, status, reason=reason)
         self._cache[command_id] = {"fingerprint": fingerprint, "ack": ack}
         self._cache.move_to_end(command_id)
