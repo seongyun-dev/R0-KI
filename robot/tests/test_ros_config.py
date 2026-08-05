@@ -122,6 +122,10 @@ class RosConfigTest(unittest.TestCase):
             self.assertIn("      x: 0.0", rendered)
             self.assertIn("      y: 0.0", rendered)
             self.assertIn("      yaw: 0.0", rendered)
+            self.assertIn("      rolling_window: true", rendered)
+            self.assertIn("      plugins: [inflation_layer]", rendered)
+            self.assertNotIn("      plugins: [static_layer, inflation_layer]", rendered)
+            self.assertIn("      allow_unknown: true", rendered)
 
     def test_rejects_missing_or_invalid_fixed_initial_pose(self):
         for name, value, message in (

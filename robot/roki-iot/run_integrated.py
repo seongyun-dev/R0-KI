@@ -253,7 +253,11 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
         map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
         scan_dwell_sec=float(os.getenv("ROKI_SCAN_DWELL_SECONDS", "3.0")),
         cmd_vel_timeout_sec=float(
-            os.getenv("ROKI_NAV2_CMD_VEL_TIMEOUT_SECONDS", "0.5")
+            os.getenv("ROKI_NAV2_CMD_VEL_TIMEOUT_SECONDS", "3.0")
+        ),
+        initial_pose_topic=os.getenv("ROKI_INITIAL_POSE_TOPIC", "/initialpose"),
+        initial_pose_settle_sec=float(
+            os.getenv("ROKI_NAV2_INITIAL_POSE_SETTLE_SECONDS", "1.0")
         ),
     )
     return RosNav2Bridge(

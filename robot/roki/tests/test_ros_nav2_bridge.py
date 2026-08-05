@@ -32,6 +32,18 @@ class DeadThread:
         return False
 
 
+class FakePoseWithCovarianceStamped:
+    def __init__(self):
+        self.header = SimpleNamespace(frame_id=None, stamp=None)
+        self.pose = SimpleNamespace(
+            pose=SimpleNamespace(
+                position=SimpleNamespace(x=0.0, y=0.0),
+                orientation=SimpleNamespace(z=0.0, w=0.0),
+            ),
+            covariance=[0.0] * 36,
+        )
+
+
 def demo_route():
     return parse_route(
         {
@@ -83,6 +95,43 @@ def reached(waypoint):
 
 
 class RosNav2BridgeTest(unittest.TestCase):
+    def test_start_resets_localization_to_waypoint_one_before_next_goal(self) -> None:
+        sleeps = []
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6),
+                initial_pose_settle_sec=1.0,
+            ),
+            motion_sink=lambda _command: None,
+            sleep=sleeps.append,
+        )
+        publisher = Mock()
+        bridge.is_ready = Mock(return_value=(True, "READY"))
+        bridge._initial_pose_type = FakePoseWithCovarianceStamped
+        bridge._initial_pose_publisher = publisher
+        bridge._node = SimpleNamespace(
+            get_clock=lambda: SimpleNamespace(
+                now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
+            )
+        )
+        bridge._send_sequence = Mock()
+        route = demo_route()
+        first_event = SimpleNamespace(
+            mission_event=SimpleNamespace(waypoint=route.waypoints[0])
+        )
+
+        bridge.start_patrol(route=route, first_event=first_event)
+
+        message = publisher.publish.call_args.args[0]
+        self.assertEqual(message.header.frame_id, "map")
+        self.assertEqual(message.header.stamp, "stamp")
+        self.assertEqual(message.pose.pose.position.x, 1.0)
+        self.assertEqual(message.pose.pose.position.y, 1.0)
+        self.assertAlmostEqual(message.pose.pose.orientation.z, 0.0)
+        self.assertAlmostEqual(message.pose.pose.orientation.w, 1.0)
+        self.assertEqual(sleeps, [1.0])
+        bridge._send_sequence.assert_not_called()
+
     def test_cmd_vel_uses_calibrated_adapter_without_serial_ownership(self) -> None:
         commands = []
         bridge = RosNav2Bridge(
@@ -480,7 +529,7 @@ class RosNav2BridgeTest(unittest.TestCase):
                 self.assertEqual(failures, [])
 
     def test_cmd_vel_timeout_range_is_fail_closed(self) -> None:
-        for seconds in (0.1, 1.1, float("nan")):
+        for seconds in (0.1, 5.1, float("nan")):
             with self.subTest(seconds=seconds):
                 with self.assertRaisesRegex(ValueError, "cmd_vel_timeout_sec"):
                     RosNav2BridgeSettings(
