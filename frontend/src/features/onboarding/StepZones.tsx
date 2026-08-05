@@ -7,6 +7,8 @@ import type { Zone, ZoneType } from '../../types/domain'
 export type StepZonesProps = {
   mapId: string | number
   onPrev: () => void
+  /** 테스트 재설정 화면에서는 기존 체크포인트를 모두 교체한다. */
+  replaceExisting?: boolean
   /** 등록한 구역 목록을 상위로 전달 (대시보드 지도에 반영) */
   onComplete: (zones: Zone[]) => void
 }
@@ -63,7 +65,7 @@ const rectStyle = (r: Rect) => ({
 })
 
 /** Step 3/3 — 구역 지정 (IoT 수신 맵 위 드래그) (1y). R0Kiauth 시안 pMap 상태 C */
-export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
+export function StepZones({ mapId, onPrev, onComplete, replaceExisting = false }: StepZonesProps) {
   const gridRef = useRef<HTMLDivElement>(null)
   const idRef = useRef(0)
   const [selectedType, setSelectedType] = useState<ZoneType>('주차장')
@@ -229,7 +231,11 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     setIsSaving(true)
     setSaveError(undefined)
     try {
-      await mapApi.registerZones(mapId, requests)
+      if (replaceExisting) {
+        await mapApi.replaceZones(mapId, requests)
+      } else {
+        await mapApi.registerZones(mapId, requests)
+      }
       onComplete(zones.map((z) => ({ id: `Z-${z.id}`, type: z.type, label: z.label, rect: z.rect })))
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : '구역 저장에 실패했습니다.')

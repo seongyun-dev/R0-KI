@@ -325,6 +325,7 @@ export const robotsApi = {
 }
 
 export const mapApi = {
+  current: () => apiRequest<MapDetailResponse>('/api/map/current'),
   startMapping: (robotId: string | number) =>
     apiRequest<MappingStartResponse>('/api/map/mapping-sessions', {
       method: 'POST',
@@ -346,6 +347,11 @@ export const mapApi = {
   registerZones: (mapId: string | number, zones: ZoneCreateRequest[]) =>
     apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
       method: 'POST',
+      body: jsonBody({ zones }),
+    }),
+  replaceZones: (mapId: string | number, zones: ZoneCreateRequest[]) =>
+    apiRequest<ZoneCreateResponse[]>(`/api/map/${encodeURIComponent(mapId)}/zones`, {
+      method: 'PUT',
       body: jsonBody({ zones }),
     }),
   zones: (mapId: string | number) =>

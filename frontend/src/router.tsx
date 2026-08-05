@@ -23,6 +23,7 @@ const Stats = lazy(() => import('./pages/Stats'))
 // 개발용 컴포넌트 갤러리 — 화면 어디서도 링크하지 않으므로 메인 번들에서 떼어낸다
 // (여기서만 쓰는 UI 컴포넌트들이 함께 딸려 나간다)
 const DevPreview = lazy(() => import('./pages/DevPreview'))
+const TestMapSetup = lazy(() => import('./pages/TestMapSetup'))
 
 // CLAUDE.md §6 라우트 매핑
 export const router = createBrowserRouter([
@@ -30,6 +31,17 @@ export const router = createBrowserRouter([
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
   { path: '/signup/onboarding', element: <SignupOnboarding />, errorElement: <RouteError /> },
   // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 /app 하위에 두지 않는다
+  {
+    path: '/app/test/map-setup',
+    element: (
+      <RequireAuth>
+        <Suspense fallback={null}>
+          <TestMapSetup />
+        </Suspense>
+      </RequireAuth>
+    ),
+    errorElement: <RouteError />,
+  },
   {
     path: '/app/map',
     element: (

@@ -415,21 +415,26 @@ export default function Dashboard() {
                   checkpoints={mapData.checkpoints}
                   patrolling={isPatrolling}
                   bottomRight={
-                    patrollingRobots.length > 0 ? (
-                      <button
-                        type="button"
-                        className="botall"
-                        aria-pressed={showAllPatrolling}
-                        onClick={() => setShowAllPatrolling(true)}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden>
-                          <circle cx="7" cy="8" r="2.6" />
-                          <circle cx="17" cy="8" r="2.6" />
-                          <circle cx="12" cy="16.5" r="2.6" />
-                        </svg>
-                        순찰 중 로봇 전체 보기
-                      </button>
-                    ) : undefined
+                    <>
+                      <Link className="mapsetup-mapbtn" to="/app/test/map-setup">
+                        지도/체크포인트 재설정
+                      </Link>
+                      {patrollingRobots.length > 0 && (
+                        <button
+                          type="button"
+                          className="botall"
+                          aria-pressed={showAllPatrolling}
+                          onClick={() => setShowAllPatrolling(true)}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden>
+                            <circle cx="7" cy="8" r="2.6" />
+                            <circle cx="17" cy="8" r="2.6" />
+                            <circle cx="12" cy="16.5" r="2.6" />
+                          </svg>
+                          순찰 중 로봇 전체 보기
+                        </button>
+                      )}
+                    </>
                   }
                 />
               ) : (

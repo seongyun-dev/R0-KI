@@ -545,6 +545,13 @@
     box-shadow var(--d-fast) var(--e-glass)}
 .r0ki .botall svg{width:clamp(10px,1.6cqw,15px);height:clamp(10px,1.6cqw,15px);flex:none;fill:currentColor}
 .r0ki .botall:hover{transform:translateY(-1px);border-color:var(--graphic)}
+.r0ki .mapsetup-mapbtn{display:inline-flex;align-items:center;
+  padding:clamp(4px,.7cqw,8px) clamp(8px,1.4cqw,14px);
+  border:1px solid var(--hair);border-radius:var(--r-pill);background:var(--focus-in);
+  color:var(--text-1);font-family:var(--sans);font-size:clamp(8px,1.3cqw,12px);font-weight:700;
+  text-decoration:none;white-space:nowrap;box-shadow:var(--sh-1);
+  transition:transform var(--d-fast) var(--e-glass),border-color var(--d-fast) var(--e-glass)}
+.r0ki .mapsetup-mapbtn:hover{transform:translateY(-1px);border-color:var(--graphic)}
 /* 켜진 상태는 채운 강조색 — 작아도 지금 무엇이 선택됐는지 한눈에 읽힌다 */
 .r0ki .botall[aria-pressed="true"]{border-color:transparent;color:var(--accent-ink);
   background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2));
