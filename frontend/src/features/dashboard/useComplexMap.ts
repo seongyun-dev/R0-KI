@@ -149,7 +149,7 @@ function registeredMapToView(
 
 /** 대시보드에 등록된 지도 이미지와 구역을 조회한다. */
 export function useComplexMap() {
-  const mapId = useAuthStore((state) => state.mapId) ?? env.defaultMapId
+  const mapId = useAuthStore((state) => state.mapId)
   const robotId = useAuthStore((state) => state.robotId) ?? env.defaultRobotId
   const registeredZones = useRegisteredMap((state) => state.zones)
   // 이 훅이 만든 objectURL 전부 — 화면에 못 올라간 것까지 회수하기 위해 들고 있는다

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { R0KiAuthShell } from '../components/layout/R0KiAuthShell'
 import { setAuthPersistence, useAuthStore } from '../features/auth/useAuthStore'
-import { authApi } from '../api/services'
+import { authApi, mapApi } from '../api/services'
 import { ApiError } from '../api/client'
 import { readOnboardingStatus } from '../features/auth/onboardingStatus'
 import { useOnboardingProgress } from '../features/onboarding/useOnboardingProgress'
@@ -47,8 +47,8 @@ export default function Login() {
                  판정 근거는 로그인 응답의 등록 여부(백엔드 제공) — 브라우저 저장소가 아니라
                  서버 상태를 보므로 다른 기기·시크릿창에서 로그인해도 같게 동작한다. */
               const status = await readOnboardingStatus(response)
-              // mapId 가 없으면(응답 미제공) 기존 값을 지우지 않는다 — undefined 는 "유지"
-              setMapContext({ mapId: status.mapId ?? undefined, robotId: status.robotId })
+              const currentMap = status.mapRegistered ? await mapApi.current() : null
+              setMapContext({ mapId: currentMap?.mapId ?? null, robotId: status.robotId })
 
               if (status.nextPhase) {
                 resumeOnboarding({
