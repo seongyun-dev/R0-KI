@@ -21,7 +21,7 @@ import type { StatsDashboardData } from './mapAnalyticsToStats'
  * 통계 대시보드 데이터 훅.
  *
  * - unit + offset → resolveStatsRange → from/to
- * - zone: parking/recycle/danger → zoneIds 필터
+ * - zone: parking/recycle → zoneIds 필터
  */
 export function useStats(
   params: { unit?: StatsUnit; offset?: number; zone?: string } = {},
