@@ -1,5 +1,11 @@
 import { useEffect, useRef } from 'react'
-import type { MapDetailResponse, ZoneCreateResponse, ZoneTypeCode } from '../../api/contracts'
+import type {
+  MapDetailResponse,
+  NavigationWaypointResponse,
+  WaypointActionCode,
+  ZoneCreateResponse,
+  ZoneTypeCode,
+} from '../../api/contracts'
 import type { MapViewData } from '../../api/mappers'
 import { mapApi } from '../../api/services'
 import { env } from '../../config/env'
@@ -7,6 +13,7 @@ import { useApiQuery } from '../../lib/useApiQuery'
 import { complexMap, mapCheckpoints, mapPins, mapRobot } from '../../mocks'
 import type { ZoneType } from '../../types/domain'
 import { useAuthStore } from '../auth/useAuthStore'
+import { worldToMapRatios } from '../onboarding/mapCoordinates'
 import { useRegisteredMap } from '../onboarding/useRegisteredMap'
 
 const GRID_COLS = 14
@@ -25,6 +32,18 @@ const zoneIcon: Record<ZoneTypeCode, string> = {
   PARKING: '🅿️',
   RECYCLING_AREA: '♻️',
   DANGER_ZONE: '⚠️',
+  DESTINATION: '🏁',
+}
+
+const waypointLabel: Record<WaypointActionCode, string> = {
+  PASS: '경유',
+  SCAN: '탐지',
+  DESTINATION: '도착지',
+}
+
+const waypointIcon: Record<WaypointActionCode, string> = {
+  PASS: '●',
+  SCAN: '◎',
   DESTINATION: '🏁',
 }
 
@@ -56,6 +75,7 @@ function coordinateToGrid(
 function registeredMapToView(
   detail: MapDetailResponse,
   zones: ZoneCreateResponse[],
+  waypoints: NavigationWaypointResponse[],
   mapImageUrl: string,
   robotId: string | number,
 ): MapViewData {
@@ -85,6 +105,25 @@ function registeredMapToView(
       ? (detail.width * resolution) / GRID_COLS
       : undefined
 
+  const zoneNames = new Map(zones.map((zone) => [String(zone.zoneId), zone.name]))
+  const checkpoints = [...waypoints]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((waypoint) => {
+      const ratios = worldToMapRatios(detail, {
+        x: Number(waypoint.x),
+        y: Number(waypoint.y),
+      })
+      const actionLabel = waypointLabel[waypoint.action]
+      const linkedZone = waypoint.zoneId == null ? undefined : zoneNames.get(String(waypoint.zoneId))
+      return {
+        id: String(waypoint.waypointId),
+        icon: waypointIcon[waypoint.action],
+        label: linkedZone ? `${actionLabel} · ${linkedZone}` : actionLabel,
+        x: Math.max(0, Math.min(GRID_COLS, ratios.xRatio * GRID_COLS)),
+        y: Math.max(0, Math.min(GRID_ROWS, ratios.yRatio * GRID_ROWS)),
+      }
+    })
+
   return {
     map: {
       cols: GRID_COLS,
@@ -106,7 +145,7 @@ function registeredMapToView(
       y: GRID_ROWS / 2,
     },
     pins: [],
-    checkpoints: converted.map((item) => item.checkpoint),
+    checkpoints,
   }
 }
 
@@ -133,12 +172,22 @@ export function useComplexMap() {
       }
       if (!mapId) throw new Error('등록된 지도 ID가 없습니다.')
 
-      const [detail, zones] = await Promise.all([mapApi.detail(mapId), mapApi.zones(mapId)])
+      const [detail, zones, navigation] = await Promise.all([
+        mapApi.detail(mapId),
+        mapApi.zones(mapId),
+        mapApi.waypoints(mapId),
+      ])
       const blob = await mapApi.file(detail.mapUrl)
       const mapImageUrl = URL.createObjectURL(blob)
       createdUrls.current.push(mapImageUrl)
       return {
-        view: registeredMapToView(detail, zones, mapImageUrl, robotId ?? '로봇'),
+        view: registeredMapToView(
+          detail,
+          zones,
+          navigation.waypoints,
+          mapImageUrl,
+          robotId ?? '로봇',
+        ),
       }
     },
     [mapId, robotId, registeredZones],
