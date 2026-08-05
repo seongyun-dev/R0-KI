@@ -1315,7 +1315,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         application._publish_pose_if_needed(101.0, force=True)
         self.assertEqual(client.publish.call_count, 2)
 
-    def test_integrated_pose_gate_tracks_mapping_lifecycle(self) -> None:
+    def test_integrated_pose_publish_remains_active_while_idle(self) -> None:
         from run_integrated import create_integrated_application
 
         runtime = FakeRuntime()
@@ -1326,13 +1326,13 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             mapping_runtime=mapping_runtime,
         )
 
-        self.assertFalse(application._pose_publish_activity_check())
+        self.assertTrue(application._pose_publish_activity_check())
         mapping_runtime.motion_active = True
         self.assertTrue(application._pose_publish_activity_check())
         mapping_runtime.motion_active = False
-        self.assertFalse(application._pose_publish_activity_check())
+        self.assertTrue(application._pose_publish_activity_check())
 
-    def test_integrated_pose_gate_tracks_patrol_lifecycle(self) -> None:
+    def test_integrated_pose_publish_remains_active_after_patrol(self) -> None:
         from run_integrated import create_integrated_application
 
         runtime = FakeRuntime()
@@ -1341,11 +1341,11 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         service.start()
         self.addCleanup(service.stop)
 
-        self.assertFalse(application._pose_publish_activity_check())
+        self.assertTrue(application._pose_publish_activity_check())
         service.send_command("START_PATROL", patrolId=17)
         self.assertTrue(application._pose_publish_activity_check())
         service.send_command("STOP_PATROL")
-        self.assertFalse(application._pose_publish_activity_check())
+        self.assertTrue(application._pose_publish_activity_check())
 
     def test_existing_command_handler_controls_final_mission_and_publishes_ack(
         self,

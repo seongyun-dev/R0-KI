@@ -746,9 +746,10 @@ def create_integrated_application(
         pipeline_runner=pipeline_runner,
         pose_source=pose_bridge,
         lidar_health_source=lidar_health_bridge,
-        pose_publish_activity_check=(
-            runtime_service.is_obstacle_detection_active
-        ),
+        # A fresh AMCL/TF pose is useful while IDLE too: the dashboard must
+        # reflect the robot at the marked dock before START_PATROL.  The pose
+        # bridge already rejects missing or stale transforms, so patrol state
+        # is not an additional validity condition.
         runtime_components=tuple(runtime_components),
         start_serial_reader=start_serial_runtime,
     )
