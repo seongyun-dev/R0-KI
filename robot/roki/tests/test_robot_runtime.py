@@ -611,6 +611,28 @@ class RobotRuntimeTest(unittest.TestCase):
         self.assertLessEqual(controls[-1]["speed"], 45)
         self.assertEqual(controls[-1]["steering"], 81)
 
+    def test_repeated_identical_manual_targets_do_not_starve_control(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        bridge.connected = True
+        runtime._on_connected()
+        complete_handshake(runtime)
+        runtime._handle_hardware_status(
+            HardwareStatus(82.5, MotorStatus.NORMAL, LineSensorStatus.NORMAL)
+        )
+        runtime._handle_odometry(Odometry(1, 100, 0, 0))
+
+        for sequence in range(2, 7):
+            runtime.request_motion_target(45, 81)
+            runtime._handle_odometry(
+                Odometry(sequence, sequence * 100, sequence - 1, sequence - 1)
+            )
+
+        controls = [item for item in bridge.written if item["type"] == "control"]
+        self.assertTrue(controls)
+        self.assertGreater(controls[-1]["speed"], 0)
+        self.assertEqual(controls[-1]["steering"], 81)
+
     def test_manual_stationary_steering_sends_one_zero_speed_control(self) -> None:
         bridge = FakeBridge([])
         runtime, _store = create_runtime(bridge)
