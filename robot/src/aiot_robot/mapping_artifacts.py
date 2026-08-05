@@ -90,15 +90,20 @@ class SlamMapExporter:
                 (
                     self._ros2_command,
                     "service",
-                    "type",
-                    "/slam_toolbox/serialize_map",
+                    "list",
+                    "-t",
+                    "--no-daemon",
                 ),
                 min(self._settings.timeout_seconds, 5.0),
             )
         except (OSError, subprocess.SubprocessError):
             return False, "SLAM_TOOLBOX_NOT_READY"
-        service_type = str(getattr(result, "stdout", "")).strip()
-        if "slam_toolbox/srv/SerializePoseGraph" not in service_type:
+        service_graph = str(getattr(result, "stdout", ""))
+        expected_service = (
+            "/slam_toolbox/serialize_map "
+            "[slam_toolbox/srv/SerializePoseGraph]"
+        )
+        if expected_service not in service_graph:
             return False, "SLAM_TOOLBOX_NOT_READY"
         return True, "READY"
 
