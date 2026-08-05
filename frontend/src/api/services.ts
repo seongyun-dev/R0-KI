@@ -327,6 +327,7 @@ export const robotsApi = {
 }
 
 export const mapApi = {
+  current: () => apiRequest<MapDetailResponse>('/api/map/current'),
   startMapping: (robotId: string | number) =>
     apiRequest<MappingStartResponse>('/api/map/mapping-sessions', {
       method: 'POST',
