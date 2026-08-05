@@ -522,7 +522,6 @@ export type ZoneTypeCode =
   | 'START'
   | 'PARKING'
   | 'RECYCLING_AREA'
-  | 'DANGER_ZONE'
   | 'DESTINATION'
 
 export type ZoneCreateRequest = {

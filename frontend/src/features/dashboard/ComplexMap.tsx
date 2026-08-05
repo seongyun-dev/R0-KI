@@ -42,7 +42,6 @@ const toneVar: Record<Tone, string> = {
 const zoneTone: Record<ZoneType, string> = {
   주차장: 'patrol',
   분리수거장: 'charge',
-  위험구역: 'alert',
   출입구: 'detect',
   도착지: 'offline',
   기타: 'offline',
@@ -477,17 +476,6 @@ export function ComplexMap({
                     height={py(z.rect.h) - 4}
                     rx="7"
                   />
-                  {z.type === '위험구역' && (
-                    <rect
-                      x={px(z.rect.x) + 2}
-                      y={py(z.rect.y) + 2}
-                      width={px(z.rect.w) - 4}
-                      height={py(z.rect.h) - 4}
-                      rx="7"
-                      fill="url(#cmapHatch)"
-                      stroke="none"
-                    />
-                  )}
                   {/* 유형에서 유도되는 설비 묘사 (주차면·수거함·복귀 깃발·건물 윤곽) */}
                   <ZoneDetail
                     type={z.type}

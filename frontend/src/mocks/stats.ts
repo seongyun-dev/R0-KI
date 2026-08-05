@@ -94,13 +94,6 @@ export const handlingStats: HandlingStat[] = [
     handledPct: 78,
     pendingPct: 22,
   },
-  {
-    label: '위험구역',
-    handled: 27,
-    pending: 14,
-    handledPct: 66,
-    pendingPct: 34,
-  },
 ]
 
 export const zoneShares: ZoneShareStat[] = MOCK_INSIGHT_ZONES
