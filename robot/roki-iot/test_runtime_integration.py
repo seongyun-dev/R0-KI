@@ -132,6 +132,29 @@ class BlockingManualController:
 
 
 class RuntimeStateBackendAdapterTest(unittest.TestCase):
+    def test_obstacle_activity_tracks_patrol_lifecycle(self) -> None:
+        runtime = FakeRuntime()
+        service = FinalRuntimeService(runtime)
+        service.start()
+        self.addCleanup(service.stop)
+
+        self.assertFalse(service.is_obstacle_detection_active())
+        service.send_command("START_PATROL", patrolId=17)
+        self.assertTrue(service.is_obstacle_detection_active())
+        service.send_command("STOP_PATROL")
+        self.assertFalse(service.is_obstacle_detection_active())
+
+    def test_obstacle_activity_uses_mapping_motion_lifecycle(self) -> None:
+        service = FinalRuntimeService(FakeRuntime())
+        mapping = SimpleNamespace(motion_active=False)
+        service.set_mapping_runtime(mapping)
+
+        self.assertFalse(service.is_obstacle_detection_active())
+        mapping.motion_active = True
+        self.assertTrue(service.is_obstacle_detection_active())
+        mapping.motion_active = False
+        self.assertFalse(service.is_obstacle_detection_active())
+
     def test_manual_demo_starts_stationary_only_after_mqtt_start(self) -> None:
         runtime = FakeRuntime()
         manual = Mock()
@@ -259,7 +282,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             "NAVIGATION_MAP_MISMATCH",
             "NAVIGATION_MAP_METADATA_MISMATCH",
             "NAVIGATION_CONFIG_INVALID",
-            "NAVIGATION_ROUTE_UNSAFE",
+            "NAVIGATION_ROUTE_INVALID",
         ):
             with self.subTest(reason=reason):
                 runtime = FakeRuntime()
@@ -1016,6 +1039,28 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             application._command_handler.on_runtime_failure
         )
 
+    def test_integrated_lidar_gate_uses_final_runtime_lifecycle(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        mapping_runtime = Mock()
+        mapping_runtime.motion_active = False
+        lidar_bridge = Mock()
+        application = create_integrated_application(
+            final_runtime=runtime,
+            mapping_runtime=mapping_runtime,
+            lidar_health_bridge=lidar_bridge,
+        )
+
+        lidar_bridge.set_obstacle_activity_check.assert_called_once()
+        activity_check = (
+            lidar_bridge.set_obstacle_activity_check.call_args.args[0]
+        )
+        self.assertFalse(activity_check())
+        mapping_runtime.motion_active = True
+        self.assertTrue(activity_check())
+        self.assertIs(application._state_store, runtime.state_store)
+
     def test_pose_bridge_and_publisher_share_final_runtime_store(self) -> None:
         from run_integrated import create_integrated_application
 
@@ -1208,6 +1253,99 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             set(payload),
             {"schemaVersion", "robotKey", "x", "y", "heading", "timestamp"},
         )
+
+    def test_pose_lifecycle_gate_does_not_gate_status(self) -> None:
+        from backend_mqtt.publisher import RokiPublisherApplication
+        from backend_state.models import PoseState
+
+        settings = SimpleNamespace(
+            pose_publish_interval_seconds=1.0,
+            status_publish_interval_seconds=5.0,
+            schema_version=1,
+            robot_key="ROKI-01",
+            pose_topic="hanbakwi/v1/robots/ROKI-01/pose",
+            status_topic="hanbakwi/v1/robots/ROKI-01/status",
+        )
+        store = Mock()
+        store.get_pose.return_value = PoseState(1.0, 2.0, 90.0)
+        store.get_status.return_value = SimpleNamespace(
+            battery=80.0,
+            state="IDLE",
+            motor="NORMAL",
+            camera="NORMAL",
+            lidar="NORMAL",
+            line_sensor="NORMAL",
+            obstacle=SimpleNamespace(
+                status="CLEAR",
+                direction="NONE",
+                reason_message=None,
+            ),
+        )
+        activity = {"active": False}
+        client = Mock()
+        application = RokiPublisherApplication(
+            settings=settings,
+            serial_reader=Mock(),
+            state_store=store,
+            mqtt_client=client,
+            command_handler=Mock(),
+            pipeline_runner=Mock(),
+            pose_publish_activity_check=lambda: activity["active"],
+        )
+
+        application._publish_status_if_needed(100.0)
+        application._publish_pose_if_needed(100.0)
+
+        self.assertEqual(client.publish.call_count, 1)
+        self.assertEqual(
+            client.publish.call_args.kwargs["topic"],
+            settings.status_topic,
+        )
+        store.get_pose.assert_not_called()
+
+        activity["active"] = True
+        application._publish_pose_if_needed(100.0)
+        self.assertEqual(client.publish.call_count, 2)
+        self.assertEqual(
+            client.publish.call_args.kwargs["topic"],
+            settings.pose_topic,
+        )
+
+        activity["active"] = False
+        application._publish_pose_if_needed(101.0, force=True)
+        self.assertEqual(client.publish.call_count, 2)
+
+    def test_integrated_pose_publish_remains_active_while_idle(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        mapping_runtime = Mock()
+        mapping_runtime.motion_active = False
+        application = create_integrated_application(
+            final_runtime=runtime,
+            mapping_runtime=mapping_runtime,
+        )
+
+        self.assertTrue(application._pose_publish_activity_check())
+        mapping_runtime.motion_active = True
+        self.assertTrue(application._pose_publish_activity_check())
+        mapping_runtime.motion_active = False
+        self.assertTrue(application._pose_publish_activity_check())
+
+    def test_integrated_pose_publish_remains_active_after_patrol(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        application = create_integrated_application(final_runtime=runtime)
+        service = application._serial_reader
+        service.start()
+        self.addCleanup(service.stop)
+
+        self.assertTrue(application._pose_publish_activity_check())
+        service.send_command("START_PATROL", patrolId=17)
+        self.assertTrue(application._pose_publish_activity_check())
+        service.send_command("STOP_PATROL")
+        self.assertTrue(application._pose_publish_activity_check())
 
     def test_existing_command_handler_controls_final_mission_and_publishes_ack(
         self,

@@ -57,9 +57,25 @@ class MappingArtifactsTest(unittest.TestCase):
         self.assertEqual((artifact.origin_x, artifact.origin_y), (-1.0, -2.0))
         self.assertEqual(len(commands), 2)
         self.assertIn("map_saver_cli", commands[0])
+        self.assertIn("save_map_timeout:=24.0", commands[0])
         self.assertIn("/slam_toolbox/serialize_map", commands[1])
+        normalized_yaml = artifact.yaml_path.read_text(encoding="utf-8")
+        self.assertIn("mode: trinary", normalized_yaml)
+        self.assertIn("occupied_thresh: 0.65", normalized_yaml)
+        self.assertIn("free_thresh: 0.15", normalized_yaml)
 
     def test_readiness_requires_live_slam_toolbox_service(self) -> None:
+        commands: list[tuple[str, ...]] = []
+
+        def ready_runner(command, _timeout):
+            commands.append(tuple(command))
+            return SimpleNamespace(
+                stdout=(
+                    "/slam_toolbox/serialize_map "
+                    "[slam_toolbox/srv/SerializePoseGraph]\n"
+                )
+            )
+
         exporter = SlamMapExporter(
             MapExportSettings(self.root),
             runner=lambda _command, _timeout: SimpleNamespace(stdout=""),
@@ -72,12 +88,14 @@ class MappingArtifactsTest(unittest.TestCase):
 
         ready_exporter = SlamMapExporter(
             MapExportSettings(self.root),
-            runner=lambda _command, _timeout: SimpleNamespace(
-                stdout="slam_toolbox/srv/SerializePoseGraph\n"
-            ),
+            runner=ready_runner,
         )
         with patch("aiot_robot.mapping_artifacts.shutil.which", return_value="ros2"):
             self.assertEqual(ready_exporter.readiness(), (True, "READY"))
+        self.assertEqual(
+            commands,
+            [("ros2", "service", "list", "-t", "--no-daemon")],
+        )
 
     def test_nonzero_origin_yaw_is_rejected_for_current_frontend(self) -> None:
         def runner(command, _timeout):

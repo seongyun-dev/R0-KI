@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,6 +10,9 @@ from typing import Any, Callable, Mapping
 
 from aiot_robot.backend_client import BackendTransportError
 from navigation.route import Route, RouteValidationError, parse_route
+
+
+logger = logging.getLogger(__name__)
 
 
 class NavigationConfigError(RuntimeError):
@@ -90,10 +94,15 @@ class BackendNavigationConfigProvider:
         try:
             return self._navigation_factory(route)
         except Exception as exc:
-            # This factory performs the local map bundle/hash/occupancy/
-            # clearance validation. A stale local bundle is not a transport
-            # outage and must never activate a fallback route.
-            raise NavigationConfigError("NAVIGATION_ROUTE_UNSAFE") from exc
+            # Preserve a stable MQTT reason without hiding the actionable
+            # local cause from Jetson operations logs.
+            logger.error(
+                "Navigation route validation failed: type=%s detail=%s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            raise NavigationConfigError("NAVIGATION_ROUTE_INVALID") from exc
 
     def _request_timeout(self, deadline: datetime | None) -> float | None:
         if deadline is None:

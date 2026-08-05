@@ -45,16 +45,16 @@ record live environment values.
 
 ## Gamepad safety behaviour
 
-`ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC` defaults to `1.0`. If no new Linux
-joystick event arrives before that lease expires, Robot sends STOP and
-disarms the gamepad. The operator must return both axes to neutral, release
-the deadman button, and press it again before motion resumes.
+`ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC` defaults to `0`. Linux joystick devices
+normally emit events only when a value changes, so event silence cannot be
+used as a liveness signal while a stick is held. The converter therefore keeps
+refreshing the held deadman/stick state until an explicit release, STOP,
+device disconnect or mapping shutdown occurs. A process failure is still
+bounded by the ESP32 command watchdog.
 
-Some inexpensive wireless receivers do not emit repeated events while a stick
-is held steady. With such a receiver, a held direction intentionally becomes a
-bounded pulse of at most about one second instead of continuous motion.
-Re-centre and command another pulse. Do not increase the lease beyond `1.0`
-for the field test.
+A positive lease remains available for receivers that are known to emit
+periodic events. Do not enable it for a change-only receiver: doing so turns a
+normal held direction into an unexpectedly short pulse.
 
 After a reconnect, Linux `JS_EVENT_INIT` values never arm motion. This prevents
 a held deadman/stick state from being restored as a live drive command.
@@ -63,9 +63,9 @@ a held deadman/stick state from being restored as a live drive command.
 
 1. Keep the motor power path disabled and connect the gamepad receiver.
 2. Run the gamepad probe and record the actual axis/button numbers.
-3. Confirm that releasing deadman, removing the receiver, and leaving input
-   silent for more than one second each produce STOP before enabling free-floor
-   motion. Confirm that silent-input STOP requires neutral/deadman re-arming.
+3. Confirm that releasing deadman and removing the receiver each produce STOP
+   before enabling free-floor motion. Confirm that a held stick continues to
+   refresh short ESP32 pulses only while deadman remains pressed.
 4. Start mapping from the Frontend. A waypoint route is not required.
 5. Drive at PWM 45 using short pulses. Avoid fast steering and revisit the
    starting area so SLAM can close the map.

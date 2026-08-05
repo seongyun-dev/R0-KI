@@ -48,6 +48,11 @@ class FrontObstacleDetector:
         self._settings = settings
         self._status = "CLEAR"
 
+    def reset(self) -> None:
+        """운행 비활성 전환 시 hysteresis 상태를 안전한 초기값으로 되돌린다."""
+
+        self._status = "CLEAR"
+
     def evaluate_scan(
         self,
         *,

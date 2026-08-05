@@ -18,6 +18,10 @@ grep -q 'ATTR{index}=="0"' \
   "${repository_root}/infra/jetson/99-roki-cameras.rules"
 grep -q 'ConditionPathExists=/opt/aiot/secrets/ros.env' \
   "${repository_root}/infra/jetson/aiot-ros.service"
+grep -q '^RuntimeDirectoryPreserve=yes$' \
+  "${repository_root}/infra/jetson/aiot-ros.service"
+grep -q '^RuntimeDirectoryPreserve=yes$' \
+  "${repository_root}/infra/jetson/aiot-ai.service"
 grep -Eq '^Wants=.*aiot-ros.service' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q '^User=e103$' \
@@ -28,7 +32,9 @@ grep -q '^EnvironmentFile=/opt/aiot/secrets/ros.env$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q 'fixed_resolution: true' \
+grep -q '^Environment=PYTHONUNBUFFERED=1$' \
+  "${repository_root}/infra/jetson/aiot-robot.service"
+grep -q 'fixed_resolution: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"

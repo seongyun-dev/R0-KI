@@ -9,6 +9,11 @@ import math
 import statistics
 from typing import Any, Callable
 
+from state.robot_state import ObstacleState
+
+
+ObstacleActivityCheck = Callable[[], bool]
+
 
 @dataclass(frozen=True)
 class RosLidarHealthSettings:
@@ -51,12 +56,19 @@ class RosLidarHealthBridge:
         state_store: Any,
         settings: RosLidarHealthSettings,
         obstacle_detector: Any | None = None,
+        obstacle_activity_check: ObstacleActivityCheck | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state_store = state_store
         self._settings = settings
         self._monotonic_clock = monotonic_clock
         self._obstacle_detector = obstacle_detector
+        self._obstacle_activity_check = (
+            obstacle_activity_check
+            if obstacle_activity_check is not None
+            else self._state_reports_active_operation
+        )
+        self._obstacle_was_active = False
         self._scan_lock = threading.Lock()
         self._last_scan_time: float | None = None
         self._front_range_m: float | None = None
@@ -72,6 +84,19 @@ class RosLidarHealthBridge:
     @property
     def state_store(self) -> Any:
         return self._state_store
+
+    def set_obstacle_activity_check(
+        self,
+        check: ObstacleActivityCheck,
+    ) -> None:
+        """운행 lifecycle 소유자가 제공하는 read-only gate를 연결한다.
+
+        Application 조립 단계에서 ROS thread 시작 전에 호출한다.
+        """
+
+        if not callable(check):
+            raise ValueError("obstacle activity check must be callable")
+        self._obstacle_activity_check = check
 
     def start(self) -> None:
         if self.is_running():
@@ -208,6 +233,7 @@ class RosLidarHealthBridge:
             self._set_status("DISCONNECTED")
         else:
             self._set_status("NORMAL")
+        self._synchronize_obstacle_activity()
         return self._current_status
 
     def _on_scan(self, _message: Any) -> None:
@@ -220,6 +246,10 @@ class RosLidarHealthBridge:
         )
         if self._obstacle_detector is None:
             return
+        if not self._obstacle_detection_active():
+            self._clear_inactive_obstacle()
+            return
+        self._obstacle_was_active = True
         detection = self._obstacle_detector.evaluate_scan(
             ranges=_message.ranges,
             angle_min_rad=float(_message.angle_min),
@@ -227,7 +257,38 @@ class RosLidarHealthBridge:
             range_min_m=float(_message.range_min),
             range_max_m=float(_message.range_max),
         )
+        # 운행 종료와 scan callback이 겹쳐 stale STOP이 되살아나는 것을
+        # 줄이기 위해 Store write 직전에 lifecycle을 다시 확인한다.
+        if not self._obstacle_detection_active():
+            self._clear_inactive_obstacle()
+            return
         self._state_store.update_obstacle(detection.obstacle)
+
+    def _state_reports_active_operation(self) -> bool:
+        """Standalone runtime의 보수적인 fallback gate."""
+
+        status = self._state_store.get_status()
+        return status.state in {"PATROLLING", "MAPPING"}
+
+    def _obstacle_detection_active(self) -> bool:
+        return bool(self._obstacle_activity_check())
+
+    def _synchronize_obstacle_activity(self) -> None:
+        if (
+            self._obstacle_detector is not None
+            and not self._obstacle_detection_active()
+        ):
+            self._clear_inactive_obstacle()
+
+    def _clear_inactive_obstacle(self) -> None:
+        clear = ObstacleState()
+        if self._obstacle_was_active:
+            reset = getattr(self._obstacle_detector, "reset", None)
+            if callable(reset):
+                reset()
+            self._obstacle_was_active = False
+        if self._state_store.get_status().obstacle != clear:
+            self._state_store.update_obstacle(clear)
 
     def _set_status(self, status: str) -> None:
         if status == self._current_status:

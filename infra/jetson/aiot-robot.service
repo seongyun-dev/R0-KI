@@ -21,6 +21,7 @@ Environment=ROS_DOMAIN_ID=0
 Environment=ROS_HOME=/var/lib/aiot/ros
 Environment=ROS_LOG_DIR=/var/lib/aiot/ros/log
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
 ExecStartPre=/opt/aiot/iot/current/robot/scripts/run.sh --check
 ExecStart=/opt/aiot/iot/current/robot/scripts/run.sh
 Restart=on-failure
