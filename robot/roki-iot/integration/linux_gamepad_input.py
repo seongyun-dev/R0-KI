@@ -233,6 +233,9 @@ class LinuxGamepadInput:
         self._file_descriptor: int | None = None
         self._command_active = False
         self._last_input_at: float | None = None
+        self._diagnostic_lock = threading.Lock()
+        self._last_decision: str | None = None
+        self._last_decision_at: float | None = None
 
     @property
     def device_path(self) -> Path:
@@ -266,6 +269,25 @@ class LinuxGamepadInput:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
         self._thread = None
+
+    def diagnostic_snapshot(self) -> dict[str, object]:
+        """Return read-only liveness/input context without affecting control."""
+
+        now = self._clock()
+        with self._diagnostic_lock:
+            decision = self._last_decision
+            decision_at = self._last_decision_at
+        thread = self._thread
+        return {
+            "gamepadDeviceOpen": self._file_descriptor is not None,
+            "gamepadThreadAlive": thread is not None and thread.is_alive(),
+            "lastGamepadDecision": decision or "unavailable",
+            "lastGamepadDecisionAgoMs": (
+                None
+                if decision_at is None
+                else round(max(0.0, (now - decision_at) * 1000.0), 3)
+            ),
+        }
 
     def _open(self) -> int:
         return self._opener(
@@ -336,23 +358,33 @@ class LinuxGamepadInput:
         )
         if lease_enabled and lease_expired and not self._state.finish_pressed:
             self._state.disarm()
+            if self._command_active:
+                self._record_decision("LEASE_STOP")
             self._safe_stop()
             self._controller.tick()
             return
         steering, drive, stop, finish = self._state.decision()
         if stop:
+            if self._command_active:
+                self._record_decision("STOP")
             self._safe_stop()
         else:
+            decisions: list[str] = []
             if steering is not None:
                 self._controller.handle_key(steering)
                 self._command_active = True
+                decisions.append(steering.upper())
             if drive is not None:
                 self._controller.handle_key(drive)
                 self._command_active = True
+                decisions.append(drive.upper())
+            if decisions:
+                self._record_decision("+".join(decisions))
         result = self._controller.tick()
         if result is not None:
             self._command_active = False
         if finish:
+            self._record_decision("FINISH")
             self._stop_event.set()
             threading.Thread(
                 target=self._finish_callback,
@@ -366,6 +398,12 @@ class LinuxGamepadInput:
         if self._command_active:
             self._controller.handle_key(" ")
         self._command_active = False
+
+    def _record_decision(self, decision: str) -> None:
+        now = self._clock()
+        with self._diagnostic_lock:
+            self._last_decision = decision
+            self._last_decision_at = now
 
     def _close_device(self) -> None:
         descriptor = self._file_descriptor

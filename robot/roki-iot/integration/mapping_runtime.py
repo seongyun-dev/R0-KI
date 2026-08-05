@@ -95,6 +95,39 @@ class ManualMappingRuntime:
         with self._lock:
             return self._last_error
 
+    def motion_timeline_diagnostic_context(self) -> dict[str, object]:
+        """Aggregate read-only mapping/gamepad context for Runtime fault logs."""
+
+        with self._lock:
+            context: dict[str, object] = {
+                "mappingState": self._state,
+                "mappingMotionActive": self._state
+                in {"STARTING", "MAPPING", "STOPPING"},
+            }
+        snapshot = getattr(self._gamepad_input, "diagnostic_snapshot", None)
+        if not callable(snapshot):
+            context.update(
+                {
+                    "gamepadDeviceOpen": "unavailable",
+                    "gamepadThreadAlive": "unavailable",
+                    "lastGamepadDecision": "unavailable",
+                    "lastGamepadDecisionAgoMs": "unavailable",
+                }
+            )
+            return context
+        try:
+            gamepad_context = snapshot()
+        except Exception:
+            gamepad_context = {}
+        for key in (
+            "gamepadDeviceOpen",
+            "gamepadThreadAlive",
+            "lastGamepadDecision",
+            "lastGamepadDecisionAgoMs",
+        ):
+            context[key] = gamepad_context.get(key, "unavailable")
+        return context
+
     def set_failure_listener(self, listener: FailureListener) -> None:
         """Report terminal mapping failures through the command ACK owner."""
 

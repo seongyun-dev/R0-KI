@@ -63,6 +63,14 @@ class FakeGamepad:
             self.stop_failures_remaining -= 1
             raise RuntimeError("gamepad stop failed")
 
+    def diagnostic_snapshot(self) -> dict[str, object]:
+        return {
+            "gamepadDeviceOpen": self.started > self.stopped,
+            "gamepadThreadAlive": self.started > self.stopped,
+            "lastGamepadDecision": "W" if self.started else "unavailable",
+            "lastGamepadDecisionAgoMs": 25.0 if self.started else None,
+        }
+
 
 class FakeExporter:
     def __init__(self, artifact: MapArtifact) -> None:
@@ -172,6 +180,20 @@ class MappingRuntimeTest(unittest.TestCase):
         self.assertTrue(self.runtime.active)
         self.assertEqual(self.drive.activated, [12])
         self.assertEqual(self.gamepad.started, 1)
+
+    def test_motion_timeline_diagnostic_context_tracks_mapping_and_gamepad(self) -> None:
+        idle = self.runtime.motion_timeline_diagnostic_context()
+        self.assertEqual(idle["mappingState"], "IDLE")
+        self.assertFalse(idle["mappingMotionActive"])
+        self.assertEqual(idle["lastGamepadDecision"], "unavailable")
+
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+
+        mapping = self.runtime.motion_timeline_diagnostic_context()
+        self.assertEqual(mapping["mappingState"], "MAPPING")
+        self.assertTrue(mapping["mappingMotionActive"])
+        self.assertTrue(mapping["gamepadDeviceOpen"])
+        self.assertEqual(mapping["lastGamepadDecision"], "W")
 
     def test_finish_stops_motion_exports_and_uploads_existing_contract(self) -> None:
         self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))

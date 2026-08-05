@@ -109,6 +109,38 @@ class GamepadStateTest(unittest.TestCase):
 
 
 class LinuxGamepadInputTest(unittest.TestCase):
+    def test_diagnostic_snapshot_tracks_latest_motion_decision(self) -> None:
+        class FakeController:
+            def handle_key(self, _key: str) -> None:
+                pass
+
+            def tick(self):
+                return None
+
+        now = 1.0
+        settings = GamepadSettings()
+        gamepad = LinuxGamepadInput(
+            FakeController(),
+            settings=settings,
+            finish_callback=lambda: None,
+            clock=lambda: now,
+        )
+        gamepad._accept_event(  # type: ignore[attr-defined]
+            JoystickEvent(1, JS_EVENT_BUTTON, settings.deadman_button)
+        )
+        gamepad._accept_event(  # type: ignore[attr-defined]
+            JoystickEvent(-32767, JS_EVENT_AXIS, settings.throttle_axis)
+        )
+        gamepad._apply_decision()  # type: ignore[attr-defined]
+        now = 1.25
+
+        snapshot = gamepad.diagnostic_snapshot()
+
+        self.assertEqual(snapshot["lastGamepadDecision"], "W")
+        self.assertEqual(snapshot["lastGamepadDecisionAgoMs"], 250.0)
+        self.assertFalse(snapshot["gamepadDeviceOpen"])
+        self.assertFalse(snapshot["gamepadThreadAlive"])
+
     def test_default_holds_command_while_device_remains_connected(self) -> None:
         class FakeController:
             def __init__(self) -> None:
