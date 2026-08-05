@@ -24,6 +24,7 @@ import com.oneloop.mqtt.dto.CommandAck;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.dto.mqtt.StartPatrolCommand;
+import com.oneloop.patrol.dto.mqtt.StopPatrolCommand;
 import com.oneloop.patrol.dto.request.PatrolStartRequest;
 import com.oneloop.patrol.dto.response.PatrolStartResponse;
 import com.oneloop.patrol.dto.response.PatrolStopResponse;
@@ -223,7 +224,8 @@ class PatrolCommandServiceTest {
                         invocation -> {
                             Patrol patrol = savedPatrol.get();
                             return patrol != null
-                                            && patrol.getCommandId().equals(invocation.getArgument(0))
+                                            && patrol.getCommandId()
+                                                    .equals(invocation.getArgument(0))
                                     ? Optional.of(patrol)
                                     : Optional.empty();
                         });
@@ -232,7 +234,7 @@ class PatrolCommandServiceTest {
         doAnswer(
                         invocation -> {
                             StartPatrolCommand command = invocation.getArgument(1);
-                            new PatrolCommandAckService(patrolRepository)
+                            new PatrolCommandAckService(patrolRepository, patrolAiSummaryService)
                                     .handle(
                                             "test-101",
                                             new CommandAck(
@@ -313,10 +315,61 @@ class PatrolCommandServiceTest {
         verify(mqttPublisher, times(2)).publishCommand(anyString(), any());
     }
 
+    @Test
+    void automaticStopPublishFailureIsRetriedWithSameIdOnNextPose() {
+        PatrolRobot robot =
+                readyRobot(
+                        SensorStatus.NORMAL,
+                        SensorStatus.NORMAL,
+                        SensorStatus.NORMAL,
+                        SensorStatus.DISCONNECTED);
+        Patrol patrol = new Patrol(robot, LocalDateTime.now().minusMinutes(1), "start-command");
+        ReflectionTestUtils.setField(patrol, "id", 29L);
+        when(apartmentComplex.getId()).thenReturn(2L);
+        when(patrolRepository.findFirstForUpdateByRobotIdOrderByStartedAtDesc(17L))
+                .thenReturn(Optional.of(patrol));
+        when(patrolMapRepository.findByApartmentComplexId(2L)).thenReturn(Optional.of(patrolMap));
+        when(navigationWaypointService.requireValidCurrentRoute(patrolMap))
+                .thenReturn(List.of(destinationWaypoint));
+        when(destinationWaypoint.getX()).thenReturn(new BigDecimal("2.0"));
+        when(destinationWaypoint.getY()).thenReturn(new BigDecimal("0.5"));
+        when(destinationWaypoint.getAcceptanceRadius()).thenReturn(new BigDecimal("0.3"));
+        when(mqttPublisherProvider.getIfAvailable()).thenReturn(mqttPublisher);
+        AtomicReference<String> firstCommandId = new AtomicReference<>();
+        doAnswer(
+                        invocation -> {
+                            StopPatrolCommand command = invocation.getArgument(1);
+                            if (firstCommandId.compareAndSet(null, command.commandId())) {
+                                throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+                            }
+                            assertThat(command.commandId()).isEqualTo(firstCommandId.get());
+                            return null;
+                        })
+                .when(mqttPublisher)
+                .publishCommand(anyString(), any(StopPatrolCommand.class));
+
+        assertThatThrownBy(
+                        () ->
+                                service()
+                                        .autoCompleteIfArrived(
+                                                robot,
+                                                new BigDecimal("2.0"),
+                                                new BigDecimal("0.5")))
+                .isInstanceOf(BusinessException.class);
+        assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.STOP_REQUESTED);
+
+        service().autoCompleteIfArrived(robot, new BigDecimal("2.0"), new BigDecimal("0.5"));
+
+        assertThat(patrol.getCommandId()).isEqualTo(firstCommandId.get());
+        assertThat(patrol.isCompletionRequested()).isTrue();
+        verify(mqttPublisher, times(2)).publishCommand(anyString(), any(StopPatrolCommand.class));
+        verify(navigationWaypointService).requireValidCurrentRoute(patrolMap);
+        verify(patrolAiSummaryService, never()).requestGeneration(patrol.getId());
+    }
+
     private PatrolCommandService service() {
         return new PatrolCommandService(
                 patrolRepository,
-                patrolAiSummaryService,
                 mqttPublisherProvider,
                 new PatrolCommandStateService(
                         patrolRepository,

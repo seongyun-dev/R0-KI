@@ -30,6 +30,10 @@ public class Patrol extends BaseEntity {
     @Column(name = "command_id", unique = true, length = 36)
     private String commandId;
 
+    // true면 DESTINATION 도착으로 발행한 STOP이며 성공 ACK 뒤 COMPLETED로 확정한다.
+    @Column(name = "completion_requested", nullable = false)
+    private boolean completionRequested;
+
     @Column(name = "patrol_started_at")
     private LocalDateTime startedAt;
 
@@ -71,28 +75,56 @@ public class Patrol extends BaseEntity {
         // 재요청할 때는 최신 commandId로 교체하여 늦게 도착한 이전 ACK가 상태를 바꾸지 못하게 한다.
         this.status = PatrolStatus.STOP_REQUESTED;
         this.commandId = commandId;
+        this.completionRequested = false;
+    }
+
+    public void requestCompletion(String commandId) {
+        if (status != PatrolStatus.IN_PROGRESS) {
+            throw new IllegalStateException("진행 중인 순찰만 완료 요청할 수 있습니다.");
+        }
+        this.status = PatrolStatus.STOP_REQUESTED;
+        this.commandId = commandId;
+        this.completionRequested = true;
     }
 
     public void stop() {
-        if (status != PatrolStatus.STOP_REQUESTED) {
+        if (status != PatrolStatus.STOP_REQUESTED || completionRequested) {
             throw new IllegalStateException("종료 요청 중인 순찰만 종료할 수 있습니다.");
         }
         finish(PatrolStatus.STOPPED);
     }
 
+    public void completeRequested() {
+        if (status != PatrolStatus.STOP_REQUESTED || !completionRequested) {
+            throw new IllegalStateException("완료 요청 중인 순찰만 완료할 수 있습니다.");
+        }
+        finish(PatrolStatus.COMPLETED);
+    }
+
+    public void retryCompletionAfterFailedStop() {
+        if (status != PatrolStatus.STOP_REQUESTED || !completionRequested) {
+            throw new IllegalStateException("완료 요청 중인 순찰만 완료 재시도할 수 있습니다.");
+        }
+        // 실패한 commandId는 그대로 두어 중복 ACK를 식별한다. 다음 pose가 도착을
+        // 재확인하면 requestCompletion()이 새 commandId로 교체한다.
+        this.status = PatrolStatus.IN_PROGRESS;
+        this.completionRequested = false;
+    }
+
     private void finish(PatrolStatus finishedStatus) {
         this.status = finishedStatus;
+        this.completionRequested = false;
         this.endedAt = LocalDateTime.now();
         this.endBatteryLevel = robot.getBatteryLevel();
         if (startedAt != null)
             this.totalDuration = Math.toIntExact(Duration.between(startedAt, endedAt).toSeconds());
     }
 
-
     // START_PATROL 명령이 거절/실패한 경우에만 호출되며, 아직 순찰이 시작되지 않았으므로 배터리/기간은 남기지 않는다.
     public void fail() {
         // 통신 단절로 끝난 순찰도 보고서에 종료 시점과 운행 시간을 남길 수 있도록 종료 정보를 채운다.
         this.status = PatrolStatus.FAILED;
+        this.completionRequested = false;
         this.endedAt = LocalDateTime.now();
         this.endBatteryLevel = robot.getBatteryLevel();
         if (startedAt != null)

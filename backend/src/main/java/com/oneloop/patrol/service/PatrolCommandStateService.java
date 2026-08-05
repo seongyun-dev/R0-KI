@@ -34,8 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 순찰 명령을 발행하기 전에 DB 상태와 commandId를 독립 트랜잭션으로 확정한다.
  *
- * <p>MQTT 발행은 {@link PatrolCommandService}가 이 메서드의 커밋이 끝난 뒤 수행한다. 따라서 로봇이 명령을
- * 받자마자 ACK를 보내도 ACK 처리 트랜잭션이 commandId를 조회할 수 있다.
+ * <p>MQTT 발행은 {@link PatrolCommandService}가 이 메서드의 커밋이 끝난 뒤 수행한다. 따라서 로봇이 명령을 받자마자 ACK를 보내도 ACK 처리
+ * 트랜잭션이 commandId를 조회할 수 있다.
  */
 @Service
 @RequiredArgsConstructor
@@ -119,7 +119,20 @@ public class PatrolCommandStateService {
                 patrolRepository
                         .findFirstForUpdateByRobotIdOrderByStartedAtDesc(robotId)
                         .orElse(null);
-        if (patrol == null || patrol.getStatus() != PatrolStatus.IN_PROGRESS) {
+        if (patrol == null) {
+            return Optional.empty();
+        }
+
+        // MQTT 발행 실패 또는 ACK 유실 뒤 다음 pose에서 같은 멱등 commandId로 재발행한다.
+        if (patrol.getStatus() == PatrolStatus.STOP_REQUESTED && patrol.isCompletionRequested()) {
+            return Optional.of(
+                    new PreparedAutoComplete(
+                            patrol.getId(),
+                            patrol.getCommandId(),
+                            patrol.getRobot().getSerialNumber(),
+                            StopPatrolCommand.of(patrol.getCommandId())));
+        }
+        if (patrol.getStatus() != PatrolStatus.IN_PROGRESS) {
             return Optional.empty();
         }
 
@@ -148,9 +161,8 @@ public class PatrolCommandStateService {
             return Optional.empty();
         }
 
-        patrol.complete();
         String commandId = UUID.randomUUID().toString();
-        patrol.updateCommandId(commandId);
+        patrol.requestCompletion(commandId);
         return Optional.of(
                 new PreparedAutoComplete(
                         patrol.getId(),

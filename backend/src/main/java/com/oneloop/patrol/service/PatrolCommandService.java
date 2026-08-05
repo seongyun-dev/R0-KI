@@ -26,7 +26,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class PatrolCommandService {
 
     private final PatrolRepository patrolRepository;
-    private final PatrolAiSummaryService patrolAiSummaryService;
     private final ObjectProvider<MqttPublisher> mqttPublisherProvider;
     private final PatrolCommandStateService patrolCommandStateService;
 
@@ -78,7 +77,8 @@ public class PatrolCommandService {
     }
 
     // pose 수신 때마다 RobotTelemetryService.updatePose()에서 호출된다.
-    // 로봇의 진행중인 순찰이 있고 좌표가 도착지(DESTINATION) 체크포인트 안에 들어오면 자동으로 종료 처리한다.
+    // 로봇의 진행중인 순찰이 있고 좌표가 도착지(DESTINATION) 체크포인트 안에 들어오면 STOP을 요청한다.
+    // COMPLETED 확정과 AI 요약 요청은 실제 STOP 성공 ACK를 받은 뒤 처리한다.
     public void autoCompleteIfArrived(PatrolRobot robot, BigDecimal x, BigDecimal y) {
         PatrolCommandStateService.PreparedAutoComplete prepared =
                 patrolCommandStateService.prepareAutoComplete(robot.getId(), x, y).orElse(null);
@@ -86,8 +86,6 @@ public class PatrolCommandService {
             return;
         }
 
-        // AI 요약 생성 요청 - 실제 GMS 호출은 트랜잭션 커밋 후 별도 스레드(PatrolCompletedEventListener)에서 처리된다.
-        patrolAiSummaryService.requestGeneration(prepared.patrolId());
         publish(prepared.robotKey(), prepared.command());
     }
 

@@ -67,7 +67,7 @@ class PatrolCommandStateServiceTest {
     }
 
     @Test
-    void completesOnlyAtFinalDestinationRadiusAndRepeatedPoseIsIdempotent() {
+    void requestsStopOnlyAtDestinationAndRepeatedPoseReusesCommand() {
         Patrol patrol = patrol();
         NavigationWaypoint pass = waypoint(1, "0.5", NavigationWaypointAction.PASS);
         NavigationWaypoint destination = waypoint(2, "2.0", NavigationWaypointAction.DESTINATION);
@@ -79,11 +79,15 @@ class PatrolCommandStateServiceTest {
 
         assertThat(service.prepareAutoComplete(17L, new BigDecimal("0.5"), new BigDecimal("0.5")))
                 .isEmpty();
-        assertThat(service.prepareAutoComplete(17L, new BigDecimal("2.3"), new BigDecimal("0.5")))
-                .isPresent();
-        assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.COMPLETED);
-        assertThat(service.prepareAutoComplete(17L, new BigDecimal("2.0"), new BigDecimal("0.5")))
-                .isEmpty();
+        PatrolCommandStateService.PreparedAutoComplete first =
+                service.prepareAutoComplete(17L, new BigDecimal("2.3"), new BigDecimal("0.5"))
+                        .orElseThrow();
+        assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.STOP_REQUESTED);
+        assertThat(patrol.isCompletionRequested()).isTrue();
+        PatrolCommandStateService.PreparedAutoComplete retry =
+                service.prepareAutoComplete(17L, new BigDecimal("2.0"), new BigDecimal("0.5"))
+                        .orElseThrow();
+        assertThat(retry.commandId()).isEqualTo(first.commandId());
         verify(navigationWaypointService, times(2)).requireValidCurrentRoute(patrolMap);
     }
 
