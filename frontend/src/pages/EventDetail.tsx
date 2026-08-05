@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { useEvent, useEvidenceImage, useUpdateEventStatus } from '../features/events/useEvents'
 import { useElapsed } from '../lib/useElapsed'
@@ -30,6 +30,11 @@ const RISK_DOT: Record<string, string> = {
 
 export default function EventDetail() {
   const { id } = useParams()
+  const location = useLocation()
+  const listSearch =
+    location.state && typeof location.state === 'object' && 'listSearch' in location.state
+      ? String((location.state as { listSearch?: string }).listSearch ?? '')
+      : ''
   const { data: event, isLoading, error, refetch } = useEvent(id)
   const {
     data: evidenceImageUrl,
@@ -158,6 +163,13 @@ export default function EventDetail() {
               )}
             </div>
           </div>
+          {event && (
+            <div className="headtools">
+              <Link to={`/app/events${listSearch}`} className="btn btn-s">
+                목록
+              </Link>
+            </div>
+          )}
         </div>
         {error ? (
           <div className="glass g2 aisum">
