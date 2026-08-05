@@ -282,7 +282,7 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             "NAVIGATION_MAP_MISMATCH",
             "NAVIGATION_MAP_METADATA_MISMATCH",
             "NAVIGATION_CONFIG_INVALID",
-            "NAVIGATION_ROUTE_UNSAFE",
+            "NAVIGATION_ROUTE_INVALID",
         ):
             with self.subTest(reason=reason):
                 runtime = FakeRuntime()

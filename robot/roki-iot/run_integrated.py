@@ -131,12 +131,7 @@ def _build_navigation_service_from_route(
     from navigation.map_metadata import (
         file_sha256,
         load_map_metadata,
-        load_occupancy_grid,
         map_bundle_sha256,
-        validate_map_quality,
-        validate_point_clearance,
-        validate_point_bounds,
-        validate_route_clearance,
         validate_route_bounds,
     )
     from navigation.route import RouteValidationError
@@ -177,38 +172,12 @@ def _build_navigation_service_from_route(
         if not hmac.compare_digest(file_sha256(route_path), expected_route_sha256):
             raise RouteValidationError("route SHA256 does not match deployment")
 
+    # Keep only deployment identity and coordinate sanity here.  Occupancy,
+    # unknown-space and robot-footprint decisions belong to Nav2's live
+    # costmaps, where current LiDAR data can be considered.  Static rejection
+    # made a usable field map impossible to patrol and also incorrectly tied
+    # every route to one preconfigured dock coordinate.
     validate_route_bounds(route, metadata)
-    grid = load_occupancy_grid(metadata)
-    validate_map_quality(
-        grid,
-        minimum_known_coverage_ratio=_coverage_ratio(
-            "ROKI_MAP_MIN_KNOWN_COVERAGE_RATIO", "0.10"
-        ),
-        minimum_free_coverage_ratio=_coverage_ratio(
-            "ROKI_MAP_MIN_FREE_COVERAGE_RATIO", "0.10"
-        ),
-    )
-    robot_radius_m = float(_required_environment("ROKI_ROBOT_RADIUS_M"))
-    validate_route_clearance(
-        route,
-        grid,
-        robot_radius_m=robot_radius_m,
-    )
-    dock_x = float(_required_environment("ROKI_INITIAL_POSE_X_M"))
-    dock_y = float(_required_environment("ROKI_INITIAL_POSE_Y_M"))
-    validate_point_bounds(
-        dock_x,
-        dock_y,
-        metadata,
-        label="fixed dock initial pose",
-    )
-    validate_point_clearance(
-        dock_x,
-        dock_y,
-        grid,
-        robot_radius_m=robot_radius_m,
-        label="fixed dock initial pose",
-    )
     return WaypointNavigationService(route)
 
 
@@ -234,17 +203,6 @@ def _required_sha256(name: str) -> str:
     value = _required_environment(name).lower()
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be a SHA256 hex digest")
-    return value
-
-
-def _coverage_ratio(name: str, default: str) -> float:
-    raw = os.getenv(name, default).strip()
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be numeric") from exc
-    if not 0.0 <= value <= 1.0:
-        raise RuntimeError(f"DEMO_CONFIG_INVALID: {name} must be within 0.0..1.0")
     return value
 
 
