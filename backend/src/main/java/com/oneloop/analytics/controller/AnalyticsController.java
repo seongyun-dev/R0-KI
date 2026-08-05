@@ -36,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
  * - GET /trend : 일/주/월 시계열 또는 3시간 시각대(hour3)
  * - GET /by-type : 유형별 건수/비율/증감
  * - GET /by-zone : 구역별 건수 (checkpoint_id 기준)
- * - GET /handling : 처리/미처리 현황 (전체·주차·쓰레기·위험구역)
+ * - GET /handling : 처리/미처리 현황 (전체·주차·쓰레기)
  */
 @Tag(name = "Analytics API", description = "이벤트 분석/통계 API")
 @RestController
@@ -199,7 +199,7 @@ public class AnalyticsController {
     @Operation(
             summary = "이벤트 처리 현황",
             description =
-                    "전체/주차/쓰레기/위험구역 라벨별 처리·미처리 건수와 비율을 조회합니다. "
+                    "전체/주차/쓰레기 라벨별 처리·미처리 건수와 비율을 조회합니다. "
                             + "handled=COMPLETED, pending=DETECTED+PROCESSING. "
                             + "유형 묶음은 AnalyticsEventGroup 규칙을 따릅니다.")
     @GetMapping("/handling")
