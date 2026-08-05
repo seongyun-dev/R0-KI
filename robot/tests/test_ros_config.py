@@ -91,6 +91,17 @@ class RosConfigTest(unittest.TestCase):
                 rendered,
             )
 
+    def test_fixed_path_trees_use_humble_compatible_ports(self):
+        config_root = Path(__file__).resolve().parents[1] / "config" / "ros"
+
+        for name in (
+            "nav2_fixed_path.xml",
+            "nav2_fixed_path_through_poses.xml",
+        ):
+            with self.subTest(name=name):
+                tree = (config_root / name).read_text(encoding="utf-8")
+                self.assertNotIn("error_code_id", tree)
+
     def test_zero_initial_pose_is_rendered_as_ros_double(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "nav2.yaml"
