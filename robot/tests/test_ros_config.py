@@ -69,6 +69,22 @@ class RosConfigTest(unittest.TestCase):
                 output.read_text(encoding="utf-8"),
             )
 
+    def test_production_template_loads_default_nav2_recovery_plugins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "nav2.yaml"
+            template = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / "ros"
+                / "nav2.params.yaml.template"
+            )
+
+            render_nav2_config(template, output, self.environment())
+            rendered = output.read_text(encoding="utf-8")
+
+            self.assertIn("nav2_recovery_node_bt_node", rendered)
+            self.assertIn("nav2_navigate_through_poses_action_bt_node", rendered)
+
     def test_zero_initial_pose_is_rendered_as_ros_double(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "nav2.yaml"
