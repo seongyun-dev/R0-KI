@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -61,10 +62,23 @@ public class SecurityConfig {
                                         .requestMatchers(
                                                 HttpMethod.POST, "/api/map/mapping-sessions/*/map")
                                         .hasRole("ROBOT")
+                                        .requestMatchers("/api/robot/**")
+                                        .hasRole("ROBOT")
+                                        .requestMatchers(HttpMethod.POST, "/api/events/*/evidence")
+                                        .hasRole("ROBOT")
                                         .requestMatchers(PUBLIC_ENDPOINTS)
                                         .permitAll()
                                         .anyRequest()
-                                        .authenticated())
+                                        .access(
+                                                (authentication, context) -> {
+                                                    var current = authentication.get();
+                                                    return new AuthorizationDecision(
+                                                            current != null
+                                                                    && current.isAuthenticated()
+                                                                    && current.getPrincipal()
+                                                                            instanceof
+                                                                            CustomUserDetails);
+                                                }))
                 .exceptionHandling(
                         exception ->
                                 exception

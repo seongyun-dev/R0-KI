@@ -21,6 +21,7 @@ public class PatrolCommandAckService {
     private static final String STOP_PATROL = "STOP_PATROL";
 
     private final PatrolRepository patrolRepository;
+    private final PatrolAiSummaryService patrolAiSummaryService;
 
     // ACK 처리 진입점 - MqttInboundHandler가 START_PATROL/STOP_PATROL ACK를 여기로 위임한다.
     @Transactional
@@ -57,17 +58,21 @@ public class PatrolCommandAckService {
     // START_PATROL이 SUCCEEDED가 아니면(REJECTED/FAILED 구분 없음) 순찰이 시작되지 못한 것이므로 FAILED로 전환한다.
     private void handleStartAck(Patrol patrol, CommandAck ack) {
         if (ack.status() == CommandAck.AckStatus.SUCCEEDED) {
-            log.info("[MQTT] 순찰 시작 ACK 처리 완료. patrolId={}, commandId={}", patrol.getId(), ack.commandId());
+            log.info(
+                    "[MQTT] 순찰 시작 ACK 처리 완료. patrolId={}, commandId={}",
+                    patrol.getId(),
+                    ack.commandId());
             return;
         }
 
         if (patrol.getStatus() == PatrolStatus.IN_PROGRESS) {
             patrol.fail();
             log.info(
-                    "[MQTT] 순찰 시작 거절/실패로 FAILED 처리. patrolId={}, commandId={}, status={}",
+                    "[MQTT] 순찰 시작 거절/실패로 FAILED 처리. patrolId={}, commandId={}, status={}, reason={}",
                     patrol.getId(),
                     ack.commandId(),
-                    ack.status());
+                    ack.status(),
+                    ack.reason());
         } else {
             log.warn(
                     "[MQTT] 허용되지 않은 ACK 상태 전환을 무시합니다. patrolId={}, currentStatus={}, status={}",
@@ -77,21 +82,32 @@ public class PatrolCommandAckService {
         }
     }
 
-    // STOP_PATROL은 백엔드가 이미 pose로 도착을 확인하고 COMPLETED로 확정한 뒤 통보하는 명령이라, 실패해도 순찰 상태는 건드리지 않고 로봇이 실제로 멈췄는지 확인이 필요하다는 경고만 남긴다.
+    // STOP_PATROL 성공 ACK가 실제 정지의 확정점이다. 그 전에는 자동 종료도 STOP_REQUESTED로 유지한다.
     private void handleStopAck(Patrol patrol, CommandAck ack) {
         if (ack.status() == CommandAck.AckStatus.SUCCEEDED) {
-            // 자동 종료는 STOP 명령 전 이미 COMPLETED이고, 수동 종료만 ACK 시점에 STOPPED로 확정한다.
             if (patrol.getStatus() == PatrolStatus.STOP_REQUESTED) {
-                patrol.stop();
+                if (patrol.isCompletionRequested()) {
+                    patrol.completeRequested();
+                    patrolAiSummaryService.requestGeneration(patrol.getId());
+                } else {
+                    patrol.stop();
+                }
             }
-            log.info("[MQTT] 순찰 종료 ACK 처리 완료. patrolId={}, commandId={}", patrol.getId(), ack.commandId());
+            log.info(
+                    "[MQTT] 순찰 종료 ACK 처리 완료. patrolId={}, commandId={}",
+                    patrol.getId(),
+                    ack.commandId());
             return;
+        }
+        if (patrol.getStatus() == PatrolStatus.STOP_REQUESTED && patrol.isCompletionRequested()) {
+            patrol.retryCompletionAfterFailedStop();
         }
         log.warn(
                 "[MQTT] 순찰 종료 명령이 거절/실패했습니다. 로봇이 실제로 정지했는지 확인이 필요합니다."
-                        + " patrolId={}, commandId={}, status={}",
+                        + " patrolId={}, commandId={}, status={}, reason={}",
                 patrol.getId(),
                 ack.commandId(),
-                ack.status());
+                ack.status(),
+                ack.reason());
     }
 }

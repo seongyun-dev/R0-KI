@@ -47,10 +47,11 @@ public class MappingCommandAckService {
         }
 
         log.info(
-                "[MQTT] 매핑 명령 ACK 처리 완료. sessionId={}, commandId={}, status={}",
+                "[MQTT] 매핑 명령 ACK 처리 완료. sessionId={}, commandId={}, status={}, reason={}",
                 session.getId(),
                 ack.commandId(),
-                ack.status());
+                ack.status(),
+                ack.reason());
     }
 
     private boolean isValid(CommandAck ack) {

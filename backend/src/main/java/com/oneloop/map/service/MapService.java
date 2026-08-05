@@ -6,6 +6,8 @@ import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.dto.request.MapUploadRequest;
 import com.oneloop.map.dto.response.MapDetailResponse;
 import com.oneloop.map.dto.response.MapUploadResponse;
+import com.oneloop.map.repository.CheckpointRepository;
+import com.oneloop.map.repository.NavigationWaypointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.service.MapFileStorage.StoredMapFile;
 import com.oneloop.mapping.domain.MappingSession;
@@ -30,6 +32,9 @@ public class MapService {
 
     private final MappingSessionRepository mappingSessionRepository;
     private final PatrolMapRepository patrolMapRepository;
+    private final CheckpointRepository checkpointRepository;
+    private final NavigationWaypointRepository navigationWaypointRepository;
+    private final NavigationConfigurationGuard navigationConfigurationGuard;
     private final MapFileStorage mapFileStorage;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -60,11 +65,13 @@ public class MapService {
             throw new BusinessException(ErrorCode.MAPPING_SESSION_INVALID_STATE);
         }
 
-        StoredMapFile storedFile = mapFileStorage.store(request.getMapImage());
         PatrolMap patrolMap =
                 patrolMapRepository
-                        .findByApartmentComplexId(session.getApartmentComplex().getId())
+                        .findForUpdateByApartmentComplexId(session.getApartmentComplex().getId())
                         .orElse(null);
+        navigationConfigurationGuard.assertMutable(session.getApartmentComplex().getId());
+
+        StoredMapFile storedFile = mapFileStorage.store(request.getMapImage());
         String previousMapUrl = patrolMap == null ? null : patrolMap.getUrl();
 
         registerFileCleanup(storedFile.publicUrl(), previousMapUrl);
@@ -83,6 +90,8 @@ public class MapService {
                                     storedFile.width(),
                                     storedFile.height()));
         } else {
+            navigationWaypointRepository.deleteAllByPatrolMapId(patrolMap.getId());
+            checkpointRepository.deactivateAllByPatrolMapId(patrolMap.getId());
             patrolMap.update(
                     createMapName(session),
                     storedFile.publicUrl(),
@@ -106,6 +115,14 @@ public class MapService {
         PatrolMap patrolMap =
                 patrolMapRepository
                         .findByIdAndApartmentComplexId(mapId, apartmentComplexId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.MAP_NOT_FOUND));
+        return MapDetailResponse.from(patrolMap);
+    }
+
+    public MapDetailResponse getCurrent(Long apartmentComplexId) {
+        PatrolMap patrolMap =
+                patrolMapRepository
+                        .findByApartmentComplexId(apartmentComplexId)
                         .orElseThrow(() -> new BusinessException(ErrorCode.MAP_NOT_FOUND));
         return MapDetailResponse.from(patrolMap);
     }

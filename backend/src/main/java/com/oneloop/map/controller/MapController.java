@@ -42,6 +42,13 @@ public class MapController {
                 "지도가 등록되었습니다.", mapService.upload(mappingSessionId, robotId, request));
     }
 
+    @Operation(summary = "현재 단지 지도 조회", description = "로그인한 관리자의 단지에 등록된 현재 지도를 조회합니다.")
+    @GetMapping("/current")
+    public ApiResponse<MapDetailResponse> getCurrent(
+            @AuthenticationPrincipal CustomUserDetails principal) {
+        return ApiResponse.success(mapService.getCurrent(principal.getApartmentComplexId()));
+    }
+
     @Operation(summary = "지도 상세 조회", description = "로그인한 관리자의 단지에 등록된 지도 정보를 조회합니다.")
     @GetMapping("/{mapId}")
     public ApiResponse<MapDetailResponse> get(
