@@ -154,7 +154,10 @@ class MappingCommandAckServiceTest {
         assertThat(session.getStatus()).isEqualTo(MappingStatus.MAPPING);
         assertThat(session.getStopCommandStatus())
                 .isEqualTo(MappingStopCommandStatus.ACK_SUCCEEDED);
-        verify(eventPublisher, times(1)).publishEvent(org.mockito.ArgumentMatchers.any());
+        verify(eventPublisher, times(1))
+                .publishEvent(
+                        org.mockito.ArgumentMatchers.any(
+                                MappingStopCommandStatusChangedEvent.class));
     }
 
     @Test
