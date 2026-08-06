@@ -4,8 +4,7 @@ import type {
   AnalyticsInsightResponse,
 } from '../../api/analyticsContracts'
 import { statsApi } from '../../api/services'
-import { env } from '../../config/env'
-import { mockAnalyticsInsight } from '../../mocks/stats'
+
 
 const POLL_INTERVAL_MS = 3000
 
@@ -27,10 +26,7 @@ function isGenerating(status: AnalyticsInsightResponse['generationStatus']) {
 async function fetchInsight(
   periodType: AnalyticsInsightPeriodType,
 ): Promise<AnalyticsInsightResponse> {
-  if (env.useMocks) {
-    await new Promise((resolve) => window.setTimeout(resolve, 350))
-    return mockAnalyticsInsight(periodType)
-  }
+
   return statsApi.fetchInsight(periodType)
 }
 

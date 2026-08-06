@@ -1,13 +1,5 @@
-import {
-  aiInsights,
-  dailyEvents,
-  handlingStats,
-  hourlyEvents,
-  statSummary,
-  zoneShares,
-} from '../../mocks'
+
 import { statsApi } from '../../api/services'
-import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
 import { assembleStatsDashboard } from './mapAnalyticsToStats'
 import {
@@ -33,16 +25,7 @@ export function useStats(
 
   return useApiQuery<StatsDashboardData>(
     async () => {
-      if (env.useMocks) {
-        return {
-          summary: statSummary,
-          daily: dailyEvents,
-          hourly: hourlyEvents,
-          handling: handlingStats,
-          zones: zoneShares,
-          insights: aiInsights,
-        }
-      }
+
 
       const trendBucket = resolveTrendBucket(unit)
       const [overview, dailyTrend, hourlyTrend, handling, byZone] =
@@ -57,7 +40,7 @@ export function useStats(
       })
     },
     [unit, offset, zone, range.from, range.to],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 }
 
