@@ -7,19 +7,17 @@ import java.util.Set;
 /**
  * 프론트 통계 화면용 이벤트 유형 묶음.
  *
- * <p>백엔드 EventType(5종)을 화면 라벨(주차/쓰레기/위험구역)로 묶는 기준이다.
+ * <p>백엔드 EventType(5종)을 화면 라벨(주차/쓰레기)로 묶는 기준이다.
  * handling API와 (필요 시) 프론트 매퍼가 이 규칙을 공유한다.
  *
  * <ul>
  *   <li>주차: 불법주차 + 미등록차량
  *   <li>쓰레기: 쓰레기 투기 + 분리수거 포화
- *   <li>위험구역: 긴급(EMERGENCY) — 구역 타입 DANGER_ZONE과 다른 개념
  * </ul>
  */
 public enum AnalyticsEventGroup {
     PARKING("주차", EnumSet.of(EventType.ILLEGAL_PARKING, EventType.UNREGISTERED_VEHICLE)),
-    TRASH("쓰레기", EnumSet.of(EventType.TRASH_DETECTED, EventType.RECYCLING_AREA_FULL)),
-    DANGER("위험구역", EnumSet.of(EventType.EMERGENCY));
+    TRASH("쓰레기", EnumSet.of(EventType.TRASH_DETECTED, EventType.RECYCLING_AREA_FULL));
 
     private final String label;
     private final Set<EventType> eventTypes;
