@@ -458,6 +458,14 @@ class FinalRuntimeService:
             route=self._navigation_service.route,
             first_event=event,
         )
+        confirm_start_anchor = getattr(
+            self._navigation_service,
+            "confirm_start_anchor",
+            None,
+        )
+        if not callable(confirm_start_anchor):
+            raise RuntimeError("navigation start anchor reset is not supported")
+        confirm_start_anchor()
 
     def _ensure_start_not_expired(
         self, expires_at: datetime | None
