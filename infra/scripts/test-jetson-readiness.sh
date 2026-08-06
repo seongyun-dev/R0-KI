@@ -22,6 +22,8 @@ grep -q '^RuntimeDirectoryPreserve=yes$' \
   "${repository_root}/infra/jetson/aiot-ros.service"
 grep -q '^RuntimeDirectoryPreserve=yes$' \
   "${repository_root}/infra/jetson/aiot-ai.service"
+grep -q '^StartLimitIntervalSec=0$' \
+  "${repository_root}/infra/jetson/aiot-ai.service"
 grep -Eq '^Wants=.*aiot-ros.service' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q '^User=e103$' \
