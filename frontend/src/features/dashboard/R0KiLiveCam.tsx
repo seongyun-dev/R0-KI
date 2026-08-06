@@ -83,7 +83,7 @@ export function R0KiLiveCam({ urgent = false, clockText, robotId }: R0KiLiveCamP
       <span className={`camstate ${state}`}>
         {state === 'live'
           ? '정상 표시 중'
-          : state === 'connecting'
+          : state === 'connecting' || state === 'waiting'
             ? '스트림 연결 중'
             : state === 'retrying'
               ? '스트림 재시도 중'
