@@ -26,6 +26,12 @@ weights/
 
 # 업로드 및 생성 파일
 uploads/
+
+# 이벤트 상세 화면에서 사용하는 공용 시드 이미지
+!uploads/
+uploads/*
+!uploads/evidence/
+!uploads/evidence/*.png
 outputs/
 results/
 temp/
