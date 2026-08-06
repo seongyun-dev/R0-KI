@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { mapApi } from '../../api/services'
 import type { MappingStatusCode } from '../../api/contracts'
+import { MappingLiveView } from '../mapping/MappingLiveView'
 
 export type StepMapScanProps = {
   robotId: string | number
@@ -20,21 +21,40 @@ const statusText: Record<MappingStatusCode, string> = {
 export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
   const [status, setStatus] = useState<MappingStatusCode | 'IDLE'>('IDLE')
   const [mapId, setMapId] = useState<string | number>()
+  const [mappingSessionId, setMappingSessionId] = useState<string | number>()
+  const [scanRobotId, setScanRobotId] = useState<string | number>()
   const [error, setError] = useState<string>()
   const abortRef = useRef<AbortController>()
+  const startPendingRef = useRef(false)
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => {
+    setStatus('IDLE')
+    setMapId(undefined)
+    setMappingSessionId(undefined)
+    setScanRobotId(undefined)
+    setError(undefined)
+
+    return () => {
+      abortRef.current?.abort()
+      startPendingRef.current = false
+    }
+  }, [robotId])
 
   const startScan = async () => {
+    if (startPendingRef.current) return
+    startPendingRef.current = true
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setError(undefined)
     setMapId(undefined)
+    setMappingSessionId(undefined)
+    setScanRobotId(robotId)
     setStatus('REQUESTED')
 
     try {
-      const session = await mapApi.startMapping(robotId)
+      const session = await mapApi.startMapping(robotId, controller.signal)
+      setMappingSessionId(session.mappingSessionId)
       setStatus(session.mappingStatus)
       await mapApi.subscribeMapping(
         session.mappingSessionId,
@@ -55,6 +75,8 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
       if (controller.signal.aborted) return
       setError(reason instanceof Error ? reason.message : '지도 파악 연결에 실패했습니다.')
       setStatus('FAILED')
+    } finally {
+      if (abortRef.current === controller) startPendingRef.current = false
     }
   }
 
@@ -63,6 +85,14 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
 
   return (
     <div>
+      {(status === 'IDLE' || status === 'REQUESTED' || status === 'MAPPING') && (
+        <MappingLiveView
+          robotId={robotId}
+          mappingSessionId={mappingSessionId}
+          active={status === 'MAPPING' && scanRobotId === robotId}
+        />
+      )}
+
       {status === 'IDLE' && (
         <div className="au-panel">
           <p className="t">프론트에서 시작한 뒤 게임패드로 직접 주행합니다.</p>
@@ -76,7 +106,11 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
       {isRunning && (
         <div className="au-panel">
           <span className="au-spin" role="status" aria-live="polite" aria-label="지도 파악 중" />
-          <p className="t">{statusText[status]}</p>
+          <p className="t">
+            {status === 'REQUESTED'
+              ? '맵 그리기 시작을 준비하고 있습니다.'
+              : statusText[status]}
+          </p>
           <p className="s">주행을 마치면 현장에서 종료·저장하고, 완료 상태가 올 때까지 기다려 주세요.</p>
         </div>
       )}

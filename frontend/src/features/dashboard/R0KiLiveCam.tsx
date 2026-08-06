@@ -75,7 +75,11 @@ export function R0KiLiveCam({ urgent = false, clockText, robotId }: R0KiLiveCamP
         </g>
       </svg>}
       <span className={`camstate ${state}`}>
-        {state === 'live' ? '좌·우 AI 탐지' : state === 'connecting' ? '영상 연결 중' : '영상 대기'}
+        {state === 'live'
+          ? '좌·우 AI 탐지'
+          : state === 'connecting' || state === 'waiting'
+            ? '영상 연결 중'
+            : '영상 대기'}
         {clockText ? ` · ${clockText}` : ''}
       </span>
       <span className={`rec${state === 'live' ? '' : ' paused'}`} />
