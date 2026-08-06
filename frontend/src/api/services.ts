@@ -334,6 +334,14 @@ export const mapApi = {
       body: jsonBody({ robotId }),
       signal,
     }),
+  stopMapping: (mappingSessionId: string | number, signal?: AbortSignal) =>
+    apiRequest<void>(
+      `/api/map/mapping-sessions/${encodeURIComponent(mappingSessionId)}/stop`,
+      {
+        method: 'POST',
+        signal,
+      },
+    ),
   subscribeMapping: (
     mappingSessionId: string | number,
     onMessage: (data: MappingStatusEventResponse) => void,

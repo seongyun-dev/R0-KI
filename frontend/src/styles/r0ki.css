@@ -656,6 +656,8 @@
 .r0ki .btn-s::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
   background:radial-gradient(140% 130% at 6% -30%,rgba(255,255,255,.22) 0%,rgba(255,255,255,.055) 28%,transparent 58%);
   mix-blend-mode:screen}
+.r0ki .btn-stop{color:var(--urgent-text);background:var(--urgent-bg);border:1px solid var(--urgent-edge)}
+.r0ki .btn-stop:hover{border-color:var(--urgent);box-shadow:0 8px 20px rgba(192,39,45,.12)}
 
 /* 표 (목록) — 유리 패널 안에서 내부 스크롤 */
 .r0ki .tblwrap{padding:var(--s3) var(--s5) var(--s5);flex:1;min-height:0;overflow-y:auto}

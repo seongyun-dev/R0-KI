@@ -492,6 +492,13 @@ export type MappingStatusCode =
   | 'FAILED'
   | 'CANCELLED'
 
+export type MappingStopCommandStatus =
+  | 'PREPARED'
+  | 'PUBLISHED'
+  | 'ACK_SUCCEEDED'
+  | 'PUBLISH_FAILED'
+  | 'FAILED'
+
 export type MappingStartResponse = {
   mappingSessionId: Id
   robotId: Id
@@ -503,6 +510,9 @@ export type MappingStatusEventResponse = {
   mappingSessionId: Id
   status: MappingStatusCode
   mapId?: Id | null
+  stopCommandId?: string | null
+  stopCommandStatus?: MappingStopCommandStatus | null
+  reason?: string | null
 }
 
 export type MapDetailResponse = {

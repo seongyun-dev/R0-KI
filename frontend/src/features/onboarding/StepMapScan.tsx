@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { mapApi } from '../../api/services'
-import type { MappingStatusCode } from '../../api/contracts'
+import type { MappingStatusCode, MappingStopCommandStatus } from '../../api/contracts'
 import { MappingLiveView } from '../mapping/MappingLiveView'
+import { MappingStopModal } from './MappingStopModal'
 
 export type StepMapScanProps = {
   robotId: string | number
@@ -17,6 +18,8 @@ const statusText: Record<MappingStatusCode, string> = {
   CANCELLED: '지도 파악이 취소되었습니다.',
 }
 
+const stopFailureFallback = '맵 생성 종료 요청에 실패했습니다. 다시 시도해 주세요.'
+
 /** Step 3/3 — 백엔드 매핑 시작 요청과 SSE 상태 구독. R0Kiauth 시안 pMap 상태 A→B */
 export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
   const [status, setStatus] = useState<MappingStatusCode | 'IDLE'>('IDLE')
@@ -24,8 +27,15 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
   const [mappingSessionId, setMappingSessionId] = useState<string | number>()
   const [scanRobotId, setScanRobotId] = useState<string | number>()
   const [error, setError] = useState<string>()
+  const [stopModalOpen, setStopModalOpen] = useState(false)
+  const [isStopping, setIsStopping] = useState(false)
+  const [stopRequested, setStopRequested] = useState(false)
+  const [stopError, setStopError] = useState<string>()
+  const [stopCommandStatus, setStopCommandStatus] = useState<MappingStopCommandStatus | null>()
   const abortRef = useRef<AbortController>()
+  const stopAbortRef = useRef<AbortController>()
   const startPendingRef = useRef(false)
+  const stopPendingRef = useRef(false)
 
   useEffect(() => {
     setStatus('IDLE')
@@ -33,10 +43,18 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
     setMappingSessionId(undefined)
     setScanRobotId(undefined)
     setError(undefined)
+    setStopModalOpen(false)
+    setIsStopping(false)
+    setStopRequested(false)
+    setStopError(undefined)
+    setStopCommandStatus(undefined)
 
     return () => {
       abortRef.current?.abort()
+      stopAbortRef.current?.abort()
+      stopAbortRef.current = undefined
       startPendingRef.current = false
+      stopPendingRef.current = false
     }
   }, [robotId])
 
@@ -51,6 +69,9 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
     setMappingSessionId(undefined)
     setScanRobotId(robotId)
     setStatus('REQUESTED')
+    setStopRequested(false)
+    setStopError(undefined)
+    setStopCommandStatus(undefined)
 
     try {
       const session = await mapApi.startMapping(robotId, controller.signal)
@@ -66,8 +87,37 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
             event.status === 'FAILED' ||
             event.status === 'CANCELLED'
           ) {
+            setStopModalOpen(false)
+            setIsStopping(false)
+            setStopRequested(false)
+            stopAbortRef.current?.abort()
+            stopAbortRef.current = undefined
+            stopPendingRef.current = false
             controller.abort()
+            return
           }
+
+          if (event.stopCommandStatus == null) return
+
+          setStopCommandStatus(event.stopCommandStatus)
+
+          if (
+            event.stopCommandStatus === 'FAILED' ||
+            event.stopCommandStatus === 'PUBLISH_FAILED'
+          ) {
+            stopAbortRef.current?.abort()
+            stopAbortRef.current = undefined
+            stopPendingRef.current = false
+            setIsStopping(false)
+            setStopRequested(false)
+            setStopModalOpen(false)
+            setStopError(event.reason?.trim() || stopFailureFallback)
+            return
+          }
+
+          setStopError(undefined)
+          setStopRequested(true)
+          setStopModalOpen(false)
         },
         controller.signal,
       )
@@ -77,6 +127,31 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
       setStatus('FAILED')
     } finally {
       if (abortRef.current === controller) startPendingRef.current = false
+    }
+  }
+
+  const stopScan = async () => {
+    if (stopPendingRef.current || mappingSessionId == null) return
+    stopPendingRef.current = true
+    const controller = new AbortController()
+    stopAbortRef.current = controller
+    setIsStopping(true)
+    setStopError(undefined)
+    setStopCommandStatus(undefined)
+
+    try {
+      await mapApi.stopMapping(mappingSessionId, controller.signal)
+      setStopRequested(true)
+      setStopModalOpen(false)
+    } catch (reason) {
+      if (controller.signal.aborted) return
+      setStopError(reason instanceof Error ? reason.message : stopFailureFallback)
+    } finally {
+      if (stopAbortRef.current === controller) {
+        stopAbortRef.current = undefined
+        stopPendingRef.current = false
+        setIsStopping(false)
+      }
     }
   }
 
@@ -109,6 +184,32 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
           <p className="t">{statusText[status]}</p>
           <p className="s">LiDAR로 주변을 인식하고 미탐색 영역을 찾아 자동으로 이동합니다.</p>
           <p className="s">안전을 위해 로봇 주변에 충분한 공간을 확보해 주세요.</p>
+          {stopRequested ? (
+            <>
+              <p className="s" role="status" aria-live="polite">
+                {stopCommandStatus === 'ACK_SUCCEEDED'
+                  ? '종료 요청이 접수되었습니다. 지도를 저장하고 있습니다.'
+                  : '종료 요청 중...'}
+              </p>
+              <button type="button" className="btn btn-stop" disabled>
+                맵 생성 종료
+              </button>
+            </>
+          ) : status === 'MAPPING' && mappingSessionId != null ? (
+            <>
+              {stopError && <p className="pserr" role="alert">{stopError}</p>}
+              <button
+                type="button"
+                className="btn btn-stop"
+                onClick={() => {
+                  setStopError(undefined)
+                  setStopModalOpen(true)
+                }}
+              >
+                맵 생성 종료
+              </button>
+            </>
+          ) : null}
         </div>
       )}
 
@@ -155,6 +256,14 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
           <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
         </button>
       </div>
+
+      <MappingStopModal
+        open={stopModalOpen}
+        stopping={isStopping}
+        error={stopError}
+        onCancel={() => setStopModalOpen(false)}
+        onConfirm={() => void stopScan()}
+      />
     </div>
   )
 }
