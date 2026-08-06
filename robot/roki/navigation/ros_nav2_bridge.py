@@ -38,6 +38,7 @@ class RosNav2BridgeSettings:
     cmd_vel_timeout_sec: float = 3.0
     initial_pose_topic: str = "/initialpose"
     initial_pose_settle_sec: float = 1.0
+    first_goal_accept_timeout_sec: float = 5.0
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -66,6 +67,13 @@ class RosNav2BridgeSettings:
         ):
             raise ValueError(
                 "initial_pose_settle_sec must be within 0.1..3.0 seconds"
+            )
+        if (
+            not math.isfinite(self.first_goal_accept_timeout_sec)
+            or not 0.5 <= self.first_goal_accept_timeout_sec <= 15.0
+        ):
+            raise ValueError(
+                "first_goal_accept_timeout_sec must be within 0.5..15.0 seconds"
             )
 
 
@@ -108,6 +116,9 @@ class RosNav2Bridge:
         self._scan_generation = 0
         self._pending_scan: tuple[int, int] | None = None
         self._patrol_failure_reported = False
+        self._first_goal_event = threading.Event()
+        self._first_goal_failure: str | None = None
+        self._first_goal_pending = False
         self._node: Any = None
         self._executor: Any = None
         self._action_client: Any = None
@@ -204,6 +215,9 @@ class RosNav2Bridge:
             self._current_sequence = 1
             self._last_cmd_vel_at = None
             self._patrol_failure_reported = False
+            self._first_goal_event.clear()
+            self._first_goal_failure = None
+            self._first_goal_pending = True
         if stale_timer is not None:
             stale_timer.cancel()
         self._cancel_goal_best_effort(stale_handle)
@@ -223,6 +237,18 @@ class RosNav2Bridge:
             self._fail("NAV2_INITIAL_POSE_RESET_FAILED")
             raise
 
+    def wait_for_first_goal_acceptance(self) -> None:
+        """Wait until the first post-anchor Nav2 goal is accepted."""
+
+        if not self._first_goal_event.wait(
+            timeout=self._settings.first_goal_accept_timeout_sec
+        ):
+            self._fail("NAV2_FIRST_GOAL_ACCEPT_TIMEOUT")
+        with self._lock:
+            first_goal_failure = self._first_goal_failure
+        if first_goal_failure is not None:
+            raise RuntimeError(first_goal_failure)
+
     def stop_patrol(self) -> None:
         with self._lock:
             timer = self._cancel_scan_dwell_locked()
@@ -233,6 +259,10 @@ class RosNav2Bridge:
             self._cmd_vel_hold_reason = "NAV2_PATROL_STOPPED"
             self._last_cmd_vel_at = None
             self._patrol_failure_reported = True
+            if not self._first_goal_event.is_set():
+                self._first_goal_failure = "NAV2_PATROL_STOPPED_DURING_START"
+                self._first_goal_pending = False
+                self._first_goal_event.set()
         if timer is not None:
             timer.cancel()
         self._motion_sink(CmdVelCommand(0, 80, "NAV2_PATROL_STOPPED"))
@@ -507,6 +537,10 @@ class RosNav2Bridge:
                     # goal. Subsequent zero or non-zero cmd_vel messages both
                     # prove the controller/velocity-smoother chain is alive.
                     self._last_cmd_vel_at = self._clock()
+                    if self._first_goal_pending:
+                        self._first_goal_pending = False
+                        self._first_goal_failure = None
+                        self._first_goal_event.set()
             if stale:
                 self._cancel_goal_best_effort(handle)
                 return
@@ -543,6 +577,10 @@ class RosNav2Bridge:
             if self._patrol_failure_reported:
                 return
             self._patrol_failure_reported = True
+            if not self._first_goal_event.is_set():
+                self._first_goal_failure = reason
+                self._first_goal_pending = False
+                self._first_goal_event.set()
             timer = self._cancel_scan_dwell_locked()
             handle = self._invalidate_goal_locked()
             self._route = None

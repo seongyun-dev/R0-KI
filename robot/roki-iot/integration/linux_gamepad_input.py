@@ -122,6 +122,14 @@ class GamepadState:
         self._finish_emitted = False
 
     def update(self, event: JoystickEvent) -> None:
+        # Some wireless receivers expose bogus extreme axis values in their
+        # JS_EVENT_INIT snapshot (the field Xbox-compatible pad reports axis
+        # 0 as -32767 while physically centred).  Initial snapshots must never
+        # arm motion, and treating those values as live input can prevent the
+        # controller from ever reaching the neutral-to-arm transition.  Keep
+        # safe neutral/released defaults until the first real event arrives.
+        if event.is_initial:
+            return
         safe_before_update = self._safe_to_arm()
         if event.event_type == JS_EVENT_AXIS:
             divisor = 32767.0 if event.value >= 0 else 32768.0
@@ -402,8 +410,11 @@ class LinuxGamepadInput:
     def _record_decision(self, decision: str) -> None:
         now = self._clock()
         with self._diagnostic_lock:
+            changed = self._last_decision != decision
             self._last_decision = decision
             self._last_decision_at = now
+        if changed:
+            print(f"[MAPPING] gamepad decision={decision}")
 
     def _close_device(self) -> None:
         descriptor = self._file_descriptor

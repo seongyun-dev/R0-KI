@@ -132,6 +132,87 @@ class RosNav2BridgeTest(unittest.TestCase):
         self.assertEqual(sleeps, [1.0])
         bridge._send_sequence.assert_not_called()
 
+    def test_start_waits_for_first_post_anchor_goal_acceptance(self) -> None:
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6),
+                initial_pose_settle_sec=1.0,
+            ),
+            motion_sink=lambda _command: None,
+            sleep=lambda _seconds: None,
+        )
+        bridge.is_ready = Mock(return_value=(True, "READY"))
+        bridge._initial_pose_type = FakePoseWithCovarianceStamped
+        bridge._initial_pose_publisher = Mock()
+        bridge._node = SimpleNamespace(
+            get_clock=lambda: SimpleNamespace(
+                now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
+            )
+        )
+
+        def accept_first_goal(_sequence):
+            handle = Mock()
+            handle.accepted = True
+            result_future = Mock()
+            handle.get_result_async.return_value = result_future
+            response = Mock()
+            response.result.return_value = handle
+            bridge._on_goal_response(response, bridge._goal_generation)
+
+        bridge._send_sequence = accept_first_goal
+        route = demo_route()
+        first_event = SimpleNamespace(
+            mission_event=SimpleNamespace(waypoint=route.waypoints[0])
+        )
+
+        bridge.start_patrol(route=route, first_event=first_event)
+        bridge.on_navigation_event(reached(route.waypoints[0]))
+        bridge.wait_for_first_goal_acceptance()
+
+        self.assertIsNotNone(bridge._goal_handle)
+        self.assertTrue(bridge._first_goal_event.is_set())
+        self.assertEqual(bridge._current_sequence, 2)
+
+    def test_rejected_first_post_anchor_goal_fails_start(self) -> None:
+        commands = []
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6),
+                initial_pose_settle_sec=1.0,
+            ),
+            motion_sink=commands.append,
+            sleep=lambda _seconds: None,
+        )
+        bridge.is_ready = Mock(return_value=(True, "READY"))
+        bridge._initial_pose_type = FakePoseWithCovarianceStamped
+        bridge._initial_pose_publisher = Mock()
+        bridge._node = SimpleNamespace(
+            get_clock=lambda: SimpleNamespace(
+                now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
+            )
+        )
+
+        def reject_first_goal(_sequence):
+            handle = Mock()
+            handle.accepted = False
+            response = Mock()
+            response.result.return_value = handle
+            bridge._on_goal_response(response, bridge._goal_generation)
+
+        bridge._send_sequence = reject_first_goal
+        route = demo_route()
+        first_event = SimpleNamespace(
+            mission_event=SimpleNamespace(waypoint=route.waypoints[0])
+        )
+
+        bridge.start_patrol(route=route, first_event=first_event)
+        bridge.on_navigation_event(reached(route.waypoints[0]))
+        with self.assertRaisesRegex(RuntimeError, "NAV2_GOAL_REJECTED"):
+            bridge.wait_for_first_goal_acceptance()
+
+        self.assertTrue(commands[-1].stopped)
+        self.assertEqual(commands[-1].stop_reason, "NAV2_GOAL_REJECTED")
+
     def test_cmd_vel_uses_calibrated_adapter_without_serial_ownership(self) -> None:
         commands = []
         bridge = RosNav2Bridge(
@@ -417,6 +498,17 @@ class RosNav2BridgeTest(unittest.TestCase):
                     RosNav2BridgeSettings(
                         AckermannCommandSettings(0.124, 8.6),
                         scan_dwell_sec=seconds,
+                    )
+
+    def test_first_goal_accept_timeout_range_is_fail_closed(self) -> None:
+        for seconds in (0.0, 15.1, float("nan")):
+            with self.subTest(seconds=seconds):
+                with self.assertRaisesRegex(
+                    ValueError, "first_goal_accept_timeout_sec"
+                ):
+                    RosNav2BridgeSettings(
+                        AckermannCommandSettings(0.124, 8.6),
+                        first_goal_accept_timeout_sec=seconds,
                     )
 
     def test_active_goal_cmd_vel_freshness_timeout_fails_patrol(self) -> None:
