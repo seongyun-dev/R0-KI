@@ -35,13 +35,16 @@ class RosNav2BridgeSettings:
     navigate_action: str = "/navigate_to_pose"
     map_frame: str = "map"
     scan_dwell_sec: float = 3.0
-    cmd_vel_timeout_sec: float = 0.5
+    cmd_vel_timeout_sec: float = 3.0
+    initial_pose_topic: str = "/initialpose"
+    initial_pose_settle_sec: float = 1.0
 
     def __post_init__(self) -> None:
         for name, value in (
             ("cmd_vel_topic", self.cmd_vel_topic),
             ("navigate_action", self.navigate_action),
             ("map_frame", self.map_frame),
+            ("initial_pose_topic", self.initial_pose_topic),
         ):
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
@@ -52,10 +55,17 @@ class RosNav2BridgeSettings:
             raise ValueError("scan_dwell_sec must be within 0.1..60.0 seconds")
         if (
             not math.isfinite(self.cmd_vel_timeout_sec)
-            or not 0.2 <= self.cmd_vel_timeout_sec <= 1.0
+            or not 0.2 <= self.cmd_vel_timeout_sec <= 5.0
         ):
             raise ValueError(
-                "cmd_vel_timeout_sec must be within 0.2..1.0 seconds"
+                "cmd_vel_timeout_sec must be within 0.2..5.0 seconds"
+            )
+        if (
+            not math.isfinite(self.initial_pose_settle_sec)
+            or not 0.1 <= self.initial_pose_settle_sec <= 3.0
+        ):
+            raise ValueError(
+                "initial_pose_settle_sec must be within 0.1..3.0 seconds"
             )
 
 
@@ -72,6 +82,7 @@ class RosNav2Bridge:
         heading_source: HeadingSource | None = None,
         timer_factory: TimerFactory = threading.Timer,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._settings = settings
         self._adapter = CmdVelToEsp32Adapter(settings.ackermann)
@@ -81,6 +92,7 @@ class RosNav2Bridge:
         self._heading_source = heading_source
         self._timer_factory = timer_factory
         self._clock = clock
+        self._sleep = sleep
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -100,9 +112,11 @@ class RosNav2Bridge:
         self._executor: Any = None
         self._action_client: Any = None
         self._subscription: Any = None
+        self._initial_pose_publisher: Any = None
         self._rclpy: Any = None
         self._navigate_type: Any = None
         self._pose_type: Any = None
+        self._initial_pose_type: Any = None
         self._owns_rclpy_context = False
 
     def start(self) -> None:
@@ -110,7 +124,11 @@ class RosNav2Bridge:
             return
         try:
             import rclpy
-            from geometry_msgs.msg import PoseStamped, Twist
+            from geometry_msgs.msg import (
+                PoseStamped,
+                PoseWithCovarianceStamped,
+                Twist,
+            )
             from nav2_msgs.action import NavigateToPose
             from rclpy.action import ActionClient
             from rclpy.executors import SingleThreadedExecutor
@@ -126,6 +144,7 @@ class RosNav2Bridge:
         try:
             self._navigate_type = NavigateToPose
             self._pose_type = PoseStamped
+            self._initial_pose_type = PoseWithCovarianceStamped
             self._node = rclpy.create_node("roki_nav2_bridge")
             self._action_client = ActionClient(
                 self._node,
@@ -136,6 +155,11 @@ class RosNav2Bridge:
                 Twist,
                 self._settings.cmd_vel_topic,
                 self._on_cmd_vel,
+                10,
+            )
+            self._initial_pose_publisher = self._node.create_publisher(
+                PoseWithCovarianceStamped,
+                self._settings.initial_pose_topic,
                 10,
             )
             self._executor = SingleThreadedExecutor()
@@ -169,7 +193,6 @@ class RosNav2Bridge:
         return True, "READY"
 
     def start_patrol(self, *, route: Any, first_event: Any) -> None:
-        del first_event
         ready, reason = self.is_ready()
         if not ready:
             raise RuntimeError(reason)
@@ -185,7 +208,20 @@ class RosNav2Bridge:
             stale_timer.cancel()
         self._cancel_goal_best_effort(stale_handle)
         self._publish_scan_context(None)
-        self._send_sequence(1)
+        first_waypoint = getattr(first_event.mission_event, "waypoint", None)
+        if first_waypoint is None or int(first_waypoint.sequence) != 1:
+            self._fail("NAV2_START_ANCHOR_INVALID")
+            raise RuntimeError("NAV2_START_ANCHOR_INVALID")
+        try:
+            yaw_deg = self._resolve_goal_yaw_deg(route, 1)
+            self._publish_initial_pose(first_waypoint, yaw_deg)
+            # Let AMCL consume /initialpose before waypoint 1 is confirmed and
+            # the adapter dispatches waypoint 2.  The START command remains
+            # serialized by FinalRuntimeService during this bounded wait.
+            self._sleep(self._settings.initial_pose_settle_sec)
+        except Exception:
+            self._fail("NAV2_INITIAL_POSE_RESET_FAILED")
+            raise
 
     def stop_patrol(self) -> None:
         with self._lock:
@@ -543,6 +579,30 @@ class RosNav2Bridge:
                 return float(heading)
         raise ValueError("no route direction or current map heading")
 
+    def _publish_initial_pose(self, waypoint: Any, yaw_deg: float) -> None:
+        """Reset AMCL to the physically marked waypoint-1 start anchor."""
+
+        if (
+            self._initial_pose_type is None
+            or self._initial_pose_publisher is None
+            or self._node is None
+        ):
+            raise RuntimeError("initial pose publisher is not ready")
+        message = self._initial_pose_type()
+        message.header.frame_id = self._settings.map_frame
+        message.header.stamp = self._node.get_clock().now().to_msg()
+        message.pose.pose.position.x = float(waypoint.x)
+        message.pose.pose.position.y = float(waypoint.y)
+        yaw = math.radians(float(yaw_deg))
+        message.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        message.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        # Match RViz/Nav2's practical initial-pose uncertainty: the marked
+        # dock is repeatable, but not millimetre-perfect.
+        message.pose.covariance[0] = 0.25
+        message.pose.covariance[7] = 0.25
+        message.pose.covariance[35] = math.radians(15.0) ** 2
+        self._initial_pose_publisher.publish(message)
+
     def _publish_scan_context(self, waypoint: Any | None) -> None:
         if self._scan_context_sink is None:
             return
@@ -592,9 +652,11 @@ class RosNav2Bridge:
         executor = self._executor
         node = self._node
         self._subscription = None
+        self._initial_pose_publisher = None
         self._action_client = None
         self._executor = None
         self._node = None
+        self._initial_pose_type = None
         if node is not None:
             if executor is not None:
                 executor.remove_node(node)

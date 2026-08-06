@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 from aiot_robot.ros_config import build_nav2_values, render_nav2_config
 
 
@@ -122,6 +124,33 @@ class RosConfigTest(unittest.TestCase):
             self.assertIn("      x: 0.0", rendered)
             self.assertIn("      y: 0.0", rendered)
             self.assertIn("      yaw: 0.0", rendered)
+            self.assertIn("      rolling_window: true", rendered)
+            self.assertIn("      plugins: [inflation_layer]", rendered)
+            self.assertNotIn("      plugins: [static_layer, inflation_layer]", rendered)
+            self.assertIn("      allow_unknown: true", rendered)
+
+    def test_rolling_global_costmap_uses_humble_integer_dimensions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "nav2.yaml"
+            template = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / "ros"
+                / "nav2.params.yaml.template"
+            )
+
+            render_nav2_config(template, output, self.environment())
+            config = yaml.safe_load(output.read_text(encoding="utf-8"))
+            parameters = config["global_costmap"]["global_costmap"][
+                "ros__parameters"
+            ]
+
+            self.assertIs(type(parameters["width"]), int)
+            self.assertIs(type(parameters["height"]), int)
+            self.assertEqual(parameters["width"], 20)
+            self.assertEqual(parameters["height"], 20)
+            self.assertTrue(parameters["rolling_window"])
+            self.assertEqual(parameters["plugins"], ["inflation_layer"])
 
     def test_rejects_missing_or_invalid_fixed_initial_pose(self):
         for name, value, message in (
