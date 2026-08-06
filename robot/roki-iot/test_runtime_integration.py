@@ -994,6 +994,9 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         driver.start_patrol.side_effect = lambda **_kwargs: order.append(
             "initial-pose-reset"
         )
+        driver.wait_for_first_goal_acceptance.side_effect = lambda: order.append(
+            "first-goal-accepted"
+        )
         driver.on_navigation_event.side_effect = lambda event: order.append(
             event.mission_event.event_type.value
         )
@@ -1008,7 +1011,12 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
 
         self.assertEqual(
             order,
-            ["STARTED", "initial-pose-reset", "WAYPOINT_REACHED"],
+            [
+                "STARTED",
+                "initial-pose-reset",
+                "WAYPOINT_REACHED",
+                "first-goal-accepted",
+            ],
         )
         self.assertEqual(navigation._mission.current_waypoint.sequence, 2)
 

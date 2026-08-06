@@ -466,6 +466,18 @@ class FinalRuntimeService:
         if not callable(confirm_start_anchor):
             raise RuntimeError("navigation start anchor reset is not supported")
         confirm_start_anchor()
+        wait_for_first_goal = getattr(
+            self._navigation_driver,
+            "wait_for_first_goal_acceptance",
+            None,
+        )
+        if not callable(wait_for_first_goal):
+            raise RuntimeError("Nav2 first goal confirmation is not supported")
+        wait_for_first_goal()
+        # Nav2 start does not complete until the first action goal is accepted.
+        # Recheck the backend command deadline after that asynchronous boundary
+        # so an expired command can never be acknowledged as PATROLLING.
+        self._ensure_start_not_expired(expires_at)
 
     def _ensure_start_not_expired(
         self, expires_at: datetime | None
