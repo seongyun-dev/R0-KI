@@ -21,8 +21,8 @@ export type RiskLevel = '낮음' | '보통' | '긴급';
 
 export type Tone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
 
-export type EventType = '불법주차' | '쓰레기' | '위험구역' | '응급상황' | '화재 의심' | '침입' | '정기 점검';
-export type ZoneType = '주차장' | '분리수거장' | '위험구역' | '출입구' | '도착지' | '기타';
+export type EventType = '불법주차' | '미등록 차량' | '쓰레기' | '응급상황' | '화재 의심' | '침입' | '정기 점검';
+export type ZoneType = '주차장' | '분리수거장' | '출입구' | '도착지' | '기타';
 
 export interface Complex {          // 아파트단지
   id: string;
@@ -144,7 +144,7 @@ export interface Patrol {
   date: string;                     // 07/15
   start: string;                    // 09:00
   end?: string | null;              // 09:42 (진행중이면 null)
-  routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 위험구역(B2), 출발지]
+  routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 지하주차장 B2, 출발지]
   routeSummary?: string;            // 상세 요약용 경로 표기 (1e: "101동→102동→103동")
   eventCount: number;               // 2
   status: StatusLabel;              // 완료 / 진행중
@@ -234,7 +234,7 @@ export interface HourlyEventStat {
 }
 
 export interface HandlingStat {     // 처리 현황 100% 기준 (1m)
-  label: string;                    // 전체 / 주차 / 쓰레기 / 위험구역
+  label: string;                    // 전체 / 주차 / 쓰레기 
   handled: number;                  // 59 (건)
   pending: number;                  // 24 (건)
   handledPct: number;               // 71 (%)

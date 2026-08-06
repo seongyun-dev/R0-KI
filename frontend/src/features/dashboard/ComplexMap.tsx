@@ -12,7 +12,6 @@ import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneT
    · 구역: 상태 명도 램프(--patrol/--charge/--alert/--detect/--offline).
      온보딩 구역 편집기(.au-zone)와 같은 반투명 레시피(채움 13% · 테두리 62%)라
      등록 화면에서 그린 구역이 대시보드에서 같은 색으로 이어진다.
-   · 위험구역은 색에만 기대지 않고 해칭을 겹친다(색맹 대응 · 이중 표기).
    · 구조물(격자·외곽): currentColor + 낮은 불투명도.
    · 로봇/경로: --graphic. 긴급 핀만 --urgent (모노크롬 규칙의 유일한 예외).
 
@@ -42,7 +41,6 @@ const toneVar: Record<Tone, string> = {
 const zoneTone: Record<ZoneType, string> = {
   주차장: 'patrol',
   분리수거장: 'charge',
-  위험구역: 'alert',
   출입구: 'detect',
   도착지: 'offline',
   기타: 'offline',
@@ -406,10 +404,6 @@ export function ComplexMap({
             <stop offset="0" stopColor="#fff" stopOpacity=".5" />
             <stop offset="1" stopColor="#fff" stopOpacity="0" />
           </radialGradient>
-          {/* 위험구역 해칭 — 색 외 이중 표기 */}
-          <pattern id="cmapHatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--alert)" strokeOpacity=".28" strokeWidth="1.6" />
-          </pattern>
         </defs>
 
         <g
@@ -477,17 +471,6 @@ export function ComplexMap({
                     height={py(z.rect.h) - 4}
                     rx="7"
                   />
-                  {z.type === '위험구역' && (
-                    <rect
-                      x={px(z.rect.x) + 2}
-                      y={py(z.rect.y) + 2}
-                      width={px(z.rect.w) - 4}
-                      height={py(z.rect.h) - 4}
-                      rx="7"
-                      fill="url(#cmapHatch)"
-                      stroke="none"
-                    />
-                  )}
                   {/* 유형에서 유도되는 설비 묘사 (주차면·수거함·복귀 깃발·건물 윤곽) */}
                   <ZoneDetail
                     type={z.type}

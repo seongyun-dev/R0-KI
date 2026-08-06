@@ -1,8 +1,6 @@
-import { robots } from '../../mocks'
 import { useCallback } from 'react'
 import { robotDetailToDomain, robotListItemToDomain } from '../../api/mappers'
 import { robotsApi, unwrapList } from '../../api/services'
-import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
 import { useApiQuery } from '../../lib/useApiQuery'
 
@@ -12,20 +10,7 @@ export function useRobots(
 ) {
   const query = useApiQuery(
     async () => {
-      if (env.useMocks) {
-        const page = params.page ?? 0
-        const size = params.size ?? 10
-        const start = page * size
-        return {
-          content: robots.slice(start, start + size),
-          page,
-          size,
-          totalElements: robots.length,
-          totalPages: Math.ceil(robots.length / size),
-          first: page === 0,
-          last: start + size >= robots.length,
-        }
-      }
+
       const response = await robotsApi.list(params)
       // 목록 응답이 배열로 오면 response.content 는 undefined 라 .map 에서 터진다.
       return {
@@ -34,7 +19,7 @@ export function useRobots(
       }
     },
     [params.page, params.size, params.sort?.join(',')],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 
   return {
@@ -53,17 +38,11 @@ export function useRobots(
 export function useRobotStats() {
   return useApiQuery(
     async () => {
-      if (env.useMocks) {
-        return {
-          totalCount: robots.length,
-          patrollingCount: robots.filter((r) => r.status === '순찰중').length,
-          idleOrChargingCount: robots.filter((r) => r.status === '대기' || r.status === '충전중').length,
-        }
-      }
+
       return robotsApi.stats()
     },
     [],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 }
 
@@ -72,18 +51,16 @@ export function useRobot(id: string | undefined) {
   return useApiQuery(
     async () => {
       if (!id) return undefined
-      if (env.useMocks) return robots.find((r) => r.id === id)
       return robotDetailToDomain(await robotsApi.detail(id))
     },
     [id],
-    { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },
+    { enabled: Boolean(id), delayMs: 0 },
   )
 }
 
 export function useUpdateRobot() {
   const update = useCallback(
     async (variables: { robotId: string | number; robotName: string }) => {
-      if (env.useMocks) return undefined
       // 백엔드 수정 요청은 name만 받는다(상태는 시스템이 관리).
       return robotsApi.update(variables.robotId, { name: variables.robotName })
     },
@@ -105,7 +82,6 @@ export function useCreateRobot() {
 export function useDeleteRobot() {
   const remove = useCallback(
     async (variables: { robotId: string | number }) => {
-      if (env.useMocks) return undefined
       return robotsApi.delete(variables.robotId)
     },
     [],

@@ -1,13 +1,5 @@
-import {
-  aiInsights,
-  dailyEvents,
-  handlingStats,
-  hourlyEvents,
-  statSummary,
-  zoneShares,
-} from '../../mocks'
+
 import { statsApi } from '../../api/services'
-import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
 import { assembleStatsDashboard } from './mapAnalyticsToStats'
 import {
@@ -21,7 +13,7 @@ import type { StatsDashboardData } from './mapAnalyticsToStats'
  * 통계 대시보드 데이터 훅.
  *
  * - unit + offset → resolveStatsRange → from/to
- * - zone: parking/recycle/danger → zoneIds 필터
+ * - zone: parking/recycle → zoneIds 필터
  */
 export function useStats(
   params: { unit?: StatsUnit; offset?: number; zone?: string } = {},
@@ -33,16 +25,7 @@ export function useStats(
 
   return useApiQuery<StatsDashboardData>(
     async () => {
-      if (env.useMocks) {
-        return {
-          summary: statSummary,
-          daily: dailyEvents,
-          hourly: hourlyEvents,
-          handling: handlingStats,
-          zones: zoneShares,
-          insights: aiInsights,
-        }
-      }
+
 
       const trendBucket = resolveTrendBucket(unit)
       const [overview, dailyTrend, hourlyTrend, handling, byZone] =
@@ -57,7 +40,7 @@ export function useStats(
       })
     },
     [unit, offset, zone, range.from, range.to],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 }
 

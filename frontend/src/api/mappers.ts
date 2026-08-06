@@ -76,7 +76,7 @@ function eventType(value: string): EventType {
   const map: Record<string, EventType> = {
     // 백엔드 enum 코드
     ILLEGAL_PARKING: '불법주차',
-    UNREGISTERED_VEHICLE: '불법주차',
+    UNREGISTERED_VEHICLE: '미등록 차량',
     TRASH_DETECTED: '쓰레기',
     RECYCLING_AREA_FULL: '쓰레기',
     EMERGENCY: '응급상황',
@@ -424,7 +424,6 @@ function zoneType(value: string): ZoneType {
   if (
     value === '주차장' ||
     value === '분리수거장' ||
-    value === '위험구역' ||
     value === '출입구' ||
     value === '도착지'
   ) {
@@ -504,8 +503,7 @@ function zoneToDomain(
     도착지: '🏁',
     주차장: '🅿',
     분리수거장: '🗑',
-    위험구역: '⚠',
-  }
+    }
   return {
     zone: {
       id: String(value.checkpointId),

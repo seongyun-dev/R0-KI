@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { RobotObstacleEvent } from '../../api/contracts'
 import { robotsApi } from '../../api/services'
-import { env } from '../../config/env'
 
 const RECONNECT_DELAY_MS = 2_000
 
@@ -12,7 +11,6 @@ export function useRobotObstacleAlert(
   onRef.current = onEvent
 
   useEffect(() => {
-    if (env.useMocks) return
 
     const controller = new AbortController()
     let reconnectTimer: number | undefined

@@ -1,8 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { emergencyEventSseToDomain } from '../../api/mappers'
 import { eventsApi } from '../../api/services'
-import { env } from '../../config/env'
-import { events } from '../../mocks'
 import type { PatrolEvent } from '../../types/domain'
 import { createSeenStore } from './usePolledFeed'
 
@@ -16,16 +14,8 @@ export function useEmergencyAlert(onEmergency: (event: PatrolEvent) => void) {
   const onRef = useRef(onEmergency)
   onRef.current = onEmergency
 
-  useEffect(() => {
-    if (!env.useMocks) return
-    const target = events.find((event) => event.riskLevel === '긴급')
-    if (!target) return
-    const timer = window.setTimeout(() => onRef.current(target), 1_500)
-    return () => window.clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
-    if (env.useMocks) return
 
     const controller = new AbortController()
     let reconnectTimer: number | undefined

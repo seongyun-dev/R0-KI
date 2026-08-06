@@ -51,7 +51,7 @@ export function Hero({ hintHidden }: HeroProps) {
             <div className="hero-stat"><div className="n"><b>자동</b></div><div className="l">순찰 기록 관리</div></div>
           </div>
           <div className="cta-row" data-reveal="up" data-gate="ready" data-delay="750" style={{ '--ry': '10px' } as React.CSSProperties}>
-            <Button variant="accent" withArrow="right" onClick={() => navigate('/signup/onboarding')}>회원가입하기</Button>
+            <Button variant="accent" withArrow="right" onClick={() => navigate('/signup/onboarding?new=1')}>회원가입하기</Button>
             <Button variant="outline" onClick={() => navigate('/login')}>관리자 로그인 →</Button>
           </div>
         </div>

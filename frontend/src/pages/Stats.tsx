@@ -24,7 +24,6 @@ const UNIT_OPTIONS = [
 const ZONE_OPTIONS = [
   { value: 'parking', label: '구역: 주차장' },
   { value: 'recycle', label: '구역: 분리수거장' },
-  { value: 'danger', label: '구역: 위험구역' },
 ]
 
 export default function Stats() {
@@ -113,7 +112,7 @@ export default function Stats() {
           </div>
           <div className="headtools tight">
             <R0KiDropdown
-              allLabel="달 단위"
+              allLabel="월 단위"
               options={UNIT_OPTIONS}
               value={unitKey}
               onChange={onUnitChange}

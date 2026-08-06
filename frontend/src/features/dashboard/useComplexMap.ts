@@ -10,7 +10,6 @@ import type { MapViewData } from '../../api/mappers'
 import { mapApi } from '../../api/services'
 import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
-import { complexMap, mapCheckpoints, mapPins, mapRobot } from '../../mocks'
 import type { ZoneType } from '../../types/domain'
 import { useAuthStore } from '../auth/useAuthStore'
 import { worldToMapRatios } from '../onboarding/mapCoordinates'
@@ -23,7 +22,6 @@ const zoneTypeLabel: Record<ZoneTypeCode, ZoneType> = {
   START: '출입구',
   PARKING: '주차장',
   RECYCLING_AREA: '분리수거장',
-  DANGER_ZONE: '위험구역',
   DESTINATION: '도착지',
 }
 
@@ -31,7 +29,18 @@ const zoneIcon: Record<ZoneTypeCode, string> = {
   START: '🚪',
   PARKING: '🅿️',
   RECYCLING_AREA: '♻️',
-  DANGER_ZONE: '⚠️',
+  DESTINATION: '🏁',
+}
+
+const waypointLabel: Record<WaypointActionCode, string> = {
+  PASS: '경유',
+  SCAN: '탐지',
+  DESTINATION: '도착지',
+}
+
+const waypointIcon: Record<WaypointActionCode, string> = {
+  PASS: '●',
+  SCAN: '◎',
   DESTINATION: '🏁',
 }
 
@@ -151,7 +160,7 @@ function registeredMapToView(
 
 /** 대시보드에 등록된 지도 이미지와 구역을 조회한다. */
 export function useComplexMap() {
-  const mapId = useAuthStore((state) => state.mapId) ?? env.defaultMapId
+  const mapId = useAuthStore((state) => state.mapId)
   const robotId = useAuthStore((state) => state.robotId) ?? env.defaultRobotId
   const registeredZones = useRegisteredMap((state) => state.zones)
   // 이 훅이 만든 objectURL 전부 — 화면에 못 올라간 것까지 회수하기 위해 들고 있는다
@@ -159,17 +168,7 @@ export function useComplexMap() {
 
   const query = useApiQuery<{ view: MapViewData }>(
     async () => {
-      if (env.useMocks) {
-        const map = registeredZones.length ? { ...complexMap, zones: registeredZones } : complexMap
-        return {
-          view: {
-            map,
-            robot: mapRobot,
-            pins: mapPins,
-            checkpoints: mapCheckpoints,
-          },
-        }
-      }
+
       if (!mapId) throw new Error('등록된 지도 ID가 없습니다.')
 
       const [detail, zones, navigation] = await Promise.all([
@@ -191,7 +190,7 @@ export function useComplexMap() {
       }
     },
     [mapId, robotId, registeredZones],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 
   /* objectURL 회수 — state 에 들어온 것만 보고 지우면 누수가 남는다.
