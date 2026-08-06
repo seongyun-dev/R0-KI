@@ -3,8 +3,9 @@ Description=AIoT Jetson AI runtime
 Wants=network-online.target aiot-update.service
 After=network-online.target
 ConditionPathExists=/opt/aiot/iot/current/robot/src/aiot_robot/ai_runtime.py
-StartLimitIntervalSec=60
-StartLimitBurst=3
+# A camera can be attached after boot during field setup.  Keep retrying the
+# fail-closed preflight so the service recovers without an operator restart.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -24,7 +25,7 @@ ExecStart=/opt/aiot/bin/aiot-ai-run
 ExecStartPost=/opt/aiot/bin/aiot-ai-wait-ready
 ExecStopPost=/usr/bin/rm -f /run/aiot/ai-ready.json
 Restart=on-failure
-RestartSec=5s
+RestartSec=10s
 TimeoutStartSec=120s
 TimeoutStopSec=30s
 KillSignal=SIGINT

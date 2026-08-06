@@ -30,6 +30,21 @@ def destination_route():
 
 
 class NavigationServiceTest(unittest.TestCase):
+    def test_confirm_start_anchor_completes_single_start_destination(self) -> None:
+        service = WaypointNavigationService(destination_route())
+        service.start_patrol(patrol_id=7)
+
+        events = service.confirm_start_anchor()
+
+        self.assertEqual(
+            [event.mission_event.event_type for event in events],
+            [
+                MissionEventType.WAYPOINT_REACHED,
+                MissionEventType.DESTINATION_REACHED,
+            ],
+        )
+        self.assertEqual(service.state, MissionState.COMPLETED)
+
     def test_start_pose_destination_and_completion_events(self) -> None:
         service = WaypointNavigationService(destination_route())
         received = []
