@@ -87,11 +87,7 @@ function toListSearch(filters: EventListFilters, page: number) {
   return query ? `?${query}` : ''
 }
 
-// const RISK_OPTIONS = [
-//   { value: 'EMERGENCY', label: '긴급' },
-//   { value: 'NORMAL', label: '보통' },
-//   { value: 'LOW', label: '낮음' },
-// ]
+
 
 export default function EventList() {
   const navigate = useNavigate()
