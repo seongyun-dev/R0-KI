@@ -44,18 +44,6 @@ const waypointIcon: Record<WaypointActionCode, string> = {
   DESTINATION: '🏁',
 }
 
-const waypointLabel: Record<WaypointActionCode, string> = {
-  PASS: '경유',
-  SCAN: '탐지',
-  DESTINATION: '도착지',
-}
-
-const waypointIcon: Record<WaypointActionCode, string> = {
-  PASS: '●',
-  SCAN: '◎',
-  DESTINATION: '🏁',
-}
-
 function coordinateToGrid(
   detail: MapDetailResponse,
   zone: ZoneCreateResponse,
