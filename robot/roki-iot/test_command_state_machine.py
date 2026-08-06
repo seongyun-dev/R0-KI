@@ -348,6 +348,9 @@ class CommandStateMachineTest(unittest.TestCase):
             [m[1]["status"] for m in self.mqtt.messages],
             ["REJECTED", "REJECTED", "REJECTED"],
         )
+        self.assertTrue(
+            all(message[1].get("reason") for message in self.mqtt.messages)
+        )
 
     def test_same_command_id_with_different_payload_is_rejected(self) -> None:
         first = payload("START_PATROL", "same", patrol_id=7)
@@ -356,6 +359,10 @@ class CommandStateMachineTest(unittest.TestCase):
         self.handler.handle(self.settings.command_topic, second)
         self.assertEqual(len(self.runtime.calls), 1)
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "DUPLICATE_PAYLOAD_MISMATCH",
+        )
 
     def test_stop_orders_physical_ai_flush_then_ack(self) -> None:
         order: list[str] = []
@@ -395,6 +402,10 @@ class CommandStateMachineTest(unittest.TestCase):
         self.assertIsNone(self.runtime.active_patrol_id)
         self.assertEqual(self.store.state, "ERROR")
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "FAILED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "ESP32 STOP was not delivered",
+        )
         self.assertEqual(self.ai.disabled, ["STOP_PATROL"])
 
     def test_obstacle_requires_stable_clear_before_resume(self) -> None:

@@ -91,6 +91,29 @@ class GamepadStateTest(unittest.TestCase):
         self.axis(self.settings.throttle_axis, -32767)
         self.assertEqual(self.state.decision(), (None, "w", False, False))
 
+    def test_bogus_initial_axis_does_not_block_deadman_free_control(self) -> None:
+        state = GamepadState(
+            GamepadSettings(deadman_required=False),
+            clock=lambda: self.now,
+        )
+        state.update(
+            JoystickEvent(
+                -32767,
+                JS_EVENT_AXIS,
+                self.settings.steering_axis,
+                is_initial=True,
+            )
+        )
+        state.update(
+            JoystickEvent(
+                -32767,
+                JS_EVENT_AXIS,
+                self.settings.throttle_axis,
+            )
+        )
+
+        self.assertEqual(state.decision(), (None, "w", False, False))
+
     def test_decode_preserves_init_flag(self) -> None:
         import struct
 
