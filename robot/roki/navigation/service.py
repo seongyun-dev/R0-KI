@@ -60,6 +60,31 @@ class WaypointNavigationService:
         self._notify(listeners, (event,))
         return event
 
+    def confirm_start_anchor(self) -> tuple[NavigationEvent, ...]:
+        """Mark waypoint 1 reached after Nav2 resets localization to it.
+
+        The demo robot is physically placed on waypoint 1 before START.  This
+        keeps that point as the localization anchor instead of asking the
+        Ackermann chassis to navigate back to its own starting coordinate.
+        """
+
+        with self._lock:
+            if (
+                self._patrol_id is None
+                or self._mission.state is not MissionState.RUNNING
+            ):
+                raise RuntimeError("waypoint mission is not running")
+            waypoint = self._mission.current_waypoint
+            if waypoint is None or waypoint.sequence != 1:
+                raise RuntimeError("waypoint 1 is not the current start anchor")
+        return self.update_pose(
+            Pose2D(
+                float(waypoint.x),
+                float(waypoint.y),
+                float(waypoint.yaw_deg or 0.0),
+            )
+        )
+
     def stop_patrol(self) -> NavigationEvent | None:
         with self._lock:
             patrol_id = self._patrol_id

@@ -19,6 +19,8 @@ from integration.runtime_state_backend_adapter import (
 )
 from backend_state.robot_state_store import RobotStateStore
 from backend_state.models import HardwareState, ObstacleState
+from navigation.route import parse_route
+from navigation.service import WaypointNavigationService
 
 
 class FakeMissionController:
@@ -956,6 +958,59 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         )
         navigation.add_event_listener.call_args.args[0](event)
         driver.on_navigation_event.assert_called_once_with(event)
+
+    def test_nav2_start_resets_driver_then_confirms_waypoint_one_anchor(self) -> None:
+        runtime = FakeRuntime()
+        route = parse_route(
+            {
+                "schema_version": 1,
+                "map_id": "demo-map",
+                "map_version": 1,
+                "route_id": "start-anchor",
+                "frame_id": "map",
+                "waypoints": [
+                    {
+                        "sequence": 1,
+                        "x": 1.0,
+                        "y": 1.0,
+                        "yaw_deg": 0.0,
+                        "acceptance_radius_m": 0.2,
+                        "action": "PASS",
+                    },
+                    {
+                        "sequence": 2,
+                        "x": 2.0,
+                        "y": 1.0,
+                        "yaw_deg": 0.0,
+                        "acceptance_radius_m": 0.2,
+                        "action": "DESTINATION",
+                    },
+                ],
+            }
+        )
+        navigation = WaypointNavigationService(route)
+        driver = Mock()
+        order = []
+        driver.start_patrol.side_effect = lambda **_kwargs: order.append(
+            "initial-pose-reset"
+        )
+        driver.on_navigation_event.side_effect = lambda event: order.append(
+            event.mission_event.event_type.value
+        )
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+        )
+        service.readiness = Mock(return_value=(True, "READY"))
+
+        service._start_nav2_patrol(patrol_id=7)
+
+        self.assertEqual(
+            order,
+            ["STARTED", "initial-pose-reset", "WAYPOINT_REACHED"],
+        )
+        self.assertEqual(navigation._mission.current_waypoint.sequence, 2)
 
     def test_final_runtime_service_owns_one_runtime_thread(self) -> None:
         runtime = FakeRuntime()
