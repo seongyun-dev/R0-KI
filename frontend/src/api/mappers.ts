@@ -76,7 +76,7 @@ function eventType(value: string): EventType {
   const map: Record<string, EventType> = {
     // 백엔드 enum 코드
     ILLEGAL_PARKING: '불법주차',
-    UNREGISTERED_VEHICLE: '불법주차',
+    UNREGISTERED_VEHICLE: '미등록 차량',
     TRASH_DETECTED: '쓰레기',
     RECYCLING_AREA_FULL: '쓰레기',
     EMERGENCY: '응급상황',
