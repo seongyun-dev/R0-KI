@@ -13,12 +13,18 @@ export type R0KiLiveCamProps = {
 }
 
 export function R0KiLiveCam({ urgent = false, clockText, robotId }: R0KiLiveCamProps) {
-  const { frameUrl, state } = useMjpegStream(robotId)
+  const { frameUrl, state, handleFrameLoad, handleFrameError } = useMjpegStream(robotId)
 
   return (
     <div className="cam">
       {frameUrl && (
-        <img className="camstream" src={frameUrl} alt="로봇 좌우 카메라 AI 실시간 탐지 영상" />
+        <img
+          className="camstream"
+          src={frameUrl}
+          alt="로봇 좌우 카메라 AI 실시간 탐지 영상"
+          onLoad={handleFrameLoad}
+          onError={handleFrameError}
+        />
       )}
       {!frameUrl && <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-label="로봇 전방 카메라 실시간 영상">
         <defs>
@@ -75,7 +81,15 @@ export function R0KiLiveCam({ urgent = false, clockText, robotId }: R0KiLiveCamP
         </g>
       </svg>}
       <span className={`camstate ${state}`}>
-        {state === 'live' ? '좌·우 AI 탐지' : state === 'connecting' ? '영상 연결 중' : '영상 대기'}
+        {state === 'live'
+          ? '정상 표시 중'
+          : state === 'connecting'
+            ? '스트림 연결 중'
+            : state === 'retrying'
+              ? '스트림 재시도 중'
+              : state === 'failed'
+                ? '스트림 연결 실패'
+                : '순찰 비활성'}
         {clockText ? ` · ${clockText}` : ''}
       </span>
       <span className={`rec${state === 'live' ? '' : ' paused'}`} />
