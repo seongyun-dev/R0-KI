@@ -12,7 +12,7 @@ export function MappingLiveView({
   active,
 }: MappingLiveViewProps) {
   const endpoint = `/live/mapping/robots/${encodeURIComponent(String(robotId))}/stream.mjpg`
-  const { frameUrl, state } = useMjpegStream(robotId, {
+  const { frameUrl, state, handleFrameLoad, handleFrameError } = useMjpegStream(robotId, {
     endpoint,
     enabled: active,
     lifecycleKey: mappingSessionId,
@@ -24,9 +24,11 @@ export function MappingLiveView({
       ? 'LiDAR 지도 스트림에 연결하고 있습니다.'
       : state === 'waiting'
         ? '연결되었습니다. 첫 LiDAR 프레임을 기다리고 있습니다.'
-        : state === 'offline'
-          ? 'LiDAR 지도 연결에 실패했습니다. 잠시 후 다시 확인해 주세요.'
-          : '실시간 LiDAR 지도를 수신하고 있습니다.'
+        : state === 'retrying'
+          ? 'LiDAR 지도 스트림 연결을 다시 시도하고 있습니다.'
+          : state === 'failed'
+            ? 'LiDAR 지도 연결에 실패했습니다. 잠시 후 다시 확인해 주세요.'
+            : '실시간 LiDAR 지도를 수신하고 있습니다.'
 
   return (
     <section className="mapping-live" aria-label="실시간 LiDAR 지도">
@@ -36,6 +38,8 @@ export function MappingLiveView({
             className="mapping-live__frame"
             src={frameUrl}
             alt="로봇이 실시간으로 생성 중인 LiDAR 지도"
+            onLoad={handleFrameLoad}
+            onError={handleFrameError}
           />
         ) : (
           <div className="mapping-live__placeholder" aria-hidden="true">

@@ -1488,10 +1488,11 @@
 .r0ki .mapping-live__status{display:flex;align-items:center;justify-content:center;gap:9px;min-height:40px;
   padding:6px var(--s3);font-size:13.5px;font-weight:600;color:var(--text-2);text-align:center}
 .r0ki .mapping-live__status>span{width:8px;height:8px;flex:none;border-radius:50%;background:var(--text-3)}
-.r0ki .mapping-live__status--connecting>span,.r0ki .mapping-live__status--waiting>span{background:var(--graphic)}
+.r0ki .mapping-live__status--connecting>span,.r0ki .mapping-live__status--waiting>span,
+.r0ki .mapping-live__status--retrying>span{background:var(--graphic)}
 .r0ki .mapping-live__status--live>span{background:var(--patrol)}
-.r0ki .mapping-live__status--offline{color:var(--urgent-text)}
-.r0ki .mapping-live__status--offline>span{background:var(--urgent-text)}
+.r0ki .mapping-live__status--failed{color:var(--urgent-text)}
+.r0ki .mapping-live__status--failed>span{background:var(--urgent-text)}
 @media(max-width:640px){
   .r0ki .mapping-live{padding:var(--s2)}
   .r0ki .mapping-live__viewport{border-radius:10px}
