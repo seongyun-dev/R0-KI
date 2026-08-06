@@ -12,6 +12,7 @@ python_bin="${robot_root}/.venv/bin/python"
 environment_parser="${robot_root}/scripts/parse_systemd_env.py"
 robot_env="${AIOT_ROBOT_ENV_FILE:-/opt/aiot/secrets/robot.env}"
 ros_env="${AIOT_ROS_ENV_FILE:-/opt/aiot/secrets/ros.env}"
+current_map_env="${AIOT_ACTIVE_MAP_ENV_FILE:-/var/lib/aiot/config/current-map.env}"
 
 # OTA smoke runs outside systemd. Load the same files in the same order as
 # aiot-robot.service so mapping/patrol mode and geometry are validated against
@@ -49,6 +50,10 @@ load_environment_file() {
 
 load_environment_file "${robot_env}" false
 load_environment_file "${ros_env}" true
+# aiot-robot.service and aiot-ros.service load this drop-in last.  Without it,
+# smoke tests can accidentally validate stale mapping mode while systemd starts
+# the patrol/Nav2 mode selected by the newly activated Backend map bundle.
+load_environment_file "${current_map_env}" false
 
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 test -r "${ros_setup}"
