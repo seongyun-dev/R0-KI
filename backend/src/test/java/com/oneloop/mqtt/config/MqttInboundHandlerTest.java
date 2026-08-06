@@ -117,6 +117,24 @@ class MqttInboundHandlerTest {
         assertThat(ackCaptor.getValue().reason()).isNull();
     }
 
+    @Test
+    void routesStopMappingAckToMappingService() {
+        ArgumentCaptor<CommandAck> ackCaptor = ArgumentCaptor.forClass(CommandAck.class);
+
+        handler()
+                .messageArrived(
+                        "hanbakwi/v1/robots/test-101/command/ack",
+                        mqttMessage(
+                                """
+                                {"schemaVersion":1,"commandId":"stop-command",
+                                 "command":"STOP_MAPPING",
+                                 "status":"SUCCEEDED","receivedAt":"2026-08-07T03:00:00Z"}
+                                """));
+
+        verify(mappingCommandAckService).handle(eq("test-101"), ackCaptor.capture());
+        assertThat(ackCaptor.getValue().command()).isEqualTo("STOP_MAPPING");
+    }
+
     private MqttInboundHandler handler() {
         return new MqttInboundHandler(
                 client, robotTelemetryService, mappingCommandAckService, patrolCommandAckService);

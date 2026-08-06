@@ -22,6 +22,7 @@ import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.NavigationWaypointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.mapping.domain.MappingSession;
+import com.oneloop.mapping.domain.MappingStatus;
 import com.oneloop.mapping.repository.MappingSessionRepository;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolCheckpointVisit;
@@ -158,6 +159,11 @@ class MapConfigurationTransactionIntegrationTest {
 
         MapUploadRequest request = uploadRequest(commandId);
         mapService.upload(session.getId(), fixture.robot().getId(), request);
+
+        assertThat(mappingSessionRepository.findById(session.getId()))
+                .get()
+                .extracting(MappingSession::getStatus)
+                .isEqualTo(MappingStatus.COMPLETED);
 
         PatrolMap updatedMap = patrolMapRepository.findById(fixture.map().getId()).orElseThrow();
         assertThat(updatedMap.getMapVersion()).isEqualTo(2);

@@ -25,7 +25,18 @@ public interface MappingSessionRepository extends JpaRepository<MappingSession, 
     // commandId로 ACK가 어느 세션에 대한 응답인지 특정할 수 있다.
     Optional<MappingSession> findByCommandId(String commandId);
 
+    Optional<MappingSession> findByStopCommandId(String stopCommandId);
+
     Optional<MappingSession> findByIdAndApartmentComplexId(Long id, Long apartmentComplexId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+            "select session from MappingSession session "
+                    + "join fetch session.robot "
+                    + "where session.id = :id "
+                    + "and session.apartmentComplex.id = :apartmentComplexId")
+    Optional<MappingSession> findForUpdateByIdAndApartmentComplexId(
+            @Param("id") Long id, @Param("apartmentComplexId") Long apartmentComplexId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
