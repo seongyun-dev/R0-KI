@@ -1,7 +1,5 @@
-import { patrols } from '../../mocks'
 import { patrolDetailToDomain, patrolListItemToDomain } from '../../api/mappers'
 import { patrolsApi, unwrapList } from '../../api/services'
-import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
 
 // UI 기간 필터값 → 백엔드 enum. 매핑 없는 값(all·30d 등)은 undefined → 쿼리에서 생략(전체).
@@ -23,29 +21,7 @@ export function usePatrols(
 ) {
   const query = useApiQuery(
     async () => {
-      if (env.useMocks) {
-        let list = patrols
-        if (params.robotId) list = list.filter((patrol) => patrol.robotId === params.robotId)
-        if (params.status && params.status !== 'all') {
-          list =
-            params.status === 'COMPLETED'
-              ? list.filter((patrol) => patrol.end != null)
-              : list.filter((patrol) => patrol.status === params.status)
-        }
-        if (params.period === 'today') list = list.filter((patrol) => patrol.date === '07/15')
-        const page = params.page ?? 0
-        const size = params.size ?? 10
-        const start = page * size
-        return {
-          content: list.slice(start, start + size),
-          page,
-          size,
-          totalElements: list.length,
-          totalPages: Math.ceil(list.length / size),
-          first: page === 0,
-          last: start + size >= list.length,
-        }
-      }
+
       // 백엔드 목록은 단지 전체 순찰을 반환(robotId 필터 미지원). 완료 필터는 화면에서 처리.
       const response = await patrolsApi.list({
         period: params.period ? PERIOD_PARAM[params.period] : undefined,
@@ -68,7 +44,7 @@ export function usePatrols(
       params.size,
       params.sort?.join(','),
     ],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 
   return {
@@ -88,11 +64,10 @@ export function usePatrol(id: string | undefined) {
   return useApiQuery(
     async () => {
       if (!id) return undefined
-      if (env.useMocks) return patrols.find((p) => p.id === id)
       // 상세 응답에 patrolId가 없어 요청 id를 그대로 도메인 id로 사용
       return patrolDetailToDomain(await patrolsApi.detail(id), id)
     },
     [id],
-    { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },
+    { enabled: Boolean(id), delayMs: 0 },
   )
 }

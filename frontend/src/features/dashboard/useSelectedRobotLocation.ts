@@ -1,5 +1,4 @@
 import { robotsApi } from '../../api/services'
-import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
 import type { ComplexMapData } from '../../types/domain'
 import { toMapRobot } from './useRobotLocations'
@@ -12,7 +11,7 @@ export function useSelectedRobotLocation(
 ) {
   return useApiQuery(
     async () => {
-      if (env.useMocks || robotId == null || !map) return undefined
+      if ( robotId == null || !map) return undefined
 
       const response = await robotsApi.location(robotId)
       const robot = toMapRobot(response, map)
@@ -25,6 +24,6 @@ export function useSelectedRobotLocation(
       }
     },
     [robotId, map],
-    { enabled: !env.useMocks && robotId != null && Boolean(map) },
+    { enabled: robotId != null && Boolean(map) },
   )
 }

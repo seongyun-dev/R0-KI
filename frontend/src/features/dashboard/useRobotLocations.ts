@@ -5,7 +5,6 @@ import type {
   RobotStatusCode,
 } from '../../api/contracts'
 import { robotsApi } from '../../api/services'
-import { env } from '../../config/env'
 import type { ComplexMapData, MapRobot } from '../../types/domain'
 
 const RECONNECT_DELAY_MS = 2_000
@@ -59,11 +58,6 @@ export function useRobotLocations(map: ComplexMapData | undefined) {
   const [statuses, setStatuses] = useState<Record<string, RobotStatusCode | string>>({})
 
   useEffect(() => {
-    if (env.useMocks) {
-      setLocations([])
-      setStatuses({})
-      return
-    }
 
     const controller = new AbortController()
     let reconnectTimer: number | undefined

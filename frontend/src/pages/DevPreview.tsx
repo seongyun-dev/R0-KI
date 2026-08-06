@@ -43,7 +43,7 @@ const swatches = [
   { cls: 'bg-danger', name: 'danger' },
 ]
 
-// M2 스모크 테스트 — mocks/patrols + usePatrols() 훅 배선
+// M2 스모크 테스트 usePatrols() 훅 배선
 const demoColumns: Column<Patrol>[] = [
   { key: 'id', header: '순찰ID', render: (r) => <span className="font-mono font-semibold tabular">{r.id}</span> },
   { key: 'start', header: '시작', render: (r) => <span className="font-mono tabular">{r.date} {r.start}</span> },

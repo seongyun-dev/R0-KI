@@ -1,7 +1,6 @@
 import { useCallback, useEffect } from 'react'
 import { eventsApi } from '../../api/services'
 import { eventDetailToDomain, eventListItemToDomain } from '../../api/mappers'
-import { env } from '../../config/env'
 import { useApiMutation } from '../../lib/useApiMutation'
 import { useApiQuery } from '../../lib/useApiQuery'
 import type { ProcessingStatus } from '../../types/domain'
@@ -65,7 +64,7 @@ export function useEvent(id: string | undefined) {
       return eventDetailToDomain(await eventsApi.detail(id))
     },
     [id],
-    { enabled: Boolean(id), delayMs: env.useMocks ? 350 : 0 },
+    { enabled: Boolean(id), delayMs: 0 },
   )
 }
 

@@ -21,7 +21,7 @@ const PERIOD_LABEL: Record<string, string> = {
 export default function PatrolList() {
   const navigate = useNavigate()
   const sessionRobotId = useAuthStore((state) => state.robotId)
-  const selectedRobotId = env.useMocks ? 'R-01' : sessionRobotId ?? env.defaultRobotId
+  const selectedRobotId = sessionRobotId ?? env.defaultRobotId
   const { data: robots } = useRobots()
   const [period, setPeriod] = useState('all')
   const [applied, setApplied] = useState('all')

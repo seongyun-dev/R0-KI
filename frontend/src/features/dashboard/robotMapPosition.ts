@@ -1,5 +1,3 @@
-import { mapRobots } from '../../mocks'
-import { env } from '../../config/env'
 import type { MapRobot, Robot } from '../../types/domain'
 
 /** 대시보드에서 고른 로봇의 지도 위치.
@@ -12,10 +10,7 @@ export function robotMapPosition(
 ): MapRobot | undefined {
   if (!robot) return undefined
 
-  if (env.useMocks) {
-    const found = mapRobots.find((m) => m.id === robot.id)
-    return found ? { ...found, name: found.name ?? robot.name } : undefined
-  }
+
 
   if (!mapRobotFromServer) return undefined
   const sameRobot =

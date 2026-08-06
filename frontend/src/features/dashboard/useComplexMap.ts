@@ -10,7 +10,6 @@ import type { MapViewData } from '../../api/mappers'
 import { mapApi } from '../../api/services'
 import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
-import { complexMap, mapCheckpoints, mapPins, mapRobot } from '../../mocks'
 import type { ZoneType } from '../../types/domain'
 import { useAuthStore } from '../auth/useAuthStore'
 import { worldToMapRatios } from '../onboarding/mapCoordinates'
@@ -157,17 +156,7 @@ export function useComplexMap() {
 
   const query = useApiQuery<{ view: MapViewData }>(
     async () => {
-      if (env.useMocks) {
-        const map = registeredZones.length ? { ...complexMap, zones: registeredZones } : complexMap
-        return {
-          view: {
-            map,
-            robot: mapRobot,
-            pins: mapPins,
-            checkpoints: mapCheckpoints,
-          },
-        }
-      }
+
       if (!mapId) throw new Error('등록된 지도 ID가 없습니다.')
 
       const [detail, zones, navigation] = await Promise.all([
@@ -189,7 +178,7 @@ export function useComplexMap() {
       }
     },
     [mapId, robotId, registeredZones],
-    { delayMs: env.useMocks ? 350 : 0 },
+    { delayMs: 0 },
   )
 
   /* objectURL 회수 — state 에 들어온 것만 보고 지우면 누수가 남는다.
