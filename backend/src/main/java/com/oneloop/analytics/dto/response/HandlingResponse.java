@@ -10,7 +10,7 @@ import lombok.Getter;
  * handling(처리 현황) API 응답 본문(data).
  *
  * <p>프론트 HandlingChart 매핑:
- * - items[].label → Y축 (전체 / 주차 / 쓰레기 / 위험구역)
+ * - items[].label → Y축 (전체 / 주차 / 쓰레기 )
  * - handled / pending → 건수
  * - handledPct / pendingPct → 100% 기준 막대
  *
@@ -23,7 +23,7 @@ import lombok.Getter;
 @Schema(description = "이벤트 처리 현황 응답")
 public class HandlingResponse {
 
-    @Schema(description = "라벨별 처리/미처리 집계 (전체 → 주차 → 쓰레기 → 위험구역 순)")
+    @Schema(description = "라벨별 처리/미처리 집계 (전체 → 주차 → 쓰레기 순)")
     private List<HandlingItem> items;
 
     @Getter

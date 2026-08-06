@@ -2,6 +2,12 @@ HELP.md
 .gradle
 build/
 uploads/
+
+# backend 디렉터리에서 bootRun할 때 사용하는 이벤트 시드 이미지
+!uploads/
+uploads/*
+!uploads/evidence/
+!uploads/evidence/*.png
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
@@ -42,3 +48,7 @@ out/
 
 ### Local file storage ###
 /uploads/
+!/uploads/
+/uploads/*
+!/uploads/evidence/
+!/uploads/evidence/*.png

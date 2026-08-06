@@ -4,10 +4,14 @@ import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.mapping.domain.MappingSession;
 import com.oneloop.mapping.domain.MappingStatus;
+import com.oneloop.mapping.domain.MappingStopCommandStatus;
 import com.oneloop.mapping.dto.mqtt.StartMappingCommand;
+import com.oneloop.mapping.dto.mqtt.StopMappingCommand;
 import com.oneloop.mapping.dto.request.MappingStartRequest;
 import com.oneloop.mapping.dto.response.MappingStartResponse;
+import com.oneloop.mapping.dto.response.MappingStopResponse;
 import com.oneloop.mapping.event.MappingStatusChangedEvent;
+import com.oneloop.mapping.event.MappingStopCommandStatusChangedEvent;
 import com.oneloop.mapping.repository.MappingSessionRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
@@ -94,10 +98,80 @@ public class MappingCommandStateService {
                         });
     }
 
+    @Transactional
+    public PreparedMappingStop prepareStop(Long apartmentComplexId, Long mappingSessionId) {
+        MappingSession session =
+                mappingSessionRepository
+                        .findForUpdateByIdAndApartmentComplexId(
+                                mappingSessionId, apartmentComplexId)
+                        .orElseThrow(
+                                () ->
+                                        new BusinessException(
+                                                ErrorCode.MAPPING_SESSION_NOT_FOUND));
+
+        if (session.getStatus() != MappingStatus.MAPPING) {
+            throw new BusinessException(ErrorCode.MAPPING_SESSION_INVALID_STATE);
+        }
+
+        boolean shouldPublish = false;
+        if (session.getStopCommandId() == null) {
+            session.prepareStop(UUID.randomUUID().toString());
+            shouldPublish = true;
+        } else if (session.getStopCommandStatus() == MappingStopCommandStatus.PUBLISH_FAILED) {
+            shouldPublish = true;
+        }
+
+        StopMappingCommand command =
+                StopMappingCommand.of(session.getStopCommandId(), session.getId());
+        return new PreparedMappingStop(
+                session.getId(),
+                session.getStopCommandId(),
+                session.getRobot().getSerialNumber(),
+                command,
+                shouldPublish,
+                new MappingStopResponse(session.getId(), session.getStopCommandId()));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markStopPublished(Long mappingSessionId, String commandId) {
+        mappingSessionRepository
+                .findById(mappingSessionId)
+                .filter(session -> Objects.equals(session.getStopCommandId(), commandId))
+                .filter(MappingSession::markStopPublished)
+                .ifPresent(this::publishStopCommandStatusChanged);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void failStopPublish(Long mappingSessionId, String commandId, String reason) {
+        mappingSessionRepository
+                .findById(mappingSessionId)
+                .filter(session -> Objects.equals(session.getStopCommandId(), commandId))
+                .filter(session -> session.markStopPublishFailed(reason))
+                .ifPresent(this::publishStopCommandStatusChanged);
+    }
+
+    private void publishStopCommandStatusChanged(MappingSession session) {
+        eventPublisher.publishEvent(
+                new MappingStopCommandStatusChangedEvent(
+                        session.getId(),
+                        session.getStatus(),
+                        session.getStopCommandId(),
+                        session.getStopCommandStatus(),
+                        session.getStopFailureReason()));
+    }
+
     public record PreparedMappingStart(
             Long mappingSessionId,
             String commandId,
             String robotKey,
             StartMappingCommand command,
             MappingStartResponse response) {}
+
+    public record PreparedMappingStop(
+            Long mappingSessionId,
+            String commandId,
+            String robotKey,
+            StopMappingCommand command,
+            boolean shouldPublish,
+            MappingStopResponse response) {}
 }

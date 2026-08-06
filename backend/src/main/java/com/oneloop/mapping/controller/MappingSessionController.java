@@ -4,6 +4,7 @@ import com.oneloop.global.response.ApiResponse;
 import com.oneloop.global.security.CustomUserDetails;
 import com.oneloop.mapping.dto.request.MappingStartRequest;
 import com.oneloop.mapping.dto.response.MappingStartResponse;
+import com.oneloop.mapping.dto.response.MappingStopResponse;
 import com.oneloop.mapping.service.MappingSessionService;
 import com.oneloop.mapping.service.MappingSseService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,6 +39,19 @@ public class MappingSessionController {
         return ApiResponse.success(
                 "지도 생성이 요청되었습니다.",
                 mappingSessionService.start(principal.getApartmentComplexId(), request));
+    }
+
+    @Operation(
+            summary = "지도 생성 종료",
+            description = "진행 중인 지도 생성 세션에 종료 및 저장 명령을 전송합니다.")
+    @PostMapping("/{mappingSessionId}/stop")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ApiResponse<MappingStopResponse> stop(
+            @AuthenticationPrincipal CustomUserDetails principal,
+            @PathVariable Long mappingSessionId) {
+        return ApiResponse.success(
+                "지도 생성 종료가 요청되었습니다.",
+                mappingSessionService.stop(principal.getApartmentComplexId(), mappingSessionId));
     }
 
     @Operation(
