@@ -188,8 +188,10 @@ global_costmap:
       # across stale walls/unknown cells, while the local LiDAR costmap and
       # Robot obstacle interlock still stop motion for real obstacles.
       rolling_window: true
-      width: 20.0
-      height: 20.0
+      # Nav2 declares rolling-window width/height as integer parameters on
+      # Humble. Decimal YAML scalars make planner_server abort during startup.
+      width: 20
+      height: 20
       track_unknown_space: false
       plugins: [inflation_layer]
       inflation_layer:
