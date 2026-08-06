@@ -328,10 +328,11 @@ export const robotsApi = {
 
 export const mapApi = {
   current: () => apiRequest<MapDetailResponse>('/api/map/current'),
-  startMapping: (robotId: string | number) =>
+  startMapping: (robotId: string | number, signal?: AbortSignal) =>
     apiRequest<MappingStartResponse>('/api/map/mapping-sessions', {
       method: 'POST',
       body: jsonBody({ robotId }),
+      signal,
     }),
   subscribeMapping: (
     mappingSessionId: string | number,

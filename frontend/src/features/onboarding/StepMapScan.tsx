@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { mapApi } from '../../api/services'
 import type { MappingStatusCode } from '../../api/contracts'
+import { MappingLiveView } from '../mapping/MappingLiveView'
 
 export type StepMapScanProps = {
   robotId: string | number
@@ -9,8 +10,8 @@ export type StepMapScanProps = {
 }
 
 const statusText: Record<MappingStatusCode, string> = {
-  REQUESTED: '지도 생성을 요청했습니다. 게임패드와 deadman 입력을 준비해 주세요.',
-  MAPPING: '게임패드 deadman을 누른 채 로봇을 수동 주행하며 지도를 만들고 있습니다.',
+  REQUESTED: '로봇이 주변 공간을 자율 탐색하며 지도를 만들고 있습니다.',
+  MAPPING: '로봇이 주변 공간을 자율 탐색하며 지도를 만들고 있습니다.',
   COMPLETED: '지도 파악이 완료되었습니다.',
   FAILED: '지도 파악에 실패했습니다. 다시 시도해 주세요.',
   CANCELLED: '지도 파악이 취소되었습니다.',
@@ -20,21 +21,40 @@ const statusText: Record<MappingStatusCode, string> = {
 export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
   const [status, setStatus] = useState<MappingStatusCode | 'IDLE'>('IDLE')
   const [mapId, setMapId] = useState<string | number>()
+  const [mappingSessionId, setMappingSessionId] = useState<string | number>()
+  const [scanRobotId, setScanRobotId] = useState<string | number>()
   const [error, setError] = useState<string>()
   const abortRef = useRef<AbortController>()
+  const startPendingRef = useRef(false)
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => {
+    setStatus('IDLE')
+    setMapId(undefined)
+    setMappingSessionId(undefined)
+    setScanRobotId(undefined)
+    setError(undefined)
+
+    return () => {
+      abortRef.current?.abort()
+      startPendingRef.current = false
+    }
+  }, [robotId])
 
   const startScan = async () => {
+    if (startPendingRef.current) return
+    startPendingRef.current = true
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     setError(undefined)
     setMapId(undefined)
+    setMappingSessionId(undefined)
+    setScanRobotId(robotId)
     setStatus('REQUESTED')
 
     try {
-      const session = await mapApi.startMapping(robotId)
+      const session = await mapApi.startMapping(robotId, controller.signal)
+      setMappingSessionId(session.mappingSessionId)
       setStatus(session.mappingStatus)
       await mapApi.subscribeMapping(
         session.mappingSessionId,
@@ -55,6 +75,8 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
       if (controller.signal.aborted) return
       setError(reason instanceof Error ? reason.message : '지도 파악 연결에 실패했습니다.')
       setStatus('FAILED')
+    } finally {
+      if (abortRef.current === controller) startPendingRef.current = false
     }
   }
 
@@ -63,13 +85,21 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
 
   return (
     <div>
+      {(status === 'IDLE' || status === 'REQUESTED' || status === 'MAPPING') && (
+        <MappingLiveView
+          robotId={robotId}
+          mappingSessionId={mappingSessionId}
+          active={status === 'MAPPING' && scanRobotId === robotId}
+        />
+      )}
+
       {status === 'IDLE' && (
         <div className="au-panel">
-          <p className="t">프론트에서 시작한 뒤 게임패드로 직접 주행합니다.</p>
+          <p className="t">로봇이 주변 공간을 자율 탐색하며 지도를 생성합니다.</p>
           <p className="s">
-            deadman을 누른 채 단지를 수동으로 주행하고, 현장에서 종료·저장 조작을 완료해 주세요.
+            LiDAR로 주변을 인식하고 미탐색 영역을 찾아 자동으로 이동합니다.
           </p>
-          <button type="button" className="btn btn-p" onClick={startScan}>맵 파악하기</button>
+          <button type="button" className="btn btn-p" onClick={startScan}>맵 생성 시작</button>
         </div>
       )}
 
@@ -77,7 +107,8 @@ export function StepMapScan({ robotId, onPrev, onNext }: StepMapScanProps) {
         <div className="au-panel">
           <span className="au-spin" role="status" aria-live="polite" aria-label="지도 파악 중" />
           <p className="t">{statusText[status]}</p>
-          <p className="s">주행을 마치면 현장에서 종료·저장하고, 완료 상태가 올 때까지 기다려 주세요.</p>
+          <p className="s">LiDAR로 주변을 인식하고 미탐색 영역을 찾아 자동으로 이동합니다.</p>
+          <p className="s">안전을 위해 로봇 주변에 충분한 공간을 확보해 주세요.</p>
         </div>
       )}
 

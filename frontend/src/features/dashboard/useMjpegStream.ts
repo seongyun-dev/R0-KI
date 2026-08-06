@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react'
 import { apiRequest, apiUrl } from '../../api/client'
 
-export type MjpegStreamState = 'idle' | 'connecting' | 'live' | 'offline'
+export type MjpegStreamState = 'idle' | 'connecting' | 'waiting' | 'live' | 'offline'
+
+export type MjpegStreamOptions = {
+  endpoint?: string
+  enabled?: boolean
+  lifecycleKey?: string | number
+}
 
 const MAX_BUFFER_BYTES = 2 * 1024 * 1024
 const FIRST_FRAME_TIMEOUT_MS = 12_000
 const NEXT_FRAME_TIMEOUT_MS = 5_000
 const RETRY_DELAY_MS = 2_000
+const MAX_RETRY_ATTEMPTS = 3
 
 function appendBytes(left: Uint8Array, right: Uint8Array) {
   const joined = new Uint8Array(left.length + right.length)
@@ -27,12 +34,17 @@ type StreamSession = {
   expiresAt: string
 }
 
-export function useMjpegStream(robotId?: string | number) {
+export function useMjpegStream(
+  robotId?: string | number,
+  { endpoint, enabled = true, lifecycleKey }: MjpegStreamOptions = {},
+) {
   const [frameUrl, setFrameUrl] = useState<string>()
-  const [state, setState] = useState<MjpegStreamState>(robotId == null ? 'idle' : 'connecting')
+  const [state, setState] = useState<MjpegStreamState>(
+    robotId == null || !enabled ? 'idle' : 'connecting',
+  )
 
   useEffect(() => {
-    if (robotId == null) {
+    if (robotId == null || !enabled) {
       setState('idle')
       setFrameUrl(undefined)
       return
@@ -45,6 +57,7 @@ export function useMjpegStream(robotId?: string | number) {
     let activeAttempt: AbortController | undefined
     let currentUrl: string | undefined
     let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let retryCount = 0
 
     const clearPublishedFrame = () => {
       const previousUrl = currentUrl
@@ -90,7 +103,8 @@ export function useMjpegStream(robotId?: string | number) {
           `/api/robots/${robotId}/stream-sessions`,
           { method: 'POST', signal: attemptController.signal },
         )
-        const response = await fetch(apiUrl(`/live/robots/${robotId}/stream.mjpg`), {
+        const streamEndpoint = endpoint ?? `/live/robots/${robotId}/stream.mjpg`
+        const response = await fetch(apiUrl(streamEndpoint), {
           headers: {
             Accept: 'multipart/x-mixed-replace',
             'X-Stream-Token': session.token,
@@ -101,6 +115,7 @@ export function useMjpegStream(robotId?: string | number) {
         if (!response.ok || !response.body) {
           throw new Error(`MJPEG stream failed (${response.status})`)
         }
+        setState('waiting')
 
         const reader = response.body.getReader()
         let buffer = new Uint8Array()
@@ -136,7 +151,10 @@ export function useMjpegStream(robotId?: string | number) {
         if (lifecycleController.signal.aborted) return
         clearPublishedFrame()
         setState('offline')
-        retryTimer = setTimeout(connect, RETRY_DELAY_MS)
+        if (retryCount < MAX_RETRY_ATTEMPTS) {
+          retryCount += 1
+          retryTimer = setTimeout(connect, RETRY_DELAY_MS)
+        }
       } finally {
         if (frameWatchdog) clearTimeout(frameWatchdog)
         lifecycleController.signal.removeEventListener('abort', abortAttempt)
@@ -151,7 +169,7 @@ export function useMjpegStream(robotId?: string | number) {
       if (retryTimer) clearTimeout(retryTimer)
       if (currentUrl) URL.revokeObjectURL(currentUrl)
     }
-  }, [robotId])
+  }, [enabled, endpoint, lifecycleKey, robotId])
 
   return { frameUrl, state }
 }
