@@ -21,4 +21,16 @@ public class MappingStatusChangedEventListener {
                 MappingStatusEventResponse.of(
                         event.mappingSessionId(), event.status(), event.mapId()));
     }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleStopCommand(MappingStopCommandStatusChangedEvent event) {
+        mappingSseService.broadcast(
+                event.mappingSessionId(),
+                MappingStatusEventResponse.ofStopCommand(
+                        event.mappingSessionId(),
+                        event.mappingStatus(),
+                        event.stopCommandId(),
+                        event.stopCommandStatus(),
+                        event.reason()));
+    }
 }

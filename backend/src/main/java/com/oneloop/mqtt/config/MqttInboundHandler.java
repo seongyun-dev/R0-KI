@@ -29,6 +29,7 @@ class MqttInboundHandler implements MqttCallbackExtended {
     };
     private static final int QOS = 1;
     private static final String START_MAPPING = "START_MAPPING";
+    private static final String STOP_MAPPING = "STOP_MAPPING";
     private static final String START_PATROL = "START_PATROL";
     private static final String STOP_PATROL = "STOP_PATROL";
 
@@ -165,7 +166,7 @@ class MqttInboundHandler implements MqttCallbackExtended {
 
     private void routeCommandAck(String robotKey, CommandAck ack) {
         String command = ack.command();
-        if (START_MAPPING.equals(command)) {
+        if (START_MAPPING.equals(command) || STOP_MAPPING.equals(command)) {
             mappingCommandAckService.handle(robotKey, ack);
         } else if (START_PATROL.equals(command) || STOP_PATROL.equals(command)) {
             patrolCommandAckService.handle(robotKey, ack);
