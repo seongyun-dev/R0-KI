@@ -120,14 +120,166 @@ def nav2_xy_goal_tolerance(environment: Mapping[str, str]) -> float:
     return value
 
 
+def apply_mapping_overrides(rendered: str, environment: Mapping[str, str]) -> str:
+    """Turn the patrol Nav2 config into the mapping-mode variant.
+
+    Patrol deliberately keeps the stored map out of the global costmap: there the
+    map is localization evidence and the live LiDAR owns obstacle decisions.
+    Exploration needs the opposite -- the planner must see the map that SLAM is
+    still growing so it can route through known free space toward a frontier and
+    refuse to cut through unexplored cells.
+
+    Only the differences live here so the two configurations cannot drift apart.
+    """
+
+    import yaml
+
+    config = yaml.safe_load(rendered)
+
+    global_costmap = config["global_costmap"]["global_costmap"]["ros__parameters"]
+    # SLAM publishes /map continuously; follow it instead of a one-shot load.
+    #
+    # Static plus inflation only, which is what upstream Nav2 uses alongside SLAM.
+    # A live obstacle_layer here was tried and removed: /map already encodes these
+    # same scans with proper probabilistic ray-tracing, and on a non-rolling costmap
+    # that grows with the map, a mark is only cleared when something re-observes it
+    # inside raytrace_max_range. Everything the robot drove past kept its marks, so
+    # exploration progressively walled itself in.
+    global_costmap["plugins"] = ["static_layer", "inflation_layer"]
+    global_costmap["static_layer"] = {
+        "plugin": "nav2_costmap_2d::StaticLayer",
+        "map_subscribe_transient_local": True,
+        "subscribe_to_updates": True,
+    }
+    global_costmap.pop("obstacle_layer", None)
+    # Unknown space must stay distinguishable so the explorer can still see where
+    # the frontiers are. The planner is deliberately left free to route through it
+    # (the template's allow_unknown stays true): during exploration the map is a
+    # thin band of observed free space, and a car-like Dubin path needs roughly
+    # twice the 0.34 m turning radius of clearance to curve at all. Forbidding
+    # unknown cells makes every candidate path leave known space and fail, which
+    # is what "GridBased: failed to create plan" was. Clearance is enforced where
+    # it can actually be measured -- the local costmap and the LiDAR interlock.
+    global_costmap["track_unknown_space"] = True
+    global_costmap["rolling_window"] = False
+    for key in ("width", "height"):
+        global_costmap.pop(key, None)
+
+    # The template inflates robot_radius + 0.15 = 0.38 m, which suits an open floor.
+    # Here the mapped corridor measures about 1.1 m across, so a 0.38 m skirt on each
+    # wall leaves roughly 0.3 m of un-penalised centre -- less than the 0.34 m turning
+    # radius, so no arc toward an off-axis frontier fits and every plan is refused.
+    # Lethality is untouched: it still comes from the 0.23 m footprint, and the LiDAR
+    # interlock still stops the chassis on approach. This only stops the planner from
+    # treating the whole room as expensive.
+    for scope in ("global_costmap", "local_costmap"):
+        layer = config[scope][scope]["ros__parameters"]["inflation_layer"]
+        layer["inflation_radius"] = 0.25
+
+    planner = config["planner_server"]["ros__parameters"]["GridBased"]
+    # Exploration is the one mode that has to maneuver through space it has not
+    # mapped yet. A Dubin path can only curve forward, so with 0.34 m of turning
+    # radius a wall 0.3-0.4 m to one side leaves no forward arc that clears it --
+    # that is what "RegulatedPurePursuitController detected collision ahead" was.
+    # Reeds-Shepp adds reverse segments, and the template's reverse_penalty keeps
+    # them short and last-resort. Patrol stays on DUBIN: it follows an operator's
+    # route through space already known to be drivable, and reversing there would
+    # move the robot away from the waypoint it was sent to.
+    planner["motion_model_for_search"] = "REEDS_SHEPP"
+    # The template's 2.1 is tuned for patrol, where reversing means leaving the
+    # waypoint you were sent to. During exploration a frontier is often close and
+    # far off-axis -- 0.93 m at 121 deg was observed live -- and the only path that
+    # fits a 0.34 m turning radius in a room this size starts by backing up. At 2.1
+    # the search kept preferring forward arcs that swept into the wall, so no plan
+    # existed at all. Still above 1.0 so forward stays preferred when it works.
+    planner["reverse_penalty"] = 1.3
+    # Upstream documents this as safe only when the costmap is largely static: it
+    # reuses the obstacle dynamic-programming expansion between replans. While SLAM
+    # is still growing the map that assumption is false every second, so the search
+    # runs against a stale heuristic and gives up on goals that are reachable.
+    planner["cache_obstacle_heuristic"] = False
+
+    # The template forbids negative linear velocity, which is right for patrol: that
+    # mode plans with DUBIN and must never retreat from the waypoint it was sent to.
+    # Here it silently defeated the whole reverse setup. /cmd_vel is published by the
+    # velocity smoother, not the controller, so a reverse command from the controller
+    # arrived as linear.x clamped to 0 with angular.z intact -- which the Ackermann
+    # adapter must refuse as an in-place rotation. Every IN_PLACE_ROTATION_REJECTED
+    # was a reverse being flattened here.
+    smoother = config["velocity_smoother"]["ros__parameters"]
+    maximum_reverse = -float(smoother["max_velocity"][0])
+    smoother["min_velocity"] = [maximum_reverse, 0.0, smoother["min_velocity"][2]]
+    # A REEDS_SHEPP path alternates forward and reverse, and every reversal
+    # walks linear.x through zero while the steering command is still live.
+    # The Ackermann adapter must refuse that pair as an in-place rotation, so
+    # the gate closed and the ramp restarted roughly every two seconds -- the
+    # chassis oscillated in place instead of driving (measured 2026-08-07:
+    # gate open +45, -45, +45 ... with IN_PLACE_ROTATION_REJECTED between
+    # each). Collapsing near-zero linear to exactly zero removes the pair:
+    # the adapter reads a clean STOP, the reversal completes, and the next
+    # segment starts from a real speed. The threshold sits just under the
+    # controller's own floor (regulated_linear_scaling_min_speed 0.05) so it
+    # only catches the ramp crossing, never a legitimate cruise command.
+    deadband = smoother.get("deadband_velocity") or [0.0, 0.0, 0.0]
+    smoother["deadband_velocity"] = [0.049, deadband[1], deadband[2]]
+
+    controller = config["controller_server"]["ros__parameters"]
+    # explore_lite stamps every frontier goal with an identity quaternion, i.e.
+    # "arrive facing 0 rad" (explore.cpp: goal.pose.pose.orientation.w = 1).
+    # A differential robot just pivots on arrival, but this chassis would have to
+    # contort a Dubin path to hit that heading, and the resulting curvature makes
+    # the controller throttle linear velocity to zero while still commanding yaw
+    # -- an in-place rotation the Ackermann adapter must refuse. Arrival heading
+    # carries no meaning for exploration, so free it.
+    controller["general_goal_checker"]["yaw_goal_tolerance"] = 3.15
+    follow_path = controller["FollowPath"]
+    # Measured floor, not a preference: the drive PWM cannot go below 45 without
+    # stalling, and PWM 45 moves this chassis at 0.094 m/s (tape-measured 0.23 m
+    # over 2.02 s, agreeing with TF to 2.6% and the encoders at 1470 ticks/m).
+    # Letting the controller scale below that makes it believe it slowed down when
+    # nothing changed, so it keeps adding steering instead -- which is how a tight
+    # curve turns into a full-lock veer.
+    # The floor the chassis can actually hold. Measured from rest, 1 s per step:
+    # PWM 44 -> 0.074 m/s, 42 -> 0.059, 41 -> ~0.05, 40 -> 0.039, 38 -> 0.024,
+    # 36 -> stalls. Below PWM 41 the two rear motors also diverge sharply (16% of
+    # each other at 40, 58% at 38), so a slower floor would buy regulation range at
+    # the cost of veering every time the controller slowed down. Asking for less
+    # than this makes the controller believe it slowed when it did not, and it
+    # answers by steering harder instead.
+    follow_path["regulated_linear_scaling_min_speed"] = 0.05
+    # Pure pursuit oscillates once the lookahead falls under the turning radius:
+    # the carrot sits inside the tightest arc the chassis can draw, so it can never
+    # be reached and the controller answers by steering harder. 0.34 m is the
+    # measured radius, so keep the lookahead comfortably outside it.
+    follow_path["min_lookahead_dist"] = 0.45
+    follow_path["lookahead_dist"] = 0.50
+    # Without this the controller drives forward along a reverse segment instead
+    # of backing along it, so the Reeds-Shepp plan above would be worse than no
+    # plan. Safe to pair only because use_rotate_to_heading is false; Nav2 rejects
+    # the two together. The adapter already signs the drive PWM from linear.x, so
+    # a negative command reaches the chassis as reverse.
+    follow_path["allow_reversing"] = True
+
+    bt = config["bt_navigator"]["ros__parameters"]
+    mapping_bt = environment.get("ROKI_NAV2_MAPPING_BT_XML", "").strip()
+    if mapping_bt:
+        bt["default_nav_to_pose_bt_xml"] = mapping_bt
+
+    return yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
+
+
 def render_nav2_config(
     template_path: Path,
     output_path: Path,
     environment: Mapping[str, str],
+    *,
+    mapping: bool = False,
 ) -> dict[str, str]:
     values = build_nav2_values(environment)
     template = Template(template_path.read_text(encoding="utf-8"))
     rendered = template.substitute(values)
+    if mapping:
+        rendered = apply_mapping_overrides(rendered, environment)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
     try:
@@ -177,6 +329,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--template", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--software-only", action="store_true")
+    parser.add_argument(
+        "--mapping",
+        action="store_true",
+        help="render the mapping-mode variant that follows the live SLAM map",
+    )
     args = parser.parse_args(argv)
 
     if args.software_only:
@@ -193,8 +350,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.output is None:
         parser.error("--output is required unless --software-only is used")
-    values = render_nav2_config(args.template, args.output, os.environ)
-    print(json.dumps({"fieldReady": True, "values": values}, sort_keys=True))
+    values = render_nav2_config(
+        args.template, args.output, os.environ, mapping=args.mapping
+    )
+    print(
+        json.dumps(
+            {"fieldReady": True, "mapping": args.mapping, "values": values},
+            sort_keys=True,
+        )
+    )
     return 0
 
 

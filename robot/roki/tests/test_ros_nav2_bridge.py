@@ -95,7 +95,14 @@ def reached(waypoint):
 
 
 class RosNav2BridgeTest(unittest.TestCase):
-    def test_start_resets_localization_to_waypoint_one_before_next_goal(self) -> None:
+    def test_start_never_overwrites_localization(self) -> None:
+        """START_PATROL must not teleport AMCL to the route's waypoint 1.
+
+        Localization is seeded once at startup with the dock pose and owned by
+        scan matching afterwards. The route is a set of goals, not a statement
+        of where the robot is.
+        """
+
         sleeps = []
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
@@ -122,14 +129,10 @@ class RosNav2BridgeTest(unittest.TestCase):
 
         bridge.start_patrol(route=route, first_event=first_event)
 
-        message = publisher.publish.call_args.args[0]
-        self.assertEqual(message.header.frame_id, "map")
-        self.assertEqual(message.header.stamp, "stamp")
-        self.assertEqual(message.pose.pose.position.x, 1.0)
-        self.assertEqual(message.pose.pose.position.y, 1.0)
-        self.assertAlmostEqual(message.pose.pose.orientation.z, 0.0)
-        self.assertAlmostEqual(message.pose.pose.orientation.w, 1.0)
-        self.assertEqual(sleeps, [1.0])
+        publisher.publish.assert_not_called()
+        self.assertEqual(sleeps, [])
+        # Waypoint 1 stays the externally confirmed anchor; navigation begins
+        # when the outer service reports it reached and sequence 2 dispatches.
         bridge._send_sequence.assert_not_called()
 
     def test_start_waits_for_first_post_anchor_goal_acceptance(self) -> None:
@@ -453,6 +456,119 @@ class RosNav2BridgeTest(unittest.TestCase):
         command = bridge.record_cmd_vel(0.2, 0.0)
         self.assertTrue(command.stopped)
         self.assertEqual(command.stop_reason, "SCAN_DWELL")
+
+    def test_nav2_abort_holds_for_obstacle_and_resumes_same_waypoint(
+        self,
+    ) -> None:
+        failures = []
+        obstacles = []
+        commands = []
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=commands.append,
+            failure_sink=failures.append,
+            obstacle_sink=obstacles.append,
+        )
+        bridge._route = demo_route()
+        bridge._current_sequence = 2
+        bridge._goal_generation = 2
+        bridge._send_sequence = Mock()
+        result = Mock()
+        result.result.return_value = SimpleNamespace(status=6)
+
+        bridge._on_goal_result(result, 2)
+
+        # An abort must not end the patrol: no failure is reported and the
+        # route/sequence survive so the same waypoint can be retried.
+        self.assertEqual(failures, [])
+        self.assertEqual(obstacles, ["OBSTACLE"])
+        self.assertIsNotNone(bridge._route)
+        self.assertEqual(bridge._current_sequence, 2)
+        self.assertTrue(bridge._paused)
+        self.assertEqual(bridge._cmd_vel_hold_reason, "OBSTACLE")
+        self.assertTrue(commands[-1].stopped)
+        self.assertEqual(commands[-1].stop_reason, "OBSTACLE")
+        bridge._send_sequence.assert_not_called()
+
+        # Once the obstacle clears the runtime resumes the very same waypoint.
+        bridge.resume_patrol()
+        bridge._send_sequence.assert_called_once_with(2)
+        self.assertFalse(bridge._paused)
+
+    def test_repeated_nav2_aborts_eventually_fail_closed(self) -> None:
+        failures = []
+        obstacles = []
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6),
+                goal_abort_retry_limit=2,
+            ),
+            motion_sink=lambda _command: None,
+            failure_sink=failures.append,
+            obstacle_sink=obstacles.append,
+        )
+        bridge._route = demo_route()
+        bridge._current_sequence = 2
+        bridge._send_sequence = Mock()
+
+        def abort_once() -> None:
+            bridge._goal_generation += 1
+            bridge._paused = False
+            result = Mock()
+            result.result.return_value = SimpleNamespace(status=6)
+            bridge._on_goal_result(result, bridge._goal_generation)
+
+        abort_once()
+        abort_once()
+        self.assertEqual(failures, [])
+        self.assertEqual(len(obstacles), 2)
+
+        # A blockage that never clears must not hold the patrol open forever.
+        abort_once()
+        self.assertEqual(len(obstacles), 2)
+        self.assertEqual(len(failures), 1)
+        self.assertTrue(
+            failures[0].startswith("NAV2_GOAL_ABORT_UNRECOVERABLE")
+        )
+        self.assertIsNone(bridge._route)
+
+    def test_waypoint_progress_restores_abort_retry_budget(self) -> None:
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=lambda _command: None,
+        )
+        route = demo_route()
+        bridge._route = route
+        bridge._current_sequence = 1
+        bridge._goal_aborts_at_sequence = 2
+        bridge._send_sequence = Mock()
+
+        bridge.on_navigation_event(reached(route.waypoints[0]))
+
+        self.assertEqual(bridge._current_sequence, 2)
+        self.assertEqual(bridge._goal_aborts_at_sequence, 0)
+
+    def test_succeeded_goal_restores_abort_retry_budget(self) -> None:
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=lambda _command: None,
+        )
+        bridge._route = demo_route()
+        bridge._current_sequence = 2
+        bridge._goal_generation = 2
+        bridge._goal_aborts_at_sequence = 2
+        result = Mock()
+        result.result.return_value = SimpleNamespace(status=4)
+
+        bridge._on_goal_result(result, 2)
+
+        self.assertEqual(bridge._goal_aborts_at_sequence, 0)
 
     def test_current_goal_cancel_fails_closed(self) -> None:
         failures = []

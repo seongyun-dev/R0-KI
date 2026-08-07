@@ -113,6 +113,7 @@ class RobotRuntime:
         self._pending_motion_stop: int | None = None
         self._manual_motion_active = False
         self._stationary_steering_pending = False
+        self._control_gate_was_writing = False
         self._latest_hardware_status: HardwareStatus | None = None
         self._last_logged_line_values: tuple[int, ...] | None = None
         self._last_odometry_uptime_ms: int | None = None
@@ -461,6 +462,21 @@ class RobotRuntime:
                 )
             ):
                 self._stationary_steering_pending = False
+                # fault=NONE stops leave no trace in _send_stop, which made
+                # "commands flow but wheels stay still" undiagnosable in the
+                # field. Log the gate's inputs once per closing transition.
+                if self._control_gate_was_writing:
+                    self._control_gate_was_writing = False
+                    logger.warning(
+                        "CONTROL gate closed: allowed=%s fault=%s estop=%s "
+                        "authorized=%s ramp_speed=%s mission_speed=%s",
+                        latest_decision.allowed,
+                        latest_decision.fault,
+                        current.command.emergency_stop,
+                        authorized,
+                        command.speed,
+                        current.command.speed,
+                    )
                 self._send_stop(latest_decision.fault)
                 return
             if not self._bridge.write_line(
@@ -476,6 +492,16 @@ class RobotRuntime:
                 )
             else:
                 self._stationary_steering_pending = False
+                if not self._control_gate_was_writing:
+                    self._control_gate_was_writing = True
+                    # WARNING on purpose: the runtime's log level hides INFO,
+                    # and the whole point is to see the first written PWM in
+                    # the field journal next to the closing transition.
+                    logger.warning(
+                        "CONTROL gate open: speed=%s steering=%s",
+                        command.speed,
+                        command.steering_deg,
+                    )
 
         if not self._mission.run_if_current(
             mission.generation,

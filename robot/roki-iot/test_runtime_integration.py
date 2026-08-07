@@ -1282,6 +1282,48 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         self.assertEqual(payload["motor"], "NORMAL")
         self.assertEqual(payload["lineSensor"], "NORMAL")
 
+    def test_mapping_suppresses_only_backend_obstacle_alert_fields(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        mapping_runtime = Mock()
+        mapping_runtime.active = True
+        application = create_integrated_application(
+            final_runtime=runtime,
+            mapping_runtime=mapping_runtime,
+        )
+        runtime.state_store.update_lidar_status("NORMAL")
+        runtime.state_store.update_obstacle(
+            ObstacleState(
+                status="STOP",
+                direction="FRONT",
+                reason_message="front obstacle",
+            )
+        )
+        application._mqtt_client.publish = Mock()
+
+        application._publish_status_if_needed(100.0)
+
+        payload = application._mqtt_client.publish.call_args.kwargs["payload"]
+        self.assertEqual(
+            payload["obstacle"],
+            {
+                "status": "CLEAR",
+                "direction": "NONE",
+                "reasonMessage": None,
+            },
+        )
+        self.assertEqual(payload["lidar"], "NORMAL")
+        self.assertEqual(
+            runtime.state_store.get_status().obstacle.status,
+            "STOP",
+        )
+
+        mapping_runtime.active = False
+        application._publish_status_if_needed(101.0, force=True)
+        payload = application._mqtt_client.publish.call_args.kwargs["payload"]
+        self.assertEqual(payload["obstacle"]["status"], "STOP")
+
     def test_pose_publisher_keeps_one_second_interval(self) -> None:
         from backend_mqtt.publisher import RokiPublisherApplication
         from backend_state.models import PoseState

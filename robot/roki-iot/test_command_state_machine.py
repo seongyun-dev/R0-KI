@@ -173,7 +173,10 @@ def payload(
 class FakeMappingRuntime:
     def __init__(self) -> None:
         self.active = False
+        self.state = "IDLE"
+        self.mapping_session_id: int | None = None
         self.starts: list[tuple[int, str]] = []
+        self.finishes: list[int | None] = []
         self.stops = 0
         self.aborts: list[str] = []
         self.command_id: str | None = None
@@ -187,12 +190,26 @@ class FakeMappingRuntime:
         self.starts.append((mapping_session_id, command_id))
         if self.start_decision[0]:
             self.active = True
+            self.state = "MAPPING"
+            self.mapping_session_id = mapping_session_id
             self.command_id = command_id
         return self.start_decision
+
+    def lifecycle_snapshot(self):
+        return self.state, self.mapping_session_id
+
+    def finish(self, mapping_session_id: int | None = None) -> bool:
+        self.finishes.append(mapping_session_id)
+        if self.state != "MAPPING" or mapping_session_id != self.mapping_session_id:
+            return False
+        self.state = "SAVING"
+        return True
 
     def stop(self) -> None:
         self.stops += 1
         self.active = False
+        self.state = "IDLE"
+        self.mapping_session_id = None
         self.command_id = None
 
     def abort(self, reason: str) -> str | None:
@@ -201,6 +218,8 @@ class FakeMappingRuntime:
         self.aborts.append(reason)
         command_id = self.command_id
         self.active = False
+        self.state = "IDLE"
+        self.mapping_session_id = None
         self.command_id = None
         return command_id
 
@@ -603,6 +622,76 @@ class CommandStateMachineTest(unittest.TestCase):
 
         self.assertEqual(self.mapping.starts, [(12, "map-command")])
         self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+
+    def test_stop_mapping_finishes_same_session_once_and_acks_success(self) -> None:
+        self.mapping.active = True
+        self.mapping.state = "MAPPING"
+        self.mapping.mapping_session_id = 12
+
+        command = payload(
+            "STOP_MAPPING",
+            "stop-map-1",
+            mapping_session_id=12,
+        )
+        self.handler.handle(self.settings.command_topic, command)
+        self.handler.handle(self.settings.command_topic, command)
+
+        self.assertEqual(self.mapping.finishes, [12])
+        self.assertEqual(
+            [message[1]["status"] for message in self.mqtt.messages[-2:]],
+            ["SUCCEEDED", "SUCCEEDED"],
+        )
+        self.assertEqual(self.mqtt.messages[-1][1]["command"], "STOP_MAPPING")
+
+    def test_stop_mapping_is_idempotent_while_save_or_upload_is_active(self) -> None:
+        for state in ("STOPPING", "SAVING", "UPLOADING"):
+            with self.subTest(state=state):
+                self.mapping.active = True
+                self.mapping.state = state
+                self.mapping.mapping_session_id = 12
+                self.mapping.finishes.clear()
+
+                self.handler.handle(
+                    self.settings.command_topic,
+                    payload(
+                        "STOP_MAPPING",
+                        f"stop-map-{state.lower()}",
+                        mapping_session_id=12,
+                    ),
+                )
+
+                self.assertEqual(self.mapping.finishes, [])
+                self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+
+    def test_stop_mapping_rejects_a_different_session(self) -> None:
+        self.mapping.active = True
+        self.mapping.state = "MAPPING"
+        self.mapping.mapping_session_id = 12
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("STOP_MAPPING", "wrong-map", mapping_session_id=13),
+        )
+
+        self.assertEqual(self.mapping.finishes, [])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "MAPPING_SESSION_MISMATCH",
+        )
+
+    def test_stop_mapping_rejects_idle_without_starting_work(self) -> None:
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("STOP_MAPPING", "idle-map", mapping_session_id=12),
+        )
+
+        self.assertEqual(self.mapping.finishes, [])
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"],
+            "MAPPING_NOT_ACTIVE",
+        )
 
     def test_runtime_failure_aborts_mapping_and_replays_failed_ack(self) -> None:
         command = payload(

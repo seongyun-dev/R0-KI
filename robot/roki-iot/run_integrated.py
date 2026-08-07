@@ -244,9 +244,9 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
             ),
             minimum_drive_pwm=int(os.getenv("PATROL_DRIVE_SPEED_PWM", "45")),
             maximum_drive_pwm=int(os.getenv("ROKI_MAXIMUM_DRIVE_PWM", "51")),
-            steering_left_deg=60,
+            steering_left_deg=40,
             steering_center_deg=80,
-            steering_right_deg=100,
+            steering_right_deg=120,
         ),
         cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
         navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
@@ -259,6 +259,9 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
         initial_pose_settle_sec=float(
             os.getenv("ROKI_NAV2_INITIAL_POSE_SETTLE_SECONDS", "1.0")
         ),
+        goal_abort_retry_limit=int(
+            os.getenv("ROKI_NAV2_GOAL_ABORT_RETRY_LIMIT", "3")
+        ),
     )
     return RosNav2Bridge(
         settings=settings,
@@ -266,10 +269,60 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
             command
         ),
         failure_sink=lambda reason: service_holder["service"].fail_patrol(reason),
+        obstacle_sink=lambda reason: service_holder["service"].pause_patrol(reason),
         scan_context_sink=lambda waypoint: service_holder[
             "service"
         ].update_scan_context(waypoint),
         heading_source=lambda: service_holder["service"].current_heading_deg(),
+    )
+
+
+def _build_mapping_nav2_bridge(
+    runtime: Any, mapping_runtime_holder: dict[str, Any]
+) -> Any:
+    """Subscribe to Nav2 ``cmd_vel`` so the frontier explorer can drive mapping.
+
+    Only the cmd_vel-to-ESP32 half of the bridge is wanted here: goals come from
+    explore_lite over its own Nav2 action client, never from this process. The
+    bridge therefore gets a mapping-session motion sink and no failure sink, and
+    ``start_patrol`` is never called on it.
+    """
+
+    from integration.mapping_motion_sink import MappingMotionSink
+    from navigation.ros_nav2_bridge import RosNav2Bridge, RosNav2BridgeSettings
+    from navigation.cmd_vel_adapter import AckermannCommandSettings
+
+    wheelbase = os.getenv("ROKI_WHEELBASE_M", "").strip()
+    maximum_angle = os.getenv("ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG", "").strip()
+    if not wheelbase or not maximum_angle:
+        raise RuntimeError(
+            "AUTONOMOUS_MAPPING_FIELD_CONFIG_MISSING: ROKI_WHEELBASE_M and "
+            "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG are required"
+        )
+    sink = MappingMotionSink(
+        runtime,
+        lambda: mapping_runtime_holder.get("mapping"),
+        stop_reporter=lambda reason: print(f"[MAPPING] motion stop reason={reason}"),
+    )
+    return RosNav2Bridge(
+        settings=RosNav2BridgeSettings(
+            ackermann=AckermannCommandSettings(
+                wheelbase_m=float(wheelbase),
+                maximum_road_wheel_angle_deg=float(maximum_angle),
+                maximum_linear_speed_mps=float(
+                    os.getenv("ROKI_MAXIMUM_LINEAR_SPEED_MPS", "0.4")
+                ),
+                minimum_drive_pwm=int(os.getenv("PATROL_DRIVE_SPEED_PWM", "45")),
+                maximum_drive_pwm=int(os.getenv("ROKI_MAXIMUM_DRIVE_PWM", "51")),
+                steering_left_deg=40,
+                steering_center_deg=80,
+                steering_right_deg=120,
+            ),
+            cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
+            navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
+            map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
+        ),
+        motion_sink=sink,
     )
 
 
@@ -313,20 +366,38 @@ def _environment_enabled(name: str, default: bool = True) -> bool:
 
 
 def _mapping_mode_requested() -> bool:
-    return (
-        _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True)
-        and os.getenv("AIOT_ROS_MODE", "").strip().lower() == "mapping"
-    )
+    return os.getenv("AIOT_ROS_MODE", "").strip().lower() == "mapping"
+
+
+class _NoOpMappingInput:
+    """No-op mapping input used when the optional gamepad is disabled."""
+
+    device_path = Path("disabled")
+
+    def start(self) -> None:
+        return
+
+    def stop(self) -> None:
+        return
+
+    @staticmethod
+    def diagnostic_snapshot() -> dict[str, object]:
+        return {
+            "gamepadDeviceOpen": False,
+            "gamepadThreadAlive": False,
+            "lastGamepadDecision": "DISABLED",
+            "lastGamepadDecisionAgoMs": None,
+        }
+
+
+# Compatibility for the already-deployed focused test name.
+_DisabledMappingInput = _NoOpMappingInput
 
 
 def _legacy_mapping_only_selected(settings: Any, route_path: Path) -> bool:
     """Preserve the pre-route mapping bootstrap used before Nav2 is configured."""
 
-    return (
-        _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True)
-        and settings.navigation_mode == "encoder_limited"
-        and not route_path.is_file()
-    )
+    return settings.navigation_mode == "encoder_limited" and not route_path.is_file()
 
 
 def _require_legacy_route_when_mapping_disabled(
@@ -512,11 +583,14 @@ def _build_mapping_runtime(
         ),
     )
     holder: dict[str, Any] = {}
-    gamepad_input = LinuxGamepadInput(
-        drive_controller,
-        settings=gamepad_settings,
-        finish_callback=lambda: holder["mapping"].finish(),
-    )
+    if _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True):
+        gamepad_input = LinuxGamepadInput(
+            drive_controller,
+            settings=gamepad_settings,
+            finish_callback=lambda: holder["mapping"].finish(),
+        )
+    else:
+        gamepad_input = _NoOpMappingInput()
     mapping_runtime = ManualMappingRuntime(
         runtime_service=runtime_service,
         state_store=state_store,
@@ -571,6 +645,32 @@ def _build_mapping_runtime(
     )
     holder["mapping"] = mapping_runtime
     return mapping_runtime
+
+
+def _build_mapping_visualizer(mapping_runtime: Any) -> Any:
+    """Build an optional read-only view of the existing mapping lifecycle."""
+
+    from aiot_robot.mapping_visualizer import (
+        MappingVisualizer,
+        MappingVisualizerSettings,
+    )
+
+    settings = MappingVisualizerSettings(
+        bind=os.getenv("AIOT_MAPPING_MJPEG_BIND", "127.0.0.1"),
+        port=int(os.getenv("AIOT_MAPPING_MJPEG_PORT", "8091")),
+        output_size_px=int(os.getenv("AIOT_MAPPING_MJPEG_SIZE_PX", "800")),
+        maximum_fps=float(os.getenv("AIOT_MAPPING_MJPEG_MAX_FPS", "4")),
+        jpeg_quality=int(os.getenv("AIOT_MAPPING_MJPEG_QUALITY", "75")),
+        inactive_fps=float(os.getenv("AIOT_MAPPING_MJPEG_INACTIVE_FPS", "1")),
+        map_topic=os.getenv("AIOT_MAPPING_MAP_TOPIC", "/map"),
+        scan_topic=os.getenv("AIOT_MAPPING_SCAN_TOPIC", "/scan"),
+        map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
+        robot_frame=os.getenv("ROKI_BASE_FRAME", "base_link"),
+    )
+    return MappingVisualizer(
+        mapping_active=lambda: bool(mapping_runtime.motion_active),
+        settings=settings,
+    )
 
 
 def create_integrated_application(
@@ -643,6 +743,21 @@ def create_integrated_application(
         )
         else None
     )
+    # Autonomous mapping has no route and therefore no patrol to authorise
+    # motion, but Nav2 is still driving: the frontier explorer supplies the
+    # goals. Build the same cmd_vel bridge and route its output through the
+    # mapping-session gate instead of the patrol gate. The mapping runtime is
+    # created further down, so the gate resolves it lazily.
+    mapping_runtime_holder: dict[str, Any] = {}
+    mapping_motion_bridge = (
+        _build_mapping_nav2_bridge(runtime, mapping_runtime_holder)
+        if (
+            navigation_driver is None
+            and not manual_enabled
+            and _environment_enabled("AIOT_MAPPING_AUTONOMOUS", False)
+        )
+        else None
+    )
     runtime_service = FinalRuntimeService(
         runtime,
         patrol_drive_speed_pwm=settings.patrol_drive_speed_pwm,
@@ -671,9 +786,7 @@ def create_integrated_application(
         allow_legacy_direct_patrol=allow_legacy_direct_patrol,
     )
     service_holder["service"] = runtime_service
-    if mapping_runtime is None and build_default_runtime and _environment_enabled(
-        "AIOT_MAPPING_GAMEPAD_ENABLED", True
-    ):
+    if mapping_runtime is None and build_default_runtime:
         mapping_runtime = _build_mapping_runtime(
             runtime,
             runtime_service,
@@ -682,6 +795,7 @@ def create_integrated_application(
         )
     if mapping_runtime is not None:
         runtime_service.set_mapping_runtime(mapping_runtime)
+        mapping_runtime_holder["mapping"] = mapping_runtime
     if lidar_health_bridge is not None:
         set_obstacle_activity_check = getattr(
             lidar_health_bridge,
@@ -692,9 +806,29 @@ def create_integrated_application(
             set_obstacle_activity_check(
                 runtime_service.is_obstacle_detection_active
             )
+        # obstacle_sink(pause)의 대칭짝. Nav2는 장애물 abort 시 순찰을 이쪽에
+        # 넘기고 clear-detect 루프가 돌려주기를 기다리는데(RosNav2Bridge.
+        # _hold_for_obstacle) 그 호출자가 없어서 _paused가 영구히 True로 남고
+        # 이후 모든 cmd_vel이 MOTION_INTERLOCK으로 버려졌다.
+        set_obstacle_clear_sink = getattr(
+            lidar_health_bridge,
+            "set_obstacle_clear_sink",
+            None,
+        )
+        if callable(set_obstacle_clear_sink):
+            set_obstacle_clear_sink(runtime_service.resume_patrol)
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
+    if mapping_motion_bridge is not None:
+        # Started and stopped with the rest of the runtime so the cmd_vel
+        # subscription exists for the whole mapping session.
+        runtime_components.append(mapping_motion_bridge)
+    if (
+        mapping_runtime is not None
+        and _environment_enabled("AIOT_MAPPING_MJPEG_ENABLED", False)
+    ):
+        runtime_components.append(_build_mapping_visualizer(mapping_runtime))
     if operational_ai:
         from aiot_robot.runtime_ai import RosAiCoordinator
 
@@ -754,6 +888,14 @@ def create_integrated_application(
         # reflect the robot at the marked dock before START_PATROL.  The pose
         # bridge already rejects missing or stale transforms, so patrol state
         # is not an additional validity condition.
+        obstacle_alert_activity_check=lambda: not bool(
+            (mapping_runtime is not None and mapping_runtime.active)
+            or (
+                _environment_enabled("AIOT_MAPPING_AUTONOMOUS", False)
+                and os.getenv("AIOT_ROS_MODE", "").strip().lower()
+                == "mapping"
+            )
+        ),
         runtime_components=tuple(runtime_components),
         start_serial_reader=start_serial_runtime,
     )
@@ -771,7 +913,7 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
     _validate_import_namespaces()
     settings = load_settings()
     selected_route = _selected_route_path(route_path)
-    mapping_available = _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True)
+    mapping_available = True
     mapping_requested = _mapping_mode_requested()
     legacy_mapping_only = _legacy_mapping_only_selected(settings, selected_route)
     config_source = _navigation_config_source()
