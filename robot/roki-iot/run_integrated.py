@@ -365,8 +365,17 @@ def _environment_enabled(name: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _mapping_mode_requested() -> bool:
-    return os.getenv("AIOT_ROS_MODE", "").strip().lower() == "mapping"
+def _no_active_map() -> bool:
+    """아직 지도가 없으면 순찰 경로를 검증할 대상이 없다.
+
+    예전에는 AIOT_ROS_MODE 로 판단했다. 그 변수는 "지금 어느 노드 집합이
+    떠 있는가"를 뜻했고, 매핑 모드에는 순찰 경로가 없으니 검증을 미뤘다.
+    이제 두 운행이 같은 노드 집합으로 돌아 그 변수가 사라졌지만, 판단의
+    실질은 그대로다 -- 활성 지도가 없으면 순찰할 경로도 없다.
+    지도가 활성화되면 map_activation 이 ROKI_MAP_YAML 을 기록한다.
+    """
+
+    return not os.getenv("ROKI_MAP_YAML", "").strip()
 
 
 class _NoOpMappingInput:
@@ -529,6 +538,10 @@ def _build_mapping_runtime(
         ManualDriveSettings,
     )
     from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
+    from integration.localization_mode import (
+        LocalizationModeController,
+        RosLocalizationModeTransport,
+    )
     from integration.map_activation import (
         CurrentMapActivator,
         MapActivationSettings,
@@ -591,6 +604,15 @@ def _build_mapping_runtime(
         )
     else:
         gamepad_input = _NoOpMappingInput()
+    # 매핑<->순찰 전환. 예전에는 env 파일에 모드를 적고 서비스를 재시작했다.
+    # 이제 slam_toolbox 서비스 호출이라 프로세스가 살아 있는 채로 바뀐다.
+    localization_transport = RosLocalizationModeTransport()
+    localization_transport.start()
+    localization_controller = LocalizationModeController(
+        localization_transport,
+        report=print,
+    )
+
     mapping_runtime = ManualMappingRuntime(
         runtime_service=runtime_service,
         state_store=state_store,
@@ -621,14 +643,9 @@ def _build_mapping_runtime(
                         "/var/lib/aiot/config/current-map.env",
                     )
                 ),
-                restart_request_file=Path(
-                    os.getenv(
-                        "AIOT_MAP_ACTIVATION_REQUEST_FILE",
-                        "/var/lib/aiot/state/map-activation.pending",
-                    )
-                ),
             )
         ),
+        localization=localization_controller,
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -888,13 +905,16 @@ def create_integrated_application(
         # reflect the robot at the marked dock before START_PATROL.  The pose
         # bridge already rejects missing or stale transforms, so patrol state
         # is not an additional validity condition.
-        obstacle_alert_activity_check=lambda: not bool(
-            (mapping_runtime is not None and mapping_runtime.active)
-            or (
-                _environment_enabled("AIOT_MAPPING_AUTONOMOUS", False)
-                and os.getenv("AIOT_ROS_MODE", "").strip().lower()
-                == "mapping"
-            )
+        # 매핑 중에는 백엔드로 가는 장애물 알림만 비운다. 그리는 중인 벽이
+        # 순찰 위험 알림이 되면 안 되기 때문이다. 젯슨 내부의 실제 스캔과
+        # 인터락은 그대로 살아 있다.
+        #
+        # 예전에는 AIOT_ROS_MODE 도 함께 봤다. 그 변수는 부팅 시 어느 노드
+        # 집합이 떴는지를 뜻했으므로, 세션이 없어도 매핑 스택이면 알림이
+        # 꺼졌다. 이제 두 운행이 같은 스택을 쓰니 그 대리 판단이 성립하지
+        # 않고, 판단 기준은 실제 세션 하나로 충분하다.
+        obstacle_alert_activity_check=lambda: not (
+            mapping_runtime is not None and mapping_runtime.active
         ),
         runtime_components=tuple(runtime_components),
         start_serial_reader=start_serial_runtime,
@@ -914,7 +934,7 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
     settings = load_settings()
     selected_route = _selected_route_path(route_path)
     mapping_available = True
-    mapping_requested = _mapping_mode_requested()
+    mapping_requested = _no_active_map()
     legacy_mapping_only = _legacy_mapping_only_selected(settings, selected_route)
     config_source = _navigation_config_source()
     local_fallback = _environment_enabled(
@@ -1020,7 +1040,7 @@ def main(argv: list[str] | None = None) -> int:
     _event_delivery_owner()
     if not args.manual_keyboard:
         selected_route = _selected_route_path(args.route)
-        if _mapping_mode_requested() or _legacy_mapping_only_selected(
+        if _no_active_map() or _legacy_mapping_only_selected(
             settings, selected_route
         ):
             logging.getLogger(__name__).info(

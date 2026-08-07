@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,7 +48,6 @@ class CurrentMapActivatorTest(unittest.TestCase):
         self.settings = MapActivationSettings(
             self.root / "maps",
             self.root / "config" / "current-map.env",
-            self.root / "state" / "map-activation.pending",
         )
         self.activator = CurrentMapActivator(self.settings)
 
@@ -65,19 +63,18 @@ class CurrentMapActivatorTest(unittest.TestCase):
         metadata = load_map_metadata(activated.yaml_path)
         self.assertEqual(activated.bundle_sha256, map_bundle_sha256(metadata))
         environment = self.settings.environment_file.read_text(encoding="utf-8")
-        self.assertIn('AIOT_ROS_MODE="patrol"', environment)
         self.assertIn('ROKI_MAP_ID="7"', environment)
         self.assertIn('ROKI_MAP_VERSION="3"', environment)
         self.assertIn(
             f'ROKI_MAP_SHA256="{activated.bundle_sha256}"',
             environment,
         )
-        request = json.loads(
-            self.settings.restart_request_file.read_text(encoding="utf-8")
-        )
-        self.assertEqual(request["mapId"], 7)
-        self.assertEqual(request["mapVersion"], 3)
-        self.assertEqual(request["mapYaml"], str(activated.yaml_path))
+        # 활성화는 더 이상 모드를 정하지 않는다. 예전에는 여기에
+        # AIOT_ROS_MODE="patrol" 을 적고 마커 파일로 서비스를 재시작해 전환했다.
+        # 그 재시작이 진행 중이던 세션을 고아로 만들고 시리얼을 다시 열게 했다.
+        # 지금은 slam_toolbox 서비스 호출로 전환하므로, 이 파일에 남는 것은
+        # "활성 지도가 무엇인가"라는 사실뿐이다.
+        self.assertNotIn("AIOT_ROS_MODE", environment)
 
     def test_same_backend_version_and_content_is_idempotent(self) -> None:
         first = self.activator.activate(self.artifact, map_id="7", map_version="3")
@@ -107,7 +104,6 @@ class CurrentMapActivatorTest(unittest.TestCase):
             self.settings.environment_file.read_text(encoding="utf-8"),
             'ROKI_MAP_YAML="/previous/map.yaml"\n',
         )
-        self.assertFalse(self.settings.restart_request_file.exists())
 
 
 if __name__ == "__main__":

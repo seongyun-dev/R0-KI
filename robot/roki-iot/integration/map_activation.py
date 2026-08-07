@@ -24,7 +24,6 @@ class MapActivationError(RuntimeError):
 class MapActivationSettings:
     maps_directory: Path
     environment_file: Path
-    restart_request_file: Path
 
 
 @dataclass(frozen=True)
@@ -82,8 +81,12 @@ class CurrentMapActivator:
                 os.replace(staging_directory, final_directory)
 
             active_yaml = final_directory / artifact.yaml_path.name
+            # AIOT_ROS_MODE 를 쓰지 않는다. 예전에는 이 파일에 "patrol" 을 적고
+            # restart_request_file 로 서비스를 재시작해 모드를 바꿨다. 두 운행이
+            # 서로 다른 노드 집합을 쓰던 시절의 구조다. 지금은 slam_toolbox 가
+            # 두 역할을 다 하므로 전환이 서비스 호출이고, 재시작이 필요 없다.
+            # 여기 남은 값들은 "지금 활성 지도가 무엇인가"라는 사실뿐이다.
             environment = {
-                "AIOT_ROS_MODE": "patrol",
                 "ROKI_MAP_YAML": str(active_yaml.resolve()),
                 "ROKI_MAP_ID": str(normalized_map_id),
                 "ROKI_MAP_VERSION": str(normalized_map_version),
@@ -96,26 +99,12 @@ class CurrentMapActivator:
                     for name, value in environment.items()
                 ),
             )
-            activated = ActivatedMap(
+            return ActivatedMap(
                 normalized_map_id,
                 normalized_map_version,
                 active_yaml,
                 source_hash,
             )
-            _atomic_write_text(
-                self._settings.restart_request_file,
-                json.dumps(
-                    {
-                        "mapId": activated.map_id,
-                        "mapVersion": activated.map_version,
-                        "mapYaml": str(activated.yaml_path),
-                        "mapSha256": activated.bundle_sha256,
-                    },
-                    sort_keys=True,
-                )
-                + "\n",
-            )
-            return activated
         except (OSError, UnicodeError, yaml.YAMLError) as exc:
             raise MapActivationError("map activation filesystem failure") from exc
         finally:
