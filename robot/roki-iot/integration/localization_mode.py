@@ -24,8 +24,9 @@ slam_toolbox 는 이 전환을 서비스 호출로 제공한다. `map_and_locali
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 # slam_toolbox/srv/DeserializePoseGraph 의 match_type.
 # 저장된 그래프를 주어진 포즈 근처에서 위치추정 시작점으로 삼는다.
@@ -39,6 +40,23 @@ class DockPose:
     x: float = 0.0
     y: float = 0.0
     theta: float = 0.0
+
+
+def posegraph_files_present(posegraph_path: str) -> bool:
+    """slam_toolbox 가 실제로 읽을 두 파일이 다 있는지 본다.
+
+    직렬화는 확장자 없는 경로를 받아 ``.posegraph`` 와 ``.data`` 두 개를
+    만든다. 하나만 있으면 적재는 실패하는데 서비스는 그 실패를 알려주지
+    않으므로, 호출 전에 여기서 걸러야 한다.
+    """
+
+    from pathlib import Path
+
+    base = Path(posegraph_path)
+    return (
+        base.with_suffix(".posegraph").is_file()
+        and base.with_suffix(".data").is_file()
+    )
 
 
 class ModeTransport(Protocol):
@@ -70,9 +88,11 @@ class LocalizationModeController:
         self,
         transport: ModeTransport,
         *,
+        posegraph_exists: Callable[[str], bool] | None = None,
         report: Callable[[str], None] | None = None,
     ) -> None:
         self._transport = transport
+        self._posegraph_exists = posegraph_exists or posegraph_files_present
         self._report = report
         self._lock = threading.Lock()
         # 시작 시점의 모드를 안다고 가정하지 않는다. 첫 전환이 실제 상태를
@@ -125,6 +145,14 @@ class LocalizationModeController:
 
         if not posegraph_path:
             return False, "POSEGRAPH_PATH_MISSING"
+        # 파일 존재를 여기서 막지 않으면 아무도 막지 못한다.
+        # DeserializePoseGraph 는 빈 응답을 돌려주는 서비스라 실패 신호가 없다.
+        # 2026-08-07 실기 확인: 없는 경로를 주면 노드는
+        # "serialization::Read: Failed to open requested file" 을 찍는데
+        # 서비스는 정상 응답한다. 그대로 두면 지도 없이 순찰을 시작한다.
+        if not self._posegraph_exists(posegraph_path):
+            self._say(f"posegraph not found path={posegraph_path}")
+            return False, "POSEGRAPH_MISSING"
         pose = dock_pose or DockPose()
         try:
             self._transport.set_localization_mode(True)
@@ -179,3 +207,175 @@ class LocalizationModeController:
     def _say(self, message: str) -> None:
         if self._report is not None:
             self._report(f"[LOCALIZATION] {message}")
+
+
+class ServiceCallFailed(RuntimeError):
+    """서비스 호출이 응답을 못 받았거나 실패를 응답했다."""
+
+
+def wait_for_response(
+    future: Any,
+    *,
+    timeout_sec: float,
+    description: str,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    poll_sec: float = 0.02,
+) -> Any:
+    """실행기가 다른 스레드에서 돌리는 future 를 기다린다.
+
+    ``rclpy.spin_until_future_complete`` 를 쓰지 않는다. 우리 노드는 이미
+    전용 실행기가 스핀하고 있어서, 같은 노드를 또 스핀하면 충돌한다.
+    스핀은 실행기에 맡기고 여기서는 완료만 기다린다.
+    """
+
+    deadline = clock() + timeout_sec
+    while not future.done():
+        if clock() >= deadline:
+            future.cancel()
+            raise ServiceCallFailed(f"{description} timed out after {timeout_sec}s")
+        sleep(poll_sec)
+    exception = future.exception()
+    if exception is not None:
+        raise ServiceCallFailed(f"{description} raised {type(exception).__name__}")
+    response = future.result()
+    if response is None:
+        raise ServiceCallFailed(f"{description} returned no response")
+    # SetBool 은 success/message 를 준다. DeserializePoseGraph 는 빈 응답이라
+    # 여기서 걸리지 않는다 -- 예외 없이 돌아온 것 자체가 성공이다.
+    if getattr(response, "success", True) is False:
+        detail = getattr(response, "message", "") or "no message"
+        raise ServiceCallFailed(f"{description} rejected: {detail}")
+    return response
+
+
+class RosLocalizationModeTransport:
+    """``LocalizationModeController`` 가 쓰는 실제 ROS 서비스 클라이언트.
+
+    rclpy 는 ``start()`` 안에서 늦게 임포트한다. 이 모듈을 임포트하는 것만으로
+    ROS 가 필요해지면 정책 클래스의 테스트까지 ROS 설치에 묶인다.
+    """
+
+    def __init__(
+        self,
+        *,
+        node_name: str = "roki_localization_mode",
+        set_mode_service: str = "/slam_toolbox/set_localization_mode",
+        deserialize_service: str = "/slam_toolbox/deserialize_map",
+        discovery_timeout_sec: float = 15.0,
+        set_mode_timeout_sec: float = 15.0,
+        # 7.2MB 포즈그래프 적재에 수 초가 걸린다(2026-08-07 실측). 넉넉히 준다.
+        deserialize_timeout_sec: float = 60.0,
+    ) -> None:
+        self._node_name = node_name
+        self._set_mode_service = set_mode_service
+        self._deserialize_service = deserialize_service
+        self._discovery_timeout_sec = discovery_timeout_sec
+        self._set_mode_timeout_sec = set_mode_timeout_sec
+        self._deserialize_timeout_sec = deserialize_timeout_sec
+        self._lock = threading.Lock()
+        self._node: Any = None
+        self._executor: Any = None
+        self._thread: threading.Thread | None = None
+        self._owns_rclpy_context = False
+        self._set_mode_client: Any = None
+        self._deserialize_client: Any = None
+        self._set_bool_type: Any = None
+        self._deserialize_type: Any = None
+        self._pose_type: Any = None
+
+    def start(self) -> None:
+        with self._lock:
+            if self._node is not None:
+                return
+            import rclpy
+            from geometry_msgs.msg import Pose2D
+            from rclpy.executors import SingleThreadedExecutor
+            from slam_toolbox.srv import DeserializePoseGraph
+            from std_srvs.srv import SetBool
+
+            self._set_bool_type = SetBool
+            self._deserialize_type = DeserializePoseGraph
+            self._pose_type = Pose2D
+
+            self._owns_rclpy_context = not rclpy.ok()
+            if self._owns_rclpy_context:
+                rclpy.init(args=None)
+            self._node = rclpy.create_node(self._node_name)
+            self._set_mode_client = self._node.create_client(
+                SetBool, self._set_mode_service
+            )
+            self._deserialize_client = self._node.create_client(
+                DeserializePoseGraph, self._deserialize_service
+            )
+            self._executor = SingleThreadedExecutor()
+            self._executor.add_node(self._node)
+            self._thread = threading.Thread(
+                target=self._executor.spin,
+                name="ros-localization-mode",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._executor is not None:
+                self._executor.shutdown()
+            if self._node is not None:
+                self._node.destroy_node()
+            if self._owns_rclpy_context:
+                import rclpy
+
+                if rclpy.ok():
+                    rclpy.shutdown()
+            self._node = None
+            self._executor = None
+            self._thread = None
+
+    def set_localization_mode(self, localization: bool) -> None:
+        request = self._set_bool_type.Request()
+        request.data = bool(localization)
+        self._invoke(
+            self._set_mode_client,
+            request,
+            self._set_mode_service,
+            self._set_mode_timeout_sec,
+        )
+
+    def deserialize_map(
+        self,
+        filename: str,
+        match_type: int,
+        initial_pose: DockPose,
+    ) -> None:
+        request = self._deserialize_type.Request()
+        request.filename = filename
+        request.match_type = int(match_type)
+        pose = self._pose_type()
+        pose.x = float(initial_pose.x)
+        pose.y = float(initial_pose.y)
+        pose.theta = float(initial_pose.theta)
+        request.initial_pose = pose
+        self._invoke(
+            self._deserialize_client,
+            request,
+            self._deserialize_service,
+            self._deserialize_timeout_sec,
+        )
+
+    def _invoke(
+        self,
+        client: Any,
+        request: Any,
+        description: str,
+        timeout_sec: float,
+    ) -> None:
+        if client is None:
+            raise ServiceCallFailed(f"{description} transport is not started")
+        if not client.wait_for_service(timeout_sec=self._discovery_timeout_sec):
+            raise ServiceCallFailed(f"{description} is not available")
+        wait_for_response(
+            client.call_async(request),
+            timeout_sec=timeout_sec,
+            description=description,
+        )

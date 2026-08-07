@@ -1,12 +1,54 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 from integration.localization_mode import (
     LOCALIZE_AT_POSE,
     DockPose,
     LocalizationModeController,
+    ServiceCallFailed,
+    posegraph_files_present,
+    wait_for_response,
 )
+
+
+class FakeFuture:
+    """호출 N 번째에 완료되는 future. 대기 루프를 시간 없이 검증한다."""
+
+    def __init__(self, *, done_after=0, result=None, exception=None):
+        self._remaining = done_after
+        self._result = result
+        self._exception = exception
+        self.cancelled = False
+
+    def done(self):
+        if self._remaining <= 0:
+            return True
+        self._remaining -= 1
+        return False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def exception(self):
+        return self._exception
+
+    def result(self):
+        return self._result
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
 
 
 class RecordingTransport:
@@ -31,8 +73,11 @@ class LocalizationModeControllerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.transport = RecordingTransport()
         self.messages: list[str] = []
+        self.missing: set[str] = set()
         self.controller = LocalizationModeController(
-            self.transport, report=self.messages.append
+            self.transport,
+            posegraph_exists=lambda path: path not in self.missing,
+            report=self.messages.append,
         )
 
     def test_entering_mapping_disables_localization(self) -> None:
@@ -76,6 +121,23 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(reason, "ALREADY_MAPPING")
         self.assertEqual(len(self.transport.calls), 1)
+
+    def test_absent_posegraph_files_stop_the_switch(self) -> None:
+        """DeserializePoseGraph 는 빈 응답이라 실패를 알려주지 않는다.
+
+        2026-08-07 실기: 없는 경로를 주면 노드는 "Failed to open requested
+        file" 을 찍는데 서비스는 정상 응답한다. 여기서 막지 않으면 지도 없이
+        순찰이 시작된다.
+        """
+
+        self.missing.add("/maps/gone/posegraph")
+
+        ready, reason = self.controller.enter_patrol("/maps/gone/posegraph")
+
+        self.assertFalse(ready)
+        self.assertEqual(reason, "POSEGRAPH_MISSING")
+        self.assertEqual(self.transport.calls, [], "모드를 바꾸기 전에 걸러야 한다")
+        self.assertIsNone(self.controller.mode)
 
     def test_missing_posegraph_path_never_touches_the_service(self) -> None:
         ready, reason = self.controller.enter_patrol("")
@@ -161,6 +223,95 @@ class LocalizationModeControllerTest(unittest.TestCase):
             "[LOCALIZATION] mode=patrol posegraph=/maps/session/posegraph",
             self.messages,
         )
+
+
+class PosegraphFilesPresentTest(unittest.TestCase):
+    """직렬화는 확장자 없는 경로에서 .posegraph 와 .data 두 개를 만든다."""
+
+    def _base(self, directory, *suffixes):
+        base = Path(directory) / "posegraph"
+        for suffix in suffixes:
+            base.with_suffix(suffix).write_bytes(b"x")
+        return str(base)
+
+    def test_both_files_present(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = self._base(directory, ".posegraph", ".data")
+            self.assertTrue(posegraph_files_present(base))
+
+    def test_data_file_alone_is_not_enough(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = self._base(directory, ".data")
+            self.assertFalse(posegraph_files_present(base))
+
+    def test_posegraph_file_alone_is_not_enough(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = self._base(directory, ".posegraph")
+            self.assertFalse(posegraph_files_present(base))
+
+    def test_nothing_there(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertFalse(posegraph_files_present(str(Path(directory) / "none")))
+
+
+class WaitForResponseTest(unittest.TestCase):
+    """실행기가 다른 스레드에서 채우는 future 를 기다리는 로직."""
+
+    def _wait(self, future, timeout_sec=5.0, clock=None):
+        clock = clock or FakeClock()
+        return wait_for_response(
+            future,
+            timeout_sec=timeout_sec,
+            description="/svc",
+            clock=clock,
+            sleep=lambda _: clock.advance(0.02),
+        )
+
+    def test_returns_the_response_once_done(self) -> None:
+        response = SimpleNamespace(success=True, message="")
+
+        self.assertIs(self._wait(FakeFuture(result=response)), response)
+
+    def test_polls_until_the_executor_completes_it(self) -> None:
+        future = FakeFuture(done_after=3, result=SimpleNamespace(success=True))
+
+        self._wait(future)
+
+        self.assertFalse(future.cancelled)
+
+    def test_timeout_cancels_so_a_late_reply_cannot_land_later(self) -> None:
+        clock = FakeClock()
+        future = FakeFuture(done_after=10_000)
+
+        with self.assertRaises(ServiceCallFailed):
+            self._wait(future, timeout_sec=0.1, clock=clock)
+
+        self.assertTrue(future.cancelled)
+
+    def test_service_exception_is_surfaced(self) -> None:
+        future = FakeFuture(exception=ValueError("boom"))
+
+        with self.assertRaisesRegex(ServiceCallFailed, "ValueError"):
+            self._wait(future)
+
+    def test_success_false_is_a_failure_not_a_pass(self) -> None:
+        """SetBool 이 success=False 를 주면 전환이 안 된 것이다."""
+
+        future = FakeFuture(result=SimpleNamespace(success=False, message="busy"))
+
+        with self.assertRaisesRegex(ServiceCallFailed, "busy"):
+            self._wait(future)
+
+    def test_empty_response_counts_as_success(self) -> None:
+        """DeserializePoseGraph 응답에는 success 필드가 없다."""
+
+        response = SimpleNamespace()
+
+        self.assertIs(self._wait(FakeFuture(result=response)), response)
+
+    def test_none_response_is_a_failure(self) -> None:
+        with self.assertRaises(ServiceCallFailed):
+            self._wait(FakeFuture(result=None))
 
 
 if __name__ == "__main__":
