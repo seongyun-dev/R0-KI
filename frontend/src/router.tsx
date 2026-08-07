@@ -1,8 +1,8 @@
 import { Suspense, lazy } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
+import { HomeRoute } from './features/auth/HomeRoute'
 import { RequireAuth } from './features/auth/RequireAuth'
 import Dashboard from './pages/Dashboard'
-import Landing from './pages/Landing'
 import Login from './pages/Login'
 import SignupOnboarding from './pages/SignupOnboarding'
 import PatrolList from './pages/PatrolList'
@@ -27,7 +27,7 @@ const TestMapSetup = lazy(() => import('./pages/TestMapSetup'))
 
 // CLAUDE.md §6 라우트 매핑
 export const router = createBrowserRouter([
-  { path: '/', element: <Landing />, errorElement: <RouteError /> },
+  { path: '/', element: <HomeRoute />, errorElement: <RouteError /> },
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
   { path: '/signup/onboarding', element: <SignupOnboarding />, errorElement: <RouteError /> },
   // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 /app 하위에 두지 않는다

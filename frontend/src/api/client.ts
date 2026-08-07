@@ -101,7 +101,6 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const body = await readResponse(response)
 
   if (!response.ok) {
-    if (response.status === 401) useAuthStore.getState().logout()
     throw new ApiError(response.status, apiErrorMessage(response.status, body), body)
   }
 
@@ -114,7 +113,6 @@ export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob>
   if (auth) headers.set('Authorization', auth.Authorization)
   const response = await fetch(apiUrl(path), { headers, signal })
   if (!response.ok) {
-    if (response.status === 401) useAuthStore.getState().logout()
     throw new ApiError(response.status, `이미지를 불러오지 못했습니다 (${response.status})`)
   }
   return response.blob()
@@ -133,7 +131,6 @@ export async function consumeSse<T>(
     signal,
   })
   if (!response.ok || !response.body) {
-    if (response.status === 401) useAuthStore.getState().logout()
     throw new ApiError(response.status, `실시간 연결에 실패했습니다 (${response.status})`)
   }
 
