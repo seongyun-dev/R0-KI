@@ -24,7 +24,6 @@ export default function PatrolList() {
   const selectedRobotId = sessionRobotId ?? env.defaultRobotId
   const { data: robots } = useRobots()
   const [period, setPeriod] = useState('all')
-  const [applied, setApplied] = useState('all')
   const [page, setPage] = useState(0)
   const {
     data: patrols,
@@ -37,7 +36,7 @@ export default function PatrolList() {
     last,
   } = usePatrols({
     robotId: selectedRobotId,
-    period: applied,
+    period,
     status: 'COMPLETED',
     page,
     size: 10,
@@ -60,27 +59,22 @@ export default function PatrolList() {
             </div>
             <div className="ptitle">순찰 이력</div>
           </div>
-          <form
-            className="headtools"
-            onSubmit={(e) => {
-              e.preventDefault()
-              setPage(0)
-              setApplied(period)
-            }}
-          >
+          <div className="headtools">
             <select
               className="sel"
               aria-label="기간 선택"
               value={period}
-              onChange={(e) => setPeriod(e.target.value)}
+              onChange={(e) => {
+                setPeriod(e.target.value)
+                setPage(0)
+              }}
             >
               <option value="all">기간 전체</option>
               <option value="today">오늘</option>
               <option value="7d">최근 7일</option>
               <option value="30d">최근 30일</option>
             </select>
-            <button type="submit" className="btn btn-p">검색</button>
-          </form>
+          </div>
         </div>
 
         <div className="glass g2 tblwrap">
@@ -134,7 +128,7 @@ export default function PatrolList() {
               <div className="tfoot">
                 {/* 지금 보이는 페이지 기준 — 아래 '전체 N건'(totalElements)과 구분한다 */}
                 <span>{isLoading ? '불러오는 중…' : rows.length === 0 ? '조건에 맞는 순찰 이력이 없습니다' : `이 페이지 ${rows.length}건`}</span>
-                <span>{PERIOD_LABEL[applied] ?? '기간 전체'}</span>
+                <span>{PERIOD_LABEL[period] ?? '기간 전체'}</span>
               </div>
               <div
                 className="tfoot"
