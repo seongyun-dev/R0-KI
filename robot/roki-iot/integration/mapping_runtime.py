@@ -188,16 +188,18 @@ class ManualMappingRuntime:
             return False, str(exc)
         return True, "READY"
 
-    def _enter_patrol_localization(self, artifact: Any) -> None:
-        """방금 저장한 포즈그래프로 위치추정을 켠다.
+    def _enter_patrol_localization(self, activated: Any) -> None:
+        """방금 활성화한 지도의 포즈그래프로 위치추정을 켠다.
 
-        경로 규약은 map_exporter 와 짝을 이룬다: 산출물 디렉터리의
+        세션 디렉터리가 아니라 활성 지도 디렉터리를 쓴다. 세션 산출물은
+        임시이고, 활성 번들이 다음 부팅에도 남는 쪽이다. 경로 규약은
+        map_exporter/map_activation 과 짝을 이룬다: 디렉터리 안의
         ``posegraph`` 접두사에 .posegraph 와 .data 가 놓인다.
         """
 
         if self._localization is None:
             return
-        posegraph = Path(getattr(artifact, "directory", "")) / "posegraph"
+        posegraph = Path(activated.yaml_path).parent / "posegraph"
         ready, reason = self._localization.enter_patrol(str(posegraph))
         if not ready:
             # 지도는 이미 저장·업로드됐다. 순찰 시작 시 다시 시도하면 되므로
@@ -450,7 +452,7 @@ class ManualMappingRuntime:
             # 진행 중이던 세션을 고아로 만들고 시리얼을 다시 열게 했다.
             # 실패해도 매핑 자체는 성공이므로 세션을 실패로 만들지는 않는다 --
             # 순찰을 시작할 때 다시 시도한다.
-            self._enter_patrol_localization(artifact)
+            self._enter_patrol_localization(activated)
             with self._lock:
                 self._reset_locked()
                 self._last_error = None

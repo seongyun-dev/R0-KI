@@ -65,6 +65,14 @@ class CurrentMapActivator:
             staged_image = staging_directory / image_name
             shutil.copyfile(artifact.yaml_path, staged_yaml)
             shutil.copyfile(artifact.pgm_path, staged_image)
+            # 포즈그래프도 함께 옮긴다. 이미지가 프론트용이라면 그래프는
+            # 위치추정용이고, 둘 다 있어야 이 지도로 순찰할 수 있다. 세션
+            # 디렉터리에만 두면 그 디렉터리를 치우는 순간 순찰이 불가능해지는데,
+            # DeserializePoseGraph 는 빈 응답이라 그 사실조차 알려주지 않는다.
+            for suffix in (".posegraph", ".data"):
+                source = artifact.directory / f"posegraph{suffix}"
+                if source.is_file():
+                    shutil.copyfile(source, staging_directory / source.name)
             if _bundle_sha256(staged_yaml, staged_image) != source_hash:
                 raise MapActivationError("copied map bundle hash does not match source")
 

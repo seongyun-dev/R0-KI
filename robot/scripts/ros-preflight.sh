@@ -88,12 +88,17 @@ if [ -n "${map_yaml}" ]; then
     echo "ROKI_MAP_YAML must point to a readable absolute map YAML" >&2
     exit 1
   fi
+  # 경고만 한다. 여기서 막으면 부팅이 잠긴다: 포즈그래프 없는 지도로는
+  # 순찰할 수 없지만, 스택이 안 뜨면 새로 매핑해서 만들 수도 없다.
+  # 실제 차단은 순찰 진입 시점의 LocalizationModeController 가 한다
+  # (POSEGRAPH_MISSING). 여기서는 다음 사람이 알아채게만 한다.
   posegraph_base="$(dirname "${map_yaml}")/posegraph"
   for artifact in "${posegraph_base}.posegraph" "${posegraph_base}.data"; do
     test -s "${artifact}" || {
-      echo "Pose graph artifact is missing: ${artifact}" >&2
-      echo "The map image alone cannot localize; re-run mapping." >&2
-      exit 1; }
+      echo "WARNING: pose graph artifact is missing: ${artifact}" >&2
+      echo "WARNING: this map can be displayed but not localized against;" >&2
+      echo "WARNING: patrol will refuse until a new mapping run produces one." >&2
+      break; }
   done
 fi
 
