@@ -53,6 +53,24 @@ if [ "${mode}" = mapping ]; then
   start_component ros2 launch slam_toolbox online_async_launch.py \
     use_sim_time:=false \
     slam_params_file:="${robot_root}/config/ros/slam_toolbox.yaml"
+  # Autonomous exploration needs a planner and controller while the map is still
+  # being built. navigation_launch.py is Nav2 without localization, which is what
+  # this mode wants: slam_toolbox already owns the map->odom transform, so AMCL
+  # and map_server must stay out of the way.
+  if [ "${AIOT_MAPPING_AUTONOMOUS:-false}" = true ]; then
+    start_component ros2 launch nav2_bringup navigation_launch.py \
+      use_sim_time:=false autostart:=true use_composition:=False \
+      params_file:="${AIOT_NAV2_MAPPING_CONFIG:-/run/aiot/nav2.mapping.params.yaml}"
+    # explore_lite is deliberately NOT launched here. It has no enable/disable
+    # API and permanently blacklists any frontier whose goal fails, so started
+    # with this service it runs against a closed motion gate until every
+    # frontier is blacklisted and exploration is dead for the whole service
+    # lifetime. Its lifetime belongs to the mapping session instead:
+    # roki-iot/integration/explore_supervisor.py spawns it once START_MAPPING
+    # has opened the motion gate (after confirming bt_navigator is active,
+    # which also replaces the fixed sleep that used to sit here) and kills it
+    # when the session finishes, aborts or shuts down.
+  fi
 else
   start_component ros2 launch nav2_bringup bringup_launch.py \
     slam:=False use_sim_time:=false autostart:=true use_composition:=False \

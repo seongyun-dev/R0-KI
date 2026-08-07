@@ -87,4 +87,17 @@ if [ "${mode}" = patrol ]; then
     --template "${robot_root}/config/ros/nav2.params.yaml.template" \
     --output "${AIOT_NAV2_RENDERED_CONFIG:-/run/aiot/nav2.params.yaml}"
 fi
+
+# Autonomous exploration drives Nav2 against the map SLAM is still building, so
+# mapping mode needs its own rendered config. Patrol keeps using the template
+# above unchanged.
+if [ "${mode}" = mapping ] && [ "${AIOT_MAPPING_AUTONOMOUS:-false}" = true ]; then
+  test -s "${robot_root}/config/ros/nav2_mapping_replan.xml" || {
+    echo "mapping behaviour tree is missing" >&2; exit 1; }
+  ROKI_NAV2_MAPPING_BT_XML="${robot_root}/config/ros/nav2_mapping_replan.xml" \
+  "${python_bin}" -m aiot_robot.ros_config \
+    --template "${robot_root}/config/ros/nav2.params.yaml.template" \
+    --mapping \
+    --output "${AIOT_NAV2_MAPPING_CONFIG:-/run/aiot/nav2.mapping.params.yaml}"
+fi
 echo "ROS ${mode} preflight passed without opening the ESP32 serial device"

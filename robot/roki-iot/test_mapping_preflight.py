@@ -57,7 +57,7 @@ class MappingPreflightTest(unittest.TestCase):
         self.assertFalse(result["routeConfigured"])
         self.assertFalse(result["mapValidated"])
 
-    def test_preflight_still_requires_route_when_mapping_is_disabled(self) -> None:
+    def test_mapping_mode_remains_available_when_gamepad_is_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             missing_route = Path(directory) / "route.local.yaml"
             with (
@@ -65,13 +65,30 @@ class MappingPreflightTest(unittest.TestCase):
                     os.environ,
                     {
                         "AIOT_MAPPING_GAMEPAD_ENABLED": "false",
+                        "AIOT_ROS_MODE": "mapping",
                         "ROKI_NAVIGATION_MODE": "encoder_limited",
                     },
                 ),
                 patch.object(run_integrated, "_validate_import_namespaces"),
             ):
-                with self.assertRaisesRegex(RuntimeError, "route file is missing"):
-                    run_integrated.preflight(missing_route)
+                result = run_integrated.preflight(missing_route)
+
+        self.assertTrue(result["mappingAvailable"])
+        self.assertTrue(result["mappingModeRequested"])
+        self.assertEqual(result["navigationMode"], "mapping")
+        self.assertFalse(result["routeConfigured"])
+
+    def test_disabled_mapping_input_never_opens_device_or_thread(self) -> None:
+        mapping_input = run_integrated._DisabledMappingInput()
+
+        mapping_input.start()
+        snapshot = mapping_input.diagnostic_snapshot()
+        mapping_input.stop()
+
+        self.assertEqual(mapping_input.device_path, Path("disabled"))
+        self.assertFalse(snapshot["gamepadDeviceOpen"])
+        self.assertFalse(snapshot["gamepadThreadAlive"])
+        self.assertEqual(snapshot["lastGamepadDecision"], "DISABLED")
 
 
 if __name__ == "__main__":

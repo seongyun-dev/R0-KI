@@ -16,7 +16,17 @@ ydlidar_ros2_driver_node:
     # points"), which intermittently starves /scan and RF2O/Nav2.
     fixed_resolution: false
     reversion: false
-    inverted: false
+    # This unit reports bearings mirrored about its own zero. Verified 2026-08-07
+    # with the robot boxed into a corner: the scan put the near wall 0.32 m to the
+    # left and 0.75 m of space to the right, while the wall was physically on the
+    # right. A mirror cannot be corrected by a TF, because a TF is a rotation --
+    # it has to be undone here, at the driver.
+    #
+    # Combined with the reverse test that fixed forward at reported -90 deg, the
+    # true mapping was bearing = -reported - 90. Undoing the mirror here makes it
+    # bearing = reported - 90, so ROKI_LIDAR_YAW_RAD must be -pi/2 (was +pi/2) and
+    # the obstacle interlock's forward centre becomes +90 deg (was -90).
+    inverted: true
     auto_reconnect: true
     support_motor_dtr: false
     angle_max: 180.0

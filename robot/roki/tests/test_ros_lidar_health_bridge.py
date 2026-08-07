@@ -160,6 +160,97 @@ class RosLidarHealthBridgeTest(unittest.TestCase):
         self.assertEqual(status.line_sensor, "DISCONNECTED")
         self.assertIsNone(self.store.snapshot().safety_decision)
 
+    def _clear_sink_bridge(self, resumes, active=lambda: True):
+        """STOP 0.6 / CLEAR 0.7 hysteresis 를 가진 브릿지와 resume 기록기."""
+
+        bridge = RosLidarHealthBridge(
+            state_store=self.store,
+            settings=RosLidarHealthSettings("/scan", 1.0),
+            obstacle_detector=FrontObstacleDetector(
+                ObstacleDetectorSettings(30.0, 0.6, 0.7)
+            ),
+            obstacle_activity_check=active,
+            monotonic_clock=lambda: 10.0,
+        )
+        bridge.set_obstacle_clear_sink(lambda: resumes.append(1))
+        return bridge
+
+    @staticmethod
+    def _scan(front_range):
+        return SimpleNamespace(
+            ranges=[1.0, front_range, 1.0],
+            angle_min=-0.1,
+            angle_increment=0.1,
+            range_min=0.12,
+            range_max=12.0,
+        )
+
+    def test_obstacle_clear_after_stop_requests_resume_once(self) -> None:
+        resumes: list[int] = []
+        bridge = self._clear_sink_bridge(resumes)
+
+        bridge._on_scan(self._scan(0.4))
+        self.assertEqual(self.store.get_status().obstacle.status, "STOP")
+        self.assertEqual(resumes, [], "STOP 중에는 재개하지 않는다")
+
+        bridge._on_scan(self._scan(1.5))
+
+        self.assertEqual(self.store.get_status().obstacle.status, "CLEAR")
+        self.assertEqual(resumes, [1], "STOP -> CLEAR 전이에서 한 번만 재개")
+
+        bridge._on_scan(self._scan(1.5))
+        self.assertEqual(resumes, [1], "CLEAR 유지 중에는 재개를 반복하지 않는다")
+
+    def test_clear_without_prior_stop_never_resumes(self) -> None:
+        """정상 주행 중의 CLEAR 스캔이 일시정지를 임의로 풀면 안 된다."""
+
+        resumes: list[int] = []
+        bridge = self._clear_sink_bridge(resumes)
+
+        for _ in range(3):
+            bridge._on_scan(self._scan(1.5))
+
+        self.assertEqual(resumes, [])
+
+    def test_hysteresis_band_holds_stop_and_does_not_resume(self) -> None:
+        """0.6~0.7 사이는 아직 해제가 아니므로 재개하지 않는다."""
+
+        resumes: list[int] = []
+        bridge = self._clear_sink_bridge(resumes)
+
+        bridge._on_scan(self._scan(0.4))
+        bridge._on_scan(self._scan(0.65))
+
+        self.assertEqual(self.store.get_status().obstacle.status, "STOP")
+        self.assertEqual(resumes, [])
+
+    def test_operation_end_drops_the_latch_so_next_run_is_clean(self) -> None:
+        """운행 종료로 detection이 꺼지면 다음 운행 첫 CLEAR가 재개를 부르지 않는다."""
+
+        resumes: list[int] = []
+        active = {"on": True}
+        bridge = self._clear_sink_bridge(resumes, active=lambda: active["on"])
+
+        bridge._on_scan(self._scan(0.4))
+        active["on"] = False
+        bridge._on_scan(self._scan(1.5))
+        active["on"] = True
+        bridge._on_scan(self._scan(1.5))
+
+        self.assertEqual(resumes, [])
+
+    def test_resume_failure_does_not_kill_the_scan_callback(self) -> None:
+        bridge = self._clear_sink_bridge([])
+        bridge.set_obstacle_clear_sink(
+            lambda: (_ for _ in ()).throw(RuntimeError("nav2 down"))
+        )
+
+        bridge._on_scan(self._scan(0.4))
+        bridge._on_scan(self._scan(1.5))
+
+        # 예외가 전파되면 이후 CLEAR 판정 자체가 멈춘다.
+        self.assertEqual(self.store.get_status().obstacle.status, "CLEAR")
+
     def test_inactive_scan_clears_stale_stop_once_without_detection(self) -> None:
         store = CountingRobotStateStore()
         store.update_obstacle(

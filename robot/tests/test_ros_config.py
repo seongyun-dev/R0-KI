@@ -164,6 +164,93 @@ class RosConfigTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     build_nav2_values(environment)
 
+    def test_both_modes_declare_the_measured_rectangular_body(self):
+        """Patrol must not plan against a circle 1.8x wider than the real chassis.
+
+        robot_radius doubles as the inscribed radius in Nav2, so a 0.23 m circle
+        marked the robot's own cell lethal within 0.23 m of a wall. The body is a
+        physical fact, so patrol and mapping have to agree on it.
+        """
+
+        import math
+
+        circumscribed = math.hypot(0.175, 0.125)
+        template = (
+            Path(__file__).resolve().parents[1]
+            / "config"
+            / "ros"
+            / "nav2.params.yaml.template"
+        )
+        environment = self.environment()
+        environment["ROKI_NAV2_MAPPING_BT_XML"] = "/opt/aiot/mapping.xml"
+
+        for mapping in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "nav2.yaml"
+                render_nav2_config(template, output, environment, mapping=mapping)
+                config = yaml.safe_load(output.read_text(encoding="utf-8"))
+
+            for scope in ("global_costmap", "local_costmap"):
+                with self.subTest(mapping=mapping, scope=scope):
+                    params = config[scope][scope]["ros__parameters"]
+                    self.assertEqual(
+                        params["footprint"],
+                        "[[0.175, 0.125], [0.175, -0.125], "
+                        "[-0.175, -0.125], [-0.175, 0.125]]",
+                    )
+                    # Two geometries that disagree is worse than either alone.
+                    self.assertNotIn("robot_radius", params)
+                    # Nav2 reads inflation costs when it checks the footprint, so
+                    # the skirt has to reach at least the circumscribed circle or
+                    # collisions go silently unreported.
+                    self.assertGreaterEqual(
+                        float(params["inflation_layer"]["inflation_radius"]),
+                        circumscribed,
+                    )
+
+    def test_mapping_collapses_near_zero_linear_to_stop_the_reversal_oscillation(self):
+        """전진<->후진 전환의 0 통과 구간이 제자리회전으로 오인되지 않게."""
+
+        template = (
+            Path(__file__).resolve().parents[1]
+            / "config"
+            / "ros"
+            / "nav2.params.yaml.template"
+        )
+        environment = self.environment()
+        environment["ROKI_NAV2_MAPPING_BT_XML"] = "/opt/aiot/mapping.xml"
+
+        with tempfile.TemporaryDirectory() as directory:
+            mapping_out = Path(directory) / "mapping.yaml"
+            patrol_out = Path(directory) / "patrol.yaml"
+            render_nav2_config(template, mapping_out, environment, mapping=True)
+            render_nav2_config(template, patrol_out, environment)
+            mapping = yaml.safe_load(mapping_out.read_text(encoding="utf-8"))
+            patrol = yaml.safe_load(patrol_out.read_text(encoding="utf-8"))
+
+        smoother = mapping["velocity_smoother"]["ros__parameters"]
+        deadband = smoother["deadband_velocity"]
+        controller_floor = float(
+            mapping["controller_server"]["ros__parameters"]["FollowPath"][
+                "regulated_linear_scaling_min_speed"
+            ]
+        )
+        self.assertGreater(deadband[0], 0.0, "선속 데드밴드가 있어야 한다")
+        self.assertLess(
+            deadband[0],
+            controller_floor,
+            "정상 순항 명령까지 잘라내면 안 되므로 컨트롤러 하한보다 작아야 한다",
+        )
+        # 각속도는 건드리지 않는다: 조향은 정지 중에도 유지돼야 한다.
+        self.assertEqual(deadband[1:], [0.0, 0.0])
+        # 후진은 계속 허용돼야 REEDS_SHEPP 경로가 성립한다.
+        self.assertLess(smoother["min_velocity"][0], 0.0)
+        # 순찰은 DUBIN 전진 전용이라 이 보정이 필요 없다.
+        self.assertEqual(
+            patrol["velocity_smoother"]["ros__parameters"]["deadband_velocity"],
+            [0.0, 0.0, 0.0],
+        )
+
     def test_rejects_unsafe_xy_goal_tolerance(self):
         for value in ("0.01", "1.1", "nan"):
             with self.subTest(value=value):

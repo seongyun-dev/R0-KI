@@ -24,7 +24,13 @@ from backend_state.robot_state_store import RobotStateStore
 
 SEOUL = ZoneInfo("Asia/Seoul")
 SUPPORTED_COMMANDS = frozenset(
-    {"START_PATROL", "STOP_PATROL", "SET_TOKEN", "START_MAPPING"}
+    {
+        "START_PATROL",
+        "STOP_PATROL",
+        "SET_TOKEN",
+        "START_MAPPING",
+        "STOP_MAPPING",
+    }
 )
 ACK_STATUSES = frozenset({"SUCCEEDED", "REJECTED", "FAILED"})
 
@@ -148,8 +154,10 @@ class PatrolCommandHandler:
             self._handle_stop_patrol(command)
         elif command.command == "SET_TOKEN":
             self._handle_set_token(command, str(payload["token"]))
-        else:
+        elif command.command == "START_MAPPING":
             self._handle_start_mapping(command)
+        else:
+            self._handle_stop_mapping(command)
 
     def tick(self) -> None:
         """Advance map pose and enforce the LiDAR stop/resume interlock."""
@@ -528,6 +536,100 @@ class PatrolCommandHandler:
             f"mappingSessionId={command.mapping_session_id}"
         )
 
+    def _handle_stop_mapping(self, command: ValidatedCommand) -> None:
+        with self._mapping_lifecycle_lock:
+            self._handle_stop_mapping_locked(command)
+
+    def _handle_stop_mapping_locked(self, command: ValidatedCommand) -> None:
+        """Accept one session-bound finish request without duplicating work."""
+
+        assert command.mapping_session_id is not None
+        if self._mapping_runtime is None:
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason="MAPPING_RUNTIME_MISSING",
+            )
+            print("[COMMAND] STOP_MAPPING rejected reason=MAPPING_RUNTIME_MISSING")
+            return
+
+        state, active_session_id = self._mapping_runtime.lifecycle_snapshot()
+        if state == "IDLE":
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason="MAPPING_NOT_ACTIVE",
+            )
+            print("[COMMAND] STOP_MAPPING rejected reason=MAPPING_NOT_ACTIVE")
+            return
+        if active_session_id != command.mapping_session_id:
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason="MAPPING_SESSION_MISMATCH",
+            )
+            print(
+                "[COMMAND] STOP_MAPPING rejected "
+                "reason=MAPPING_SESSION_MISMATCH"
+            )
+            return
+
+        if state in {"STOPPING", "SAVING", "UPLOADING"}:
+            self._record_and_publish_command(command, "SUCCEEDED")
+            print(
+                "[COMMAND] STOP_MAPPING already accepted "
+                f"mappingSessionId={command.mapping_session_id} state={state}"
+            )
+            return
+        if state != "MAPPING":
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason="MAPPING_NOT_STOPPABLE",
+            )
+            print(
+                "[COMMAND] STOP_MAPPING rejected "
+                f"reason=MAPPING_NOT_STOPPABLE state={state}"
+            )
+            return
+
+        try:
+            accepted = self._mapping_runtime.finish(command.mapping_session_id)
+        except Exception as exc:
+            self._record_and_publish_command(
+                command,
+                "FAILED",
+                reason=type(exc).__name__,
+            )
+            print(f"[COMMAND] STOP_MAPPING failed type={type(exc).__name__}")
+            return
+        if not accepted:
+            # A concurrent gamepad finish may have won after the snapshot. It
+            # is still the same accepted stop operation, not a second export.
+            current_state, current_session_id = (
+                self._mapping_runtime.lifecycle_snapshot()
+            )
+            if (
+                current_session_id == command.mapping_session_id
+                and current_state in {"STOPPING", "SAVING", "UPLOADING"}
+            ):
+                self._record_and_publish_command(command, "SUCCEEDED")
+                return
+            self._record_and_publish_command(
+                command,
+                "FAILED",
+                reason="MAPPING_FINISH_FAILED",
+            )
+            print("[COMMAND] STOP_MAPPING failed reason=MAPPING_FINISH_FAILED")
+            return
+
+        self._record_and_publish_command(command, "SUCCEEDED")
+        print(
+            "[COMMAND] STOP_MAPPING accepted "
+            f"commandId={command.command_id} "
+            f"mappingSessionId={command.mapping_session_id}"
+        )
+
     def _handle_set_token(self, command: ValidatedCommand, token: str) -> None:
         try:
             self._write_secret(token)
@@ -639,7 +741,7 @@ class PatrolCommandHandler:
         else:
             patrol_id = None
         mapping_session_id = payload.get("mappingSessionId")
-        if command == "START_MAPPING":
+        if command in {"START_MAPPING", "STOP_MAPPING"}:
             if (
                 isinstance(mapping_session_id, bool)
                 or not isinstance(mapping_session_id, int)

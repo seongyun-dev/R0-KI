@@ -17,6 +17,7 @@ from aiot_robot.backend_client import (
     RobotBackendClient,
 )
 from aiot_robot.mapping_artifacts import MapArtifact
+from integration.explore_supervisor import ExploreSupervisor
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class ManualMappingRuntime:
         map_activator: Any,
         settings: MappingRuntimeSettings,
         client_factory: ClientFactory | None = None,
+        explore_supervisor: Any | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._state_store = state_store
@@ -65,6 +67,15 @@ class ManualMappingRuntime:
         self._map_activator = map_activator
         self._settings = settings
         self._client_factory = client_factory or self._build_client
+        # The explorer's lifetime belongs to the mapping session, not to the
+        # ROS service (see explore_supervisor.py). Built from the environment
+        # here so run_integrated's construction call stays untouched; None
+        # when autonomous mapping is not enabled.
+        self._explore = (
+            explore_supervisor
+            if explore_supervisor is not None
+            else ExploreSupervisor.from_environment()
+        )
         self._lock = threading.Lock()
         self._state = "IDLE"
         self._mapping_session_id: int | None = None
@@ -89,6 +100,12 @@ class ManualMappingRuntime:
     def state(self) -> str:
         with self._lock:
             return self._state
+
+    def lifecycle_snapshot(self) -> tuple[str, int | None]:
+        """Return the current mapping state and session as one atomic snapshot."""
+
+        with self._lock:
+            return self._state, self._mapping_session_id
 
     @property
     def last_error(self) -> str | None:
@@ -215,12 +232,22 @@ class ManualMappingRuntime:
             f"mappingSessionId={mapping_session_id} "
             f"controller={self._gamepad_input.device_path}"
         )
+        # Only after the session is committed: the motion gate is open now, so
+        # the explorer's very first goal can actually drive the chassis
+        # instead of being refused and blacklisting its frontier.
+        if self._explore is not None:
+            self._explore.start(mapping_session_id)
         return True, "READY"
 
-    def finish(self) -> bool:
+    def finish(self, mapping_session_id: int | None = None) -> bool:
         """Stop motion immediately, then save and upload in a worker thread."""
 
         with self._lock:
+            if (
+                mapping_session_id is not None
+                and self._mapping_session_id != mapping_session_id
+            ):
+                return False
             if self._state != "MAPPING":
                 return False
             self._state = "STOPPING"
@@ -228,6 +255,11 @@ class ManualMappingRuntime:
             command_id = self._command_id
         assert mapping_session_id is not None and command_id is not None
 
+        # Silence the goal source before cutting the chassis: STOPPING still
+        # keeps the motion gate open, so a live explorer would keep steering
+        # the robot while the map is being saved.
+        if self._explore is not None:
+            self._explore.stop("finish")
         stop_failures = self._stop_mapping_motion("finish")
         if stop_failures:
             self._notify_failure("MAPPING_STOP_FAILED")
@@ -266,6 +298,8 @@ class ManualMappingRuntime:
 
     def stop(self) -> None:
         self._shutdown.set()
+        if self._explore is not None:
+            self._explore.stop("shutdown")
         try:
             self._gamepad_input.stop()
         finally:
@@ -289,6 +323,8 @@ class ManualMappingRuntime:
             self._state = "ABORTING"
             self._shutdown.set()
         self._stop_mapping_motion("abort")
+        if self._explore is not None:
+            self._explore.stop(reason)
         with self._lock:
             self._reset_locked()
             self._last_error = reason

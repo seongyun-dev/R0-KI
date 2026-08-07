@@ -9,16 +9,24 @@ control:
   # 45는 ramp 중 정지구간을 짧게 넘기기 위한 보수적 최소 출력이다.
   speed_min: 45
   speed_max: 255
-  # ESP32 odometry 주기(100ms)마다 최대 8 PWM씩 증가한다.
-  speed_ramp_per_update: 8
+  # 2026-08-07 현장: 8/tick 램프는 Nav2 저속 주행을 사실상 정지시켰다.
+  # REEDS_SHEPP 경로는 전·후진을 자주 바꾸는데, 부호가 바뀔 때마다 램프가
+  # 0을 지나며 리셋되고, stall 하한(실측 38, 36 이하 정지)까지 기어 올라가는
+  # 8→16→24→32 구간은 바퀴가 돌지 않는 죽은 시간이다. 최대 출력이 45로
+  # 제한된 지금은 램프로 보호할 관성도 없으므로 목표치로 즉시 점프한다.
+  # (전일 직접 구동 실측도 매번 0→45/50 스텝 입력으로 수행되었다.)
+  speed_ramp_per_update: 45
   # TODO(calibration): 좌우 엔코더 극성과 정상 편차를 확인한 뒤 결정한다.
   straight_correction_kp_deg_per_tick: null
   maximum_straight_correction_deg: null
 
   servo_center_deg: 80
-  # 기존 안전 펌웨어의 검증 제한 범위를 우선 사용한다.
-  servo_min_deg: 60
-  servo_max_deg: 100
+  # 2026-08-06 현장 실측: 명령 오프셋 30/40/50에서 road-wheel 15/20/30도.
+  # 전달률이 오프셋 40까지 0.50으로 선형이고 50에서 0.60으로 꺾인다.
+  # cmd_vel_adapter는 선형 매핑을 가정하므로 선형 구간인 +-40만 사용한다.
+  # +-50(30/130)은 실제로 도달하지만 과대 조향으로 경로를 이탈했다.
+  servo_min_deg: 40
+  servo_max_deg: 120
 
 line_following:
   # 2026-08-02 현장 시험에서 센서 보드가 선을 벗어나기 전에 조향할 시간이

@@ -21,9 +21,13 @@ amcl:
     resample_interval: 1
     transform_tolerance: 0.5
     tf_broadcast: true
-    # Seed the marked dock while ROS starts so IDLE telemetry is usable.  Each
-    # START_PATROL later publishes waypoint 1 to /initialpose again, because
-    # the latest Backend route owns the actual demo start anchor.
+    # Seed the marked dock once, while ROS starts, so IDLE telemetry is usable.
+    # This is now AMCL's only external fix: START_PATROL used to republish
+    # waypoint 1 to /initialpose on every run, which let the route teleport the
+    # belief to wherever the operator had drawn it. Localization belongs to the
+    # map and the scans, so the bridge no longer does that. The convention that
+    # replaces it: waypoint 1 = the marked dock = the mapping start point =
+    # map (0, 0, 0), which is what ROKI_INITIAL_POSE_* below must hold.
     set_initial_pose: true
     always_reset_initial_pose: true
     initial_pose:
@@ -152,7 +156,20 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      robot_radius: $ROBOT_RADIUS_M
+      # Measured body: 0.35 m long, 0.25 m wide, centred on base_link (the LiDAR
+      # sits directly above it). robot_radius describes a *circular* robot, and
+      # Nav2 then uses that single number as BOTH the circumscribed and the
+      # inscribed radius. For this rectangle the circumscribed radius really is
+      # sqrt(0.175^2 + 0.125^2) = 0.215 m -- which is what the 0.23 m measurement
+      # captured -- but the inscribed radius is only the half-width, 0.125 m.
+      # Declaring a circle therefore inflated every obstacle by 0.23 m instead of
+      # 0.125 m and marked the robot's own cell lethal whenever it came within
+      # 0.23 m of a wall: the "Starting point in lethal space" that killed plans.
+      # A polygon also switches the collision check from a centre-cost test to a
+      # real footprint test, so the clearance is not bought by weakening safety.
+      # The chassis is a physical fact, not a mode preference, so patrol and
+      # mapping share it. $ROBOT_RADIUS_M still drives inflation_radius below.
+      footprint: "[[0.175, 0.125], [0.175, -0.125], [-0.175, -0.125], [-0.175, 0.125]]"
       plugins: [obstacle_layer, inflation_layer]
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
@@ -182,7 +199,10 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: false
-      robot_radius: $ROBOT_RADIUS_M
+      # Same measured rectangle as the local costmap above; see the derivation
+      # there. Both costmaps must agree on the body or the planner and the
+      # controller disagree about what fits.
+      footprint: "[[0.175, 0.125], [0.175, -0.125], [-0.175, -0.125], [-0.175, 0.125]]"
       resolution: 0.05
       # The stored map is localization evidence, not a demo-route gate.  Plan
       # across stale walls/unknown cells, while the local LiDAR costmap and
