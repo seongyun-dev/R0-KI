@@ -12,10 +12,26 @@ export type R0KiDropdownProps = {
   options: R0KiDropdownOption[]
   value: string
   onChange: (value: string) => void
+  /** 부모에서 열림 상태를 제어할 때 사용 — 한 그룹에 하나만 열리게 할 수 있다 */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function R0KiDropdown({ allLabel, options, value, onChange }: R0KiDropdownProps) {
-  const [open, setOpen] = useState(false)
+export function R0KiDropdown({
+  allLabel,
+  options,
+  value,
+  onChange,
+  open: openProp,
+  onOpenChange,
+}: R0KiDropdownProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const controlled = onOpenChange != null
+  const open = controlled ? Boolean(openProp) : internalOpen
+  const setOpen = (next: boolean) => {
+    if (controlled) onOpenChange(next)
+    else setInternalOpen(next)
+  }
   const ref = useRef<HTMLDivElement>(null)
 
   // 바깥 클릭 · ESC 로 닫기
@@ -48,7 +64,7 @@ export function R0KiDropdown({ allLabel, options, value, onChange }: R0KiDropdow
         aria-expanded={open}
         onClick={(e) => {
           e.stopPropagation()
-          setOpen((v) => !v)
+          setOpen(!open)
         }}
       >
         <span className="dd-lab">{current.label}</span>
