@@ -14,6 +14,9 @@ import RobotList from './pages/RobotList'
 import RobotNew from './pages/RobotNew'
 import NotificationList from './pages/NotificationList'
 import NotificationDetail from './pages/NotificationDetail'
+import ResidentList from './pages/ResidentList'
+import ResidentDetail from './pages/ResidentDetail'
+import ResidentNew from './pages/ResidentNew'
 import MapFull from './pages/MapFull'
 import NotFound from './pages/NotFound'
 import RouteError from './pages/RouteError'
@@ -135,6 +138,31 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <RobotDetail />
+          </RequireAuth>
+        ),
+      },
+      // 입주민 관리 (목록 → 등록 → 상세) — 불법주차 문자 발송 대상이 되는 세대·차량을 관리한다
+      {
+        path: 'residents',
+        element: (
+          <RequireAuth>
+            <ResidentList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'residents/new',
+        element: (
+          <RequireAuth>
+            <ResidentNew />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'residents/:id',
+        element: (
+          <RequireAuth>
+            <ResidentDetail />
           </RequireAuth>
         ),
       },

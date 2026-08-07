@@ -58,13 +58,21 @@ function formatClock(d: Date) {
 }
 
 // notifications 는 주 메뉴가 아닌 상단바 알림 버튼이 활성 표시를 가져간다
-export type R0KiNavKey = 'dashboard' | 'patrol' | 'events' | 'robots' | 'stats' | 'notifications'
+export type R0KiNavKey =
+  | 'dashboard'
+  | 'patrol'
+  | 'events'
+  | 'robots'
+  | 'residents'
+  | 'stats'
+  | 'notifications'
 
 const NAV_ITEMS: { key: R0KiNavKey; label: string; to: string }[] = [
   { key: 'dashboard', label: '대시보드', to: '/app' },
   { key: 'patrol', label: '순찰 관리', to: '/app/patrol' },
   { key: 'events', label: '이벤트 관리', to: '/app/events' },
   { key: 'robots', label: '로봇 관리', to: '/app/robots' },
+  { key: 'residents', label: '입주민 관리', to: '/app/residents' },
   { key: 'stats', label: '통계', to: '/app/stats' },
 ]
 
