@@ -1,41 +1,9 @@
-amcl:
-  ros__parameters:
-    use_sim_time: false
-    alpha1: 0.2
-    alpha2: 0.2
-    alpha3: 0.2
-    alpha4: 0.2
-    alpha5: 0.2
-    base_frame_id: base_link
-    global_frame_id: map
-    odom_frame_id: odom
-    robot_model_type: nav2_amcl::DifferentialMotionModel
-    scan_topic: scan
-    min_particles: 500
-    max_particles: 2000
-    max_beams: 60
-    laser_model_type: likelihood_field
-    laser_likelihood_max_dist: 2.0
-    update_min_d: 0.10
-    update_min_a: 0.10
-    resample_interval: 1
-    transform_tolerance: 0.5
-    tf_broadcast: true
-    # Seed the marked dock once, while ROS starts, so IDLE telemetry is usable.
-    # This is now AMCL's only external fix: START_PATROL used to republish
-    # waypoint 1 to /initialpose on every run, which let the route teleport the
-    # belief to wherever the operator had drawn it. Localization belongs to the
-    # map and the scans, so the bridge no longer does that. The convention that
-    # replaces it: waypoint 1 = the marked dock = the mapping start point =
-    # map (0, 0, 0), which is what ROKI_INITIAL_POSE_* below must hold.
-    set_initial_pose: true
-    always_reset_initial_pose: true
-    initial_pose:
-      x: $INITIAL_POSE_X_M
-      y: $INITIAL_POSE_Y_M
-      z: 0.0
-      yaw: $INITIAL_POSE_YAW_RAD
-    first_map_only: true
+# 위치추정 서버(amcl)와 map_server 는 여기 없다.
+# slam_toolbox 의 map_and_localization 노드가 매핑과 위치추정 두 역할을 모두
+# 맡고 /map 과 map->odom 을 두 운행 모두에서 발행한다. upstream 은 그 위치추정
+# 모드를 AMCL 대체로 명시한다. 전환은 프로세스 교체가 아니라
+# slam_toolbox/set_localization_mode 서비스 호출이며,
+# roki-iot/integration/localization_mode.py 가 수행한다.
 
 bt_navigator:
   ros__parameters:
@@ -219,11 +187,6 @@ global_costmap:
         cost_scaling_factor: 3.0
         inflation_radius: $INFLATION_RADIUS_M
       always_send_full_costmap: true
-
-map_server:
-  ros__parameters:
-    use_sim_time: false
-    yaml_filename: ""
 
 map_saver:
   ros__parameters:
