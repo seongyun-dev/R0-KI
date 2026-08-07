@@ -8,6 +8,7 @@ import { EventTrendChart } from '../features/stats/EventTrendChart'
 import { HandlingChart, HANDLING_OPACITIES } from '../features/stats/HandlingChart'
 import { HourlyTypeChart, HOURLY_SERIES } from '../features/stats/HourlyTypeChart'
 import { ZonePieChart } from '../features/stats/ZonePieChart'
+import { formatHandleMinutes } from '../features/stats/mapAnalyticsToStats'
 import { useStats, useStatsPeriodLabel } from '../features/stats/useStats'
 import type { StatsUnit } from '../features/stats/resolveAnalyticsRange'
 import { downloadCsv } from '../lib/downloadCsv'
@@ -63,7 +64,7 @@ export default function Stats() {
       ['기간', periodLabel, ''],
       ['KPI', '총 순찰 횟수', data.summary.totalPatrols],
       ['KPI', '총 이벤트', data.summary.totalEvents],
-      ['KPI', '평균 처리시간(분)', data.summary.avgHandleMin],
+      ['KPI', '평균 처리시간', formatHandleMinutes(data.summary.avgHandleMin)],
       [],
       ['이벤트 추이', '기간', '건수'],
       ...data.daily.map((d) => ['', d.date, d.count]),
@@ -96,7 +97,13 @@ export default function Stats() {
     ? [
         { k: '총 순찰 횟수', v: data.summary.totalPatrols, u: '회', d: data.summary.deltas?.patrols, ar: '▲' },
         { k: '총 이벤트', v: data.summary.totalEvents, u: '건', d: data.summary.deltas?.events, ar: '▲' },
-        { k: '평균 처리시간', v: data.summary.avgHandleMin, u: '분', d: data.summary.deltas?.handle, ar: '▼' },
+        {
+          k: '평균 처리시간',
+          v: formatHandleMinutes(data.summary.avgHandleMin),
+          u: '',
+          d: data.summary.deltas?.handle,
+          ar: '▼',
+        },
       ]
     : []
 
