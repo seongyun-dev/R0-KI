@@ -50,4 +50,12 @@ public class Resident extends BaseEntity {
     public void changeNotificationEnabled(boolean enabled) {
         this.notificationEnabled = enabled;
     }
+
+    public void changeInfo(
+            String name, String phoneNumber, String buildingNumber, String unitNumber) {
+        this.name = name;
+        this.phoneNumber = phoneNumber;
+        this.buildingNumber = buildingNumber;
+        this.unitNumber = unitNumber;
+    }
 }
