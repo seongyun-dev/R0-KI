@@ -224,7 +224,10 @@ def _navigation_mode(settings: Any) -> str:
     return "nav2"
 
 
-def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
+def _build_nav2_driver(
+    service_holder: dict[str, Any],
+    mapping_sink_holder: dict[str, Any] | None = None,
+) -> Any:
     from navigation.cmd_vel_adapter import AckermannCommandSettings
     from navigation.ros_nav2_bridge import RosNav2Bridge, RosNav2BridgeSettings
 
@@ -259,17 +262,53 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
             os.getenv("ROKI_NAV2_GOAL_ABORT_RETRY_LIMIT", "3")
         ),
     )
+    def route_motion(command: Any) -> None:
+        """실행 중인 운행에 따라 cmd_vel 을 알맞은 게이트로 보낸다.
+
+        예전에는 부팅 시점의 AIOT_ROS_MODE 가 이걸 정했다. 매핑 모드면 순찰
+        내비게이션 자체를 만들지 않았고, 그래서 브리지가 하나뿐이라 라우팅이
+        필요 없었다. 이제 두 운행이 같은 스택을 쓰므로 브리지도 하나이고,
+        어느 게이트로 갈지는 실행 중에 정해야 한다.
+        (2026-08-08 실기: 이 라우팅이 없어 매핑 중 cmd_vel 이 순찰 게이트로
+        가서 활성 순찰이 없다는 이유로 전부 MOTION_INTERLOCK 이 됐다.
+        10분에 2,530건, 게이트 개방 0회.)
+        """
+
+        mapping_sink = (mapping_sink_holder or {}).get("sink")
+        if mapping_sink is not None and mapping_sink.mapping_authorised():
+            mapping_sink(command)
+            return
+        service_holder["service"].apply_motion_command(command)
+
     return RosNav2Bridge(
         settings=settings,
-        motion_sink=lambda command: service_holder["service"].apply_motion_command(
-            command
-        ),
+        motion_sink=route_motion,
         failure_sink=lambda reason: service_holder["service"].fail_patrol(reason),
         obstacle_sink=lambda reason: service_holder["service"].pause_patrol(reason),
         scan_context_sink=lambda waypoint: service_holder[
             "service"
         ].update_scan_context(waypoint),
         heading_source=lambda: service_holder["service"].current_heading_deg(),
+    )
+
+
+def build_mapping_motion_sink(
+    runtime: Any, mapping_runtime_holder: dict[str, Any]
+) -> Any:
+    """매핑 세션이 살아 있는 동안만 섀시를 여는 게이트.
+
+    브리지와 분리해 둔다. 지도가 이미 있으면 순찰 브리지가 cmd_vel 을
+    구독하므로 매핑 전용 브리지를 또 만들면 두 구독자가 같은 명령을 놓고
+    서로 정지시킨다. 그때는 브리지 없이 이 싱크만 순찰 브리지의 라우터에
+    넘긴다.
+    """
+
+    from integration.mapping_motion_sink import MappingMotionSink
+
+    return MappingMotionSink(
+        runtime,
+        lambda: mapping_runtime_holder.get("mapping"),
+        stop_reporter=lambda reason: print(f"[MAPPING] motion stop reason={reason}"),
     )
 
 
@@ -284,7 +323,6 @@ def _build_mapping_nav2_bridge(
     ``start_patrol`` is never called on it.
     """
 
-    from integration.mapping_motion_sink import MappingMotionSink
     from navigation.ros_nav2_bridge import RosNav2Bridge, RosNav2BridgeSettings
     from navigation.cmd_vel_adapter import AckermannCommandSettings
 
@@ -295,11 +333,7 @@ def _build_mapping_nav2_bridge(
             "AUTONOMOUS_MAPPING_FIELD_CONFIG_MISSING: ROKI_WHEELBASE_M and "
             "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG are required"
         )
-    sink = MappingMotionSink(
-        runtime,
-        lambda: mapping_runtime_holder.get("mapping"),
-        stop_reporter=lambda reason: print(f"[MAPPING] motion stop reason={reason}"),
-    )
+    sink = build_mapping_motion_sink(runtime, mapping_runtime_holder)
     return RosNav2Bridge(
         settings=RosNav2BridgeSettings(
             ackermann=AckermannCommandSettings(
@@ -757,8 +791,13 @@ def create_integrated_application(
     if manual_demo and manual_controller is None and keyboard_input is None:
         manual_controller, keyboard_input = _build_manual_demo_components(runtime)
     service_holder: dict[str, Any] = {}
+    # 매핑 세션은 순찰과 같은 cmd_vel 스트림을 쓴다. 어느 게이트로 보낼지는
+    # 실행 중에 정해지므로, 순찰 브리지의 라우터가 이 홀더를 통해 매핑 싱크를
+    # 찾는다. 매핑 런타임은 아래에서 만들어지므로 지연 해석이다.
+    mapping_runtime_holder: dict[str, Any] = {}
+    mapping_sink_holder: dict[str, Any] = {}
     navigation_driver = (
-        _build_nav2_driver(service_holder)
+        _build_nav2_driver(service_holder, mapping_sink_holder)
         if (
             navigation_mode == "nav2"
             and not manual_enabled
@@ -771,7 +810,14 @@ def create_integrated_application(
     # goals. Build the same cmd_vel bridge and route its output through the
     # mapping-session gate instead of the patrol gate. The mapping runtime is
     # created further down, so the gate resolves it lazily.
-    mapping_runtime_holder: dict[str, Any] = {}
+    if not manual_enabled and _environment_enabled("AIOT_MAPPING_AUTONOMOUS", False):
+        mapping_sink_holder["sink"] = build_mapping_motion_sink(
+            runtime, mapping_runtime_holder
+        )
+    # 순찰 브리지가 없을 때만 매핑 전용 브리지를 만든다. 아직 지도가 없어
+    # 순찰 내비게이션이 성립하지 않는 첫 매핑이 그런 경우다. 순찰 브리지가
+    # 있으면 그쪽 라우터가 위 싱크로 보내므로 구독자를 둘로 만들지 않는다 --
+    # 둘이면 같은 cmd_vel 을 놓고 서로 정지시킨다.
     mapping_motion_bridge = (
         _build_mapping_nav2_bridge(runtime, mapping_runtime_holder)
         if (
