@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { R0KiDropdown } from '../components/ui/R0KiDropdown'
@@ -13,12 +13,6 @@ import type {
    유리 테이블 + 커스텀 드롭다운 4종 필터. 데이터는 기존 useEvents 그대로.
    위험도는 긴급만 --urgent(모노크롬 예외), 나머지는 명도 램프. */
 
-/* 처리 상태 점 색 — 명도 램프 */
-const STATE_DOT: Record<string, string> = {
-  탐지: 'var(--detect)',
-  처리중: 'var(--charge)',
-  처리완료: 'var(--offline)',
-}
 /* 위험도 점 색 (긴급은 .st.u 로 별도 처리) */
 const RISK_DOT: Record<string, string> = {
   보통: 'var(--detect)',
@@ -50,6 +44,8 @@ type EventListFilters = {
   status: ProcessingStatusCode | ''
   period: EventPeriodCode | ''
 }
+
+type FilterKey = keyof EventListFilters
 
 const TYPE_VALUES = new Set(TYPE_OPTIONS.map((option) => option.value))
 const STATE_VALUES = new Set(STATE_OPTIONS.map((option) => option.value))
@@ -87,20 +83,13 @@ function toListSearch(filters: EventListFilters, page: number) {
   return query ? `?${query}` : ''
 }
 
-
-
 export default function EventList() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const applied = filtersFromSearchParams(searchParams)
   const page = pageFromSearchParams(searchParams)
   const listSearch = toListSearch(applied, page)
-  // 입력 중 필터 / 적용된 필터 분리 — 검색 버튼으로 확정
-  const [draft, setDraft] = useState<EventListFilters>(applied)
-
-  useEffect(() => {
-    setDraft(applied)
-  }, [applied.period, applied.status, applied.type, page])
+  const [openFilter, setOpenFilter] = useState<FilterKey | null>(null)
 
   const {
     data: events,
@@ -123,8 +112,9 @@ export default function EventList() {
   const rows = events ?? []
   const urgentCount = rows.filter((e) => e.riskLevel === '긴급').length
 
-  const set = (key: keyof typeof draft) => (value: string) =>
-    setDraft((prev) => ({ ...prev, [key]: value }))
+  const applyFilter = (key: FilterKey, value: string) => {
+    setSearchParams(buildSearchParams({ ...applied, [key]: value }, 0))
+  }
 
   return (
     <R0KiShell active="events">
@@ -137,16 +127,30 @@ export default function EventList() {
             <div className="ptitle">이벤트 목록</div>
           </div>
           <div className="headtools tight">
-            <R0KiDropdown allLabel="유형 전체" options={TYPE_OPTIONS} value={draft.type} onChange={set('type')} />
-            <R0KiDropdown allLabel="상태 전체" options={STATE_OPTIONS} value={draft.status} onChange={set('status')} />
-            <R0KiDropdown allLabel="기간 전체" options={PERIOD_OPTIONS} value={draft.period} onChange={set('period')} />
-            <button
-              type="button"
-              className="btn btn-p"
-              onClick={() => setSearchParams(buildSearchParams({ ...draft }, 0))}
-            >
-              검색
-            </button>
+            <R0KiDropdown
+              allLabel="유형 전체"
+              options={TYPE_OPTIONS}
+              value={applied.type}
+              onChange={(value) => applyFilter('type', value)}
+              open={openFilter === 'type'}
+              onOpenChange={(open) => setOpenFilter(open ? 'type' : null)}
+            />
+            <R0KiDropdown
+              allLabel="상태 전체"
+              options={STATE_OPTIONS}
+              value={applied.status}
+              onChange={(value) => applyFilter('status', value)}
+              open={openFilter === 'status'}
+              onOpenChange={(open) => setOpenFilter(open ? 'status' : null)}
+            />
+            <R0KiDropdown
+              allLabel="기간 전체"
+              options={PERIOD_OPTIONS}
+              value={applied.period}
+              onChange={(value) => applyFilter('period', value)}
+              open={openFilter === 'period'}
+              onOpenChange={(open) => setOpenFilter(open ? 'period' : null)}
+            />
           </div>
         </div>
 
@@ -162,6 +166,7 @@ export default function EventList() {
                 <thead>
                   <tr>
                     <th>이벤트 ID</th>
+                    <th>탐지 날짜</th>
                     <th>시간</th>
                     <th>유형</th>
                     <th>위치</th>
@@ -181,6 +186,7 @@ export default function EventList() {
                       }
                     >
                       <td className="id">{e.id}</td>
+                      <td className="tm">{e.date || '—'}</td>
                       <td className="tm">{e.time}</td>
                       <td className="ty">{e.type}</td>
                       <td className="loc">{e.location}</td>
@@ -196,8 +202,19 @@ export default function EventList() {
                         )}
                       </td>
                       <td>
-                        <span className="st">
-                          <i style={{ background: STATE_DOT[e.status] ?? 'var(--detect)' }} />
+                        <span
+                          className="st"
+                          data-status={
+                            e.status === '탐지'
+                              ? 'detected'
+                              : e.status === '처리중'
+                                ? 'processing'
+                                : e.status === '처리완료'
+                                  ? 'completed'
+                                  : undefined
+                          }
+                        >
+                          <i />
                           {e.status}
                         </span>
                       </td>
