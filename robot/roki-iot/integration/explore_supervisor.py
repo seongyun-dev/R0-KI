@@ -169,7 +169,21 @@ class ExploreSupervisor:
         while not self._stop_requested.is_set():
             try:
                 result = self._run(
-                    ["ros2", "lifecycle", "get", self._bt_navigator_node],
+                    # --no-daemon is not optional. The ROS daemon caches a
+                    # graph that survives an aiot-ros restart, so after a mode
+                    # switch it answers "Node not found" for a bt_navigator
+                    # that is demonstrably in `ros2 node list --no-daemon`.
+                    # Polling cannot recover from that: every retry asks the
+                    # same stale cache, the deadline expires, and the session
+                    # silently runs without explore (NAV2_NOT_ACTIVE).
+                    # Observed 2026-08-07 22:00, mapping session 9.
+                    [
+                        "ros2",
+                        "lifecycle",
+                        "get",
+                        "--no-daemon",
+                        self._bt_navigator_node,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=10.0,
