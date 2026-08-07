@@ -1,3 +1,4 @@
+import { useEffect, useState, type SyntheticEvent } from 'react'
 import { useMjpegStream } from '../dashboard/useMjpegStream'
 
 export type MappingLiveViewProps = {
@@ -11,12 +12,25 @@ export function MappingLiveView({
   mappingSessionId,
   active,
 }: MappingLiveViewProps) {
+  const [frameAspectRatio, setFrameAspectRatio] = useState<string>()
   const endpoint = `/live/mapping/robots/${encodeURIComponent(String(robotId))}/stream.mjpg`
   const { frameUrl, state, handleFrameLoad, handleFrameError } = useMjpegStream(robotId, {
     endpoint,
     enabled: active,
     lifecycleKey: mappingSessionId,
   })
+
+  useEffect(() => {
+    setFrameAspectRatio(undefined)
+  }, [mappingSessionId, robotId])
+
+  const handleMappingFrameLoad = (event: SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth, naturalHeight } = event.currentTarget
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      setFrameAspectRatio(`${naturalWidth} / ${naturalHeight}`)
+    }
+    handleFrameLoad()
+  }
 
   const statusText = !active
     ? '맵 파악을 시작하면 실시간 LiDAR 지도가 표시됩니다.'
@@ -32,13 +46,16 @@ export function MappingLiveView({
 
   return (
     <section className="mapping-live" aria-label="실시간 LiDAR 지도">
-      <div className="mapping-live__viewport">
+      <div
+        className="mapping-live__viewport"
+        style={{ aspectRatio: frameAspectRatio ?? '16 / 9' }}
+      >
         {frameUrl ? (
           <img
             className="mapping-live__frame"
             src={frameUrl}
             alt="로봇이 실시간으로 생성 중인 LiDAR 지도"
-            onLoad={handleFrameLoad}
+            onLoad={handleMappingFrameLoad}
             onError={handleFrameError}
           />
         ) : (
