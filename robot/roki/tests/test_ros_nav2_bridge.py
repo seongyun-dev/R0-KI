@@ -32,17 +32,6 @@ class DeadThread:
         return False
 
 
-class FakePoseWithCovarianceStamped:
-    def __init__(self):
-        self.header = SimpleNamespace(frame_id=None, stamp=None)
-        self.pose = SimpleNamespace(
-            pose=SimpleNamespace(
-                position=SimpleNamespace(x=0.0, y=0.0),
-                orientation=SimpleNamespace(z=0.0, w=0.0),
-            ),
-            covariance=[0.0] * 36,
-        )
-
 
 def demo_route():
     return parse_route(
@@ -107,15 +96,12 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
                 AckermannCommandSettings(0.124, 8.6),
-                initial_pose_settle_sec=1.0,
             ),
             motion_sink=lambda _command: None,
             sleep=sleeps.append,
         )
         publisher = Mock()
         bridge.is_ready = Mock(return_value=(True, "READY"))
-        bridge._initial_pose_type = FakePoseWithCovarianceStamped
-        bridge._initial_pose_publisher = publisher
         bridge._node = SimpleNamespace(
             get_clock=lambda: SimpleNamespace(
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
@@ -139,14 +125,11 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
                 AckermannCommandSettings(0.124, 8.6),
-                initial_pose_settle_sec=1.0,
             ),
             motion_sink=lambda _command: None,
             sleep=lambda _seconds: None,
         )
         bridge.is_ready = Mock(return_value=(True, "READY"))
-        bridge._initial_pose_type = FakePoseWithCovarianceStamped
-        bridge._initial_pose_publisher = Mock()
         bridge._node = SimpleNamespace(
             get_clock=lambda: SimpleNamespace(
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
@@ -181,14 +164,11 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
                 AckermannCommandSettings(0.124, 8.6),
-                initial_pose_settle_sec=1.0,
             ),
             motion_sink=commands.append,
             sleep=lambda _seconds: None,
         )
         bridge.is_ready = Mock(return_value=(True, "READY"))
-        bridge._initial_pose_type = FakePoseWithCovarianceStamped
-        bridge._initial_pose_publisher = Mock()
         bridge._node = SimpleNamespace(
             get_clock=lambda: SimpleNamespace(
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")

@@ -136,7 +136,9 @@ local_costmap:
       # A polygon also switches the collision check from a centre-cost test to a
       # real footprint test, so the clearance is not bought by weakening safety.
       # The chassis is a physical fact, not a mode preference, so patrol and
-      # mapping share it. $ROBOT_RADIUS_M still drives inflation_radius below.
+      # mapping share it. Nav2 takes the lethal inscribed radius from this
+      # polygon (0.125 m here). inflation_radius below is only the cost skirt
+      # outside it and no longer derives from the retired robot_radius.
       footprint: "[[0.175, 0.125], [0.175, -0.125], [-0.175, -0.125], [-0.175, 0.125]]"
       plugins: [obstacle_layer, inflation_layer]
       obstacle_layer:

@@ -88,10 +88,15 @@ class LocalizationModeController:
         self,
         transport: ModeTransport,
         *,
+        dock_pose: DockPose | None = None,
         posegraph_exists: Callable[[str], bool] | None = None,
         report: Callable[[str], None] | None = None,
     ) -> None:
         self._transport = transport
+        # 그래프를 불러올 때 줄 초기 추정값. 규약상 웨이포인트 1 = 도킹 지점 =
+        # 매핑 시작점 = map (0,0,0) 이므로 기본값이 곧 정답이지만, 도킹 표시를
+        # 옮기면 ROKI_INITIAL_POSE_* 로 알려줘야 스캔 매칭이 수렴한다.
+        self._dock_pose = dock_pose or DockPose()
         self._posegraph_exists = posegraph_exists or posegraph_files_present
         self._report = report
         self._lock = threading.Lock()
@@ -153,7 +158,7 @@ class LocalizationModeController:
         if not self._posegraph_exists(posegraph_path):
             self._say(f"posegraph not found path={posegraph_path}")
             return False, "POSEGRAPH_MISSING"
-        pose = dock_pose or DockPose()
+        pose = dock_pose or self._dock_pose
         try:
             self._transport.set_localization_mode(True)
         except Exception as exc:
@@ -173,6 +178,28 @@ class LocalizationModeController:
             self._patrol_arguments = (posegraph_path, pose)
         self._say(f"mode=patrol posegraph={posegraph_path}")
         return True, "READY"
+
+    def note_lifecycle_recovery(self, detail: str = "") -> None:
+        """생애주기 관리자가 스택을 복구했음을 기록만 한다.
+
+        복구는 configure 를 다시 돌리고, 그 configure 가 launch 시점 파라미터
+        파일을 읽어 실행 중 주입한 값을 버린다. 렌더된 파일이 매핑 값을 담고
+        있으므로 **매핑 중 복구는 무해하고, 순찰 중 복구만 물린다** --
+        REEDS_SHEPP 과 yaw_goal_tolerance 3.15 로 되돌아가 순찰이 조용히
+        후진하고 아무 방향으로나 도착 판정을 하게 된다.
+
+        여기서 자동 재적용을 하지 않는 이유: 복구가 실제로 얼마나 자주
+        일어나는지 아직 모른다. 빈도를 모르는 채 감시자를 만들면 폴링 주기를
+        추측으로 정하게 된다. 먼저 재고, 그 다음에 설계한다.
+        """
+
+        with self._lock:
+            mode = self._mode
+        self._say(
+            f"lifecycle recovery observed mode={mode or 'unknown'}"
+            f"{' ' + detail if detail else ''}"
+            + ("  ← 순찰 프로필이 매핑으로 되돌아갔을 수 있다" if mode == self.PATROL else "")
+        )
 
     def reassert(self) -> tuple[bool, str]:
         """마지막으로 성립한 모드를 다시 적용한다.

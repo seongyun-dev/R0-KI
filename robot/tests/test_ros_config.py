@@ -16,7 +16,6 @@ class RosConfigTest(unittest.TestCase):
         return {
             "ROKI_WHEELBASE_M": "0.30",
             "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG": "20",
-            "ROKI_ROBOT_RADIUS_M": "0.25",
             "ROKI_INITIAL_POSE_X_M": "-1.25",
             "ROKI_INITIAL_POSE_Y_M": "2.5",
             "ROKI_INITIAL_POSE_YAW_RAD": "-1.5708",
@@ -29,7 +28,6 @@ class RosConfigTest(unittest.TestCase):
         values = build_nav2_values(self.environment())
 
         self.assertAlmostEqual(float(values["MINIMUM_TURNING_RADIUS_M"]), 0.824243, places=5)
-        self.assertEqual(values["ROBOT_RADIUS_M"], "0.25")
         self.assertEqual(values["INITIAL_POSE_X_M"], "-1.25")
         self.assertEqual(values["INITIAL_POSE_Y_M"], "2.5")
         self.assertEqual(values["INITIAL_POSE_YAW_RAD"], "-1.5708")
@@ -48,7 +46,7 @@ class RosConfigTest(unittest.TestCase):
             template = root / "template.yaml"
             output = root / "output.yaml"
             template.write_text(
-                "radius: $ROBOT_RADIUS_M\nturn: $MINIMUM_TURNING_RADIUS_M\n",
+                "skirt: $INFLATION_RADIUS_M\nturn: $MINIMUM_TURNING_RADIUS_M\n",
                 encoding="utf-8",
             )
 

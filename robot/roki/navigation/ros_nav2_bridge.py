@@ -37,8 +37,6 @@ class RosNav2BridgeSettings:
     map_frame: str = "map"
     scan_dwell_sec: float = 3.0
     cmd_vel_timeout_sec: float = 3.0
-    initial_pose_topic: str = "/initialpose"
-    initial_pose_settle_sec: float = 1.0
     first_goal_accept_timeout_sec: float = 5.0
     # Nav2 aborts the goal when the controller sees an obstacle on the path.
     # That is recoverable: hold position and let the obstacle-clear loop resume
@@ -51,7 +49,6 @@ class RosNav2BridgeSettings:
             ("cmd_vel_topic", self.cmd_vel_topic),
             ("navigate_action", self.navigate_action),
             ("map_frame", self.map_frame),
-            ("initial_pose_topic", self.initial_pose_topic),
         ):
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
@@ -66,13 +63,6 @@ class RosNav2BridgeSettings:
         ):
             raise ValueError(
                 "cmd_vel_timeout_sec must be within 0.2..5.0 seconds"
-            )
-        if (
-            not math.isfinite(self.initial_pose_settle_sec)
-            or not 0.1 <= self.initial_pose_settle_sec <= 3.0
-        ):
-            raise ValueError(
-                "initial_pose_settle_sec must be within 0.1..3.0 seconds"
             )
         if (
             not math.isfinite(self.first_goal_accept_timeout_sec)
@@ -134,11 +124,9 @@ class RosNav2Bridge:
         self._executor: Any = None
         self._action_client: Any = None
         self._subscription: Any = None
-        self._initial_pose_publisher: Any = None
         self._rclpy: Any = None
         self._navigate_type: Any = None
         self._pose_type: Any = None
-        self._initial_pose_type: Any = None
         self._owns_rclpy_context = False
 
     def start(self) -> None:
@@ -146,11 +134,7 @@ class RosNav2Bridge:
             return
         try:
             import rclpy
-            from geometry_msgs.msg import (
-                PoseStamped,
-                PoseWithCovarianceStamped,
-                Twist,
-            )
+            from geometry_msgs.msg import PoseStamped, Twist
             from nav2_msgs.action import NavigateToPose
             from rclpy.action import ActionClient
             from rclpy.executors import SingleThreadedExecutor
@@ -166,7 +150,6 @@ class RosNav2Bridge:
         try:
             self._navigate_type = NavigateToPose
             self._pose_type = PoseStamped
-            self._initial_pose_type = PoseWithCovarianceStamped
             self._node = rclpy.create_node("roki_nav2_bridge")
             self._action_client = ActionClient(
                 self._node,
@@ -177,11 +160,6 @@ class RosNav2Bridge:
                 Twist,
                 self._settings.cmd_vel_topic,
                 self._on_cmd_vel,
-                10,
-            )
-            self._initial_pose_publisher = self._node.create_publisher(
-                PoseWithCovarianceStamped,
-                self._settings.initial_pose_topic,
                 10,
             )
             self._executor = SingleThreadedExecutor()
@@ -238,11 +216,11 @@ class RosNav2Bridge:
         if first_waypoint is None or int(first_waypoint.sequence) != 1:
             self._fail("NAV2_START_ANCHOR_INVALID")
             raise RuntimeError("NAV2_START_ANCHOR_INVALID")
-        # Waypoint 1 used to be force-fed to AMCL over /initialpose here, which
-        # teleported the belief to wherever the route said the robot was. That is
-        # exactly backwards: localization must come from the map and the scans,
-        # not from the route. AMCL is seeded once at startup with the dock pose
-        # (map origin -- mapping and patrol start from the same marked spot) and
+        # Waypoint 1 used to be force-fed over /initialpose here, which teleported
+        # the belief to wherever the route said the robot was. That is exactly
+        # backwards: localization must come from the map and the scans, not from
+        # the route. slam_toolbox is handed the dock pose once, when the saved
+        # pose graph is loaded (deserialize_map with LOCALIZE_AT_POSE), and
         # scan-matching owns the estimate from then on. Waypoint 1 stays the
         # protocol anchor the outer service confirms; place it at the dock.
 
@@ -685,9 +663,11 @@ class RosNav2Bridge:
         raise ValueError("no route direction or current map heading")
 
     # The bridge used to publish waypoint 1 to /initialpose on every START_PATROL
-    # ("_publish_initial_pose"). Removed: localization belongs to AMCL seeded once
-    # at startup with the dock pose; the route must not overwrite it. The publisher
-    # below is kept wired for operator-driven re-localization tooling only.
+    # ("_publish_initial_pose"). Removed: the route must not overwrite the
+    # estimate. The publisher that carried it is gone too -- AMCL was its only
+    # subscriber and slam_toolbox now owns localization, so it published to
+    # nobody. Re-localization goes through deserialize_map with LOCALIZE_AT_POSE
+    # (roki-iot/integration/localization_mode.py), not through a topic.
 
     def _publish_scan_context(self, waypoint: Any | None) -> None:
         if self._scan_context_sink is None:
@@ -738,11 +718,9 @@ class RosNav2Bridge:
         executor = self._executor
         node = self._node
         self._subscription = None
-        self._initial_pose_publisher = None
         self._action_client = None
         self._executor = None
         self._node = None
-        self._initial_pose_type = None
         if node is not None:
             if executor is not None:
                 executor.remove_node(node)

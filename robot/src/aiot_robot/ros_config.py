@@ -14,12 +14,20 @@ from typing import Mapping
 FIELD_VARIABLES = (
     "ROKI_WHEELBASE_M",
     "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG",
-    "ROKI_ROBOT_RADIUS_M",
     "ROKI_INITIAL_POSE_X_M",
     "ROKI_INITIAL_POSE_Y_M",
     "ROKI_INITIAL_POSE_YAW_RAD",
 )
 DEFAULT_NAV2_XY_GOAL_TOLERANCE_M = 0.20
+
+# 실측에서 정한 값이지 반지름에서 유도한 값이 아니다.
+#
+# 예전에는 ROKI_ROBOT_RADIUS_M(0.23) + 0.15 = 0.38 로 계산했다. 그런데 그
+# 0.23 원형 근사가 바로 순찰이 벽 0.23 m 안에서 자기 셀을 치명으로 표시하던
+# 원인이었고, 그래서 사각 footprint 로 교체했다. 계산의 전제가 사라졌는데
+# 계산만 남아 있었다 -- 렌더된 0.38 은 곧바로 0.25 로 덮어써져 한 번도 쓰인
+# 적이 없다. 유도를 지우고 실측값을 그대로 둔다.
+MEASURED_INFLATION_RADIUS_M = 0.25
 
 
 def missing_field_variables(environment: Mapping[str, str]) -> list[str]:
@@ -37,7 +45,6 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
     )
     if steering_angle >= 60:
         raise ValueError("ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG must be below 60")
-    robot_radius = _positive_float(environment, "ROKI_ROBOT_RADIUS_M")
     initial_pose_x = _finite_float(environment, "ROKI_INITIAL_POSE_X_M")
     initial_pose_y = _finite_float(environment, "ROKI_INITIAL_POSE_Y_M")
     initial_pose_yaw = _finite_float(
@@ -89,8 +96,7 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
             else native_path.as_posix()
         )
     return {
-        "ROBOT_RADIUS_M": _number(robot_radius),
-        "INFLATION_RADIUS_M": _number(robot_radius + 0.15),
+        "INFLATION_RADIUS_M": _number(MEASURED_INFLATION_RADIUS_M),
         "MINIMUM_TURNING_RADIUS_M": _number(minimum_turning_radius),
         "ANALYTIC_EXPANSION_MAX_LENGTH_M": _number(
             max(3.0, minimum_turning_radius * 5.0)
@@ -220,16 +226,20 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
     for key in ("width", "height"):
         global_costmap.pop(key, None)
 
-    # The template inflates robot_radius + 0.15 = 0.38 m, which suits an open floor.
-    # Here the mapped corridor measures about 1.1 m across, so a 0.38 m skirt on each
-    # wall leaves roughly 0.3 m of un-penalised centre -- less than the 0.34 m turning
-    # radius, so no arc toward an off-axis frontier fits and every plan is refused.
-    # Lethality is untouched: it still comes from the 0.23 m footprint, and the LiDAR
-    # interlock still stops the chassis on approach. This only stops the planner from
-    # treating the whole room as expensive.
-    for scope in ("global_costmap", "local_costmap"):
-        layer = config[scope][scope]["ros__parameters"]["inflation_layer"]
-        layer["inflation_radius"] = 0.25
+    # 이 건물의 복도는 약 1.1 m 다. 스커트가 양쪽에서 0.38 m 씩 들어오면
+    # 가운데 약 0.3 m 만 남는데, 그건 실측 회전반경 0.341 m 보다 좁다.
+    # 축에서 벗어난 목표로 향하는 호가 들어갈 자리가 없어져 계획이 거부된다.
+    #
+    # 치명성은 이 값과 무관하다. Nav2 는 footprint 의 내접원(사각 차체
+    # 0.35x0.25 에서 0.125 m)을 치명 반경으로 쓰고, inflation 은 그 바깥의
+    # 비용 기울기일 뿐이다. 라이다 인터락도 그대로 살아 있다.
+    #
+    # ⚠️ 이 값은 매핑 디버깅에서 도출했고 순찰로는 아직 검증하지 않았다.
+    # 회전반경과 복도 폭은 두 운행이 공유하는 물리 사실이라 같은 값이 맞다고
+    # 보지만, 근거는 매핑 쪽에만 있다. 순찰 첫 완주 때 확인할 것.
+    #
+    # 값 자체는 템플릿이 MEASURED_INFLATION_RADIUS_M 로 이미 받는다. 여기서
+    # 다시 쓰지 않는다 -- 같은 값을 두 곳에서 정하면 언젠가 어긋난다.
 
     # 기동 시점의 모드는 매핑이다. 렌더된 파일이 그 값을 담아야, 생애주기
     # 관리자가 bond 끊김으로 스택을 복구하며 파일을 다시 읽을 때도 매핑이

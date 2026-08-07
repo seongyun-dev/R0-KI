@@ -255,10 +255,6 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
         cmd_vel_timeout_sec=float(
             os.getenv("ROKI_NAV2_CMD_VEL_TIMEOUT_SECONDS", "3.0")
         ),
-        initial_pose_topic=os.getenv("ROKI_INITIAL_POSE_TOPIC", "/initialpose"),
-        initial_pose_settle_sec=float(
-            os.getenv("ROKI_NAV2_INITIAL_POSE_SETTLE_SECONDS", "1.0")
-        ),
         goal_abort_retry_limit=int(
             os.getenv("ROKI_NAV2_GOAL_ABORT_RETRY_LIMIT", "3")
         ),
@@ -539,6 +535,7 @@ def _build_mapping_runtime(
     )
     from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
     from integration.localization_mode import (
+        DockPose,
         LocalizationModeController,
         RosLocalizationModeTransport,
     )
@@ -610,6 +607,15 @@ def _build_mapping_runtime(
     localization_transport.start()
     localization_controller = LocalizationModeController(
         localization_transport,
+        # 포즈그래프를 불러올 때 줄 초기 추정값. 규약은 웨이포인트 1 = 도킹
+        # 지점 = 매핑 시작점 = map (0,0,0) 이다. 이 값들은 전에 AMCL 의
+        # set_initial_pose 로 갔는데, AMCL 이 사라지면서 갈 곳을 잃었다가
+        # 여기로 온다 -- 용도는 처음부터 "도킹 지점이 어디인가"였다.
+        dock_pose=DockPose(
+            x=float(os.getenv("ROKI_INITIAL_POSE_X_M", "0") or 0),
+            y=float(os.getenv("ROKI_INITIAL_POSE_Y_M", "0") or 0),
+            theta=float(os.getenv("ROKI_INITIAL_POSE_YAW_RAD", "0") or 0),
+        ),
         report=print,
     )
 

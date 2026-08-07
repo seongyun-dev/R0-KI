@@ -214,6 +214,45 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertEqual(reason, "NO_MODE_TO_REASSERT")
         self.assertEqual(self.transport.calls, [])
 
+    def test_lifecycle_recovery_is_recorded_not_repaired(self) -> None:
+        """복구 빈도를 재기 전에는 자동 재적용을 하지 않는다.
+
+        순찰 중 복구만 위험하다 -- 렌더 기준선이 매핑이라 복구가 순찰
+        파라미터를 매핑으로 되돌린다. 그 경고가 로그에 남아야 한다.
+        """
+
+        self.controller.enter_patrol("/maps/session/posegraph")
+        self.transport.calls.clear()
+
+        self.controller.note_lifecycle_recovery("bond lost")
+
+        self.assertEqual(self.transport.calls, [], "관찰만 하고 고치지 않는다")
+        message = self.messages[-1]
+        self.assertIn("lifecycle recovery observed", message)
+        self.assertIn("mode=patrol", message)
+        self.assertIn("순찰 프로필", message)
+
+    def test_lifecycle_recovery_during_mapping_is_harmless(self) -> None:
+        self.controller.enter_mapping()
+
+        self.controller.note_lifecycle_recovery()
+
+        self.assertIn("mode=mapping", self.messages[-1])
+        self.assertNotIn("순찰 프로필", self.messages[-1])
+
+    def test_dock_pose_seeds_the_graph_load(self) -> None:
+        """도킹 표시를 옮기면 그 좌표를 줘야 스캔 매칭이 수렴한다."""
+
+        controller = LocalizationModeController(
+            self.transport,
+            dock_pose=DockPose(1.5, -0.5, 0.7),
+            posegraph_exists=lambda _: True,
+        )
+
+        controller.enter_patrol("/maps/session/posegraph")
+
+        self.assertEqual(self.transport.calls[1][3], DockPose(1.5, -0.5, 0.7))
+
     def test_transitions_are_reported(self) -> None:
         self.controller.enter_mapping()
         self.controller.enter_patrol("/maps/session/posegraph")
