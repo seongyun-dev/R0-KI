@@ -26,7 +26,9 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
+
+from aiot_robot.ros_config import MODE_PROFILES
 
 # slam_toolbox/srv/DeserializePoseGraph 의 match_type.
 # 저장된 그래프를 주어진 포즈 근처에서 위치추정 시작점으로 삼는다.
@@ -60,7 +62,7 @@ def posegraph_files_present(posegraph_path: str) -> bool:
 
 
 class ModeTransport(Protocol):
-    """slam_toolbox 서비스 두 개로 좁힌 전송 경계."""
+    """slam_toolbox 서비스 두 개와 Nav2 파라미터 주입으로 좁힌 전송 경계."""
 
     def set_localization_mode(self, localization: bool) -> None:
         """실패하면 예외를 던진다. 조용히 실패하면 안 된다."""
@@ -72,6 +74,13 @@ class ModeTransport(Protocol):
         initial_pose: DockPose,
     ) -> None:
         """실패하면 예외를 던진다."""
+
+    def set_node_parameters(
+        self,
+        node_name: str,
+        values: Mapping[str, object],
+    ) -> None:
+        """실패하면 예외를 던진다. 하나라도 거부되면 실패다."""
 
 
 class LocalizationModeController:
@@ -91,8 +100,14 @@ class LocalizationModeController:
         dock_pose: DockPose | None = None,
         posegraph_exists: Callable[[str], bool] | None = None,
         report: Callable[[str], None] | None = None,
+        profiles: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
     ) -> None:
         self._transport = transport
+        # 운행별 Nav2 값. 렌더된 파라미터 파일은 매핑 값을 담고, 순찰 값은
+        # 전환 시 여기서 주입된다 -- ros_config.MODE_PROFILES 의 주석이 그렇게
+        # 설계라고 적어두었는데 주입하는 쪽이 없었다. 기본값을 두는 이유는
+        # 그것이다: 주입을 잊으면 "정의만 되고 적용되지 않는" 상태로 되돌아간다.
+        self._profiles = MODE_PROFILES if profiles is None else profiles
         # 그래프를 불러올 때 줄 초기 추정값. 규약상 웨이포인트 1 = 도킹 지점 =
         # 매핑 시작점 = map (0,0,0) 이므로 기본값이 곧 정답이지만, 도킹 표시를
         # 옮기면 ROKI_INITIAL_POSE_* 로 알려줘야 스캔 매칭이 수렴한다.
@@ -128,11 +143,44 @@ class LocalizationModeController:
             self._invalidate()
             self._say(f"mode switch to mapping failed type={type(exc).__name__}")
             return False, "SET_MAPPING_MODE_FAILED"
+        # 매핑 값 주입이 실패해도 매핑을 막지 않는다. 렌더된 파라미터 파일이
+        # 이미 매핑 값을 담고 있어서(ros_config.apply_slam_shape) 주입은 순찰
+        # 뒤에 되돌리는 용도뿐이다. 여기서 실패로 처리하면 START_MAPPING 이
+        # rollback 돼 매핑 자체가 시작하지 못한다.
+        self._apply_mode_profile(self.MAPPING)
         with self._lock:
             self._mode = self.MAPPING
             self._patrol_arguments = None
         self._say("mode=mapping")
         return True, "READY"
+
+    def _apply_mode_profile(self, mode: str) -> str | None:
+        """운행별 Nav2 파라미터를 실행 중에 주입한다.
+
+        2026-08-08 실기 확인: 순찰이 돌아야 하는 자리에 매핑 값이 그대로
+        올라가 있었다 -- planner ``motion_model_for_search=REEDS_SHEPP``,
+        ``reverse_penalty=1.3``, controller ``yaw_goal_tolerance=3.15``.
+        ``MODE_PROFILES["patrol"]`` 은 정의만 돼 있고 읽는 쪽이 테스트뿐이었다.
+        그래서 순찰이 후진하고 아무 방향으로나 도착 판정을 했다.
+
+        실패하면 이유를 돌려주되 판단은 호출자에게 맡긴다. 매핑과 순찰이
+        실패를 다르게 감당하기 때문이다.
+        """
+
+        profile = self._profiles.get(mode)
+        if not profile:
+            return None
+        for node_name, overrides in profile.items():
+            try:
+                self._transport.set_node_parameters(node_name, overrides)
+            except Exception as exc:
+                self._say(
+                    f"profile apply failed mode={mode} node={node_name} "
+                    f"type={type(exc).__name__}"
+                )
+                return "MODE_PROFILE_APPLY_FAILED"
+        self._say(f"profile applied mode={mode}")
+        return None
 
     def enter_patrol(
         self,
@@ -173,6 +221,14 @@ class LocalizationModeController:
             self._invalidate()
             self._say(f"posegraph load failed type={type(exc).__name__}")
             return False, "POSEGRAPH_LOAD_FAILED"
+        # 순찰은 매핑과 달리 실패를 감당할 수 없다. 렌더된 파일에는 매핑 값이
+        # 들어 있으므로, 주입이 실패한 채 순찰을 READY 로 알리면 그 순찰은
+        # REEDS_SHEPP 으로 후진하며 아무 방향으로나 도착 판정을 한다.
+        # 미확정으로 남겨 다음 요청이 다시 전송하게 한다.
+        profile_failure = self._apply_mode_profile(self.PATROL)
+        if profile_failure is not None:
+            self._invalidate()
+            return False, profile_failure
         with self._lock:
             self._mode = self.PATROL
             self._patrol_arguments = (posegraph_path, pose)
@@ -293,6 +349,7 @@ class RosLocalizationModeTransport:
         set_mode_timeout_sec: float = 15.0,
         # 7.2MB 포즈그래프 적재에 수 초가 걸린다(2026-08-07 실측). 넉넉히 준다.
         deserialize_timeout_sec: float = 60.0,
+        set_parameters_timeout_sec: float = 15.0,
     ) -> None:
         self._node_name = node_name
         self._set_mode_service = set_mode_service
@@ -300,6 +357,7 @@ class RosLocalizationModeTransport:
         self._discovery_timeout_sec = discovery_timeout_sec
         self._set_mode_timeout_sec = set_mode_timeout_sec
         self._deserialize_timeout_sec = deserialize_timeout_sec
+        self._set_parameters_timeout_sec = set_parameters_timeout_sec
         self._lock = threading.Lock()
         self._node: Any = None
         self._executor: Any = None
@@ -310,6 +368,13 @@ class RosLocalizationModeTransport:
         self._set_bool_type: Any = None
         self._deserialize_type: Any = None
         self._pose_type: Any = None
+        # 노드마다 클라이언트가 따로 필요하다(/planner_server, /controller_server).
+        # 어느 노드를 쓸지는 MODE_PROFILES 가 정하므로 지연 생성한다.
+        self._parameter_clients: dict[str, Any] = {}
+        self._set_parameters_type: Any = None
+        self._parameter_type: Any = None
+        self._parameter_value_type: Any = None
+        self._parameter_type_ids: Any = None
 
     def start(self) -> None:
         with self._lock:
@@ -317,6 +382,8 @@ class RosLocalizationModeTransport:
                 return
             import rclpy
             from geometry_msgs.msg import Pose2D
+            from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+            from rcl_interfaces.srv import SetParameters
             from rclpy.executors import SingleThreadedExecutor
             from slam_toolbox.srv import DeserializePoseGraph
             from std_srvs.srv import SetBool
@@ -324,6 +391,10 @@ class RosLocalizationModeTransport:
             self._set_bool_type = SetBool
             self._deserialize_type = DeserializePoseGraph
             self._pose_type = Pose2D
+            self._set_parameters_type = SetParameters
+            self._parameter_type = Parameter
+            self._parameter_value_type = ParameterValue
+            self._parameter_type_ids = ParameterType
 
             self._owns_rclpy_context = not rclpy.ok()
             if self._owns_rclpy_context:
@@ -358,6 +429,9 @@ class RosLocalizationModeTransport:
             self._node = None
             self._executor = None
             self._thread = None
+            # 노드를 파괴하면 그 노드가 만든 클라이언트도 죽는다. 남겨 두면
+            # 다음 start() 가 죽은 클라이언트를 재사용한다.
+            self._parameter_clients.clear()
 
     def set_localization_mode(self, localization: bool) -> None:
         request = self._set_bool_type.Request()
@@ -390,18 +464,92 @@ class RosLocalizationModeTransport:
             self._deserialize_timeout_sec,
         )
 
+    def set_node_parameters(
+        self,
+        node_name: str,
+        values: Mapping[str, object],
+    ) -> None:
+        """Nav2 노드에 파라미터를 실행 중 주입한다.
+
+        SetParameters 응답에는 ``success`` 가 없다. 요청마다 결과 배열이
+        따로 오고 거부는 그 안의 ``successful`` 로만 나타난다. ``_invoke``
+        의 일반 검사로는 걸리지 않으므로 여기서 직접 본다.
+        """
+
+        client = self._parameter_client(node_name)
+        request = self._set_parameters_type.Request()
+        request.parameters = [
+            self._parameter_message(name, value) for name, value in values.items()
+        ]
+        service = f"{node_name}/set_parameters"
+        response = self._invoke(
+            client, request, service, self._set_parameters_timeout_sec
+        )
+        results = list(getattr(response, "results", []))
+        if len(results) != len(request.parameters):
+            raise ServiceCallFailed(
+                f"{service} returned {len(results)} results for "
+                f"{len(request.parameters)} parameters"
+            )
+        for parameter, result in zip(request.parameters, results):
+            if not getattr(result, "successful", False):
+                detail = getattr(result, "reason", "") or "no reason"
+                raise ServiceCallFailed(
+                    f"{service} rejected {parameter.name}: {detail}"
+                )
+
+    def _parameter_client(self, node_name: str) -> Any:
+        with self._lock:
+            if self._node is None:
+                raise ServiceCallFailed(
+                    f"{node_name}/set_parameters transport is not started"
+                )
+            client = self._parameter_clients.get(node_name)
+            if client is None:
+                client = self._node.create_client(
+                    self._set_parameters_type, f"{node_name}/set_parameters"
+                )
+                self._parameter_clients[node_name] = client
+            return client
+
+    def _parameter_message(self, name: str, value: object) -> Any:
+        parameter = self._parameter_type()
+        parameter.name = name
+        parameter_value = self._parameter_value_type()
+        # bool 을 int 보다 먼저 본다. 파이썬에서 bool 은 int 의 하위형이라
+        # 순서를 뒤집으면 cache_obstacle_heuristic 이 정수로 전송되고
+        # Nav2 가 형 불일치로 거부한다.
+        if isinstance(value, bool):
+            parameter_value.type = self._parameter_type_ids.PARAMETER_BOOL
+            parameter_value.bool_value = value
+        elif isinstance(value, int):
+            parameter_value.type = self._parameter_type_ids.PARAMETER_INTEGER
+            parameter_value.integer_value = value
+        elif isinstance(value, float):
+            parameter_value.type = self._parameter_type_ids.PARAMETER_DOUBLE
+            parameter_value.double_value = value
+        elif isinstance(value, str):
+            parameter_value.type = self._parameter_type_ids.PARAMETER_STRING
+            parameter_value.string_value = value
+        else:
+            raise ServiceCallFailed(
+                f"unsupported parameter type for {name}: {type(value).__name__}"
+            )
+        parameter.value = parameter_value
+        return parameter
+
     def _invoke(
         self,
         client: Any,
         request: Any,
         description: str,
         timeout_sec: float,
-    ) -> None:
+    ) -> Any:
         if client is None:
             raise ServiceCallFailed(f"{description} transport is not started")
         if not client.wait_for_service(timeout_sec=self._discovery_timeout_sec):
             raise ServiceCallFailed(f"{description} is not available")
-        wait_for_response(
+        return wait_for_response(
             client.call_async(request),
             timeout_sec=timeout_sec,
             description=description,
