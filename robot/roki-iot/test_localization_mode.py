@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from aiot_robot.ros_config import MODE_PROFILES
+from aiot_robot.ros_config import (
+    GOAL_CHECKER_PROFILE_IDS,
+    MODE_PROFILES,
+    PLANNER_PROFILE_IDS,
+)
 from integration.localization_mode import (
     LOCALIZE_AT_POSE,
     DockPose,
@@ -107,19 +111,37 @@ class RecordingTransport:
         return [call for call in self.calls if call[0] == "set_localization_mode"]
 
 
+def profile_instance_names(mode: str, node: str) -> set:
+    """그 운행의 BT 가 실제로 부르는 파라미터 이름."""
+
+    instance = (
+        PLANNER_PROFILE_IDS if node == "/planner_server" else GOAL_CHECKER_PROFILE_IDS
+    )[mode]
+    return {
+        f"{instance}.{dotted.partition('.')[2]}" for dotted in MODE_PROFILES[mode][node]
+    }
+
+
 def seed_boot_profiles(transport: RecordingTransport) -> None:
     """기동 직후의 Nav2 를 흉내낸다 -- 두 운행 값이 동시에 올라가 있다.
 
-    이제 전환은 파라미터를 바꾸는 일이 아니라 BT 가 인스턴스를 고르는 일이다
-    (MappingGridBased / PatrolGridBased). 렌더된 파라미터 파일이 둘 다 담고
-    있으므로, 한쪽만 올라간 상태를 기본으로 두면 실기에 없는 상황을 테스트가
-    정상으로 취급하게 된다.
+    ``apply_slam_shape`` 가 하는 일과 같다. MODE_PROFILES 는 두 운행을 같은
+    접두사로 적어두고, 렌더가 그것을 인스턴스별로 펼친다. 여기서도 펼쳐 둬야
+    조회가 실기와 같은 이름을 보게 된다 -- 접두사 그대로 심어두면 아무도
+    부르지 않는 인스턴스를 검증하는 회귀를 테스트가 놓친다.
     """
 
     merged: dict[str, dict[str, object]] = {}
-    for profile in MODE_PROFILES.values():
+    for mode, profile in MODE_PROFILES.items():
         for node, values in profile.items():
-            merged.setdefault(node, {}).update(values)
+            instance = (
+                PLANNER_PROFILE_IDS
+                if node == "/planner_server"
+                else GOAL_CHECKER_PROFILE_IDS
+            )[mode]
+            for dotted, value in values.items():
+                name = f"{instance}.{dotted.partition('.')[2]}"
+                merged.setdefault(node, {})[name] = value
     transport.current_parameters = merged
 
 
@@ -178,11 +200,11 @@ class LocalizationModeControllerTest(unittest.TestCase):
         verified = self.transport.verified()
         self.assertEqual(
             verified["/planner_server"],
-            set(MODE_PROFILES["patrol"]["/planner_server"]),
+            profile_instance_names("patrol", "/planner_server"),
         )
         self.assertEqual(
             verified["/controller_server"],
-            set(MODE_PROFILES["patrol"]["/controller_server"]),
+            profile_instance_names("patrol", "/controller_server"),
         )
         self.assertFalse(
             hasattr(self.transport, "set_node_parameters"),
@@ -224,7 +246,7 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertEqual(reason, "READY")
         self.assertEqual(
             self.transport.verified()["/planner_server"],
-            set(MODE_PROFILES["mapping"]["/planner_server"]),
+            profile_instance_names("mapping", "/planner_server"),
         )
 
     def test_mapping_refuses_a_changed_profile(self) -> None:
@@ -272,7 +294,7 @@ class LocalizationModeControllerTest(unittest.TestCase):
         # 어긋난 채로 순찰을 시작하는 것보다는 싸다.
         self.assertEqual(
             self.transport.verified()["/planner_server"],
-            set(MODE_PROFILES["patrol"]["/planner_server"]),
+            profile_instance_names("patrol", "/planner_server"),
         )
 
     def test_ensure_patrol_reloads_when_the_active_map_changed(self) -> None:

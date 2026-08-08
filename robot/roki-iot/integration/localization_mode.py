@@ -28,7 +28,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from aiot_robot.ros_config import MODE_PROFILES
+from aiot_robot.ros_config import (
+    GOAL_CHECKER_PROFILE_IDS,
+    MODE_PROFILES,
+    PLANNER_PROFILE_IDS,
+)
 
 # slam_toolbox/srv/DeserializePoseGraph 의 match_type.
 # 저장된 그래프를 주어진 포즈 근처에서 위치추정 시작점으로 삼는다.
@@ -215,6 +219,36 @@ class LocalizationModeController:
                 return False, "NAV2_NOT_READY"
         return True, "READY"
 
+    @staticmethod
+    def _profile_instance_names(
+        mode: str, node_name: str, expected: Mapping[str, object]
+    ) -> dict[str, str]:
+        """프로필 키를 그 운행의 BT 가 실제로 부르는 인스턴스로 옮긴다.
+
+        ``MODE_PROFILES`` 는 두 운행을 ``GridBased.`` /
+        ``general_goal_checker.`` 라는 같은 접두사로 적어둔다 -- 그래야 두
+        프로필이 같은 항목을 덮는지 한눈에 대조된다. 실제 인스턴스는
+        ``apply_slam_shape`` 이 그 표를 deepcopy 해서 만들고
+        (MappingGridBased / PatrolGridBased, mapping_goal_checker /
+        patrol_goal_checker), BT 가 goal 마다 planner_id / goal_checker_id 로
+        고른다.
+
+        그래서 접두사 그대로 조회하면 아무도 부르지 않는 기준 인스턴스를 읽게
+        된다. 값이 우연히 맞아도 그 검증은 주행과 무관하다.
+        """
+
+        identifiers = (
+            PLANNER_PROFILE_IDS
+            if node_name == "/planner_server"
+            else GOAL_CHECKER_PROFILE_IDS
+        )
+        instance = identifiers.get(mode)
+        if instance is None:
+            return {name: name for name in expected}
+        return {
+            name: f"{instance}.{name.partition('.')[2]}" for name in expected
+        }
+
     def _verify_mode_profile(self, mode: str) -> str | None:
         """Check the active Nav2 profile without runtime reconfiguration."""
 
@@ -222,10 +256,16 @@ class LocalizationModeController:
         if not profile:
             return None
         for node_name, expected in profile.items():
+            names = self._profile_instance_names(mode, node_name, expected)
             try:
                 current = self._transport.get_node_parameters(
-                    node_name, tuple(expected)
+                    node_name, tuple(names.values())
                 )
+                current = {
+                    name: current[names[name]]
+                    for name in expected
+                    if names[name] in current
+                }
                 if set(current) != set(expected):
                     raise RuntimeError("parameter query returned incomplete values")
             except Exception as exc:
@@ -236,11 +276,13 @@ class LocalizationModeController:
                 return "MODE_PROFILE_APPLY_FAILED"
 
             mismatched = [
-                name
+                names[name]
                 for name, value in expected.items()
                 if not _profile_value_matches(current[name], value)
             ]
             if mismatched:
+                # 인스턴스 이름을 그대로 찍는다. 어느 플러그인이 어긋났는지
+                # 모르면 로그를 보고도 어디를 고쳐야 할지 알 수 없다.
                 self._say(
                     f"profile mismatch mode={mode} node={node_name} "
                     f"parameters={','.join(mismatched)}"
