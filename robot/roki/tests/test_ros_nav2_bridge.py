@@ -780,6 +780,23 @@ class ExternalMotionAuthorityTest(unittest.TestCase):
 
         self.assertLess(command.speed_pwm, 0)
 
+    def test_safety_holds_survive_mapping_authority(self) -> None:
+        """세션 소유권은 "세상이 멈추라고 한다" 를 덮을 수 없다.
+
+        2026-08-08: 첫 수정이 홀드 종류를 가리지 않고 풀어서, 매핑 중에는
+        OBSTACLE 홀드까지 무력화됐다. 라이다를 가려도 계속 주행했다.
+        """
+
+        for reason in ("OBSTACLE", "SCAN_DWELL", "NAV2_GOAL_ABORTED"):
+            with self.subTest(reason=reason):
+                bridge = self._bridge(lambda: True)
+                bridge._cmd_vel_hold_reason = reason
+
+                command = bridge.record_cmd_vel(0.075, 0.0)
+
+                self.assertTrue(command.stopped)
+                self.assertEqual(command.stop_reason, reason)
+
     def test_a_broken_authority_probe_keeps_the_hold(self) -> None:
         """권한 판단이 터졌다고 해서 명령 없이 움직이면 안 된다."""
 

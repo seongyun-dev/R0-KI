@@ -28,6 +28,11 @@ HeadingSource = Callable[[], float | None]
 TimerFactory = Callable[[float, Callable[[], None]], Any]
 LOGGER = logging.getLogger(__name__)
 
+# 외부 주행 권한(매핑 세션)이 풀어도 되는 홀드. 순찰 생애주기에서만 의미가
+# 있는 것 하나뿐이다. OBSTACLE, SCAN_DWELL, 실패 사유는 "세상이 멈추라고
+# 한다"는 뜻이라 어떤 세션 소유권으로도 덮을 수 없다.
+PATROL_LIFECYCLE_HOLDS = frozenset({"NAV2_PATROL_STOPPED"})
+
 
 @dataclass(frozen=True)
 class RosNav2BridgeSettings:
@@ -448,19 +453,24 @@ class RosNav2Bridge:
             hold_reason = self._cmd_vel_hold_reason
             if self._cmd_vel_watchdog_armed_locked():
                 self._last_cmd_vel_at = self._clock()
-        # The hold is a *patrol* lifecycle statement: it is armed by stop_patrol
-        # and cleared only when Nav2 accepts a goal that this bridge sent. In
-        # autonomous mapping the goals come from the frontier explorer instead,
-        # so that clearing path never runs and the hold armed at stop_patrol
-        # stays on forever, zeroing every command.
+        # NAV2_PATROL_STOPPED is a *patrol* lifecycle statement: it is armed by
+        # stop_patrol and cleared only when Nav2 accepts a goal that this bridge
+        # sent. In autonomous mapping the goals come from the frontier explorer
+        # instead, so that clearing path never runs and the hold armed at
+        # stop_patrol stays on forever, zeroing every command.
         #
         # 2026-08-08 현장: 매핑 내내 calls=101 auth=101 zero=101
         # last_reason=NAV2_PATROL_STOPPED. /cmd_vel 은 -0.075 를 싣고 있었는데
         # 여기서 전부 0 이 됐고, 그래서 제어 게이트가 한 번도 열리지 않았다.
         #
         # A mapping session is its own motion authority, so ask the owner rather
-        # than inferring it from patrol state.
-        if hold_reason is not None and self._external_motion_authority is not None:
+        # than inferring it from patrol state -- but release ONLY the lifecycle
+        # hold. OBSTACLE and the other safety holds mean "the world says stop",
+        # which no session ownership can override.
+        if (
+            hold_reason in PATROL_LIFECYCLE_HOLDS
+            and self._external_motion_authority is not None
+        ):
             try:
                 if self._external_motion_authority():
                     hold_reason = None
