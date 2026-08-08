@@ -47,6 +47,7 @@ class ValidatedCommand:
 
 ReadinessCheck = Callable[[], tuple[bool, str] | bool]
 TelemetryFlush = Callable[[], None]
+PatrolStopHook = Callable[[str], None]
 
 
 class PatrolCommandHandler:
@@ -71,6 +72,7 @@ class PatrolCommandHandler:
         mapping_runtime: Any | None = None,
         readiness_checks: Iterable[ReadinessCheck] = (),
         localization_preparer: Callable[[], tuple[bool, str]] | None = None,
+        patrol_stop_hook: PatrolStopHook | None = None,
         flush_telemetry: TelemetryFlush | None = None,
         command_cache_path: str | Path | None = None,
         wall_clock: Callable[[], datetime] | None = None,
@@ -87,6 +89,7 @@ class PatrolCommandHandler:
         self._mapping_lifecycle_lock = threading.RLock()
         self._readiness_checks = tuple(readiness_checks)
         self._localization_preparer = localization_preparer
+        self._patrol_stop_hook = patrol_stop_hook
         self._flush_telemetry = flush_telemetry
         self._wall_clock = wall_clock or (lambda: datetime.now(tz=SEOUL))
         self._monotonic_clock = monotonic_clock
@@ -270,6 +273,11 @@ class PatrolCommandHandler:
         except Exception as exc:
             stop_failed = True
             print(f"[SHUTDOWN] physical STOP failed: {type(exc).__name__}")
+        try:
+            self._close_patrol_scan_gate("ROBOT_RUNTIME_STOPPING")
+        except Exception as exc:
+            stop_failed = True
+            print(f"[SHUTDOWN] scan gate close failed: {type(exc).__name__}")
         ai_failed = False
         try:
             self._disable_ai("ROBOT_RUNTIME_STOPPING")
@@ -285,6 +293,11 @@ class PatrolCommandHandler:
         """Disable detections as soon as local navigation has physically stopped."""
 
         try:
+            self._close_patrol_scan_gate("DESTINATION_REACHED")
+        except Exception as exc:
+            self._state_store.update_robot_state("ERROR")
+            print(f"[SCAN_GATE] destination close failed type={type(exc).__name__}")
+        try:
             self._disable_ai("DESTINATION_REACHED")
         except Exception as exc:
             self._state_store.update_robot_state("ERROR")
@@ -295,6 +308,10 @@ class PatrolCommandHandler:
         """Close AI and telemetry state after an asynchronous robot failure."""
 
         self._clear_since = None
+        try:
+            self._close_patrol_scan_gate(reason)
+        except Exception as exc:
+            print(f"[SCAN_GATE] runtime failure close failed type={type(exc).__name__}")
         with self._mapping_lifecycle_lock:
             mapping_command_id = None
             if self._mapping_runtime is not None and bool(
@@ -400,6 +417,15 @@ class PatrolCommandHandler:
                 print(f"[COMMAND] START_PATROL localization rejected reason={reason}")
                 return
 
+        # Localization preparation opens the scan gate. Re-run the existing
+        # readiness contract after that transition, before AI or motion.
+        ready, reason = self._readiness()
+        if not ready:
+            self._cancel_prepared_patrol()
+            self._record_and_publish_command(command, "REJECTED", reason=reason)
+            print(f"[COMMAND] START_PATROL final readiness rejected reason={reason}")
+            return
+
         # Route fetch, map validation and the OTA lease can consume most of a
         # short MQTT command TTL. Recheck at the last safe point before AI or
         # any physical START is allowed.
@@ -473,6 +499,10 @@ class PatrolCommandHandler:
         errors: list[str] = []
         try:
             self._serial_reader.send_command("STOP_PATROL")
+        except Exception as exc:
+            errors.append(str(exc) or type(exc).__name__)
+        try:
+            self._close_patrol_scan_gate("STOP_PATROL")
         except Exception as exc:
             errors.append(str(exc) or type(exc).__name__)
         try:
@@ -785,11 +815,18 @@ class PatrolCommandHandler:
         )
 
     def _cancel_prepared_patrol(self) -> None:
-        cancel_prepared = getattr(
-            self._serial_reader, "cancel_prepared_patrol", None
-        )
-        if callable(cancel_prepared):
-            cancel_prepared()
+        try:
+            cancel_prepared = getattr(
+                self._serial_reader, "cancel_prepared_patrol", None
+            )
+            if callable(cancel_prepared):
+                cancel_prepared()
+        finally:
+            self._close_patrol_scan_gate("START_PATROL_ROLLBACK")
+
+    def _close_patrol_scan_gate(self, reason: str) -> None:
+        if self._patrol_stop_hook is not None:
+            self._patrol_stop_hook(reason)
 
     def _start_command_expired(self, command: ValidatedCommand) -> bool:
         return self._wall_clock() >= command.expires_at
