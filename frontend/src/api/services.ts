@@ -8,6 +8,18 @@ import type {
   AnalyticsTrendResponse,
 } from './analyticsContracts'
 import type {
+  RegisteredVehicleResponse,
+  ResidentDetailResponse,
+  ResidentFilterOptionsResponse,
+  ResidentListPageResponse,
+  ResidentListRequest,
+  ResidentNotificationUpdateRequest,
+  ResidentRegisterRequest,
+  ResidentSummaryResponse,
+  ResidentUpdateRequest,
+  VehicleRegisterRequest,
+} from './residentContracts'
+import type {
   ComplexResponse,
   EventBatchCreateRequest,
   EventBatchCreateResponse,
@@ -197,6 +209,61 @@ export const notificationsApi = {
   detail: (notificationId: number) =>
     apiRequest<NotificationDetailResponse>(
       `/api/notifications/${encodeURIComponent(String(notificationId))}`,
+    ),
+}
+
+export const residentsApi = {
+  list: (request: ResidentListRequest = {}) => {
+    const query = new URLSearchParams()
+    const { sort, keyword, buildingNumber, notificationEnabled, page, size } = request
+
+    if (keyword) query.set('keyword', keyword)
+    if (buildingNumber) query.set('buildingNumber', buildingNumber)
+    if (notificationEnabled !== undefined) {
+      query.set('notificationEnabled', String(notificationEnabled))
+    }
+    if (page !== undefined) query.set('page', String(page))
+    if (size !== undefined) query.set('size', String(size))
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<ResidentListPageResponse>(
+      suffix ? `/api/residents?${suffix}` : '/api/residents',
+    )
+  },
+  filterOptions: () =>
+    apiRequest<ResidentFilterOptionsResponse>('/api/residents/filter-options'),
+  detail: (residentId: string | number) =>
+    apiRequest<ResidentDetailResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}`,
+    ),
+  create: (request: ResidentRegisterRequest) =>
+    apiRequest<ResidentSummaryResponse>('/api/residents', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  update: (residentId: string | number, request: ResidentUpdateRequest) =>
+    apiRequest<ResidentSummaryResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}`,
+      { method: 'PATCH', body: jsonBody(request) },
+    ),
+  changeNotification: (
+    residentId: string | number,
+    request: ResidentNotificationUpdateRequest,
+  ) =>
+    apiRequest<ResidentSummaryResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/notification`,
+      { method: 'PATCH', body: jsonBody(request) },
+    ),
+  addVehicle: (residentId: string | number, request: VehicleRegisterRequest) =>
+    apiRequest<RegisteredVehicleResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/vehicles`,
+      { method: 'POST', body: jsonBody(request) },
+    ),
+  deleteVehicle: (residentId: string | number, vehicleId: string | number) =>
+    apiRequest<RegisteredVehicleResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/vehicles/${encodeURIComponent(String(vehicleId))}`,
+      { method: 'DELETE' },
     ),
 }
 

@@ -659,7 +659,11 @@
 .r0ki .btn-stop{color:var(--urgent-text);background:var(--urgent-bg);border:1px solid var(--urgent-edge)}
 .r0ki .btn-stop:hover{border-color:var(--urgent);box-shadow:0 8px 20px rgba(192,39,45,.12)}
 
-/* 표 (목록) — 유리 패널 안에서 내부 스크롤 */
+/* 표 (목록) — 유리 패널 안에서 내부 스크롤.
+   유리 껍데기(.tblshell)와 스크롤러(.tblwrap)는 반드시 서로 다른 엘리먼트여야 한다.
+   .g2 의 ::before(안쪽 링)/::after(면광)는 position:absolute 라서, 스크롤 컨테이너와
+   같은 엘리먼트에 올리면 콘텐츠와 함께 스크롤돼 목록 중간에 가로선으로 찍힌다. */
+.r0ki .tblshell{display:flex;flex-direction:column;flex:1;min-height:0}
 .r0ki .tblwrap{padding:var(--s3) var(--s5) var(--s5);flex:1;min-height:0;overflow-y:auto}
 .r0ki .tblwrap::-webkit-scrollbar{width:6px}
 .r0ki .tblwrap::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
