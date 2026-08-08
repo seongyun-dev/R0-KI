@@ -27,6 +27,7 @@ class MappingRuntimeSettings:
     backend_timeout_sec: float = 10.0
     upload_retry_initial_sec: float = 2.0
     upload_retry_max_sec: float = 30.0
+    fresh_map_timeout_sec: float = 30.0
 
     def __post_init__(self) -> None:
         if not self.backend_base_url:
@@ -37,6 +38,8 @@ class MappingRuntimeSettings:
             raise ValueError("upload_retry_initial_sec must be positive")
         if self.upload_retry_max_sec < self.upload_retry_initial_sec:
             raise ValueError("upload retry max must be >= initial")
+        if self.fresh_map_timeout_sec <= 0:
+            raise ValueError("fresh_map_timeout_sec must be positive")
 
 
 ClientFactory = Callable[[], RobotBackendClient]
@@ -59,6 +62,7 @@ class ManualMappingRuntime:
         client_factory: ClientFactory | None = None,
         explore_supervisor: Any | None = None,
         localization: Any | None = None,
+        slam_session: Any | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._state_store = state_store
@@ -69,6 +73,7 @@ class ManualMappingRuntime:
         # 매핑<->순찰 전환. None 이면 전환을 시도하지 않는다 -- 기존 테스트가
         # 이 의존성을 모른 채로도 성립해야 한다.
         self._localization = localization
+        self._slam_session = slam_session
         self._settings = settings
         self._client_factory = client_factory or self._build_client
         # The explorer's lifetime belongs to the mapping session, not to the
@@ -98,7 +103,9 @@ class ManualMappingRuntime:
     @property
     def motion_active(self) -> bool:
         with self._lock:
-            return self._state in {"STARTING", "MAPPING", "STOPPING"}
+            # STARTING owns reset/readiness and STOPPING owns final shutdown;
+            # neither state may authorise converted Nav2 motion.
+            return self._state == "MAPPING"
 
     @property
     def state(self) -> str:
@@ -116,6 +123,12 @@ class ManualMappingRuntime:
         """
 
         return self._localization
+
+    @property
+    def slam_session(self) -> Any | None:
+        """Internal SLAM scan boundary shared with patrol preparation."""
+
+        return self._slam_session
 
     def lifecycle_snapshot(self) -> tuple[str, int | None]:
         """Return the current mapping state and session as one atomic snapshot."""
@@ -240,6 +253,33 @@ class ManualMappingRuntime:
         if not ready:
             self._rollback_start(reason)
             return False, reason
+        fresh_marker = None
+        if self._slam_session is not None:
+            try:
+                # 정적(quiescence) 대기를 하지 않는다. slam 이 라이다를 직접
+                # 구독하므로 스캔은 10Hz 로 계속 흐르고, 멎기를 기다리면 영원히
+                # 안 온다. 그 대기는 게이트가 /slam_scan 을 끊던 시절의 것이다.
+                #
+                # 없어도 리셋은 깨끗하다. Mapper::Reset() 과 addScan 이 같은
+                # smapper_mutex_ 를 쓰므로 직렬화된다(slam_toolbox_common.cpp:575,
+                # laserCallback 이 아니라 addScan 이 락을 잡는다). 리셋 직전
+                # 스캔은 리셋이 지우고, 직후 스캔은 새 지도의 첫 스캔이 된다.
+                #
+                # 마커는 리셋이 **반환한 뒤**에 잡는다. 앞에서 잡으면 리셋이
+                # 진행되는 동안 도착한 (a) 마커 이후 스캔 한 장과 (b) 옛 그래프로
+                # 만들어진 지도 한 장이 fresh_map_ready 의 세 가드를 전부
+                # 통과한다. 리셋 자체는 이미 끝났으므로 지도가 겹치지는 않지만,
+                # "새 지도가 실제로 생겼다"는 확인이 무의미해진다.
+                self._slam_session.reset_slam()
+                fresh_marker = self._slam_session.marker()
+            except Exception as exc:
+                print(
+                    "[MAPPING] slam reset failed "
+                    f"type={type(exc).__name__}"
+                )
+                self._rollback_start("SLAM_RESET_FAILED")
+                return False, "SLAM_RESET_FAILED"
+
         # 새 세션은 깨끗한 지도에서 시작해야 한다. 위치추정 모드로 남아 있으면
         # 이전 지도의 포즈그래프 위에 그리게 되고, 매핑 모드로 돌리는 이 호출이
         # 위치추정 버퍼를 비운다. 예전에는 이걸 하려고 aiot-ros 를 재시작했다.
@@ -248,6 +288,21 @@ class ManualMappingRuntime:
             if not entered:
                 self._rollback_start(mode_reason)
                 return False, mode_reason
+        if self._slam_session is not None:
+            assert fresh_marker is not None
+            if not self._slam_session.wait_for_fresh_map(
+                fresh_marker,
+                timeout_sec=self._settings.fresh_map_timeout_sec,
+            ):
+                self._rollback_start("FRESH_MAP_NOT_READY")
+                return False, "FRESH_MAP_NOT_READY"
+            # Recheck the active Nav2 lifecycle after the post-reset map/TF is
+            # ready. This second call is read-only when already in mapping.
+            if self._localization is not None:
+                entered, mode_reason = self._localization.enter_mapping()
+                if not entered:
+                    self._rollback_start(mode_reason)
+                    return False, mode_reason
         try:
             self._drive_controller.activate(mapping_session_id)
             self._gamepad_input.start()
@@ -297,9 +352,8 @@ class ManualMappingRuntime:
             command_id = self._command_id
         assert mapping_session_id is not None and command_id is not None
 
-        # Silence the goal source before cutting the chassis: STOPPING still
-        # keeps the motion gate open, so a live explorer would keep steering
-        # the robot while the map is being saved.
+        # STOPPING revokes the motion gate immediately. Silence the goal source
+        # as well so Nav2 does not keep producing commands while the map saves.
         if self._explore is not None:
             self._explore.stop("finish")
         stop_failures = self._stop_mapping_motion("finish")

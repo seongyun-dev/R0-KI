@@ -5,9 +5,10 @@ robot_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ydlidar_setup="${AIOT_YDLIDAR_SETUP_FILE:-/home/e103/ydlidar_ws/install/setup.bash}"
 rf2o_setup="${AIOT_RF2O_SETUP_FILE:-/home/e103/rf2o_ws/install/setup.bash}"
+slam_reset_setup="${AIOT_SLAM_TOOLBOX_RESET_SETUP_FILE:-/home/e103/slam-toolbox-2610-reset-backport-ws/install/setup.bash}"
 
 "${robot_root}/scripts/ros-preflight.sh"
-for setup_file in "${ros_setup}" "${ydlidar_setup}" "${rf2o_setup}"; do
+for setup_file in "${ros_setup}" "${ydlidar_setup}" "${rf2o_setup}" "${slam_reset_setup}"; do
   set +u
   # shellcheck disable=SC1090
   source "${setup_file}"

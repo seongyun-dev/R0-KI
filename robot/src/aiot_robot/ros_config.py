@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import math
 import os
@@ -180,6 +181,56 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
 }
 
 
+PLANNER_PROFILE_IDS = {
+    "mapping": "MappingGridBased",
+    "patrol": "PatrolGridBased",
+}
+GOAL_CHECKER_PROFILE_IDS = {
+    "mapping": "mapping_goal_checker",
+    "patrol": "patrol_goal_checker",
+}
+
+
+def _parameter_tail(dotted: str, expected_head: str) -> str:
+    head, separator, tail = dotted.partition(".")
+    if not separator or head != expected_head:
+        raise ValueError(
+            f"profile parameter {dotted!r} must start with {expected_head}."
+        )
+    return tail
+
+
+def _preload_nav2_mode_plugins(config: dict[str, object]) -> None:
+    """Register both mode profiles without changing the current BT selection.
+
+    The existing trees still request ``GridBased`` and ``general_goal_checker``.
+    Keep those mapping-baseline instances and add independent mapping/patrol
+    instances beside them. No active parameter mutation is performed here;
+    this only shapes the startup parameter file.
+    """
+
+    planner = config["planner_server"]["ros__parameters"]
+    legacy_planner = planner["GridBased"]
+    planner["planner_plugins"] = ["GridBased", *PLANNER_PROFILE_IDS.values()]
+    for mode, plugin_id in PLANNER_PROFILE_IDS.items():
+        plugin = deepcopy(legacy_planner)
+        for dotted, value in MODE_PROFILES[mode]["/planner_server"].items():
+            plugin[_parameter_tail(dotted, "GridBased")] = value
+        planner[plugin_id] = plugin
+
+    controller = config["controller_server"]["ros__parameters"]
+    legacy_checker = controller["general_goal_checker"]
+    controller["goal_checker_plugins"] = [
+        "general_goal_checker",
+        *GOAL_CHECKER_PROFILE_IDS.values(),
+    ]
+    for mode, plugin_id in GOAL_CHECKER_PROFILE_IDS.items():
+        checker = deepcopy(legacy_checker)
+        for dotted, value in MODE_PROFILES[mode]["/controller_server"].items():
+            checker[_parameter_tail(dotted, "general_goal_checker")] = value
+        controller[plugin_id] = checker
+
+
 def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
     """두 운행이 공유하는 형태로 다듬는다.
 
@@ -253,6 +304,10 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
         for dotted, value in overrides.items():
             head, _, tail = dotted.partition(".")
             section[head][tail] = value
+
+    # P0-2 preloads both profiles while legacy IDs continue serving the
+    # protected Production Mapping BT.
+    _preload_nav2_mode_plugins(config)
 
     # The template forbids negative linear velocity, which is right for a DUBIN
     # route that must never retreat from the waypoint it was sent to. It silently

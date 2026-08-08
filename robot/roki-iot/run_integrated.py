@@ -266,6 +266,7 @@ def _build_nav2_driver(
             steering_center_deg=80,
             steering_right_deg=120,
         ),
+        patrol_behavior_tree_xml=_patrol_behavior_tree_xml(),
         cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
         navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
         map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
@@ -276,7 +277,6 @@ def _build_nav2_driver(
         goal_abort_retry_limit=int(
             os.getenv("ROKI_NAV2_GOAL_ABORT_RETRY_LIMIT", "3")
         ),
-        patrol_behavior_tree_xml=_patrol_behavior_tree_xml(),
     )
     def route_motion(command: Any) -> None:
         """실행 중인 운행에 따라 cmd_vel 을 알맞은 게이트로 보낸다.
@@ -493,10 +493,74 @@ def _active_map_directory() -> Path | None:
     없는 것이 맞다.
     """
 
-    map_yaml = os.getenv("ROKI_MAP_YAML", "").strip()
+    map_yaml = _active_map_environment().get("ROKI_MAP_YAML", "").strip()
     if not map_yaml:
         return None
     return Path(map_yaml).parent
+
+
+def _active_map_environment() -> dict[str, str]:
+    """current-map.env 의 ROKI_MAP_* 을 읽는다. 없는 키는 부팅 env 로 메운다."""
+
+    import json
+
+    environment_file = Path(
+        os.getenv("AIOT_ACTIVE_MAP_ENV_FILE", "/var/lib/aiot/config/current-map.env")
+    )
+    values: dict[str, str] = {}
+    try:
+        for line in environment_file.read_text(encoding="utf-8").splitlines():
+            name, separator, raw = line.partition("=")
+            name = name.strip()
+            if not separator or not name.startswith("ROKI_MAP_"):
+                continue
+            # map_activation 이 json.dumps 로 적는다. 따옴표를 벗긴다.
+            try:
+                values[name] = str(json.loads(raw.strip()))
+            except ValueError:
+                values[name] = raw.strip().strip('"')
+    except (OSError, UnicodeError):
+        values = {}
+    for name in ("ROKI_MAP_YAML", "ROKI_MAP_ID", "ROKI_MAP_VERSION"):
+        if not values.get(name):
+            fallback = os.getenv(name, "").strip()
+            if fallback:
+                values[name] = fallback
+    return values
+
+
+def _prepare_patrol_localization(mapping_runtime: Any) -> tuple[bool, str]:
+    """포즈그래프를 적재하고 위치추정이 실제로 붙을 때까지 기다린다.
+
+    예전에는 여기서 스캔을 끊었다 다시 이었다. 그 게이팅은 걷어냈다 --
+    slam 이 라이다를 직접 구독하므로 끊을 수 있는 것이 없고, 끊으면 map
+    프레임이 사라져 Nav2 와 pose 가 함께 죽는다(slam_toolbox.yaml 주석).
+
+    남은 것은 관측이다. ``deserialize_map`` 은 빈 응답이라 성공/실패를
+    알려주지 않으므로, 적재 이후의 새 스캔과 그에 이어진 map->odom 을 직접
+    확인해야 순찰이 지도 없이 출발하는 것을 막을 수 있다.
+    """
+
+    slam = getattr(mapping_runtime, "slam_session", None)
+    localization = getattr(mapping_runtime, "localization", None)
+    if localization is None:
+        return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
+    directory = _active_map_directory()
+    if directory is None:
+        return False, "ACTIVE_MAP_MISSING"
+    marker = slam.marker() if slam is not None else None
+    ready, reason = localization.ensure_patrol(str(directory / "posegraph"))
+    if not ready or slam is None:
+        return ready, reason
+
+    try:
+        timeout_sec = float(os.getenv("AIOT_PATROL_LOCALIZATION_TIMEOUT_SEC", "30"))
+        if not slam.wait_for_localization_ready(marker, timeout_sec=timeout_sec):
+            return False, "LOCALIZATION_NOT_READY"
+    except Exception as exc:
+        print(f"[SLAM] patrol localization wait failed type={type(exc).__name__}")
+        return False, "LOCALIZATION_NOT_READY"
+    return True, reason
 
 
 def _no_active_map() -> bool:
@@ -570,17 +634,13 @@ def _event_delivery_owner() -> str:
 
 
 def _current_navigation_identity() -> Any:
-    """지금 활성인 지도의 (mapId, mapVersion).
-
-    조회 시점에 읽는 것이 핵심이다. 부팅 시점 값으로 고정하면 매핑 직후
-    순찰이 반드시 어긋난다. ``map_activation`` 이 활성화 때 os.environ 을
-    함께 갱신하므로 env 가 다시 진실이다 -- 파일을 따로 읽지 않는다.
-    """
+    """지금 활성인 지도의 (mapId, mapVersion). 매 조회마다 파일에서 읽는다."""
 
     from aiot_robot.navigation_config import NavigationConfigIdentity
 
-    map_id = os.getenv("ROKI_MAP_ID", "").strip()
-    raw_version = os.getenv("ROKI_MAP_VERSION", "").strip()
+    values = _active_map_environment()
+    map_id = values.get("ROKI_MAP_ID", "").strip()
+    raw_version = values.get("ROKI_MAP_VERSION", "").strip()
     if not map_id or not raw_version:
         raise RuntimeError("ACTIVE_MAP_IDENTITY_MISSING")
     try:
@@ -710,6 +770,7 @@ def _build_mapping_runtime(
         ManualMappingRuntime,
         MappingRuntimeSettings,
     )
+    from integration.slam_session_control import RosSlamSessionControl
 
     drive_controller = ManualDriveController(
         runtime=runtime,
@@ -782,6 +843,24 @@ def _build_mapping_runtime(
         report=print,
     )
 
+    slam_session = RosSlamSessionControl(
+        reset_service=os.getenv("AIOT_SLAM_RESET_SERVICE", "/slam_toolbox/reset"),
+        # slam 이 실제로 소비하는 토픽을 관측한다. 이름에 SLAM_SCAN 을 남기면
+        # 다음 사람이 /slam_scan 을 넣을 유인이 생기는데, 그 토픽은 이제
+        # 아무도 발행하지 않는다 -- 넣는 순간 first_scan_after() 가 영원히
+        # None 이 되어 wait_for_fresh_map 과 wait_for_localization_ready 가
+        # 조용히 항상 실패한다.
+        scan_topic=os.getenv("AIOT_SLAM_OBSERVE_SCAN_TOPIC", "/scan"),
+        map_topic=os.getenv("AIOT_SLAM_MAP_TOPIC", "/map"),
+        map_frame=os.getenv("AIOT_SLAM_MAP_FRAME", "map"),
+        odom_frame=os.getenv("AIOT_SLAM_ODOM_FRAME", "odom"),
+        discovery_timeout_sec=float(
+            os.getenv("AIOT_SLAM_SESSION_DISCOVERY_TIMEOUT_SEC", "15")
+        ),
+        service_timeout_sec=float(
+            os.getenv("AIOT_SLAM_SESSION_SERVICE_TIMEOUT_SEC", "15")
+        ),
+    )
     mapping_runtime = ManualMappingRuntime(
         runtime_service=runtime_service,
         state_store=state_store,
@@ -815,6 +894,7 @@ def _build_mapping_runtime(
             )
         ),
         localization=localization_controller,
+        slam_session=slam_session,
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -826,6 +906,9 @@ def _build_mapping_runtime(
             ),
             upload_retry_max_sec=float(
                 os.getenv("AIOT_MAPPING_UPLOAD_RETRY_MAX_SEC", "30")
+            ),
+            fresh_map_timeout_sec=float(
+                os.getenv("AIOT_MAPPING_FRESH_MAP_TIMEOUT_SEC", "30")
             ),
         ),
     )
@@ -1018,6 +1101,9 @@ def create_integrated_application(
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
+    slam_session = getattr(mapping_runtime, "slam_session", None)
+    if slam_session is not None:
+        runtime_components.append(slam_session)
     if mapping_motion_bridge is not None:
         # Started and stopped with the rest of the runtime so the cmd_vel
         # subscription exists for the whole mapping session.
@@ -1072,13 +1158,7 @@ def create_integrated_application(
         current-map.env 에만 있고 이 프로세스의 os.environ 에는 없다.
         """
 
-        localization = getattr(mapping_runtime, "localization", None)
-        if localization is None:
-            return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
-        directory = _active_map_directory()
-        if directory is None:
-            return False, "ACTIVE_MAP_MISSING"
-        return localization.ensure_patrol(str(directory / "posegraph"))
+        return _prepare_patrol_localization(mapping_runtime)
 
     command_handler = PatrolCommandHandler(
         settings=settings,
