@@ -175,6 +175,62 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertEqual(reason, "MODE_PROFILE_APPLY_FAILED")
         self.assertIsNone(self.controller.mode)
 
+    def test_ensure_patrol_loads_the_graph_when_nobody_did(self) -> None:
+        """재부팅 뒤 첫 순찰. 그 부팅에 매핑이 없었으니 인계도 없었다."""
+
+        ready, reason = self.controller.ensure_patrol("/maps/active/posegraph")
+
+        self.assertTrue(ready)
+        self.assertEqual(reason, "READY")
+        self.assertEqual(
+            [call[1] for call in self.transport.calls if call[0] == "deserialize_map"],
+            ["/maps/active/posegraph"],
+        )
+
+    def test_ensure_patrol_does_not_reload_the_same_graph(self) -> None:
+        """7.2MB 재적재는 START_PATROL 의 TTL 을 그만큼 붙잡는다."""
+
+        self.controller.enter_patrol("/maps/active/posegraph")
+        self.transport.calls.clear()
+
+        ready, reason = self.controller.ensure_patrol("/maps/active/posegraph")
+
+        self.assertTrue(ready)
+        self.assertEqual(reason, "ALREADY_PATROL")
+        self.assertEqual(
+            [call for call in self.transport.calls if call[0] == "deserialize_map"], []
+        )
+        # 그래프는 그대로 두되 프로필은 다시 밀어넣는다. 생애주기 복구가
+        # REEDS_SHEPP 으로 되돌려놓았을 수 있다.
+        self.assertEqual(
+            self.transport.injected()["/planner_server"][
+                "GridBased.motion_model_for_search"
+            ],
+            "DUBIN",
+        )
+
+    def test_ensure_patrol_reloads_when_the_active_map_changed(self) -> None:
+        """방금 그린 지도는 이전 그래프와 다른 파일이다."""
+
+        self.controller.enter_patrol("/maps/active/map-1/posegraph")
+        self.transport.calls.clear()
+
+        ready, _ = self.controller.ensure_patrol("/maps/active/map-2/posegraph")
+
+        self.assertTrue(ready)
+        self.assertEqual(
+            [call[1] for call in self.transport.calls if call[0] == "deserialize_map"],
+            ["/maps/active/map-2/posegraph"],
+        )
+
+    def test_ensure_patrol_reports_a_missing_graph(self) -> None:
+        self.missing.add("/maps/active/posegraph")
+
+        ready, reason = self.controller.ensure_patrol("/maps/active/posegraph")
+
+        self.assertFalse(ready)
+        self.assertEqual(reason, "POSEGRAPH_MISSING")
+
     def test_mapping_survives_a_profile_injection_failure(self) -> None:
         """렌더된 파일이 이미 매핑 값이다. 여기서 실패로 처리하면 매핑이 못 뜬다."""
 

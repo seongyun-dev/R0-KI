@@ -235,6 +235,39 @@ class LocalizationModeController:
         self._say(f"mode=patrol posegraph={posegraph_path}")
         return True, "READY"
 
+    def ensure_patrol(
+        self,
+        posegraph_path: str,
+        dock_pose: DockPose | None = None,
+    ) -> tuple[bool, str]:
+        """순찰을 시작할 수 있는 상태임을 보장한다.
+
+        매핑 완료 시점의 인계(``mapping_runtime._enter_patrol_localization``)는
+        실패할 수 있고, 재부팅한 뒤에는 아예 일어나지 않는다 -- 그 부팅에는
+        매핑이 없었으므로 호출하는 쪽이 없다. 그 주석이 "순찰을 시작할 때
+        다시 시도한다" 고 적어둔 경로가 실제로는 없어서, 재부팅 뒤 바로 순찰하면
+        slam_toolbox 가 빈 매핑 상태로 남았다. 여기가 그 경로다.
+
+        이미 같은 그래프로 위치추정 중이면 그래프를 다시 읽지 않는다. 7.2MB
+        적재에 수 초가 걸려서(2026-08-07 실측) START_PATROL 의 TTL 을 그만큼
+        붙잡는다. 대신 프로필은 항상 다시 밀어넣는다 -- 생애주기 복구가
+        되돌려놓았을 수 있고, 그 확인은 서비스 호출 두 번이면 끝난다.
+        """
+
+        pose = dock_pose or self._dock_pose
+        with self._lock:
+            already = self._mode == self.PATROL and self._patrol_arguments == (
+                posegraph_path,
+                pose,
+            )
+        if not already:
+            return self.enter_patrol(posegraph_path, dock_pose)
+        profile_failure = self._apply_mode_profile(self.PATROL)
+        if profile_failure is not None:
+            self._invalidate()
+            return False, profile_failure
+        return True, "ALREADY_PATROL"
+
     def note_lifecycle_recovery(self, detail: str = "") -> None:
         """생애주기 관리자가 스택을 복구했음을 기록만 한다.
 

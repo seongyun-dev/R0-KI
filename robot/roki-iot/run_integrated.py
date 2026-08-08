@@ -451,6 +451,42 @@ def _environment_enabled(name: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _active_map_directory() -> Path | None:
+    """활성 지도 디렉터리. 프로세스 환경이 아니라 env 파일에서 읽는다.
+
+    매핑이 끝나면 ``map_activation`` 이 ``current-map.env`` 를 갱신하지만,
+    이미 떠 있는 프로세스의 ``os.environ`` 은 부팅 시점 값 그대로다. 방금 그린
+    지도로 순찰하려면 파일을 다시 읽어야 한다 -- 안 읽으면 이전 지도의
+    포즈그래프를 적재하고, 로봇은 있지도 않은 벽 사이에서 위치추정을 한다.
+
+    파일이 없거나 깨졌으면 부팅 시 환경으로 물러난다. 둘 다 없으면 활성 지도가
+    없는 것이 맞다.
+    """
+
+    import json
+
+    environment_file = Path(
+        os.getenv("AIOT_ACTIVE_MAP_ENV_FILE", "/var/lib/aiot/config/current-map.env")
+    )
+    map_yaml = ""
+    try:
+        for line in environment_file.read_text(encoding="utf-8").splitlines():
+            name, separator, raw = line.partition("=")
+            if separator and name.strip() == "ROKI_MAP_YAML":
+                # map_activation 이 json.dumps 로 적는다. 따옴표를 벗긴다.
+                try:
+                    map_yaml = str(json.loads(raw.strip()))
+                except ValueError:
+                    map_yaml = raw.strip().strip('"')
+    except (OSError, UnicodeError):
+        map_yaml = ""
+    if not map_yaml:
+        map_yaml = os.getenv("ROKI_MAP_YAML", "").strip()
+    if not map_yaml:
+        return None
+    return Path(map_yaml).parent
+
+
 def _no_active_map() -> bool:
     """아직 지도가 없으면 순찰 경로를 검증할 대상이 없다.
 
@@ -987,6 +1023,26 @@ def create_integrated_application(
         extra_args=settings.pipeline_extra_args,
         start_grace_seconds=settings.pipeline_start_grace_seconds,
     )
+    def prepare_patrol_localization() -> tuple[bool, str]:
+        """순찰 시작 직전에 활성 지도의 포즈그래프가 적재돼 있음을 보장한다.
+
+        매핑 완료 시점의 인계는 실패할 수 있고, 재부팅한 뒤에는 아예 일어나지
+        않는다 -- 그 부팅에는 매핑이 없었으므로 부르는 쪽이 없다. 그래서
+        지금까지는 재부팅 뒤 바로 순찰하면 slam_toolbox 가 빈 매핑 상태로
+        남았고, 순찰은 지도 없이 출발했다.
+
+        디렉터리를 env 파일에서 다시 읽는 것도 같은 이유다. 방금 그린 지도는
+        current-map.env 에만 있고 이 프로세스의 os.environ 에는 없다.
+        """
+
+        localization = getattr(mapping_runtime, "localization", None)
+        if localization is None:
+            return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
+        directory = _active_map_directory()
+        if directory is None:
+            return False, "ACTIVE_MAP_MISSING"
+        return localization.ensure_patrol(str(directory / "posegraph"))
+
     command_handler = PatrolCommandHandler(
         settings=settings,
         mqtt_client=mqtt_client,
@@ -997,6 +1053,7 @@ def create_integrated_application(
         ai_controller=ai_controller,
         mapping_runtime=mapping_runtime,
         readiness_checks=readiness_checks,
+        localization_preparer=prepare_patrol_localization,
     )
     if mapping_runtime is not None:
         mapping_runtime.set_failure_listener(command_handler.on_runtime_failure)

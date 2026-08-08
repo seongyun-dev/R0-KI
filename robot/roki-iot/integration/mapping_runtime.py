@@ -105,6 +105,18 @@ class ManualMappingRuntime:
         with self._lock:
             return self._state
 
+    @property
+    def localization(self) -> Any | None:
+        """매핑/순찰 모드 전환기. 순찰 시작도 이걸 써서 인계를 다시 확인한다.
+
+        이 클래스가 소유자인 이유는 매핑이 먼저 필요했기 때문이지 매핑
+        전용이기 때문이 아니다. 순찰 시작 경로에도 내줘야 한다 --
+        ``_enter_patrol_localization`` 이 실패했거나 그 부팅에 매핑이 없었으면
+        아무도 포즈그래프를 적재하지 않은 채로 순찰이 출발한다.
+        """
+
+        return self._localization
+
     def lifecycle_snapshot(self) -> tuple[str, int | None]:
         """Return the current mapping state and session as one atomic snapshot."""
 
