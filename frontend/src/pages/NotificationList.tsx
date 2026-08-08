@@ -33,79 +33,83 @@ export default function NotificationList() {
           </div>
         </div>
 
-        <div className="glass g2 tblwrap">
-          {error ? (
-            <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
-              <span>알림을 불러오지 못했습니다</span>
-              <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
-            </div>
-          ) : (
-            <>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>알림 ID</th>
-                    <th>발송 시각</th>
-                    <th>이벤트 유형</th>
-                    <th>수신자</th>
-                    <th>동/호수</th>
-                    <th>이벤트 ID</th>
-                    <th>발송 상태</th>
-                    <th className="r" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((n) => (
-                    <tr key={n.id} onClick={() => navigate(`/app/notifications/${n.id}`)}>
-                      <td className="id">{n.id}</td>
-                      <td className="tm">{n.sentAtLabel}</td>
-                      <td className="ty">{n.eventType}</td>
-                      <td className="who">{n.recipientName}</td>
-                      <td className="loc">{n.address}</td>
-                      <td className="bot">{n.eventId}</td>
-                      <td>
-                        {n.status === '발송실패' ? (
-                          <span className="st u"><i />발송실패</span>
-                        ) : (
-                          <span className="st">
-                            <i style={{ background: STATUS_DOT[n.status] ?? 'var(--detect)' }} />
-                            {n.status}
-                          </span>
-                        )}
-                      </td>
-                      <td className="r">
-                        <button type="button" className="golink">
-                          상세
-                          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {rows.length === 0 && !isLoading && (
-                <div className="empty">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7" />
-                    <path d="M13.7 20a2 2 0 0 1-3.4 0" />
-                  </svg>
-                  <span>발송된 알림이 없습니다</span>
-                </div>
-              )}
-
-              <div className="tfoot">
-                <span>
-                  {isLoading
-                    ? '불러오는 중…'
-                    : rows.length === 0
-                      ? '결과 없음'
-                      : `전체 ${rows.length}건${failedCount > 0 ? ` · 실패 ${failedCount}건` : ''}`}
-                </span>
-                <span>최신순</span>
+        {/* 유리 껍데기와 스크롤러를 나눈다 — .g2 의 안쪽 링/면광은 absolute 라
+            스크롤 컨테이너와 같은 엘리먼트에 두면 목록 중간에 가로선으로 딸려 온다 */}
+        <div className="glass g2 tblshell">
+          <div className="tblwrap">
+            {error ? (
+              <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
+                <span>알림을 불러오지 못했습니다</span>
+                <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>알림 ID</th>
+                      <th>발송 시각</th>
+                      <th>이벤트 유형</th>
+                      <th>수신자</th>
+                      <th>동/호수</th>
+                      <th>이벤트 ID</th>
+                      <th>발송 상태</th>
+                      <th className="r" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((n) => (
+                      <tr key={n.id} onClick={() => navigate(`/app/notifications/${n.id}`)}>
+                        <td className="id">{n.id}</td>
+                        <td className="tm">{n.sentAtLabel}</td>
+                        <td className="ty">{n.eventType}</td>
+                        <td className="who">{n.recipientName}</td>
+                        <td className="loc">{n.address}</td>
+                        <td className="bot">{n.eventId}</td>
+                        <td>
+                          {n.status === '발송실패' ? (
+                            <span className="st u"><i />발송실패</span>
+                          ) : (
+                            <span className="st">
+                              <i style={{ background: STATUS_DOT[n.status] ?? 'var(--detect)' }} />
+                              {n.status}
+                            </span>
+                          )}
+                        </td>
+                        <td className="r">
+                          <button type="button" className="golink">
+                            상세
+                            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {rows.length === 0 && !isLoading && (
+                  <div className="empty">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7" />
+                      <path d="M13.7 20a2 2 0 0 1-3.4 0" />
+                    </svg>
+                    <span>발송된 알림이 없습니다</span>
+                  </div>
+                )}
+
+                <div className="tfoot">
+                  <span>
+                    {isLoading
+                      ? '불러오는 중…'
+                      : rows.length === 0
+                        ? '결과 없음'
+                        : `전체 ${rows.length}건${failedCount > 0 ? ` · 실패 ${failedCount}건` : ''}`}
+                  </span>
+                  <span>최신순</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </R0KiShell>

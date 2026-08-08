@@ -144,117 +144,121 @@ export default function ResidentList() {
           </div>
         </div>
 
-        <div className="glass g2 tblwrap">
-          {error ? (
-            <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
-              <span>입주민을 불러오지 못했습니다</span>
-              <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
-            </div>
-          ) : (
-            <>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>동/호수</th>
-                    <th>이름</th>
-                    <th>연락처</th>
-                    <th>등록 차량</th>
-                    <th>알림 수신</th>
-                    <th>최근 발송</th>
-                    <th className="r" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((resident) => (
-                    <tr
-                      key={resident.residentId}
-                      onClick={() => navigate(`/app/residents/${resident.residentId}`)}
-                    >
-                      <td className="loc">
-                        {resident.buildingNumber}동 {resident.unitNumber}호
-                      </td>
-                      <td className="who">{resident.name}</td>
-                      <td className="num">{resident.maskedPhoneNumber}</td>
-                      <td className="num">
-                        {resident.vehicleCount === 0 ? (
-                          <span className="dash">미등록</span>
-                        ) : (
-                          <>
-                            {resident.representativeLicensePlate}
-                            {resident.vehicleCount > 1 && ` 외 ${resident.vehicleCount - 1}대`}
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        {resident.notificationEnabled ? (
-                          <span className="st">
-                            <i style={{ background: 'var(--offline)' }} />
-                            수신
-                          </span>
-                        ) : (
-                          <span className="st u"><i />차단</span>
-                        )}
-                      </td>
-                      <td className="tm">{formatDateTimeLabel(resident.lastNotifiedAt)}</td>
-                      <td className="r">
-                        <button type="button" className="golink">
-                          상세
-                          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-                        </button>
-                      </td>
+        {/* 유리 껍데기와 스크롤러를 나눈다 — .g2 의 안쪽 링/면광은 absolute 라
+            스크롤 컨테이너와 같은 엘리먼트에 두면 목록 중간에 가로선으로 딸려 온다 */}
+        <div className="glass g2 tblshell">
+          <div className="tblwrap">
+            {error ? (
+              <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
+                <span>입주민을 불러오지 못했습니다</span>
+                <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
+              </div>
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>동/호수</th>
+                      <th>이름</th>
+                      <th>연락처</th>
+                      <th>등록 차량</th>
+                      <th>알림 수신</th>
+                      <th>최근 발송</th>
+                      <th className="r" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {rows.map((resident) => (
+                      <tr
+                        key={resident.residentId}
+                        onClick={() => navigate(`/app/residents/${resident.residentId}`)}
+                      >
+                        <td className="loc">
+                          {resident.buildingNumber}동 {resident.unitNumber}호
+                        </td>
+                        <td className="who">{resident.name}</td>
+                        <td className="num">{resident.maskedPhoneNumber}</td>
+                        <td className="num">
+                          {resident.vehicleCount === 0 ? (
+                            <span className="dash">미등록</span>
+                          ) : (
+                            <>
+                              {resident.representativeLicensePlate}
+                              {resident.vehicleCount > 1 && ` 외 ${resident.vehicleCount - 1}대`}
+                            </>
+                          )}
+                        </td>
+                        <td>
+                          {resident.notificationEnabled ? (
+                            <span className="st">
+                              <i style={{ background: 'var(--offline)' }} />
+                              수신
+                            </span>
+                          ) : (
+                            <span className="st u"><i />차단</span>
+                          )}
+                        </td>
+                        <td className="tm">{formatDateTimeLabel(resident.lastNotifiedAt)}</td>
+                        <td className="r">
+                          <button type="button" className="golink">
+                            상세
+                            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
 
-              {rows.length === 0 && !isLoading && (
-                <div className="empty">
-                  <svg viewBox="0 0 24 24">
-                    <circle cx="12" cy="8" r="4" />
-                    <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
-                  </svg>
-                  <span>조건에 맞는 입주민이 없습니다</span>
+                {rows.length === 0 && !isLoading && (
+                  <div className="empty">
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
+                    </svg>
+                    <span>조건에 맞는 입주민이 없습니다</span>
+                  </div>
+                )}
+
+                <div className="tfoot">
+                  <span>
+                    {isLoading
+                      ? '불러오는 중…'
+                      : rows.length === 0
+                        ? '결과 없음'
+                        : `이 페이지 ${rows.length}세대${
+                            noVehicleCount > 0 ? ` · 차량 미등록 ${noVehicleCount}세대` : ''
+                          }`}
+                  </span>
+                  <span>동·호수순</span>
                 </div>
-              )}
-
-              <div className="tfoot">
-                <span>
-                  {isLoading
-                    ? '불러오는 중…'
-                    : rows.length === 0
-                      ? '결과 없음'
-                      : `이 페이지 ${rows.length}세대${
-                          noVehicleCount > 0 ? ` · 차량 미등록 ${noVehicleCount}세대` : ''
-                        }`}
-                </span>
-                <span>동·호수순</span>
-              </div>
-              <div className="tfoot" style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}>
-                <button
-                  type="button"
-                  className="btn btn-s"
-                  disabled={first || isLoading}
-                  onClick={() =>
-                    setSearchParams(buildSearchParams(applied, Math.max(0, page - 1)))
-                  }
-                >
-                  이전
-                </button>
-                <span>
-                  {totalPages === 0 ? 0 : page + 1} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-s"
-                  disabled={last || isLoading}
-                  onClick={() => setSearchParams(buildSearchParams(applied, page + 1))}
-                >
-                  다음
-                </button>
-                <span>전체 {totalElements}세대</span>
-              </div>
-            </>
-          )}
+                <div className="tfoot" style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={first || isLoading}
+                    onClick={() =>
+                      setSearchParams(buildSearchParams(applied, Math.max(0, page - 1)))
+                    }
+                  >
+                    이전
+                  </button>
+                  <span>
+                    {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={last || isLoading}
+                    onClick={() => setSearchParams(buildSearchParams(applied, page + 1))}
+                  >
+                    다음
+                  </button>
+                  <span>전체 {totalElements}세대</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </R0KiShell>

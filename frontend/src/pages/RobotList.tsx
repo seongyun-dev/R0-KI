@@ -86,115 +86,119 @@ export default function RobotList() {
           ))}
         </div>
 
-        <div className="glass g2 tblwrap">
-          {error ? (
-            <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
-              <span>로봇 목록을 불러오지 못했습니다</span>
-              <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
-            </div>
-          ) : (
-            <>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>로봇명</th>
-                    <th>상태</th>
-                    <th>배터리</th>
-                    <th>현재 위치</th>
-                    <th>최근 순찰</th>
-                    <th className="r" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.id} onClick={() => navigate(`/app/robots/${r.id}`)}>
-                      <td className="id">{r.name}</td>
-                      <td>
-                        <span className="st">
-                          <i style={{ background: STATUS_DOT[r.status] ?? 'var(--detect)' }} />
-                          {r.status}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`bat${r.battery == null ? ' unknown' : ''}`}>
-                          <span className="bar" aria-hidden>
-                            {r.battery != null && <i style={{ width: `${r.battery}%` }} />}
-                          </span>
-                          <span className="pct">
-                            {r.battery != null ? `${r.battery}%` : '--%'}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="loc">{r.location ?? '—'}</td>
-                      <td className="tm">{r.lastPatrol ?? '—'}</td>
-                      <td className="r">
-                        <span className="rowacts">
-                          <button type="button" className="golink">
-                            상세
-                            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-                          </button>
-                          <button
-                            type="button"
-                            className="linkbtn"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setEditing(r)
-                            }}
-                          >
-                            수정
-                          </button>
-                        </span>
-                      </td>
+        {/* 유리 껍데기와 스크롤러를 나눈다 — .g2 의 안쪽 링/면광은 absolute 라
+            스크롤 컨테이너와 같은 엘리먼트에 두면 목록 중간에 가로선으로 딸려 온다 */}
+        <div className="glass g2 tblshell">
+          <div className="tblwrap">
+            {error ? (
+              <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
+                <span>로봇 목록을 불러오지 못했습니다</span>
+                <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
+              </div>
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>로봇명</th>
+                      <th>상태</th>
+                      <th>배터리</th>
+                      <th>현재 위치</th>
+                      <th>최근 순찰</th>
+                      <th className="r" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.id} onClick={() => navigate(`/app/robots/${r.id}`)}>
+                        <td className="id">{r.name}</td>
+                        <td>
+                          <span className="st">
+                            <i style={{ background: STATUS_DOT[r.status] ?? 'var(--detect)' }} />
+                            {r.status}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`bat${r.battery == null ? ' unknown' : ''}`}>
+                            <span className="bar" aria-hidden>
+                              {r.battery != null && <i style={{ width: `${r.battery}%` }} />}
+                            </span>
+                            <span className="pct">
+                              {r.battery != null ? `${r.battery}%` : '--%'}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="loc">{r.location ?? '—'}</td>
+                        <td className="tm">{r.lastPatrol ?? '—'}</td>
+                        <td className="r">
+                          <span className="rowacts">
+                            <button type="button" className="golink">
+                              상세
+                              <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                            </button>
+                            <button
+                              type="button"
+                              className="linkbtn"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditing(r)
+                              }}
+                            >
+                              수정
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
 
-              {rows.length === 0 && !isLoading && (
-                <div className="empty">
-                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
-                  <span>등록된 로봇이 없습니다</span>
+                {rows.length === 0 && !isLoading && (
+                  <div className="empty">
+                    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+                    <span>등록된 로봇이 없습니다</span>
+                  </div>
+                )}
+
+                <div className="tfoot">
+                  {/* 지금 보이는 페이지 기준 — 아래 '전체 N대'(totalElements)와 구분한다 */}
+                  <span>
+                    {isLoading
+                      ? '불러오는 중…'
+                      : rows.length === 0
+                        ? '결과 없음'
+                        : `이 페이지 ${rows.length}대`}
+                  </span>
+                  <span>등록순</span>
                 </div>
-              )}
-
-              <div className="tfoot">
-                {/* 지금 보이는 페이지 기준 — 아래 '전체 N대'(totalElements)와 구분한다 */}
-                <span>
-                  {isLoading
-                    ? '불러오는 중…'
-                    : rows.length === 0
-                      ? '결과 없음'
-                      : `이 페이지 ${rows.length}대`}
-                </span>
-                <span>등록순</span>
-              </div>
-              <div
-                className="tfoot"
-                style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-s"
-                  disabled={first || isLoading}
-                  onClick={() => setPage((current) => Math.max(0, current - 1))}
+                <div
+                  className="tfoot"
+                  style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
                 >
-                  이전
-                </button>
-                <span>
-                  {totalPages === 0 ? 0 : page + 1} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-s"
-                  disabled={last || isLoading}
-                  onClick={() => setPage((current) => current + 1)}
-                >
-                  다음
-                </button>
-                <span>전체 {totalElements}대</span>
-              </div>
-            </>
-          )}
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={first || isLoading}
+                    onClick={() => setPage((current) => Math.max(0, current - 1))}
+                  >
+                    이전
+                  </button>
+                  <span>
+                    {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={last || isLoading}
+                    onClick={() => setPage((current) => current + 1)}
+                  >
+                    다음
+                  </button>
+                  <span>전체 {totalElements}대</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

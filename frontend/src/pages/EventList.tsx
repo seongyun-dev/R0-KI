@@ -154,130 +154,134 @@ export default function EventList() {
           </div>
         </div>
 
-        <div className="glass g2 tblwrap">
-          {error ? (
-            <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
-              <span>이벤트를 불러오지 못했습니다</span>
-              <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
-            </div>
-          ) : (
-            <>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>이벤트 ID</th>
-                    <th>탐지 날짜</th>
-                    <th>시간</th>
-                    <th>유형</th>
-                    <th>위치</th>
-                    <th>로봇</th>
-                    <th>위험도</th>
-                    <th>상태</th>
-                    <th>담당자</th>
-                    <th className="r" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((e) => (
-                    <tr
-                      key={e.id}
-                      onClick={() =>
-                        navigate(`/app/events/${e.id}`, { state: { listSearch } })
-                      }
-                    >
-                      <td className="id">{e.id}</td>
-                      <td className="tm">{e.date || '—'}</td>
-                      <td className="tm">{e.time}</td>
-                      <td className="ty">{e.type}</td>
-                      <td className="loc">{e.location}</td>
-                      <td className="bot">{e.robotId}</td>
-                      <td>
-                        {e.riskLevel === '긴급' ? (
-                          <span className="st u"><i />긴급</span>
-                        ) : (
-                          <span className="st">
-                            <i style={{ background: RISK_DOT[e.riskLevel ?? ''] ?? 'var(--detect)' }} />
-                            {e.riskLevel ?? '—'}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span
-                          className="st"
-                          data-status={
-                            e.status === '탐지'
-                              ? 'detected'
-                              : e.status === '처리중'
-                                ? 'processing'
-                                : e.status === '처리완료'
-                                  ? 'completed'
-                                  : undefined
-                          }
-                        >
-                          <i />
-                          {e.status}
-                        </span>
-                      </td>
-                      <td className="who">
-                        {e.assignee ?? <span className="dash">—</span>}
-                      </td>
-                      <td className="r">
-                        <button type="button" className="golink">
-                          상세
-                          <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-                        </button>
-                      </td>
+        {/* 유리 껍데기와 스크롤러를 나눈다 — .g2 의 안쪽 링/면광은 absolute 라
+            스크롤 컨테이너와 같은 엘리먼트에 두면 목록 중간에 가로선으로 딸려 온다 */}
+        <div className="glass g2 tblshell">
+          <div className="tblwrap">
+            {error ? (
+              <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
+                <span>이벤트를 불러오지 못했습니다</span>
+                <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
+              </div>
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>이벤트 ID</th>
+                      <th>탐지 날짜</th>
+                      <th>시간</th>
+                      <th>유형</th>
+                      <th>위치</th>
+                      <th>로봇</th>
+                      <th>위험도</th>
+                      <th>상태</th>
+                      <th>담당자</th>
+                      <th className="r" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {rows.map((e) => (
+                      <tr
+                        key={e.id}
+                        onClick={() =>
+                          navigate(`/app/events/${e.id}`, { state: { listSearch } })
+                        }
+                      >
+                        <td className="id">{e.id}</td>
+                        <td className="tm">{e.date || '—'}</td>
+                        <td className="tm">{e.time}</td>
+                        <td className="ty">{e.type}</td>
+                        <td className="loc">{e.location}</td>
+                        <td className="bot">{e.robotId}</td>
+                        <td>
+                          {e.riskLevel === '긴급' ? (
+                            <span className="st u"><i />긴급</span>
+                          ) : (
+                            <span className="st">
+                              <i style={{ background: RISK_DOT[e.riskLevel ?? ''] ?? 'var(--detect)' }} />
+                              {e.riskLevel ?? '—'}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span
+                            className="st"
+                            data-status={
+                              e.status === '탐지'
+                                ? 'detected'
+                                : e.status === '처리중'
+                                  ? 'processing'
+                                  : e.status === '처리완료'
+                                    ? 'completed'
+                                    : undefined
+                            }
+                          >
+                            <i />
+                            {e.status}
+                          </span>
+                        </td>
+                        <td className="who">
+                          {e.assignee ?? <span className="dash">—</span>}
+                        </td>
+                        <td className="r">
+                          <button type="button" className="golink">
+                            상세
+                            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
 
-              {rows.length === 0 && !isLoading && (
-                <div className="empty">
-                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
-                  <span>조건에 맞는 이벤트가 없습니다</span>
+                {rows.length === 0 && !isLoading && (
+                  <div className="empty">
+                    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+                    <span>조건에 맞는 이벤트가 없습니다</span>
+                  </div>
+                )}
+
+                {/* 여기 숫자는 지금 보이는 페이지 기준이다 — 아래 페이지네이션 줄의
+                    '전체 N건'(totalElements)과 같은 말로 보이지 않게 범위를 밝힌다 */}
+                <div className="tfoot">
+                  <span>
+                    {isLoading
+                      ? '불러오는 중…'
+                      : rows.length === 0
+                        ? '결과 없음'
+                        : `이 페이지 ${rows.length}건 · 긴급 ${urgentCount}건`}
+                  </span>
+                  <span>최신순</span>
                 </div>
-              )}
-
-              {/* 여기 숫자는 지금 보이는 페이지 기준이다 — 아래 페이지네이션 줄의
-                  '전체 N건'(totalElements)과 같은 말로 보이지 않게 범위를 밝힌다 */}
-              <div className="tfoot">
-                <span>
-                  {isLoading
-                    ? '불러오는 중…'
-                    : rows.length === 0
-                      ? '결과 없음'
-                      : `이 페이지 ${rows.length}건 · 긴급 ${urgentCount}건`}
-                </span>
-                <span>최신순</span>
-              </div>
-              <div
-                className="tfoot"
-                style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-s"
-                  disabled={first || isLoading}
-                  onClick={() => setSearchParams(buildSearchParams(applied, Math.max(0, page - 1)))}
+                <div
+                  className="tfoot"
+                  style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
                 >
-                  이전
-                </button>
-                <span>
-                  {totalPages === 0 ? 0 : page + 1} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-s"
-                  disabled={last || isLoading}
-                  onClick={() => setSearchParams(buildSearchParams(applied, page + 1))}
-                >
-                  다음
-                </button>
-                <span>전체 {totalElements}건</span>
-              </div>
-            </>
-          )}
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={first || isLoading}
+                    onClick={() => setSearchParams(buildSearchParams(applied, Math.max(0, page - 1)))}
+                  >
+                    이전
+                  </button>
+                  <span>
+                    {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={last || isLoading}
+                    onClick={() => setSearchParams(buildSearchParams(applied, page + 1))}
+                  >
+                    다음
+                  </button>
+                  <span>전체 {totalElements}건</span>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </R0KiShell>
