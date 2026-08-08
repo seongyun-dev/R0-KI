@@ -275,7 +275,16 @@ def _build_nav2_driver(
         """
 
         mapping_sink = (mapping_sink_holder or {}).get("sink")
-        if mapping_sink is not None and mapping_sink.mapping_authorised():
+        authorised = mapping_sink is not None and mapping_sink.mapping_authorised()
+        # 결정이 바뀔 때만 한 줄. cmd_vel 은 20Hz 라 매번 찍으면 로그가 묻힌다.
+        if route_motion.__dict__.get("last") != authorised:
+            route_motion.__dict__["last"] = authorised
+            print(
+                "[MOTION ROUTE] "
+                + ("mapping" if authorised else "patrol")
+                + f" sink={'yes' if mapping_sink is not None else 'MISSING'}"
+            )
+        if authorised:
             mapping_sink(command)
             return
         service_holder["service"].apply_motion_command(command)
