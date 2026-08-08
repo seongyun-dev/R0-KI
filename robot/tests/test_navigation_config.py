@@ -97,6 +97,29 @@ class NavigationConfigProviderTest(unittest.TestCase):
             wall_clock=lambda: NOW,
         )
 
+    def test_callable_identity_follows_the_active_map(self) -> None:
+        """매핑이 끝나면 활성 지도 버전이 올라간다. 부팅 값에 묶이면 안 된다.
+
+        2026-08-08 14:00 실기: 런타임이 v32 를 들고 있는데 백엔드 경로가 방금
+        만든 v34 를 가리켜 START_PATROL 이 NAVIGATION_MAP_MISMATCH 로 거부됐다.
+        """
+
+        active = {"version": 3}
+        provider = BackendNavigationConfigProvider(
+            backend_factory=lambda: FakeBackend(response()),
+            navigation_factory=lambda route: route,
+            identity=lambda: NavigationConfigIdentity("7", active["version"]),
+            wall_clock=lambda: NOW,
+        )
+
+        self.assertEqual(provider.load_navigation().map_version, 3)
+
+        # 백엔드는 계속 v3 를 주는데 활성 지도만 v4 로 올라간 경우는 불일치다.
+        active["version"] = 4
+        with self.assertRaises(NavigationConfigError) as raised:
+            provider.load_navigation()
+        self.assertIn("NAVIGATION_MAP_MISMATCH", str(raised.exception))
+
     def test_converts_backend_contract_to_existing_route(self) -> None:
         route = self.provider(response()).load_navigation()
 

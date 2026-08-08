@@ -40,6 +40,8 @@ HardwareStatusListener = Callable[[HardwareStatus], None]
 ConnectionListener = Callable[[int], None]
 SafetyFaultListener = Callable[[str], bool | None]
 
+# 제어 루프 출구 집계 주기. 루프는 20 Hz 라 매 회 찍으면 저널이 묻힌다.
+CONTROL_CENSUS_INTERVAL_SEC = 5.0
 
 ACTIVE_PATROL_FAULTS = frozenset(
     {
@@ -114,6 +116,8 @@ class RobotRuntime:
         self._manual_motion_active = False
         self._stationary_steering_pending = False
         self._control_gate_was_writing = False
+        self._control_census: dict[str, int] = {}
+        self._control_census_started_at: float | None = None
         self._latest_hardware_status: HardwareStatus | None = None
         self._last_logged_line_values: tuple[int, ...] | None = None
         self._last_odometry_uptime_ms: int | None = None
@@ -223,17 +227,29 @@ class RobotRuntime:
             while not self._stop_requested:
                 self._drain_motion_requests()
                 if self._bridge.ensure_connected():
+                    self._count_control_outcome("reconnected")
                     self._on_connected()
                 if not self._bridge.is_connected():
+                    # Silent before: the only log on this branch was the INFO in
+                    # ensure_connected, so a permanently unreachable ESP32 looked
+                    # exactly like a healthy idle robot.
+                    self._count_control_outcome("disconnected")
                     self._sleep(self._settings.disconnected_poll_sec)
                     continue
                 self._maintain_encoder_zero_handshake()
                 if not self._bridge.is_connected():
+                    self._count_control_outcome("dropped_in_handshake")
                     continue
                 raw = self._bridge.read_line()
                 if raw is None:
+                    self._count_control_outcome(
+                        "no_data"
+                        if self._encoder_zero_acknowledged
+                        else "no_data_awaiting_ack"
+                    )
                     self._evaluate_idle_safety()
                     continue
+                self._count_control_outcome("rx")
                 message = parse_message(raw, self._protocol_settings)
                 if message is None:
                     logger.warning("Invalid protocol message ignored")
@@ -310,6 +326,7 @@ class RobotRuntime:
         # reset or a connection listener partially changed mission state.
         self._fail_closed_mission("SERIAL_CONNECTION_RESET")
         if not self._bridge.write_line(build_stop_command(self._sequence.next())):
+            self._count_control_outcome("handshake_stop_write_failed")
             return
         self._bridge.write_line(build_hello_command(self._sequence.next()))
         self._send_encoder_zero_attempt(retry=False)
@@ -320,10 +337,12 @@ class RobotRuntime:
             if not self._bridge.write_line(
                 build_stop_command(self._sequence.next())
             ):
+                self._count_control_outcome("zero_retry_stop_write_failed")
                 return
         if not self._bridge.write_line(
             build_encoder_zero_command(self._sequence.next())
         ):
+            self._count_control_outcome("zero_write_failed")
             return
         self._encoder_zero_attempts += 1
         self._encoder_zero_last_sent_at = self._clock()
@@ -389,8 +408,10 @@ class RobotRuntime:
 
     def _handle_odometry(self, odometry: Odometry) -> None:
         if not self._encoder_zero_acknowledged:
+            self._count_control_outcome("odom_before_ack")
             self._ignore_operating_data_until_encoder_zero()
             return
+        self._count_control_outcome("odom")
         now = self._clock()
         if (
             self._last_odometry_uptime_ms is not None
@@ -477,6 +498,16 @@ class RobotRuntime:
                         command.speed,
                         current.command.speed,
                     )
+                # Name the first failing term so the census says *why*, not just
+                # that it was blocked. Order matches the condition above.
+                if not latest_decision.allowed:
+                    self._count_control_outcome(f"unsafe:{latest_decision.fault}")
+                elif current.command.emergency_stop:
+                    self._count_control_outcome("estop")
+                elif not authorized:
+                    self._count_control_outcome("unauthorized")
+                else:
+                    self._count_control_outcome("zero_speed")
                 self._send_stop(latest_decision.fault)
                 return
             if not self._bridge.write_line(
@@ -487,10 +518,12 @@ class RobotRuntime:
                     self._protocol_settings,
                 )
             ):
+                self._count_control_outcome("write_failed")
                 logger.warning(
                     "CONTROL write failed; ESP32 watchdog will stop motors"
                 )
             else:
+                self._count_control_outcome("wrote")
                 self._stationary_steering_pending = False
                 if not self._control_gate_was_writing:
                     self._control_gate_was_writing = True
@@ -508,7 +541,44 @@ class RobotRuntime:
             write_if_safe,
         ):
             self._stationary_steering_pending = False
+            # Every cmd_vel bumps the mission generation. Patrol used to set it
+            # once per waypoint, so losing the race was rare; Nav2 sets it at the
+            # controller rate, so this exit can dominate and it wrote no log.
+            self._count_control_outcome("mission_changed")
             self._send_stop("MISSION_CHANGED_BEFORE_CONTROL")
+
+    def _count_control_outcome(self, outcome: str) -> None:
+        """Tally every control-loop exit and summarise on a fixed interval.
+
+        The transition logs above only fire when the gate *changes* state, so a
+        gate that never opens once produces no output at all -- which is exactly
+        the "commands flow but the wheels never turn" case that took a full field
+        session to narrow down. A census is unconditional, so silence here now
+        means the loop is not running rather than the loop declining to write.
+
+        Rate-limited because the loop runs at the controller frequency: a line
+        per iteration would bury the journal at 20 Hz.
+        """
+
+        now = self._clock()
+        if self._control_census_started_at is None:
+            self._control_census_started_at = now
+        self._control_census[outcome] = self._control_census.get(outcome, 0) + 1
+        elapsed = now - self._control_census_started_at
+        if elapsed < CONTROL_CENSUS_INTERVAL_SEC:
+            return
+        self._control_census_started_at = now
+        census = self._control_census
+        self._control_census = {}
+        # print, not logger: the field journal for this service contains 4,299
+        # lines and not one of them came from a ``logger`` call, while every
+        # ``print`` shows up. Until that is understood, a diagnostic that has to
+        # be readable must not depend on the logging configuration.
+        print(
+            f"[RUNTIME CENSUS] {elapsed:.0f}s "
+            + " ".join(f"{name}={count}" for name, count in sorted(census.items())),
+            flush=True,
+        )
 
     def _drain_motion_requests(self) -> bool:
         """Apply cross-thread manual requests only on the Serial owner thread."""

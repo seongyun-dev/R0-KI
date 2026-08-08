@@ -11,6 +11,7 @@ import math
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -224,7 +225,10 @@ def _navigation_mode(settings: Any) -> str:
     return "nav2"
 
 
-def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
+def _build_nav2_driver(
+    service_holder: dict[str, Any],
+    mapping_sink_holder: dict[str, Any] | None = None,
+) -> Any:
     from navigation.cmd_vel_adapter import AckermannCommandSettings
     from navigation.ros_nav2_bridge import RosNav2Bridge, RosNav2BridgeSettings
 
@@ -255,25 +259,127 @@ def _build_nav2_driver(service_holder: dict[str, Any]) -> Any:
         cmd_vel_timeout_sec=float(
             os.getenv("ROKI_NAV2_CMD_VEL_TIMEOUT_SECONDS", "3.0")
         ),
-        initial_pose_topic=os.getenv("ROKI_INITIAL_POSE_TOPIC", "/initialpose"),
-        initial_pose_settle_sec=float(
-            os.getenv("ROKI_NAV2_INITIAL_POSE_SETTLE_SECONDS", "1.0")
-        ),
         goal_abort_retry_limit=int(
             os.getenv("ROKI_NAV2_GOAL_ABORT_RETRY_LIMIT", "3")
         ),
     )
+    def route_motion(command: Any) -> None:
+        """실행 중인 운행에 따라 cmd_vel 을 알맞은 게이트로 보낸다.
+
+        예전에는 부팅 시점의 AIOT_ROS_MODE 가 이걸 정했다. 매핑 모드면 순찰
+        내비게이션 자체를 만들지 않았고, 그래서 브리지가 하나뿐이라 라우팅이
+        필요 없었다. 이제 두 운행이 같은 스택을 쓰므로 브리지도 하나이고,
+        어느 게이트로 갈지는 실행 중에 정해야 한다.
+        (2026-08-08 실기: 이 라우팅이 없어 매핑 중 cmd_vel 이 순찰 게이트로
+        가서 활성 순찰이 없다는 이유로 전부 MOTION_INTERLOCK 이 됐다.
+        10분에 2,530건, 게이트 개방 0회.)
+        """
+
+        mapping_sink = (mapping_sink_holder or {}).get("sink")
+        authorised = mapping_sink is not None and mapping_sink.mapping_authorised()
+        # 결정이 바뀔 때만 한 줄. cmd_vel 은 20Hz 라 매번 찍으면 로그가 묻힌다.
+        if route_motion.__dict__.get("last") != authorised:
+            route_motion.__dict__["last"] = authorised
+            print(
+                "[MOTION ROUTE] "
+                + ("mapping" if authorised else "patrol")
+                + f" sink={'yes' if mapping_sink is not None else 'MISSING'}"
+            )
+        # 전이 로그만으로는 "콜백이 안 온다" 와 "콜백은 오는데 값이 0 이다" 를
+        # 구분할 수 없다. 2026-08-08 현장에서 정확히 그 둘 사이에서 막혔다:
+        # /cmd_vel 은 흐르는데 미션은 100% 비활성이었고, 라우터는 전이가 없어
+        # 조용했다. 주기 집계는 호출 자체가 없으면 아무것도 찍지 않으므로
+        # 침묵이 곧 "콜백 없음" 이라는 답이 된다.
+        state = route_motion.__dict__
+        state["calls"] = state.get("calls", 0) + 1
+        if authorised:
+            state["auth"] = state.get("auth", 0) + 1
+        speed = int(getattr(command, "speed_pwm", 0))
+        if speed == 0:
+            state["zero"] = state.get("zero", 0) + 1
+        elif speed < 0:
+            state["reverse"] = state.get("reverse", 0) + 1
+        else:
+            state["forward"] = state.get("forward", 0) + 1
+        # 조향 최소/최대를 남긴다. 2026-08-08 매핑이 4초 주행 뒤 펌웨어의
+        # ESP32_INVALID_CONTROL 로 중단됐는데, 저널에는 게이트 전이 한 줄
+        # (steering=67) 밖에 없어서 어느 값이 거부됐는지 알 수 없었다.
+        # 펌웨어 소스의 허용 범위는 60..100 인데 CLAUDE.md B-7/B-8 의 실측은
+        # 40/120 이 ACK 됐다고 기록한다 -- 둘 중 무엇이 실제인지 값을 봐야
+        # 정해진다. 정지 명령(0)은 중립을 싣고 오므로 세지 않는다.
+        if speed != 0:
+            steering = int(getattr(command, "steering_deg", 0))
+            low = state.get("steer_min")
+            high = state.get("steer_max")
+            state["steer_min"] = steering if low is None else min(low, steering)
+            state["steer_max"] = steering if high is None else max(high, steering)
+        now = time.monotonic()
+        started = state.get("at")
+        if started is None:
+            state["at"] = now
+        elif now - started >= 5.0:
+            state["at"] = now
+            print(
+                f"[ROUTE CENSUS] {now - started:.0f}s "
+                f"calls={state.get('calls', 0)} auth={state.get('auth', 0)} "
+                f"fwd={state.get('forward', 0)} rev={state.get('reverse', 0)} "
+                f"zero={state.get('zero', 0)} "
+                f"steer={state.get('steer_min')}..{state.get('steer_max')} "
+                f"last_speed={speed} last_reason={getattr(command, 'stop_reason', None)}",
+                flush=True,
+            )
+            for key in ("calls", "auth", "forward", "reverse", "zero"):
+                state[key] = 0
+            state["steer_min"] = None
+            state["steer_max"] = None
+        if authorised:
+            mapping_sink(command)
+            return
+        service_holder["service"].apply_motion_command(command)
+
+    def mapping_holds_motion_authority() -> bool:
+        """매핑 세션이 스스로 주행 권한을 갖는가.
+
+        브리지의 cmd_vel 홀드는 순찰 생애주기 개념이라 순찰 goal 수락으로만
+        풀린다. 자율 매핑의 goal 은 프론티어 탐색기가 보내므로 그 해제 경로가
+        돌지 않고, stop_patrol 이 걸어둔 홀드가 영구히 남아 모든 명령을 0 으로
+        만든다. 매핑 세션은 순찰과 무관한 별도의 주행 권한이므로 여기서 그렇게
+        답한다. 라우터가 쓰는 것과 같은 판단이라 둘이 어긋날 수 없다.
+        """
+
+        mapping_sink = (mapping_sink_holder or {}).get("sink")
+        return mapping_sink is not None and mapping_sink.mapping_authorised()
+
     return RosNav2Bridge(
         settings=settings,
-        motion_sink=lambda command: service_holder["service"].apply_motion_command(
-            command
-        ),
+        motion_sink=route_motion,
         failure_sink=lambda reason: service_holder["service"].fail_patrol(reason),
         obstacle_sink=lambda reason: service_holder["service"].pause_patrol(reason),
         scan_context_sink=lambda waypoint: service_holder[
             "service"
         ].update_scan_context(waypoint),
         heading_source=lambda: service_holder["service"].current_heading_deg(),
+        external_motion_authority=mapping_holds_motion_authority,
+    )
+
+
+def build_mapping_motion_sink(
+    runtime: Any, mapping_runtime_holder: dict[str, Any]
+) -> Any:
+    """매핑 세션이 살아 있는 동안만 섀시를 여는 게이트.
+
+    브리지와 분리해 둔다. 지도가 이미 있으면 순찰 브리지가 cmd_vel 을
+    구독하므로 매핑 전용 브리지를 또 만들면 두 구독자가 같은 명령을 놓고
+    서로 정지시킨다. 그때는 브리지 없이 이 싱크만 순찰 브리지의 라우터에
+    넘긴다.
+    """
+
+    from integration.mapping_motion_sink import MappingMotionSink
+
+    return MappingMotionSink(
+        runtime,
+        lambda: mapping_runtime_holder.get("mapping"),
+        stop_reporter=lambda reason: print(f"[MAPPING] motion stop reason={reason}"),
     )
 
 
@@ -288,7 +394,6 @@ def _build_mapping_nav2_bridge(
     ``start_patrol`` is never called on it.
     """
 
-    from integration.mapping_motion_sink import MappingMotionSink
     from navigation.ros_nav2_bridge import RosNav2Bridge, RosNav2BridgeSettings
     from navigation.cmd_vel_adapter import AckermannCommandSettings
 
@@ -299,11 +404,7 @@ def _build_mapping_nav2_bridge(
             "AUTONOMOUS_MAPPING_FIELD_CONFIG_MISSING: ROKI_WHEELBASE_M and "
             "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG are required"
         )
-    sink = MappingMotionSink(
-        runtime,
-        lambda: mapping_runtime_holder.get("mapping"),
-        stop_reporter=lambda reason: print(f"[MAPPING] motion stop reason={reason}"),
-    )
+    sink = build_mapping_motion_sink(runtime, mapping_runtime_holder)
     return RosNav2Bridge(
         settings=RosNav2BridgeSettings(
             ackermann=AckermannCommandSettings(
@@ -365,8 +466,65 @@ def _environment_enabled(name: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _mapping_mode_requested() -> bool:
-    return os.getenv("AIOT_ROS_MODE", "").strip().lower() == "mapping"
+def _active_map_directory() -> Path | None:
+    """활성 지도 디렉터리. 프로세스 환경이 아니라 env 파일에서 읽는다.
+
+    매핑이 끝나면 ``map_activation`` 이 ``current-map.env`` 를 갱신하지만,
+    이미 떠 있는 프로세스의 ``os.environ`` 은 부팅 시점 값 그대로다. 방금 그린
+    지도로 순찰하려면 파일을 다시 읽어야 한다 -- 안 읽으면 이전 지도의
+    포즈그래프를 적재하고, 로봇은 있지도 않은 벽 사이에서 위치추정을 한다.
+
+    파일이 없거나 깨졌으면 부팅 시 환경으로 물러난다. 둘 다 없으면 활성 지도가
+    없는 것이 맞다.
+    """
+
+    map_yaml = _active_map_environment().get("ROKI_MAP_YAML", "").strip()
+    if not map_yaml:
+        return None
+    return Path(map_yaml).parent
+
+
+def _active_map_environment() -> dict[str, str]:
+    """current-map.env 의 ROKI_MAP_* 을 읽는다. 없는 키는 부팅 env 로 메운다."""
+
+    import json
+
+    environment_file = Path(
+        os.getenv("AIOT_ACTIVE_MAP_ENV_FILE", "/var/lib/aiot/config/current-map.env")
+    )
+    values: dict[str, str] = {}
+    try:
+        for line in environment_file.read_text(encoding="utf-8").splitlines():
+            name, separator, raw = line.partition("=")
+            name = name.strip()
+            if not separator or not name.startswith("ROKI_MAP_"):
+                continue
+            # map_activation 이 json.dumps 로 적는다. 따옴표를 벗긴다.
+            try:
+                values[name] = str(json.loads(raw.strip()))
+            except ValueError:
+                values[name] = raw.strip().strip('"')
+    except (OSError, UnicodeError):
+        values = {}
+    for name in ("ROKI_MAP_YAML", "ROKI_MAP_ID", "ROKI_MAP_VERSION"):
+        if not values.get(name):
+            fallback = os.getenv(name, "").strip()
+            if fallback:
+                values[name] = fallback
+    return values
+
+
+def _no_active_map() -> bool:
+    """아직 지도가 없으면 순찰 경로를 검증할 대상이 없다.
+
+    예전에는 AIOT_ROS_MODE 로 판단했다. 그 변수는 "지금 어느 노드 집합이
+    떠 있는가"를 뜻했고, 매핑 모드에는 순찰 경로가 없으니 검증을 미뤘다.
+    이제 두 운행이 같은 노드 집합으로 돌아 그 변수가 사라졌지만, 판단의
+    실질은 그대로다 -- 활성 지도가 없으면 순찰할 경로도 없다.
+    지도가 활성화되면 map_activation 이 ROKI_MAP_YAML 을 기록한다.
+    """
+
+    return not os.getenv("ROKI_MAP_YAML", "").strip()
 
 
 class _NoOpMappingInput:
@@ -426,6 +584,25 @@ def _event_delivery_owner() -> str:
     return owner
 
 
+def _current_navigation_identity() -> Any:
+    """지금 활성인 지도의 (mapId, mapVersion). 매 조회마다 파일에서 읽는다."""
+
+    from aiot_robot.navigation_config import NavigationConfigIdentity
+
+    values = _active_map_environment()
+    map_id = values.get("ROKI_MAP_ID", "").strip()
+    raw_version = values.get("ROKI_MAP_VERSION", "").strip()
+    if not map_id or not raw_version:
+        raise RuntimeError("ACTIVE_MAP_IDENTITY_MISSING")
+    try:
+        map_version = int(raw_version)
+    except ValueError as exc:
+        raise RuntimeError("ACTIVE_MAP_IDENTITY_INVALID") from exc
+    if map_version <= 0:
+        raise RuntimeError("ACTIVE_MAP_IDENTITY_INVALID")
+    return NavigationConfigIdentity(map_id=map_id, map_version=map_version)
+
+
 def _build_backend_navigation_provider(settings: Any) -> Any:
     """Build a deferred Robot-token client; no network is used until START."""
 
@@ -460,10 +637,12 @@ def _build_backend_navigation_provider(settings: Any) -> Any:
             route,
             encoder_limited=False,
         ),
-        identity=NavigationConfigIdentity(
-            map_id=_required_environment("ROKI_MAP_ID"),
-            map_version=_required_positive_integer("ROKI_MAP_VERSION"),
-        ),
+        # 부팅 시 값으로 고정하지 않는다. 매핑이 끝나면 map_activation 이
+        # current-map.env 를 갱신하지만 이 프로세스의 os.environ 은 그대로다.
+        # 2026-08-08 14:00 실기: 런타임이 v32 를 들고 있는데 백엔드 경로가
+        # 방금 만든 v34 를 가리켜 START_PATROL 이 NAVIGATION_MAP_MISMATCH 로
+        # 거부됐다. 매핑 직후 그 지도로 순찰하는 것이 시연 흐름 전체다.
+        identity=_current_navigation_identity,
         default_acceptance_radius_m=float(
             os.getenv("ROKI_WAYPOINT_ACCEPTANCE_RADIUS_M", "0.30")
         ),
@@ -529,6 +708,11 @@ def _build_mapping_runtime(
         ManualDriveSettings,
     )
     from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
+    from integration.localization_mode import (
+        DockPose,
+        LocalizationModeController,
+        RosLocalizationModeTransport,
+    )
     from integration.map_activation import (
         CurrentMapActivator,
         MapActivationSettings,
@@ -591,6 +775,24 @@ def _build_mapping_runtime(
         )
     else:
         gamepad_input = _NoOpMappingInput()
+    # 매핑<->순찰 전환. 예전에는 env 파일에 모드를 적고 서비스를 재시작했다.
+    # 이제 slam_toolbox 서비스 호출이라 프로세스가 살아 있는 채로 바뀐다.
+    localization_transport = RosLocalizationModeTransport()
+    localization_transport.start()
+    localization_controller = LocalizationModeController(
+        localization_transport,
+        # 포즈그래프를 불러올 때 줄 초기 추정값. 규약은 웨이포인트 1 = 도킹
+        # 지점 = 매핑 시작점 = map (0,0,0) 이다. 이 값들은 전에 AMCL 의
+        # set_initial_pose 로 갔는데, AMCL 이 사라지면서 갈 곳을 잃었다가
+        # 여기로 온다 -- 용도는 처음부터 "도킹 지점이 어디인가"였다.
+        dock_pose=DockPose(
+            x=float(os.getenv("ROKI_INITIAL_POSE_X_M", "0") or 0),
+            y=float(os.getenv("ROKI_INITIAL_POSE_Y_M", "0") or 0),
+            theta=float(os.getenv("ROKI_INITIAL_POSE_YAW_RAD", "0") or 0),
+        ),
+        report=print,
+    )
+
     mapping_runtime = ManualMappingRuntime(
         runtime_service=runtime_service,
         state_store=state_store,
@@ -621,14 +823,9 @@ def _build_mapping_runtime(
                         "/var/lib/aiot/config/current-map.env",
                     )
                 ),
-                restart_request_file=Path(
-                    os.getenv(
-                        "AIOT_MAP_ACTIVATION_REQUEST_FILE",
-                        "/var/lib/aiot/state/map-activation.pending",
-                    )
-                ),
             )
         ),
+        localization=localization_controller,
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -734,8 +931,13 @@ def create_integrated_application(
     if manual_demo and manual_controller is None and keyboard_input is None:
         manual_controller, keyboard_input = _build_manual_demo_components(runtime)
     service_holder: dict[str, Any] = {}
+    # 매핑 세션은 순찰과 같은 cmd_vel 스트림을 쓴다. 어느 게이트로 보낼지는
+    # 실행 중에 정해지므로, 순찰 브리지의 라우터가 이 홀더를 통해 매핑 싱크를
+    # 찾는다. 매핑 런타임은 아래에서 만들어지므로 지연 해석이다.
+    mapping_runtime_holder: dict[str, Any] = {}
+    mapping_sink_holder: dict[str, Any] = {}
     navigation_driver = (
-        _build_nav2_driver(service_holder)
+        _build_nav2_driver(service_holder, mapping_sink_holder)
         if (
             navigation_mode == "nav2"
             and not manual_enabled
@@ -748,7 +950,14 @@ def create_integrated_application(
     # goals. Build the same cmd_vel bridge and route its output through the
     # mapping-session gate instead of the patrol gate. The mapping runtime is
     # created further down, so the gate resolves it lazily.
-    mapping_runtime_holder: dict[str, Any] = {}
+    if not manual_enabled and _environment_enabled("AIOT_MAPPING_AUTONOMOUS", False):
+        mapping_sink_holder["sink"] = build_mapping_motion_sink(
+            runtime, mapping_runtime_holder
+        )
+    # 순찰 브리지가 없을 때만 매핑 전용 브리지를 만든다. 아직 지도가 없어
+    # 순찰 내비게이션이 성립하지 않는 첫 매핑이 그런 경우다. 순찰 브리지가
+    # 있으면 그쪽 라우터가 위 싱크로 보내므로 구독자를 둘로 만들지 않는다 --
+    # 둘이면 같은 cmd_vel 을 놓고 서로 정지시킨다.
     mapping_motion_bridge = (
         _build_mapping_nav2_bridge(runtime, mapping_runtime_holder)
         if (
@@ -862,6 +1071,26 @@ def create_integrated_application(
         extra_args=settings.pipeline_extra_args,
         start_grace_seconds=settings.pipeline_start_grace_seconds,
     )
+    def prepare_patrol_localization() -> tuple[bool, str]:
+        """순찰 시작 직전에 활성 지도의 포즈그래프가 적재돼 있음을 보장한다.
+
+        매핑 완료 시점의 인계는 실패할 수 있고, 재부팅한 뒤에는 아예 일어나지
+        않는다 -- 그 부팅에는 매핑이 없었으므로 부르는 쪽이 없다. 그래서
+        지금까지는 재부팅 뒤 바로 순찰하면 slam_toolbox 가 빈 매핑 상태로
+        남았고, 순찰은 지도 없이 출발했다.
+
+        디렉터리를 env 파일에서 다시 읽는 것도 같은 이유다. 방금 그린 지도는
+        current-map.env 에만 있고 이 프로세스의 os.environ 에는 없다.
+        """
+
+        localization = getattr(mapping_runtime, "localization", None)
+        if localization is None:
+            return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
+        directory = _active_map_directory()
+        if directory is None:
+            return False, "ACTIVE_MAP_MISSING"
+        return localization.ensure_patrol(str(directory / "posegraph"))
+
     command_handler = PatrolCommandHandler(
         settings=settings,
         mqtt_client=mqtt_client,
@@ -872,6 +1101,7 @@ def create_integrated_application(
         ai_controller=ai_controller,
         mapping_runtime=mapping_runtime,
         readiness_checks=readiness_checks,
+        localization_preparer=prepare_patrol_localization,
     )
     if mapping_runtime is not None:
         mapping_runtime.set_failure_listener(command_handler.on_runtime_failure)
@@ -888,13 +1118,16 @@ def create_integrated_application(
         # reflect the robot at the marked dock before START_PATROL.  The pose
         # bridge already rejects missing or stale transforms, so patrol state
         # is not an additional validity condition.
-        obstacle_alert_activity_check=lambda: not bool(
-            (mapping_runtime is not None and mapping_runtime.active)
-            or (
-                _environment_enabled("AIOT_MAPPING_AUTONOMOUS", False)
-                and os.getenv("AIOT_ROS_MODE", "").strip().lower()
-                == "mapping"
-            )
+        # 매핑 중에는 백엔드로 가는 장애물 알림만 비운다. 그리는 중인 벽이
+        # 순찰 위험 알림이 되면 안 되기 때문이다. 젯슨 내부의 실제 스캔과
+        # 인터락은 그대로 살아 있다.
+        #
+        # 예전에는 AIOT_ROS_MODE 도 함께 봤다. 그 변수는 부팅 시 어느 노드
+        # 집합이 떴는지를 뜻했으므로, 세션이 없어도 매핑 스택이면 알림이
+        # 꺼졌다. 이제 두 운행이 같은 스택을 쓰니 그 대리 판단이 성립하지
+        # 않고, 판단 기준은 실제 세션 하나로 충분하다.
+        obstacle_alert_activity_check=lambda: not (
+            mapping_runtime is not None and mapping_runtime.active
         ),
         runtime_components=tuple(runtime_components),
         start_serial_reader=start_serial_runtime,
@@ -914,7 +1147,7 @@ def preflight(route_path: str | Path | None = None) -> dict[str, Any]:
     settings = load_settings()
     selected_route = _selected_route_path(route_path)
     mapping_available = True
-    mapping_requested = _mapping_mode_requested()
+    mapping_requested = _no_active_map()
     legacy_mapping_only = _legacy_mapping_only_selected(settings, selected_route)
     config_source = _navigation_config_source()
     local_fallback = _environment_enabled(
@@ -1020,7 +1253,7 @@ def main(argv: list[str] | None = None) -> int:
     _event_delivery_owner()
     if not args.manual_keyboard:
         selected_route = _selected_route_path(args.route)
-        if _mapping_mode_requested() or _legacy_mapping_only_selected(
+        if _no_active_map() or _legacy_mapping_only_selected(
             settings, selected_route
         ):
             logging.getLogger(__name__).info(

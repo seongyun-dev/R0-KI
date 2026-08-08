@@ -43,6 +43,16 @@ class MappingMotionSink:
         with self._lock:
             return self._driving
 
+    def mapping_authorised(self) -> bool:
+        """매핑 세션이 지금 움직여도 되는 상태인가.
+
+        cmd_vel 라우터가 매핑 게이트와 순찰 게이트 중 하나를 고를 때 쓴다.
+        내부 판단과 같은 질문이므로 같은 답을 내야 한다 -- 라우터가 여기로
+        보냈는데 안에서 거부하면 정지 명령만 오가고 아무도 주행하지 않는다.
+        """
+
+        return self._authorised()
+
     def _authorised(self) -> bool:
         mapping_runtime = self._mapping_runtime_getter()
         if mapping_runtime is None:

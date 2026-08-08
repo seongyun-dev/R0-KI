@@ -28,6 +28,11 @@ HeadingSource = Callable[[], float | None]
 TimerFactory = Callable[[float, Callable[[], None]], Any]
 LOGGER = logging.getLogger(__name__)
 
+# 외부 주행 권한(매핑 세션)이 풀어도 되는 홀드. 순찰 생애주기에서만 의미가
+# 있는 것 하나뿐이다. OBSTACLE, SCAN_DWELL, 실패 사유는 "세상이 멈추라고
+# 한다"는 뜻이라 어떤 세션 소유권으로도 덮을 수 없다.
+PATROL_LIFECYCLE_HOLDS = frozenset({"NAV2_PATROL_STOPPED"})
+
 
 @dataclass(frozen=True)
 class RosNav2BridgeSettings:
@@ -37,8 +42,6 @@ class RosNav2BridgeSettings:
     map_frame: str = "map"
     scan_dwell_sec: float = 3.0
     cmd_vel_timeout_sec: float = 3.0
-    initial_pose_topic: str = "/initialpose"
-    initial_pose_settle_sec: float = 1.0
     first_goal_accept_timeout_sec: float = 5.0
     # Nav2 aborts the goal when the controller sees an obstacle on the path.
     # That is recoverable: hold position and let the obstacle-clear loop resume
@@ -51,7 +54,6 @@ class RosNav2BridgeSettings:
             ("cmd_vel_topic", self.cmd_vel_topic),
             ("navigate_action", self.navigate_action),
             ("map_frame", self.map_frame),
-            ("initial_pose_topic", self.initial_pose_topic),
         ):
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
@@ -66,13 +68,6 @@ class RosNav2BridgeSettings:
         ):
             raise ValueError(
                 "cmd_vel_timeout_sec must be within 0.2..5.0 seconds"
-            )
-        if (
-            not math.isfinite(self.initial_pose_settle_sec)
-            or not 0.1 <= self.initial_pose_settle_sec <= 3.0
-        ):
-            raise ValueError(
-                "initial_pose_settle_sec must be within 0.1..3.0 seconds"
             )
         if (
             not math.isfinite(self.first_goal_accept_timeout_sec)
@@ -97,6 +92,7 @@ class RosNav2Bridge:
         obstacle_sink: ObstacleSink | None = None,
         scan_context_sink: ScanContextSink | None = None,
         heading_source: HeadingSource | None = None,
+        external_motion_authority: Callable[[], bool] | None = None,
         timer_factory: TimerFactory = threading.Timer,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -108,6 +104,7 @@ class RosNav2Bridge:
         self._obstacle_sink = obstacle_sink
         self._scan_context_sink = scan_context_sink
         self._heading_source = heading_source
+        self._external_motion_authority = external_motion_authority
         self._timer_factory = timer_factory
         self._clock = clock
         self._sleep = sleep
@@ -134,11 +131,9 @@ class RosNav2Bridge:
         self._executor: Any = None
         self._action_client: Any = None
         self._subscription: Any = None
-        self._initial_pose_publisher: Any = None
         self._rclpy: Any = None
         self._navigate_type: Any = None
         self._pose_type: Any = None
-        self._initial_pose_type: Any = None
         self._owns_rclpy_context = False
 
     def start(self) -> None:
@@ -146,11 +141,7 @@ class RosNav2Bridge:
             return
         try:
             import rclpy
-            from geometry_msgs.msg import (
-                PoseStamped,
-                PoseWithCovarianceStamped,
-                Twist,
-            )
+            from geometry_msgs.msg import PoseStamped, Twist
             from nav2_msgs.action import NavigateToPose
             from rclpy.action import ActionClient
             from rclpy.executors import SingleThreadedExecutor
@@ -166,7 +157,6 @@ class RosNav2Bridge:
         try:
             self._navigate_type = NavigateToPose
             self._pose_type = PoseStamped
-            self._initial_pose_type = PoseWithCovarianceStamped
             self._node = rclpy.create_node("roki_nav2_bridge")
             self._action_client = ActionClient(
                 self._node,
@@ -177,11 +167,6 @@ class RosNav2Bridge:
                 Twist,
                 self._settings.cmd_vel_topic,
                 self._on_cmd_vel,
-                10,
-            )
-            self._initial_pose_publisher = self._node.create_publisher(
-                PoseWithCovarianceStamped,
-                self._settings.initial_pose_topic,
                 10,
             )
             self._executor = SingleThreadedExecutor()
@@ -238,11 +223,11 @@ class RosNav2Bridge:
         if first_waypoint is None or int(first_waypoint.sequence) != 1:
             self._fail("NAV2_START_ANCHOR_INVALID")
             raise RuntimeError("NAV2_START_ANCHOR_INVALID")
-        # Waypoint 1 used to be force-fed to AMCL over /initialpose here, which
-        # teleported the belief to wherever the route said the robot was. That is
-        # exactly backwards: localization must come from the map and the scans,
-        # not from the route. AMCL is seeded once at startup with the dock pose
-        # (map origin -- mapping and patrol start from the same marked spot) and
+        # Waypoint 1 used to be force-fed over /initialpose here, which teleported
+        # the belief to wherever the route said the robot was. That is exactly
+        # backwards: localization must come from the map and the scans, not from
+        # the route. slam_toolbox is handed the dock pose once, when the saved
+        # pose graph is loaded (deserialize_map with LOCALIZE_AT_POSE), and
         # scan-matching owns the estimate from then on. Waypoint 1 stays the
         # protocol anchor the outer service confirms; place it at the dock.
 
@@ -468,6 +453,31 @@ class RosNav2Bridge:
             hold_reason = self._cmd_vel_hold_reason
             if self._cmd_vel_watchdog_armed_locked():
                 self._last_cmd_vel_at = self._clock()
+        # NAV2_PATROL_STOPPED is a *patrol* lifecycle statement: it is armed by
+        # stop_patrol and cleared only when Nav2 accepts a goal that this bridge
+        # sent. In autonomous mapping the goals come from the frontier explorer
+        # instead, so that clearing path never runs and the hold armed at
+        # stop_patrol stays on forever, zeroing every command.
+        #
+        # 2026-08-08 현장: 매핑 내내 calls=101 auth=101 zero=101
+        # last_reason=NAV2_PATROL_STOPPED. /cmd_vel 은 -0.075 를 싣고 있었는데
+        # 여기서 전부 0 이 됐고, 그래서 제어 게이트가 한 번도 열리지 않았다.
+        #
+        # A mapping session is its own motion authority, so ask the owner rather
+        # than inferring it from patrol state -- but release ONLY the lifecycle
+        # hold. OBSTACLE and the other safety holds mean "the world says stop",
+        # which no session ownership can override.
+        if (
+            hold_reason in PATROL_LIFECYCLE_HOLDS
+            and self._external_motion_authority is not None
+        ):
+            try:
+                if self._external_motion_authority():
+                    hold_reason = None
+            except Exception:
+                # Never let a broken authority probe turn into uncommanded
+                # motion: keep the hold.
+                pass
         if hold_reason is not None and command.speed_pwm != 0:
             command = CmdVelCommand(
                 0,
@@ -685,9 +695,11 @@ class RosNav2Bridge:
         raise ValueError("no route direction or current map heading")
 
     # The bridge used to publish waypoint 1 to /initialpose on every START_PATROL
-    # ("_publish_initial_pose"). Removed: localization belongs to AMCL seeded once
-    # at startup with the dock pose; the route must not overwrite it. The publisher
-    # below is kept wired for operator-driven re-localization tooling only.
+    # ("_publish_initial_pose"). Removed: the route must not overwrite the
+    # estimate. The publisher that carried it is gone too -- AMCL was its only
+    # subscriber and slam_toolbox now owns localization, so it published to
+    # nobody. Re-localization goes through deserialize_map with LOCALIZE_AT_POSE
+    # (roki-iot/integration/localization_mode.py), not through a topic.
 
     def _publish_scan_context(self, waypoint: Any | None) -> None:
         if self._scan_context_sink is None:
@@ -738,11 +750,9 @@ class RosNav2Bridge:
         executor = self._executor
         node = self._node
         self._subscription = None
-        self._initial_pose_publisher = None
         self._action_client = None
         self._executor = None
         self._node = None
-        self._initial_pose_type = None
         if node is not None:
             if executor is not None:
                 executor.remove_node(node)

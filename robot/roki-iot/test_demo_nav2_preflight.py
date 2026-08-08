@@ -27,7 +27,6 @@ class DemoNav2PreflightTest(unittest.TestCase):
             "ROKI_NAVIGATION_MODE": "nav2",
             "ROKI_WHEELBASE_M": "0.124",
             "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG": "8.6",
-            "ROKI_ROBOT_RADIUS_M": "0.23",
             "ROKI_INITIAL_POSE_X_M": "0.5",
             "ROKI_INITIAL_POSE_Y_M": "0.5",
             "ROKI_INITIAL_POSE_YAW_RAD": "0.0",

@@ -70,6 +70,7 @@ class PatrolCommandHandler:
         ai_controller: Any | None = None,
         mapping_runtime: Any | None = None,
         readiness_checks: Iterable[ReadinessCheck] = (),
+        localization_preparer: Callable[[], tuple[bool, str]] | None = None,
         flush_telemetry: TelemetryFlush | None = None,
         command_cache_path: str | Path | None = None,
         wall_clock: Callable[[], datetime] | None = None,
@@ -85,6 +86,7 @@ class PatrolCommandHandler:
         self._mapping_runtime = mapping_runtime
         self._mapping_lifecycle_lock = threading.RLock()
         self._readiness_checks = tuple(readiness_checks)
+        self._localization_preparer = localization_preparer
         self._flush_telemetry = flush_telemetry
         self._wall_clock = wall_clock or (lambda: datetime.now(tz=SEOUL))
         self._monotonic_clock = monotonic_clock
@@ -378,6 +380,25 @@ class PatrolCommandHandler:
             )
             print(f"[COMMAND] START_PATROL readiness rejected reason={reason}")
             return
+
+        # 위치추정 인계를 여기서 다시 확인한다. 매핑 완료 시점의 인계는
+        # 실패할 수 있고(그때는 지도를 이미 저장했으므로 세션을 실패로 만들지
+        # 않는다), 재부팅한 뒤에는 아예 일어나지 않는다 -- 그 부팅에 매핑이
+        # 없었으니 부르는 쪽이 없다. mapping_runtime 의 "순찰을 시작할 때 다시
+        # 시도한다" 는 주석이 가리키던 경로가 없어서, 지금까지는 아무도
+        # 포즈그래프를 적재하지 않은 채 순찰이 출발할 수 있었다.
+        #
+        # 순서상 readiness 다음이다. 적재에 수 초가 걸릴 수 있고, 그 시간은
+        # 바로 아래 TTL 재확인이 걸러낸다.
+        if self._localization_preparer is not None:
+            ready, reason = self._localization_preparer()
+            if not ready:
+                self._cancel_prepared_patrol()
+                self._record_and_publish_command(
+                    command, "REJECTED", reason=reason
+                )
+                print(f"[COMMAND] START_PATROL localization rejected reason={reason}")
+                return
 
         # Route fetch, map validation and the OTA lease can consume most of a
         # short MQTT command TTL. Recheck at the last safe point before AI or

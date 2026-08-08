@@ -34,9 +34,12 @@ class FakeRun:
     def __init__(self, outputs) -> None:
         self.outputs = list(outputs)
         self.calls = 0
+        self.argvs = []
 
     def __call__(self, *args, **kwargs):
         self.calls += 1
+        if args:
+            self.argvs.append(list(args[0]))
         text = self.outputs.pop(0) if self.outputs else self.outputs_last()
         result = type("R", (), {})()
         result.stdout = text
@@ -80,6 +83,25 @@ class ExploreSupervisorTest(unittest.TestCase):
         if starter is not None:
             starter.join(timeout=5.0)
             self.assertFalse(starter.is_alive())
+
+    def test_readiness_probe_bypasses_the_ros_daemon(self):
+        """데몬 그래프는 aiot-ros 재시작을 넘어 살아남아 낡은 답을 준다.
+
+        2026-08-07 22:00 현장: `ros2 lifecycle get /bt_navigator` 가
+        "Node not found" 를 돌려주는 동안 같은 노드가
+        `ros2 node list --no-daemon` 에는 active 로 보였다. 폴링으로는
+        복구되지 않는다 -- 재시도마다 같은 캐시를 물어보기 때문이다.
+        그 결과 매핑 세션이 explore 없이 조용히 진행됐다.
+        """
+
+        supervisor = self.build(["active [3]"])
+        supervisor.start(7)
+        self.join_starter(supervisor)
+
+        self.assertTrue(supervisor._run.argvs, "준비 판정이 호출되지 않았다")
+        argv = supervisor._run.argvs[0]
+        self.assertEqual(argv[:3], ["ros2", "lifecycle", "get"])
+        self.assertIn("--no-daemon", argv)
 
     def test_spawns_only_after_bt_navigator_is_active(self):
         supervisor = self.build(["inactive [2]", "inactive [2]", "active [3]"])

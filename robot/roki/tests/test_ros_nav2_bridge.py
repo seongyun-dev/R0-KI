@@ -32,17 +32,6 @@ class DeadThread:
         return False
 
 
-class FakePoseWithCovarianceStamped:
-    def __init__(self):
-        self.header = SimpleNamespace(frame_id=None, stamp=None)
-        self.pose = SimpleNamespace(
-            pose=SimpleNamespace(
-                position=SimpleNamespace(x=0.0, y=0.0),
-                orientation=SimpleNamespace(z=0.0, w=0.0),
-            ),
-            covariance=[0.0] * 36,
-        )
-
 
 def demo_route():
     return parse_route(
@@ -107,15 +96,12 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
                 AckermannCommandSettings(0.124, 8.6),
-                initial_pose_settle_sec=1.0,
             ),
             motion_sink=lambda _command: None,
             sleep=sleeps.append,
         )
         publisher = Mock()
         bridge.is_ready = Mock(return_value=(True, "READY"))
-        bridge._initial_pose_type = FakePoseWithCovarianceStamped
-        bridge._initial_pose_publisher = publisher
         bridge._node = SimpleNamespace(
             get_clock=lambda: SimpleNamespace(
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
@@ -139,14 +125,11 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
                 AckermannCommandSettings(0.124, 8.6),
-                initial_pose_settle_sec=1.0,
             ),
             motion_sink=lambda _command: None,
             sleep=lambda _seconds: None,
         )
         bridge.is_ready = Mock(return_value=(True, "READY"))
-        bridge._initial_pose_type = FakePoseWithCovarianceStamped
-        bridge._initial_pose_publisher = Mock()
         bridge._node = SimpleNamespace(
             get_clock=lambda: SimpleNamespace(
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
@@ -181,14 +164,11 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge = RosNav2Bridge(
             settings=RosNav2BridgeSettings(
                 AckermannCommandSettings(0.124, 8.6),
-                initial_pose_settle_sec=1.0,
             ),
             motion_sink=commands.append,
             sleep=lambda _seconds: None,
         )
         bridge.is_ready = Mock(return_value=(True, "READY"))
-        bridge._initial_pose_type = FakePoseWithCovarianceStamped
-        bridge._initial_pose_publisher = Mock()
         bridge._node = SimpleNamespace(
             get_clock=lambda: SimpleNamespace(
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
@@ -744,6 +724,103 @@ class RosNav2BridgeTest(unittest.TestCase):
                         AckermannCommandSettings(0.124, 8.6),
                         cmd_vel_timeout_sec=seconds,
                     )
+
+
+class ExternalMotionAuthorityTest(unittest.TestCase):
+    """자율 매핑은 순찰 홀드에 갇히면 안 된다.
+
+    2026-08-08 현장: 매핑 세션 내내 브리지가 모든 cmd_vel 을 0 으로 만들었다.
+    stop_patrol 이 건 NAV2_PATROL_STOPPED 홀드는 이 브리지가 보낸 순찰 goal 을
+    Nav2 가 수락할 때만 풀리는데, 매핑의 goal 은 프론티어 탐색기가 보내므로 그
+    경로가 아예 돌지 않았다. 계측값은 calls=101 auth=101 zero=101 이었다.
+    """
+
+    def _bridge(self, authority):
+        self.commands = []
+        return RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                ackermann=AckermannCommandSettings(
+                    wheelbase_m=0.124,
+                    maximum_road_wheel_angle_deg=20,
+                    maximum_linear_speed_mps=0.094,
+                    minimum_drive_pwm=45,
+                    maximum_drive_pwm=51,
+                )
+            ),
+            motion_sink=self.commands.append,
+            external_motion_authority=authority,
+        )
+
+    def test_patrol_hold_still_stops_when_nothing_else_authorises(self) -> None:
+        bridge = self._bridge(lambda: False)
+        bridge.stop_patrol()
+
+        command = bridge.record_cmd_vel(0.075, 0.0)
+
+        self.assertTrue(command.stopped)
+        self.assertEqual(command.stop_reason, "NAV2_PATROL_STOPPED")
+
+    def test_mapping_authority_releases_the_patrol_hold(self) -> None:
+        bridge = self._bridge(lambda: True)
+        bridge.stop_patrol()
+
+        command = bridge.record_cmd_vel(0.075, 0.0)
+
+        self.assertFalse(command.stopped)
+        self.assertGreater(command.speed_pwm, 0)
+        self.assertEqual(self.commands[-1], command)
+
+    def test_reverse_is_passed_through_under_mapping_authority(self) -> None:
+        """계획기가 REEDS_SHEPP 라 매핑 중 후진 명령이 실제로 나온다."""
+
+        bridge = self._bridge(lambda: True)
+        bridge.stop_patrol()
+
+        command = bridge.record_cmd_vel(-0.075, 0.16)
+
+        self.assertLess(command.speed_pwm, 0)
+
+    def test_safety_holds_survive_mapping_authority(self) -> None:
+        """세션 소유권은 "세상이 멈추라고 한다" 를 덮을 수 없다.
+
+        2026-08-08: 첫 수정이 홀드 종류를 가리지 않고 풀어서, 매핑 중에는
+        OBSTACLE 홀드까지 무력화됐다. 라이다를 가려도 계속 주행했다.
+        """
+
+        for reason in ("OBSTACLE", "SCAN_DWELL", "NAV2_GOAL_ABORTED"):
+            with self.subTest(reason=reason):
+                bridge = self._bridge(lambda: True)
+                bridge._cmd_vel_hold_reason = reason
+
+                command = bridge.record_cmd_vel(0.075, 0.0)
+
+                self.assertTrue(command.stopped)
+                self.assertEqual(command.stop_reason, reason)
+
+    def test_a_broken_authority_probe_keeps_the_hold(self) -> None:
+        """권한 판단이 터졌다고 해서 명령 없이 움직이면 안 된다."""
+
+        def raises() -> bool:
+            raise RuntimeError("holder gone")
+
+        bridge = self._bridge(raises)
+        bridge.stop_patrol()
+
+        command = bridge.record_cmd_vel(0.075, 0.0)
+
+        self.assertTrue(command.stopped)
+        self.assertEqual(command.stop_reason, "NAV2_PATROL_STOPPED")
+
+    def test_without_an_authority_the_hold_behaves_as_before(self) -> None:
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                ackermann=AckermannCommandSettings(0.124, 20)
+            ),
+            motion_sink=[].append,
+        )
+        bridge.stop_patrol()
+
+        self.assertTrue(bridge.record_cmd_vel(0.075, 0.0).stopped)
 
 
 if __name__ == "__main__":
