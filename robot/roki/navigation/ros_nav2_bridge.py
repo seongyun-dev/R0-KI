@@ -87,6 +87,7 @@ class RosNav2Bridge:
         obstacle_sink: ObstacleSink | None = None,
         scan_context_sink: ScanContextSink | None = None,
         heading_source: HeadingSource | None = None,
+        external_motion_authority: Callable[[], bool] | None = None,
         timer_factory: TimerFactory = threading.Timer,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -98,6 +99,7 @@ class RosNav2Bridge:
         self._obstacle_sink = obstacle_sink
         self._scan_context_sink = scan_context_sink
         self._heading_source = heading_source
+        self._external_motion_authority = external_motion_authority
         self._timer_factory = timer_factory
         self._clock = clock
         self._sleep = sleep
@@ -446,6 +448,26 @@ class RosNav2Bridge:
             hold_reason = self._cmd_vel_hold_reason
             if self._cmd_vel_watchdog_armed_locked():
                 self._last_cmd_vel_at = self._clock()
+        # The hold is a *patrol* lifecycle statement: it is armed by stop_patrol
+        # and cleared only when Nav2 accepts a goal that this bridge sent. In
+        # autonomous mapping the goals come from the frontier explorer instead,
+        # so that clearing path never runs and the hold armed at stop_patrol
+        # stays on forever, zeroing every command.
+        #
+        # 2026-08-08 현장: 매핑 내내 calls=101 auth=101 zero=101
+        # last_reason=NAV2_PATROL_STOPPED. /cmd_vel 은 -0.075 를 싣고 있었는데
+        # 여기서 전부 0 이 됐고, 그래서 제어 게이트가 한 번도 열리지 않았다.
+        #
+        # A mapping session is its own motion authority, so ask the owner rather
+        # than inferring it from patrol state.
+        if hold_reason is not None and self._external_motion_authority is not None:
+            try:
+                if self._external_motion_authority():
+                    hold_reason = None
+            except Exception:
+                # Never let a broken authority probe turn into uncommanded
+                # motion: keep the hold.
+                pass
         if hold_reason is not None and command.speed_pwm != 0:
             command = CmdVelCommand(
                 0,

@@ -322,6 +322,19 @@ def _build_nav2_driver(
             return
         service_holder["service"].apply_motion_command(command)
 
+    def mapping_holds_motion_authority() -> bool:
+        """매핑 세션이 스스로 주행 권한을 갖는가.
+
+        브리지의 cmd_vel 홀드는 순찰 생애주기 개념이라 순찰 goal 수락으로만
+        풀린다. 자율 매핑의 goal 은 프론티어 탐색기가 보내므로 그 해제 경로가
+        돌지 않고, stop_patrol 이 걸어둔 홀드가 영구히 남아 모든 명령을 0 으로
+        만든다. 매핑 세션은 순찰과 무관한 별도의 주행 권한이므로 여기서 그렇게
+        답한다. 라우터가 쓰는 것과 같은 판단이라 둘이 어긋날 수 없다.
+        """
+
+        mapping_sink = (mapping_sink_holder or {}).get("sink")
+        return mapping_sink is not None and mapping_sink.mapping_authorised()
+
     return RosNav2Bridge(
         settings=settings,
         motion_sink=route_motion,
@@ -331,6 +344,7 @@ def _build_nav2_driver(
             "service"
         ].update_scan_context(waypoint),
         heading_source=lambda: service_holder["service"].current_heading_deg(),
+        external_motion_authority=mapping_holds_motion_authority,
     )
 
 
