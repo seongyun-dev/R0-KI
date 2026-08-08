@@ -5,9 +5,10 @@ robot_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ydlidar_setup="${AIOT_YDLIDAR_SETUP_FILE:-/home/e103/ydlidar_ws/install/setup.bash}"
 rf2o_setup="${AIOT_RF2O_SETUP_FILE:-/home/e103/rf2o_ws/install/setup.bash}"
+slam_reset_setup="${AIOT_SLAM_TOOLBOX_RESET_SETUP_FILE:-/home/e103/slam-toolbox-2610-reset-backport-ws/install/setup.bash}"
 
 "${robot_root}/scripts/ros-preflight.sh"
-for setup_file in "${ros_setup}" "${ydlidar_setup}" "${rf2o_setup}"; do
+for setup_file in "${ros_setup}" "${ydlidar_setup}" "${rf2o_setup}" "${slam_reset_setup}"; do
   set +u
   # shellcheck disable=SC1090
   source "${setup_file}"
@@ -49,6 +50,12 @@ start_component ros2 run tf2_ros static_transform_publisher \
 # (2026-08-08 실측, rf2o.yaml 주석 참고).
 start_component ros2 run rf2o_laser_odometry rf2o_laser_odometry_node \
   --ros-args --params-file "${robot_root}/config/ros/rf2o.yaml"
+
+# Fail-closed boundary for slam_toolbox only. RF2O and Nav2 keep consuming
+# raw /scan; mapping/patrol lifecycle code opens this relay explicitly.
+start_component env \
+  PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  "${robot_root}/.venv/bin/python" -m aiot_robot.scan_gate
 
 # 매핑과 순찰이 같은 노드 집합으로 돈다. 예전에는 여기서 launch 파일 자체를
 # 갈아 끼웠고, 그래서 모드를 바꾸려면 이 서비스를 재시작해야 했다. 그 재시작이

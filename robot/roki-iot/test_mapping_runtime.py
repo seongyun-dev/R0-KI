@@ -303,7 +303,10 @@ class MappingRuntimeTest(unittest.TestCase):
 
         self.assertFalse(self.runtime.finish())
 
-        self.assertEqual(failures, [("MAPPING_STOP_FAILED", "STOPPING", True)])
+        # motion_active 는 이제 MAPPING 에서만 참이다. STARTING 은 리셋·준비를,
+        # STOPPING 은 최종 종료를 담당하며 그 두 구간에서 변환된 Nav2 모션을
+        # 인가하면 안 된다(mapping_runtime.motion_active 주석).
+        self.assertEqual(failures, [("MAPPING_STOP_FAILED", "STOPPING", False)])
         self.assertGreaterEqual(self.gamepad.stopped, 2)
         self.assertGreaterEqual(self.drive.deactivated, 1)
         self.assertEqual(self.exporter.exported, [])
@@ -328,7 +331,8 @@ class MappingRuntimeTest(unittest.TestCase):
 
         self.assertEqual(
             failures,
-            [("MAPPING_SAVE_WORKER_START_FAILED", "STOPPING", True)],
+            # 위와 같은 이유로 STOPPING 에서는 모션이 인가되지 않는다.
+            [("MAPPING_SAVE_WORKER_START_FAILED", "STOPPING", False)],
         )
         self.assertEqual(self.exporter.exported, [])
         self.assertFalse(self.runtime.active)
@@ -356,7 +360,8 @@ class MappingRuntimeTest(unittest.TestCase):
 
         self.assertEqual(
             failures,
-            [("MAPPING_RESTART_FAILED", "STARTING", True)],
+            # STARTING 은 리셋·준비 구간이라 모션이 인가되지 않는다.
+            [("MAPPING_RESTART_FAILED", "STARTING", False)],
         )
         self.assertEqual(self.exporter.exported, [12])
         self.assertEqual(self.drive.activated, [12, 12])

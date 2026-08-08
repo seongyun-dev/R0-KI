@@ -27,6 +27,9 @@ class MappingRuntimeSettings:
     backend_timeout_sec: float = 10.0
     upload_retry_initial_sec: float = 2.0
     upload_retry_max_sec: float = 30.0
+    fresh_map_timeout_sec: float = 30.0
+    scan_quiescence_sec: float = 0.25
+    scan_quiescence_timeout_sec: float = 2.0
 
     def __post_init__(self) -> None:
         if not self.backend_base_url:
@@ -37,6 +40,10 @@ class MappingRuntimeSettings:
             raise ValueError("upload_retry_initial_sec must be positive")
         if self.upload_retry_max_sec < self.upload_retry_initial_sec:
             raise ValueError("upload retry max must be >= initial")
+        if self.fresh_map_timeout_sec <= 0:
+            raise ValueError("fresh_map_timeout_sec must be positive")
+        if self.scan_quiescence_sec < 0 or self.scan_quiescence_timeout_sec <= 0:
+            raise ValueError("scan quiescence settings are invalid")
 
 
 ClientFactory = Callable[[], RobotBackendClient]
@@ -59,6 +66,7 @@ class ManualMappingRuntime:
         client_factory: ClientFactory | None = None,
         explore_supervisor: Any | None = None,
         localization: Any | None = None,
+        scan_gate: Any | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._state_store = state_store
@@ -69,6 +77,7 @@ class ManualMappingRuntime:
         # 매핑<->순찰 전환. None 이면 전환을 시도하지 않는다 -- 기존 테스트가
         # 이 의존성을 모른 채로도 성립해야 한다.
         self._localization = localization
+        self._scan_gate = scan_gate
         self._settings = settings
         self._client_factory = client_factory or self._build_client
         # The explorer's lifetime belongs to the mapping session, not to the
@@ -98,7 +107,9 @@ class ManualMappingRuntime:
     @property
     def motion_active(self) -> bool:
         with self._lock:
-            return self._state in {"STARTING", "MAPPING", "STOPPING"}
+            # STARTING owns reset/readiness and STOPPING owns final shutdown;
+            # neither state may authorise converted Nav2 motion.
+            return self._state == "MAPPING"
 
     @property
     def state(self) -> str:
@@ -116,6 +127,12 @@ class ManualMappingRuntime:
         """
 
         return self._localization
+
+    @property
+    def scan_gate(self) -> Any | None:
+        """Internal SLAM scan boundary shared with patrol preparation."""
+
+        return self._scan_gate
 
     def lifecycle_snapshot(self) -> tuple[str, int | None]:
         """Return the current mapping state and session as one atomic snapshot."""
@@ -236,10 +253,35 @@ class ManualMappingRuntime:
             self._completed.clear()
             self._shutdown.clear()
 
+        # The gate is the first lifecycle action. Motion is still disabled and
+        # the explorer does not exist, so any failure stays safely CLOSED.
+        if not self._close_scan_gate("start"):
+            self._rollback_start("SCAN_GATE_CLOSE_FAILED")
+            return False, "SCAN_GATE_CLOSE_FAILED"
+
         ready, reason = self.readiness()
         if not ready:
             self._rollback_start(reason)
             return False, reason
+        fresh_marker = None
+        if self._scan_gate is not None:
+            try:
+                if not self._scan_gate.wait_for_quiescence(
+                    quiet_sec=self._settings.scan_quiescence_sec,
+                    timeout_sec=self._settings.scan_quiescence_timeout_sec,
+                ):
+                    self._rollback_start("SCAN_GATE_NOT_QUIESCENT")
+                    return False, "SCAN_GATE_NOT_QUIESCENT"
+                fresh_marker = self._scan_gate.marker()
+                self._scan_gate.reset_slam()
+            except Exception as exc:
+                print(
+                    "[MAPPING] slam reset failed "
+                    f"type={type(exc).__name__}"
+                )
+                self._rollback_start("SLAM_RESET_FAILED")
+                return False, "SLAM_RESET_FAILED"
+
         # 새 세션은 깨끗한 지도에서 시작해야 한다. 위치추정 모드로 남아 있으면
         # 이전 지도의 포즈그래프 위에 그리게 되고, 매핑 모드로 돌리는 이 호출이
         # 위치추정 버퍼를 비운다. 예전에는 이걸 하려고 aiot-ros 를 재시작했다.
@@ -248,6 +290,30 @@ class ManualMappingRuntime:
             if not entered:
                 self._rollback_start(mode_reason)
                 return False, mode_reason
+        if self._scan_gate is not None:
+            try:
+                self._scan_gate.open()
+            except Exception as exc:
+                print(
+                    "[MAPPING] scan gate open failed "
+                    f"type={type(exc).__name__}"
+                )
+                self._rollback_start("SCAN_GATE_OPEN_FAILED")
+                return False, "SCAN_GATE_OPEN_FAILED"
+            assert fresh_marker is not None
+            if not self._scan_gate.wait_for_fresh_map(
+                fresh_marker,
+                timeout_sec=self._settings.fresh_map_timeout_sec,
+            ):
+                self._rollback_start("FRESH_MAP_NOT_READY")
+                return False, "FRESH_MAP_NOT_READY"
+            # Recheck the active Nav2 lifecycle after the post-reset map/TF is
+            # ready. This second call is read-only when already in mapping.
+            if self._localization is not None:
+                entered, mode_reason = self._localization.enter_mapping()
+                if not entered:
+                    self._rollback_start(mode_reason)
+                    return False, mode_reason
         try:
             self._drive_controller.activate(mapping_session_id)
             self._gamepad_input.start()
@@ -297,12 +363,27 @@ class ManualMappingRuntime:
             command_id = self._command_id
         assert mapping_session_id is not None and command_id is not None
 
-        # Silence the goal source before cutting the chassis: STOPPING still
-        # keeps the motion gate open, so a live explorer would keep steering
-        # the robot while the map is being saved.
+        # STOPPING revokes the motion gate immediately. Silence the goal source
+        # as well so Nav2 does not keep producing commands while the map saves.
         if self._explore is not None:
             self._explore.stop("finish")
         stop_failures = self._stop_mapping_motion("finish")
+        if not self._close_scan_gate("finish"):
+            stop_failures.append(RuntimeError("scan gate close failed"))
+        elif self._scan_gate is not None:
+            try:
+                quiet = self._scan_gate.wait_for_quiescence(
+                    quiet_sec=self._settings.scan_quiescence_sec,
+                    timeout_sec=self._settings.scan_quiescence_timeout_sec,
+                )
+            except Exception as exc:
+                quiet = False
+                print(
+                    "[MAPPING] scan quiescence failed "
+                    f"type={type(exc).__name__}"
+                )
+            if not quiet:
+                stop_failures.append(RuntimeError("scan gate did not quiesce"))
         if stop_failures:
             self._notify_failure("MAPPING_STOP_FAILED")
             return False
@@ -347,6 +428,7 @@ class ManualMappingRuntime:
         finally:
             if self._drive_controller.active:
                 self._drive_controller.deactivate()
+        self._close_scan_gate("shutdown")
         worker = self._worker
         if worker is not None and worker is not threading.current_thread():
             worker.join(timeout=2.0)
@@ -367,6 +449,7 @@ class ManualMappingRuntime:
         self._stop_mapping_motion("abort")
         if self._explore is not None:
             self._explore.stop(reason)
+        self._close_scan_gate("abort")
         with self._lock:
             self._reset_locked()
             self._last_error = reason
@@ -394,6 +477,8 @@ class ManualMappingRuntime:
                     # Serialize recovery with abort(): once abort owns the
                     # lifecycle lock, no input source may be restarted after it
                     # has returned.
+                    if self._scan_gate is not None:
+                        self._scan_gate.open()
                     self._drive_controller.activate(mapping_session_id)
                     self._gamepad_input.start()
                 except Exception as exc:
@@ -549,6 +634,7 @@ class ManualMappingRuntime:
                 self._drive_controller.deactivate()
         except Exception as exc:
             print(f"[MAPPING] drive rollback failed type={type(exc).__name__}")
+        self._close_scan_gate("start-rollback")
         with self._lock:
             self._reset_locked()
             self._last_error = reason
@@ -572,6 +658,19 @@ class ManualMappingRuntime:
                 f"type={type(exc).__name__}"
             )
         return failures
+
+    def _close_scan_gate(self, operation: str) -> bool:
+        if self._scan_gate is None:
+            return True
+        try:
+            self._scan_gate.close()
+            return True
+        except Exception as exc:
+            print(
+                f"[MAPPING] scan gate {operation} close failed "
+                f"type={type(exc).__name__}"
+            )
+            return False
 
     def _notify_failure(self, reason: str) -> None:
         with self._lock:
