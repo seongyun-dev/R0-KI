@@ -478,28 +478,40 @@ def _active_map_directory() -> Path | None:
     없는 것이 맞다.
     """
 
+    map_yaml = _active_map_environment().get("ROKI_MAP_YAML", "").strip()
+    if not map_yaml:
+        return None
+    return Path(map_yaml).parent
+
+
+def _active_map_environment() -> dict[str, str]:
+    """current-map.env 의 ROKI_MAP_* 을 읽는다. 없는 키는 부팅 env 로 메운다."""
+
     import json
 
     environment_file = Path(
         os.getenv("AIOT_ACTIVE_MAP_ENV_FILE", "/var/lib/aiot/config/current-map.env")
     )
-    map_yaml = ""
+    values: dict[str, str] = {}
     try:
         for line in environment_file.read_text(encoding="utf-8").splitlines():
             name, separator, raw = line.partition("=")
-            if separator and name.strip() == "ROKI_MAP_YAML":
-                # map_activation 이 json.dumps 로 적는다. 따옴표를 벗긴다.
-                try:
-                    map_yaml = str(json.loads(raw.strip()))
-                except ValueError:
-                    map_yaml = raw.strip().strip('"')
+            name = name.strip()
+            if not separator or not name.startswith("ROKI_MAP_"):
+                continue
+            # map_activation 이 json.dumps 로 적는다. 따옴표를 벗긴다.
+            try:
+                values[name] = str(json.loads(raw.strip()))
+            except ValueError:
+                values[name] = raw.strip().strip('"')
     except (OSError, UnicodeError):
-        map_yaml = ""
-    if not map_yaml:
-        map_yaml = os.getenv("ROKI_MAP_YAML", "").strip()
-    if not map_yaml:
-        return None
-    return Path(map_yaml).parent
+        values = {}
+    for name in ("ROKI_MAP_YAML", "ROKI_MAP_ID", "ROKI_MAP_VERSION"):
+        if not values.get(name):
+            fallback = os.getenv(name, "").strip()
+            if fallback:
+                values[name] = fallback
+    return values
 
 
 def _no_active_map() -> bool:
@@ -572,6 +584,25 @@ def _event_delivery_owner() -> str:
     return owner
 
 
+def _current_navigation_identity() -> Any:
+    """지금 활성인 지도의 (mapId, mapVersion). 매 조회마다 파일에서 읽는다."""
+
+    from aiot_robot.navigation_config import NavigationConfigIdentity
+
+    values = _active_map_environment()
+    map_id = values.get("ROKI_MAP_ID", "").strip()
+    raw_version = values.get("ROKI_MAP_VERSION", "").strip()
+    if not map_id or not raw_version:
+        raise RuntimeError("ACTIVE_MAP_IDENTITY_MISSING")
+    try:
+        map_version = int(raw_version)
+    except ValueError as exc:
+        raise RuntimeError("ACTIVE_MAP_IDENTITY_INVALID") from exc
+    if map_version <= 0:
+        raise RuntimeError("ACTIVE_MAP_IDENTITY_INVALID")
+    return NavigationConfigIdentity(map_id=map_id, map_version=map_version)
+
+
 def _build_backend_navigation_provider(settings: Any) -> Any:
     """Build a deferred Robot-token client; no network is used until START."""
 
@@ -606,10 +637,12 @@ def _build_backend_navigation_provider(settings: Any) -> Any:
             route,
             encoder_limited=False,
         ),
-        identity=NavigationConfigIdentity(
-            map_id=_required_environment("ROKI_MAP_ID"),
-            map_version=_required_positive_integer("ROKI_MAP_VERSION"),
-        ),
+        # 부팅 시 값으로 고정하지 않는다. 매핑이 끝나면 map_activation 이
+        # current-map.env 를 갱신하지만 이 프로세스의 os.environ 은 그대로다.
+        # 2026-08-08 14:00 실기: 런타임이 v32 를 들고 있는데 백엔드 경로가
+        # 방금 만든 v34 를 가리켜 START_PATROL 이 NAVIGATION_MAP_MISMATCH 로
+        # 거부됐다. 매핑 직후 그 지도로 순찰하는 것이 시연 흐름 전체다.
+        identity=_current_navigation_identity,
         default_acceptance_radius_m=float(
             os.getenv("ROKI_WAYPOINT_ACCEPTANCE_RADIUS_M", "0.30")
         ),
