@@ -99,6 +99,9 @@ class RosScanGateControl:
         odom_frame: str = "odom",
         discovery_timeout_sec: float = 15.0,
         service_timeout_sec: float = 15.0,
+        # 기동 시 map 프레임을 만들어 두는 창(_prime_map_frame 참고).
+        # 라이다 10Hz 에서 스캔 한 장이면 되므로 여유가 크다.
+        prime_timeout_sec: float = 10.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._node_name = node_name
@@ -110,6 +113,7 @@ class RosScanGateControl:
         self._odom_frame = odom_frame
         self._discovery_timeout_sec = discovery_timeout_sec
         self._service_timeout_sec = service_timeout_sec
+        self._prime_timeout_sec = prime_timeout_sec
         self._clock = clock
         self._lock = threading.Lock()
         self._condition = threading.Condition()
@@ -189,9 +193,69 @@ class RosScanGateControl:
             # Enforce the IDLE/startup invariant even if only this process was
             # restarted while the ROS relay process survived.
             self.close()
+            self._prime_map_frame()
         except Exception:
             self.stop()
             raise
+
+    def _prime_map_frame(self) -> None:
+        """게이트를 한 번 열었다 닫아 ``map`` 프레임을 만들어 둔다.
+
+        Nav2 의 ``Costmap2DROS::on_activate`` 는 ``map`` 프레임이 생길 때까지
+        2Hz 로 **무한히** 기다린다. 실패 반환 경로가 없어서 lifecycle 관리자도
+        깨우지 못하고, 순차 활성화라 그 뒤 노드는 정의상 active 가 되지 못한다.
+        표준 스택에서 이 대기가 초 단위로 끝나는 이유는 라이다가 항상 흐르기
+        때문인데, 우리는 그 스캔을 기본 CLOSED 게이트 뒤에 두었다.
+
+        그래서 게이트를 여는 코드보다 앞에 있는 Nav2 준비 확인이 전부 순환이
+        된다. 2026-08-09 01:43~01:45 실측: START_MAPPING 이 NAV2_NOT_READY 로
+        연속 거부되고, 그 거부가 게이트를 다시 닫아 회복 경로도 없었다.
+
+        스캔은 한 장이면 된다. slam_toolbox 의 TF 발행 루프는
+        ``scan_header`` 가 비어 있지 않은 동안 계속 map->odom 을 내고
+        (slam_toolbox_common.cpp:257-270), ``resetCallback`` 은 그 헤더를
+        지우지 않는다(:848-868). 즉 **프로세스당 한 번**이면 충분하다.
+
+        실측 근거(2026-08-08): 23:40:33 planner_server 활성화 시작 ->
+        7분 44초 동안 'Invalid frame ID "map"' -> 23:48:17 게이트 OPEN ->
+        23:48:19 planner_server bond 성립 -> 23:48:39 게이트 CLOSED ->
+        이후 65분간 같은 경고 0건. 닫은 뒤에도 map 프레임이 유지된다.
+
+        기본값은 CLOSED 그대로 둔다. "기본과 실패는 닫힘" 이라는 계약을
+        뒤집으면 ``stop`` / ``_rollback_start`` / ``_close_patrol_scan_gate``
+        가 기대는 fail-closed 불변식이 함께 흔들린다. 여기서는 기동 시
+        한 번만, 반드시 다시 닫는다.
+
+        실패해도 예외를 올리지 않는다. 프라이밍은 최적화이지 기동 조건이
+        아니다 -- 못 해도 첫 매핑이 게이트를 열면서 같은 일이 일어난다.
+        """
+
+        opened = False
+        try:
+            self.open()
+            opened = True
+            deadline = self._clock() + self._prime_timeout_sec
+            if self._wait_for_transform(deadline):
+                print("[SCAN_GATE] map frame primed")
+            else:
+                print(
+                    "[SCAN_GATE] map frame prime timed out "
+                    f"after {self._prime_timeout_sec:.0f}s"
+                )
+        except Exception as exc:
+            print(f"[SCAN_GATE] map frame prime failed type={type(exc).__name__}")
+        finally:
+            if opened:
+                try:
+                    self.close()
+                except Exception as exc:
+                    # 열어놓고 못 닫으면 IDLE 불변식이 깨진 채 남는다.
+                    # 호출자가 알아야 하므로 이것만은 올린다.
+                    print(
+                        "[SCAN_GATE] prime close failed "
+                        f"type={type(exc).__name__}"
+                    )
+                    raise
 
     def stop(self) -> None:
         with self._lock:
