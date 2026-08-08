@@ -11,6 +11,7 @@ import math
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -284,6 +285,38 @@ def _build_nav2_driver(
                 + ("mapping" if authorised else "patrol")
                 + f" sink={'yes' if mapping_sink is not None else 'MISSING'}"
             )
+        # 전이 로그만으로는 "콜백이 안 온다" 와 "콜백은 오는데 값이 0 이다" 를
+        # 구분할 수 없다. 2026-08-08 현장에서 정확히 그 둘 사이에서 막혔다:
+        # /cmd_vel 은 흐르는데 미션은 100% 비활성이었고, 라우터는 전이가 없어
+        # 조용했다. 주기 집계는 호출 자체가 없으면 아무것도 찍지 않으므로
+        # 침묵이 곧 "콜백 없음" 이라는 답이 된다.
+        state = route_motion.__dict__
+        state["calls"] = state.get("calls", 0) + 1
+        if authorised:
+            state["auth"] = state.get("auth", 0) + 1
+        speed = int(getattr(command, "speed_pwm", 0))
+        if speed == 0:
+            state["zero"] = state.get("zero", 0) + 1
+        elif speed < 0:
+            state["reverse"] = state.get("reverse", 0) + 1
+        else:
+            state["forward"] = state.get("forward", 0) + 1
+        now = time.monotonic()
+        started = state.get("at")
+        if started is None:
+            state["at"] = now
+        elif now - started >= 5.0:
+            state["at"] = now
+            print(
+                f"[ROUTE CENSUS] {now - started:.0f}s "
+                f"calls={state.get('calls', 0)} auth={state.get('auth', 0)} "
+                f"fwd={state.get('forward', 0)} rev={state.get('reverse', 0)} "
+                f"zero={state.get('zero', 0)} "
+                f"last_speed={speed} last_reason={getattr(command, 'stop_reason', None)}",
+                flush=True,
+            )
+            for key in ("calls", "auth", "forward", "reverse", "zero"):
+                state[key] = 0
         if authorised:
             mapping_sink(command)
             return
