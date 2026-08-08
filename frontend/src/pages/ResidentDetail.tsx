@@ -415,10 +415,6 @@ export default function ResidentDetail() {
               ) : (
                 <div className="info">
                   <div className="ir">
-                    <span className="k">입주민 ID</span>
-                    <span className="v num">{resident.residentId}</span>
-                  </div>
-                  <div className="ir">
                     <span className="k">이름</span>
                     <span className="v">{resident.name}</span>
                   </div>
