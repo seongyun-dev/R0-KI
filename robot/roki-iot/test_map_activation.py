@@ -49,7 +49,72 @@ class CurrentMapActivatorTest(unittest.TestCase):
             self.root / "maps",
             self.root / "config" / "current-map.env",
         )
-        self.activator = CurrentMapActivator(self.settings)
+        # 실제 os.environ 을 쓰지 않는다. 전역 환경을 건드리는 테스트는 다른
+        # 테스트로 새어나가 순서 의존 실패를 만든다.
+        self.environment: dict[str, str] = {
+            "ROKI_MAP_YAML": "/var/lib/aiot/maps/active/map-7-v2-old/map.yaml",
+            "ROKI_MAP_ID": "7",
+            "ROKI_MAP_VERSION": "2",
+            "ROKI_MAP_SHA256": "0" * 64,
+        }
+        self.activator = CurrentMapActivator(
+            self.settings, environment=self.environment
+        )
+
+    def test_activation_updates_the_process_environment(self) -> None:
+        """활성화하면 프로세스 환경이 새 지도를 가리켜야 한다.
+
+        A안(무재시작 모드 전환) 이전에는 모드를 바꿀 때 서비스를 재시작해서
+        os.environ 이 env 파일에서 새로 로드됐다. 그래서 "os.environ 은 현재
+        활성 지도를 반영한다" 는 불변식이 정의상 성립했고, ROKI_MAP_* 을
+        os.getenv 로 읽는 코드가 전부 옳았다.
+
+        재시작을 없애면서 그 불변식만 깨졌고, 2026-08-08 실기에서 세 자리가
+        같은 이유로 순찰을 거부했다 -- 부팅 시점 v38 을 든 프로세스가 방금
+        만든 v39 의 route/metadata/sha256 과 비교했다.
+
+        이 테스트는 호출부를 세지 않는다. 불변식 자체를 지킨다 -- 그래야
+        나중에 생기는 넷째 호출부도 자동으로 옳다.
+        """
+
+        activated = self.activator.activate(self.artifact, map_id=7, map_version=3)
+
+        self.assertEqual(self.environment["ROKI_MAP_VERSION"], "3")
+        self.assertEqual(self.environment["ROKI_MAP_ID"], "7")
+        self.assertEqual(
+            self.environment["ROKI_MAP_YAML"], str(activated.yaml_path.resolve())
+        )
+        self.assertEqual(self.environment["ROKI_MAP_SHA256"], activated.bundle_sha256)
+
+    def test_failed_activation_does_not_touch_the_environment(self) -> None:
+        """실패한 활성화가 환경을 오염시키면, 프로세스가 없는 지도를 활성으로 믿는다."""
+
+        before = dict(self.environment)
+
+        with self.assertRaises(MapActivationError):
+            self.activator.activate(self.artifact, map_id=0, map_version=3)
+
+        self.assertEqual(self.environment, before)
+
+    def test_environment_and_env_file_agree_after_activation(self) -> None:
+        """진실이 둘이면 언젠가 어긋난다. 파일과 프로세스 환경이 같아야 한다."""
+
+        self.activator.activate(self.artifact, map_id=7, map_version=3)
+
+        written = {}
+        for line in self.settings.environment_file.read_text(
+            encoding="utf-8"
+        ).splitlines():
+            name, separator, raw = line.partition("=")
+            if separator:
+                written[name.strip()] = raw.strip().strip('"')
+        for name in (
+            "ROKI_MAP_YAML",
+            "ROKI_MAP_ID",
+            "ROKI_MAP_VERSION",
+            "ROKI_MAP_SHA256",
+        ):
+            self.assertEqual(written[name], self.environment[name], name)
 
     def test_installs_versioned_bundle_and_atomically_selects_patrol_map(self) -> None:
         activated = self.activator.activate(

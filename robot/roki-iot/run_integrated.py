@@ -478,40 +478,10 @@ def _active_map_directory() -> Path | None:
     없는 것이 맞다.
     """
 
-    map_yaml = _active_map_environment().get("ROKI_MAP_YAML", "").strip()
+    map_yaml = os.getenv("ROKI_MAP_YAML", "").strip()
     if not map_yaml:
         return None
     return Path(map_yaml).parent
-
-
-def _active_map_environment() -> dict[str, str]:
-    """current-map.env 의 ROKI_MAP_* 을 읽는다. 없는 키는 부팅 env 로 메운다."""
-
-    import json
-
-    environment_file = Path(
-        os.getenv("AIOT_ACTIVE_MAP_ENV_FILE", "/var/lib/aiot/config/current-map.env")
-    )
-    values: dict[str, str] = {}
-    try:
-        for line in environment_file.read_text(encoding="utf-8").splitlines():
-            name, separator, raw = line.partition("=")
-            name = name.strip()
-            if not separator or not name.startswith("ROKI_MAP_"):
-                continue
-            # map_activation 이 json.dumps 로 적는다. 따옴표를 벗긴다.
-            try:
-                values[name] = str(json.loads(raw.strip()))
-            except ValueError:
-                values[name] = raw.strip().strip('"')
-    except (OSError, UnicodeError):
-        values = {}
-    for name in ("ROKI_MAP_YAML", "ROKI_MAP_ID", "ROKI_MAP_VERSION"):
-        if not values.get(name):
-            fallback = os.getenv(name, "").strip()
-            if fallback:
-                values[name] = fallback
-    return values
 
 
 def _no_active_map() -> bool:
@@ -585,13 +555,17 @@ def _event_delivery_owner() -> str:
 
 
 def _current_navigation_identity() -> Any:
-    """지금 활성인 지도의 (mapId, mapVersion). 매 조회마다 파일에서 읽는다."""
+    """지금 활성인 지도의 (mapId, mapVersion).
+
+    조회 시점에 읽는 것이 핵심이다. 부팅 시점 값으로 고정하면 매핑 직후
+    순찰이 반드시 어긋난다. ``map_activation`` 이 활성화 때 os.environ 을
+    함께 갱신하므로 env 가 다시 진실이다 -- 파일을 따로 읽지 않는다.
+    """
 
     from aiot_robot.navigation_config import NavigationConfigIdentity
 
-    values = _active_map_environment()
-    map_id = values.get("ROKI_MAP_ID", "").strip()
-    raw_version = values.get("ROKI_MAP_VERSION", "").strip()
+    map_id = os.getenv("ROKI_MAP_ID", "").strip()
+    raw_version = os.getenv("ROKI_MAP_VERSION", "").strip()
     if not map_id or not raw_version:
         raise RuntimeError("ACTIVE_MAP_IDENTITY_MISSING")
     try:
