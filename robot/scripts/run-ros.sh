@@ -73,12 +73,40 @@ start_component ros2 launch nav2_bringup navigation_launch.py \
 # 수명은 매핑 세션에 귀속된다 -- roki-iot/integration/explore_supervisor.py 가
 # START_MAPPING 이 게이트를 연 뒤 띄우고 세션이 끝나면 정리한다.
 
+# 자식이 죽었는지 직접 묻는다. wait -n 에 기대지 않는다.
+#
+# 2026-08-08 관측: slam_toolbox 가 사라진 뒤에도 이 스크립트는 계속 살아 있었다.
+# aiot-ros 는 active, NRestarts=0, run-ros.sh 는 그대로. /map 도 map->odom 도
+# 없는데 서비스는 정상이라고 보고했고, 매핑과 순찰이 둘 다 조용히 불가능해졌다.
+# 아무도 알아채지 못하고 아무것도 복구하지 않는 상태가 서비스 수명 내내 남는다.
+#
+# 좀비도 죽은 것으로 센다. kill -0 은 아직 회수되지 않은 자식에게 성공을
+# 돌려주므로 그것만으로는 구분되지 않는다. /proc 의 State 를 직접 본다.
+child_alive() {
+  local state
+  state="$(sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "/proc/$1/status" 2>/dev/null)"
+  [ -n "${state}" ] && [ "${state}" != "Z" ]
+}
+
+component_status=0
+dead_pid=""
+while [ -z "${dead_pid}" ]; do
+  for child_pid in "${child_pids[@]}"; do
+    if ! child_alive "${child_pid}"; then
+      dead_pid="${child_pid}"
+      break
+    fi
+  done
+  [ -n "${dead_pid}" ] && break
+  sleep 2
+done
+
 set +e
-wait -n "${child_pids[@]}"
+wait "${dead_pid}"
 component_status=$?
 set -e
 if [ "${component_status}" -eq 0 ]; then
-  echo "A required ROS component exited unexpectedly" >&2
   component_status=1
 fi
+echo "A required ROS component (pid ${dead_pid}) exited; status ${component_status}" >&2
 exit "${component_status}"
