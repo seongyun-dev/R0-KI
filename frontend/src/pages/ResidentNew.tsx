@@ -11,8 +11,6 @@ import { useCreateResident } from '../features/residents/useResidents'
 const NAME_MAX = 50
 const PHONE_PATTERN = /^[0-9-]+$/
 
-type VehicleDraft = { licensePlate: string; disabledVehicle: boolean }
-
 export default function ResidentNew() {
   const navigate = useNavigate()
   const createResident = useCreateResident()
@@ -23,9 +21,8 @@ export default function ResidentNew() {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [buildingNumber, setBuildingNumber] = useState('')
   const [unitNumber, setUnitNumber] = useState('')
-  const [vehicles, setVehicles] = useState<VehicleDraft[]>([
-    { licensePlate: '', disabledVehicle: false },
-  ])
+  // 차량은 번호만 입력받는다 — disabledVehicle 은 이 화면에서 다루지 않으므로 항상 false 로 보낸다
+  const [vehicles, setVehicles] = useState<string[]>([''])
 
   const [fieldError, setFieldError] = useState<Record<string, string>>({})
   const [errorMessage, setErrorMessage] = useState<string>()
@@ -33,10 +30,8 @@ export default function ResidentNew() {
 
   useEffect(() => () => window.clearTimeout(doneTimer.current), [])
 
-  const updateVehicle = (index: number, patch: Partial<VehicleDraft>) => {
-    setVehicles((prev) =>
-      prev.map((vehicle, i) => (i === index ? { ...vehicle, ...patch } : vehicle)),
-    )
+  const updateVehicle = (index: number, licensePlate: string) => {
+    setVehicles((prev) => prev.map((value, i) => (i === index ? licensePlate : value)))
   }
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -49,8 +44,9 @@ export default function ResidentNew() {
     const trimmedUnit = unitNumber.trim()
     // 빈 줄은 "안 쓴 칸"으로 보고 버린다 — 차량 없이 등록하는 것도 허용한다
     const filledVehicles = vehicles
-      .map((vehicle) => ({ ...vehicle, licensePlate: vehicle.licensePlate.trim() }))
-      .filter((vehicle) => vehicle.licensePlate !== '')
+      .map((licensePlate) => licensePlate.trim())
+      .filter((licensePlate) => licensePlate !== '')
+      .map((licensePlate) => ({ licensePlate, disabledVehicle: false }))
 
     const errors: Record<string, string> = {}
     if (!trimmedName) errors.name = '이름을 입력해 주세요.'
@@ -187,7 +183,9 @@ export default function ResidentNew() {
 
               <div className={fieldError.vehicles ? 'au-row bad' : 'au-row'}>
                 <span className="au-lab">등록 차량</span>
-                {vehicles.map((vehicle, index) => (
+                {/* .au-in 은 width:100% 라 그냥 두면 입력칸이 행을 다 먹고 옆 버튼이 찌그러진다.
+                    입력칸만 늘어나게 하고(flex:1+min-width:0) 나머지는 제 너비를 지킨다. */}
+                {vehicles.map((licensePlate, index) => (
                   <div
                     key={index}
                     style={{
@@ -199,24 +197,13 @@ export default function ResidentNew() {
                   >
                     <input
                       className="au-in num"
-                      value={vehicle.licensePlate}
-                      onChange={(event) =>
-                        updateVehicle(index, { licensePlate: event.target.value })
-                      }
+                      value={licensePlate}
+                      onChange={(event) => updateVehicle(index, event.target.value)}
                       placeholder="예: 12가3456"
                       aria-label={`차량 번호 ${index + 1}`}
                       autoComplete="off"
+                      style={{ flex: '1 1 auto', minWidth: 0 }}
                     />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={vehicle.disabledVehicle}
-                        onChange={(event) =>
-                          updateVehicle(index, { disabledVehicle: event.target.checked })
-                        }
-                      />
-                      장애인 차량
-                    </label>
                     {vehicles.length > 1 && (
                       <button
                         type="button"
@@ -224,6 +211,7 @@ export default function ResidentNew() {
                         onClick={() =>
                           setVehicles((prev) => prev.filter((_, i) => i !== index))
                         }
+                        style={{ flex: 'none', whiteSpace: 'nowrap' }}
                       >
                         삭제
                       </button>
@@ -233,9 +221,8 @@ export default function ResidentNew() {
                 <button
                   type="button"
                   className="btn btn-s btn-add"
-                  onClick={() =>
-                    setVehicles((prev) => [...prev, { licensePlate: '', disabledVehicle: false }])
-                  }
+                  onClick={() => setVehicles((prev) => [...prev, ''])}
+                  style={{ whiteSpace: 'nowrap' }}
                 >
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   차량 추가

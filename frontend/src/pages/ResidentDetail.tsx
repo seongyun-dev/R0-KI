@@ -51,8 +51,8 @@ export default function ResidentDetail() {
     buildingNumber: '',
     unitNumber: '',
   })
+  // 차량은 번호만 입력받는다 — disabledVehicle 은 이 화면에서 다루지 않으므로 항상 false 로 보낸다
   const [newPlate, setNewPlate] = useState('')
-  const [newPlateDisabled, setNewPlateDisabled] = useState(false)
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
@@ -137,14 +137,11 @@ export default function ResidentDetail() {
       () =>
         addVehicle.mutateAsync({
           residentId: id,
-          request: { licensePlate, disabledVehicle: newPlateDisabled },
+          request: { licensePlate, disabledVehicle: false },
         }),
       '차량이 등록되었습니다',
     )
-    if (ok) {
-      setNewPlate('')
-      setNewPlateDisabled(false)
-    }
+    if (ok) setNewPlate('')
   }
 
   const onDeleteVehicle = async (vehicleId: number, licensePlate: string) => {
@@ -264,6 +261,8 @@ export default function ResidentDetail() {
                   marginTop: 'var(--s3)',
                 }}
               >
+                {/* .au-in 은 width:100% 라 그냥 두면 입력칸이 행을 다 먹고 옆 버튼이 찌그러진다.
+                    입력칸만 늘어나게 하고(flex:1+min-width:0) 나머지는 제 너비를 지킨다. */}
                 <input
                   className="au-in num"
                   value={newPlate}
@@ -271,20 +270,14 @@ export default function ResidentDetail() {
                   placeholder="예: 12가3456"
                   aria-label="추가할 차량 번호"
                   autoComplete="off"
+                  style={{ flex: '1 1 auto', minWidth: 0 }}
                 />
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={newPlateDisabled}
-                    onChange={(event) => setNewPlateDisabled(event.target.checked)}
-                  />
-                  장애인 차량
-                </label>
                 <button
                   type="button"
                   className="btn btn-s btn-add"
                   onClick={onAddVehicle}
                   disabled={busy}
+                  style={{ flex: 'none', whiteSpace: 'nowrap' }}
                 >
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   차량 추가
