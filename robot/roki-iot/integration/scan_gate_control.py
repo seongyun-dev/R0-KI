@@ -190,16 +190,16 @@ class RosScanGateControl:
             )
             self._thread.start()
         try:
-            # Enforce the IDLE/startup invariant even if only this process was
-            # restarted while the ROS relay process survived.
+            # 먼저 닫아 릴레이 프로세스만 살아남은 경우의 상태를 확정한 뒤,
+            # 기동 스캔을 열어 map 프레임을 세운다(_open_for_idle 참고).
             self.close()
-            self._prime_map_frame()
+            self._open_for_idle()
         except Exception:
             self.stop()
             raise
 
-    def _prime_map_frame(self) -> None:
-        """게이트를 한 번 열었다 닫아 ``map`` 프레임을 만들어 둔다.
+    def _open_for_idle(self) -> None:
+        """기동 시 게이트를 열고 **열어 둔다**. IDLE 의 기본은 열림이다.
 
         Nav2 의 ``Costmap2DROS::on_activate`` 는 ``map`` 프레임이 생길 때까지
         2Hz 로 **무한히** 기다린다. 실패 반환 경로가 없어서 lifecycle 관리자도
@@ -211,51 +211,51 @@ class RosScanGateControl:
         된다. 2026-08-09 01:43~01:45 실측: START_MAPPING 이 NAV2_NOT_READY 로
         연속 거부되고, 그 거부가 게이트를 다시 닫아 회복 경로도 없었다.
 
-        스캔은 한 장이면 된다. slam_toolbox 의 TF 발행 루프는
-        ``scan_header`` 가 비어 있지 않은 동안 계속 map->odom 을 내고
-        (slam_toolbox_common.cpp:257-270), ``resetCallback`` 은 그 헤더를
-        지우지 않는다(:848-868). 즉 **프로세스당 한 번**이면 충분하다.
+        **한 번 열었다 닫는 것으로는 안 된다.** 2026-08-09 02:45 에 그렇게
+        해봤고 실패했다. slam_toolbox 의 TF 발행 루프는
+        ``msg.header.stamp = scan_timestamp + transform_timeout_`` 로 내는데
+        (slam_toolbox_common.cpp:257-270), ``scan_timestamp`` 은 마지막으로
+        처리한 스캔의 시각이다. 게이트를 닫으면 새 스캔이 없으므로 그 스탬프가
+        얼어붙는다. Nav2 는 최신값 조회(TimePointZero)라 통과하지만, 지도
+        좌표 pose 는 시각을 지정해 조회하므로 현재 시각의 ``odom->base_link``
+        와 합성되지 않는다::
 
-        실측 근거(2026-08-08): 23:40:33 planner_server 활성화 시작 ->
-        7분 44초 동안 'Invalid frame ID "map"' -> 23:48:17 게이트 OPEN ->
-        23:48:19 planner_server bond 성립 -> 23:48:39 게이트 CLOSED ->
-        이후 65분간 같은 경고 0건. 닫은 뒤에도 map 프레임이 유지된다.
+            Lookup would require extrapolation into the past.
+            Requested time 1786211148.747976        <- 게이트를 닫은 순간
+            but the earliest data is at 1786211399.764266
 
-        기본값은 CLOSED 그대로 둔다. "기본과 실패는 닫힘" 이라는 계약을
-        뒤집으면 ``stop`` / ``_rollback_start`` / ``_close_patrol_scan_gate``
-        가 기대는 fail-closed 불변식이 함께 흔들린다. 여기서는 기동 시
-        한 번만, 반드시 다시 닫는다.
+        pose 가 없으면 백엔드가 명령을 아예 로봇까지 보내지 않는다. 즉
+        "Nav2 는 살았는데 아무 명령도 못 받는" 상태가 된다.
 
-        실패해도 예외를 올리지 않는다. 프라이밍은 최적화이지 기동 조건이
-        아니다 -- 못 해도 첫 매핑이 게이트를 열면서 같은 일이 일어난다.
+        신선한 map->odom 은 스캔이 **계속** 흘러야만 나온다. 우회로가 없다.
+
+        열어두어도 이전 지도가 겹치지 않는다. 겹침(직사각형 방이 별모양이
+        되던 문제)의 원인은 게이트가 아니라 ``toggleMode()`` 였다 --
+        매핑->매핑이면 즉시 return 하고 매핑 그래프를 지우지 않는다
+        (experimental/slam_toolbox_map_and_localization.cpp:59-63). 지우는
+        것은 매핑 START 마다 부르는 ``reset_slam()`` -> ``Mapper::Reset()``
+        뿐이고(karto_sdk/src/Mapper.cpp:2685, 그래프·스캔매처·센서매니저를
+        delete), 실패하면 SLAM_RESET_FAILED 로 매핑이 시작조차 안 된다.
+        IDLE 중 쌓인 스캔은 그 리셋이 통째로 지운다. 순찰은
+        ``deserialize_map`` 이 그래프를 교체한다.
+
+        실패해도 예외를 올리지 않는다. 못 열어도 첫 매핑이 열면서 같은 일이
+        일어난다 -- 기동을 막을 이유는 없다.
         """
 
-        opened = False
         try:
             self.open()
-            opened = True
-            deadline = self._clock() + self._prime_timeout_sec
-            if self._wait_for_transform(deadline):
-                print("[SCAN_GATE] map frame primed")
-            else:
-                print(
-                    "[SCAN_GATE] map frame prime timed out "
-                    f"after {self._prime_timeout_sec:.0f}s"
-                )
         except Exception as exc:
-            print(f"[SCAN_GATE] map frame prime failed type={type(exc).__name__}")
-        finally:
-            if opened:
-                try:
-                    self.close()
-                except Exception as exc:
-                    # 열어놓고 못 닫으면 IDLE 불변식이 깨진 채 남는다.
-                    # 호출자가 알아야 하므로 이것만은 올린다.
-                    print(
-                        "[SCAN_GATE] prime close failed "
-                        f"type={type(exc).__name__}"
-                    )
-                    raise
+            print(f"[SCAN_GATE] idle open failed type={type(exc).__name__}")
+            return
+        deadline = self._clock() + self._prime_timeout_sec
+        if self._wait_for_transform(deadline):
+            print("[SCAN_GATE] idle OPEN, map frame ready")
+        else:
+            print(
+                "[SCAN_GATE] idle OPEN, map frame not ready after "
+                f"{self._prime_timeout_sec:.0f}s"
+            )
 
     def stop(self) -> None:
         with self._lock:
