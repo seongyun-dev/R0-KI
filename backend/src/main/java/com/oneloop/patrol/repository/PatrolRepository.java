@@ -39,7 +39,19 @@ public interface PatrolRepository extends JpaRepository<Patrol, Long> {
 
     Optional<Patrol> findFirstByRobotIdAndStatusOrderByStartedAtDesc(Long robotId, PatrolStatus status);
 
-    List<Patrol> findAllByRobotIdAndStartedAtGreaterThanEqual(Long robotId, LocalDateTime since);
+    @Query(
+            """
+            SELECT patrol
+            FROM Patrol patrol
+            WHERE patrol.robot.id = :robotId
+              AND patrol.startedAt < :to
+              AND (patrol.endedAt IS NULL OR patrol.endedAt > :from)
+            ORDER BY patrol.startedAt
+            """)
+    List<Patrol> findAllOverlappingPeriod(
+            @Param("robotId") Long robotId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
 
     Optional<Patrol> findByIdAndRobotApartmentComplexId(Long id, Long apartmentComplexId);
 
