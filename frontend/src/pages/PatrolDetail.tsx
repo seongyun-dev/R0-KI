@@ -6,7 +6,9 @@ import { R0KiShell } from '../components/layout/R0KiShell'
 import { useToast } from '../components/ui'
 import { usePatrol } from '../features/patrol/usePatrols'
 import { useAuthStore } from '../features/auth/useAuthStore'
-import type { Patrol, PatrolPoint } from '../types/domain'
+import { ZoneDetail } from '../features/dashboard/ComplexMap'
+import { zoneVar } from '../features/dashboard/zoneStyle'
+import type { Patrol, PatrolPoint, ZoneType } from '../types/domain'
 
 /* R0-Ki 순찰 상세 — 시안 R0Kipatrol 그대로.
    이동 경로 지도(구역 웨이포인트 동적 배치) + 순찰 지점 기록(타임라인) + AI 요약.
@@ -35,44 +37,48 @@ function timeMin(t: string) {
   return h * 60 + m
 }
 
-/* ── 이동 경로 지도 — routeZones 를 지그재그 웨이포인트로 동적 배치 ── */
-function RouteMapSvg({
+/* ── 이동 경로 지도 ──
+   스캔 맵 좌표(resolution·origin·width·height)가 오면 그 맵을 실제 비율 그대로 그리고,
+   좌표가 없는 단지에서는 routeZones 를 지그재그로 늘어놓는 도식으로 대체한다.
+
+   ⚠️ <image> 를 meet 으로 넣으면 안 된다. 스캔 맵의 실제 비율(대개 1.3:1 안팎)이
+      뷰박스와 다르면 그 안에서 한 번 더 레터박스돼 좌우에 회색 띠가 남는다.
+      대시보드 ComplexMap 과 같은 방식으로 — 뷰박스를 패널에 가까운 가로비로 잡고
+      맵을 거기에 늘여 채운다(preserveAspectRatio="none").
+      좌표 변환도 X·Y 배율을 따로 써야 늘어난 도면과 구역·경로가 어긋나지 않는다. */
+
+const SCHEMATIC_W = 900
+const SCHEMATIC_H = 480
+/* 맵 영역 — 패널 가로비(약 2:1)에 맞춘 고정 비율. 대시보드 그리드 14×7 과 같은 결이다 */
+const MAP_W = 900
+const MAP_H = 450
+const MAP_PAD = 24 // 구역명·시각 라벨이 잘리지 않을 여백
+
+/* 구역은 대시보드 ComplexMap 과 같은 디자인을 쓴다.
+   대시보드 좌표계는 셀 30px × 14칸 = 420 폭이고 .cmz CSS 크기도 거기에 맞춰져 있다.
+   여기 좌표계(MAP_W)는 그보다 크므로 그 배율만큼 되돌려 그린다. */
+const CMAP_CELL = 30
+const CMAP_W = CMAP_CELL * 14
+const ZONE_S = MAP_W / CMAP_W
+
+/* 대시보드와 같은 유형 매핑 — 출발지(START)·위험 구역(DANGER_ZONE)은 대시보드에서도 '기타'로 떨어진다 */
+const ZONE_TYPE: Record<string, ZoneType> = {
+  PARKING: '주차장',
+  RECYCLING_AREA: '분리수거장',
+  DESTINATION: '도착지',
+}
+const zoneTypeOf = (code: string): ZoneType => ZONE_TYPE[code] ?? '기타'
+
+/* 좌표 없는 단지용 도식 — 구역을 균등 간격 지그재그로 늘어놓는다 */
+function SchematicRouteSvg({
   patrol,
+  zones,
   mapImageUrl,
-  mapDetail,
-  checkpointZones,
 }: {
   patrol: Patrol
+  zones: string[]
   mapImageUrl?: string
-  mapDetail?: MapDetailResponse
-  checkpointZones: ZoneCreateResponse[]
 }) {
-  const zones = patrol.routeZones.filter((z) => z !== '경로 정보 없음')
-  if (
-    zones.length < 2 &&
-    (patrol.routePoints?.length ?? 0) < 2 &&
-    checkpointZones.length === 0 &&
-    !(patrol.points ?? []).some(
-      (point) => point.eventId != null && point.x != null && point.y != null,
-    )
-  ) {
-    return (
-      <svg viewBox="0 0 900 480" preserveAspectRatio="xMidYMid meet" aria-label="순찰 이동 경로">
-        {mapImageUrl && (
-          <image
-            href={mapImageUrl}
-            x="0"
-            y="0"
-            width="900"
-            height="480"
-            preserveAspectRatio="xMidYMid meet"
-          />
-        )}
-        <text x="450" y="240">경로 정보 없음</text>
-      </svg>
-    )
-  }
-
   // 중간 지점 시각 — 순찰 지점 기록에서 같은 구역명을 찾아 매칭
   const timeAt = (zone: string, index: number) => {
     if (index === 0) return patrol.start
@@ -91,6 +97,7 @@ function RouteMapSvg({
     return { zone, x, y, isEnd, time: timeAt(zone, i) }
   })
   const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
+
   const routePoints = patrol.routePoints ?? []
   const xValues = routePoints.map((point) => point.x)
   const yValues = routePoints.map((point) => point.y)
@@ -99,46 +106,31 @@ function RouteMapSvg({
   const minY = Math.min(...yValues)
   const maxY = Math.max(...yValues)
   const routePadding = 36
-  const resolution = Number(mapDetail?.resolution)
-  const originX = Number(mapDetail?.originX)
-  const originY = Number(mapDetail?.originY)
-  const mapWidth = Number(mapDetail?.width)
-  const mapHeight = Number(mapDetail?.height)
-  const hasMapCoordinates =
-    Number.isFinite(resolution) && resolution > 0 &&
-    Number.isFinite(originX) && Number.isFinite(originY) &&
-    Number.isFinite(mapWidth) && mapWidth > 0 &&
-    Number.isFinite(mapHeight) && mapHeight > 0
-  const imageScale = hasMapCoordinates ? Math.min(900 / mapWidth, 480 / mapHeight) : 1
-  const imageOffsetX = hasMapCoordinates ? (900 - mapWidth * imageScale) / 2 : 0
-  const imageOffsetY = hasMapCoordinates ? (480 - mapHeight * imageScale) / 2 : 0
-  const toScreenPoint = (x: number, y: number) => ({
-    x: imageOffsetX + ((x - originX) / resolution) * imageScale,
-    y: imageOffsetY + (mapHeight - (y - originY) / resolution) * imageScale,
-  })
-  const actualPoints = routePoints.map((point) => hasMapCoordinates
-    ? toScreenPoint(point.x, point.y)
-    : {
-        x: minX === maxX
-          ? 450
-          : routePadding + ((point.x - minX) / (maxX - minX)) * (900 - routePadding * 2),
-        y: minY === maxY
-          ? 240
-          : routePadding + ((maxY - point.y) / (maxY - minY)) * (480 - routePadding * 2),
-      })
+  const actualPoints = routePoints.map((point) => ({
+    x: minX === maxX
+      ? SCHEMATIC_W / 2
+      : routePadding + ((point.x - minX) / (maxX - minX)) * (SCHEMATIC_W - routePadding * 2),
+    y: minY === maxY
+      ? SCHEMATIC_H / 2
+      : routePadding + ((maxY - point.y) / (maxY - minY)) * (SCHEMATIC_H - routePadding * 2),
+  }))
   const actualPath = actualPoints
     .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
     .join(' ')
 
   return (
-    <svg viewBox="0 0 900 480" preserveAspectRatio="xMidYMid meet" aria-label="순찰 이동 경로">
+    <svg
+      viewBox={`0 0 ${SCHEMATIC_W} ${SCHEMATIC_H}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-label="순찰 이동 경로"
+    >
       {mapImageUrl && (
         <image
           href={mapImageUrl}
           x="0"
           y="0"
-          width="900"
-          height="480"
+          width={SCHEMATIC_W}
+          height={SCHEMATIC_H}
           preserveAspectRatio="xMidYMid meet"
         />
       )}
@@ -146,32 +138,6 @@ function RouteMapSvg({
         <path d="M0 60H900M0 120H900M0 180H900M0 240H900M0 300H900M0 360H900M0 420H900" />
         <path d="M75 0V480M150 0V480M225 0V480M300 0V480M375 0V480M450 0V480M525 0V480M600 0V480M675 0V480M750 0V480M825 0V480" />
       </g>
-      {hasMapCoordinates && checkpointZones.map((zone) => {
-        const topLeft = toScreenPoint(Number(zone.minX), Number(zone.maxY))
-        const bottomRight = toScreenPoint(Number(zone.maxX), Number(zone.minY))
-        const width = Math.max(4, bottomRight.x - topLeft.x)
-        const height = Math.max(4, bottomRight.y - topLeft.y)
-        const centerX = topLeft.x + width / 2
-        const centerY = topLeft.y + height / 2
-        return (
-          <g key={String(zone.zoneId)}>
-            <rect
-              x={topLeft.x}
-              y={topLeft.y}
-              width={width}
-              height={height}
-              rx="5"
-              fill="var(--graphic)"
-              fillOpacity=".12"
-              stroke="var(--graphic)"
-              strokeWidth="2"
-              strokeDasharray="6 4"
-            />
-            <circle cx={centerX} cy={centerY} r="6" fill="var(--graphic)" />
-            <text x={centerX} y={topLeft.y - 8}>{zone.name}</text>
-          </g>
-        )
-      })}
       <path
         d={path}
         fill="none" stroke="var(--graphic)" strokeWidth="3.4" strokeLinecap="round"
@@ -219,36 +185,237 @@ function RouteMapSvg({
           </g>
         )
       })}
-      {hasMapCoordinates && (patrol.points ?? [])
-        .filter(
-          (point) =>
-            point.eventId != null &&
-            point.x != null && Number.isFinite(point.x) &&
-            point.y != null && Number.isFinite(point.y),
+    </svg>
+  )
+}
+
+function RouteMapSvg({
+  patrol,
+  mapImageUrl,
+  mapDetail,
+  checkpointZones,
+}: {
+  patrol: Patrol
+  mapImageUrl?: string
+  mapDetail?: MapDetailResponse
+  checkpointZones: ZoneCreateResponse[]
+}) {
+  const zones = patrol.routeZones.filter((z) => z !== '경로 정보 없음')
+  const eventPoints = (patrol.points ?? []).filter(
+    (point) =>
+      point.eventId != null &&
+      point.x != null && Number.isFinite(point.x) &&
+      point.y != null && Number.isFinite(point.y),
+  )
+
+  if (
+    zones.length < 2 &&
+    (patrol.routePoints?.length ?? 0) < 2 &&
+    checkpointZones.length === 0 &&
+    eventPoints.length === 0
+  ) {
+    return (
+      <svg
+        viewBox={`0 0 ${SCHEMATIC_W} ${SCHEMATIC_H}`}
+        preserveAspectRatio="xMidYMid meet"
+        aria-label="순찰 이동 경로"
+      >
+        {mapImageUrl && (
+          <image
+            href={mapImageUrl}
+            x="0"
+            y="0"
+            width={SCHEMATIC_W}
+            height={SCHEMATIC_H}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        )}
+        <text x={SCHEMATIC_W / 2} y={SCHEMATIC_H / 2}>경로 정보 없음</text>
+      </svg>
+    )
+  }
+
+  const resolution = Number(mapDetail?.resolution)
+  const originX = Number(mapDetail?.originX)
+  const originY = Number(mapDetail?.originY)
+  const mapWidth = Number(mapDetail?.width)
+  const mapHeight = Number(mapDetail?.height)
+  const hasMapCoordinates =
+    Number.isFinite(resolution) && resolution > 0 &&
+    Number.isFinite(originX) && Number.isFinite(originY) &&
+    Number.isFinite(mapWidth) && mapWidth > 0 &&
+    Number.isFinite(mapHeight) && mapHeight > 0
+
+  if (!hasMapCoordinates) {
+    return <SchematicRouteSvg patrol={patrol} zones={zones} mapImageUrl={mapImageUrl} />
+  }
+
+  /* 맵을 MAP_W×MAP_H 에 늘여 채운다. X·Y 배율이 달라지므로 좌표 변환도 따로 건다 */
+  const viewW = MAP_W + MAP_PAD * 2
+  const viewH = MAP_H + MAP_PAD * 2
+  const scaleX = MAP_W / mapWidth
+  const scaleY = MAP_H / mapHeight
+
+  const toScreenPoint = (x: number, y: number) => ({
+    x: MAP_PAD + ((x - originX) / resolution) * scaleX,
+    y: MAP_PAD + (mapHeight - (y - originY) / resolution) * scaleY,
+  })
+
+  /* 구역 통과 시각 — 도식 웨이포인트에 붙어 있던 표기를 실제 구역으로 옮겼다.
+     첫/마지막 구역은 순찰 시작·종료 시각, 중간은 순찰 지점 기록에서 구역명으로 찾는다. */
+  const zoneTime = (name: string) => {
+    const index = zones.findIndex((z) => z === name || z.includes(name) || name.includes(z))
+    if (index === 0) return patrol.start
+    if (index >= 0 && index === zones.length - 1) return patrol.end ?? ''
+    const hit = (patrol.points ?? []).find(
+      (p) => p.location.includes(name) || name.includes(p.location),
+    )
+    return hit?.time ?? ''
+  }
+
+  const actualPoints = (patrol.routePoints ?? []).map((point) => toScreenPoint(point.x, point.y))
+  const actualPath = actualPoints
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
+    .join(' ')
+
+  const gridCols = 12
+  const gridRows = 6
+
+  return (
+    <svg
+      viewBox={`0 0 ${viewW} ${viewH}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-label="순찰 이동 경로"
+    >
+      {mapImageUrl && (
+        <image
+          href={mapImageUrl}
+          x={MAP_PAD}
+          y={MAP_PAD}
+          width={MAP_W}
+          height={MAP_H}
+          preserveAspectRatio="none"
+        />
+      )}
+      <g stroke="currentColor" opacity=".09" strokeWidth="1">
+        {Array.from({ length: gridRows + 1 }, (_, i) => (
+          <line
+            key={`h${i}`}
+            x1={MAP_PAD}
+            y1={MAP_PAD + (MAP_H * i) / gridRows}
+            x2={MAP_PAD + MAP_W}
+            y2={MAP_PAD + (MAP_H * i) / gridRows}
+          />
+        ))}
+        {Array.from({ length: gridCols + 1 }, (_, i) => (
+          <line
+            key={`v${i}`}
+            x1={MAP_PAD + (MAP_W * i) / gridCols}
+            y1={MAP_PAD}
+            x2={MAP_PAD + (MAP_W * i) / gridCols}
+            y2={MAP_PAD + MAP_H}
+          />
+        ))}
+      </g>
+      {/* 구역 — 대시보드 ComplexMap 과 같은 디자인(.cmz + ZoneDetail).
+          .cmz CSS 는 대시보드 좌표계(셀 30px) 기준 크기라, 여기 좌표를 배율로
+          나눠 그린 뒤 그룹을 scale(ZONE_S) 해서 같은 비율로 보이게 한다. */}
+      {checkpointZones.map((zone) => {
+        const topLeft = toScreenPoint(Number(zone.minX), Number(zone.maxY))
+        const bottomRight = toScreenPoint(Number(zone.maxX), Number(zone.minY))
+        const type = zoneTypeOf(zone.type)
+        const x = topLeft.x / ZONE_S
+        const y = topLeft.y / ZONE_S
+        const w = Math.max(4, bottomRight.x - topLeft.x) / ZONE_S
+        const h = Math.max(4, bottomRight.y - topLeft.y) / ZONE_S
+        const time = zoneTime(zone.name)
+        // 대시보드와 같은 판정 — 셀(30px) 넓이 6칸 이상이면 상자 안 가운데, 아니면 불릿 + 옆
+        const big = (w / CMAP_CELL) * (h / CMAP_CELL) >= 6
+        return (
+          <g key={String(zone.zoneId)} className="cmz" style={zoneVar(type)} transform={`scale(${ZONE_S})`}>
+            <rect x={x + 2} y={y + 2} width={w - 4} height={h - 4} rx="7" />
+            <ZoneDetail type={type} x={x + 2} y={y + 2} w={w - 4} h={h - 4} />
+            {big ? (
+              <>
+                <text
+                  className="mid"
+                  x={x + w / 2}
+                  y={type === '기타' ? y + h / 2 + 3.4 : y + 15}
+                  textAnchor="middle"
+                >
+                  {zone.name}
+                </text>
+                {time && (
+                  <text
+                    className="sub"
+                    x={x + w / 2}
+                    y={(type === '기타' ? y + h / 2 + 3.4 : y + 15) + 9}
+                    textAnchor="middle"
+                  >
+                    {time}
+                  </text>
+                )}
+              </>
+            ) : (
+              <>
+                <rect
+                  className="bul"
+                  x={x + 8}
+                  y={y + 9}
+                  width="4"
+                  height="4"
+                  transform={`rotate(45 ${x + 10} ${y + 11})`}
+                />
+                <text x={x + 16} y={y + 14.5}>{zone.name}</text>
+                {time && <text className="sub" x={x + 16} y={y + 23.5}>{time}</text>}
+              </>
+            )}
+          </g>
         )
-        .map((point) => {
-          const position = toScreenPoint(point.x!, point.y!)
-          return (
-            <g key={`event-${point.eventId}`}>
-              <circle
-                cx={position.x}
-                cy={position.y}
-                r="13"
-                fill="none"
-                stroke="var(--detect)"
-                strokeWidth="4"
-              />
-              <text
-                x={position.x}
-                y={position.y - 22}
-                style={{ fill: 'var(--detect)', fontWeight: 800 }}
-              >
-                {point.type}
-              </text>
-              <title>{`${point.time} · ${point.type} · ${point.location}`}</title>
-            </g>
-          )
-        })}
+      })}
+      {actualPoints.length >= 2 && (
+        <>
+          <path
+            d={actualPath}
+            fill="none"
+            stroke="var(--graphic)"
+            strokeWidth="5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="10 8"
+          />
+          <circle cx={actualPoints[0].x} cy={actualPoints[0].y} r="8" fill="var(--patrol)" />
+          <circle
+            cx={actualPoints[actualPoints.length - 1].x}
+            cy={actualPoints[actualPoints.length - 1].y}
+            r="8"
+            fill="var(--detect)"
+          />
+        </>
+      )}
+      {eventPoints.map((point) => {
+        const position = toScreenPoint(point.x!, point.y!)
+        return (
+          <g key={`event-${point.eventId}`}>
+            <circle
+              cx={position.x}
+              cy={position.y}
+              r="13"
+              fill="none"
+              stroke="var(--detect)"
+              strokeWidth="4"
+            />
+            <text
+              x={position.x}
+              y={position.y - 22}
+              style={{ fill: 'var(--detect)', fontWeight: 800 }}
+            >
+              {point.type}
+            </text>
+            <title>{`${point.time} · ${point.type} · ${point.location}`}</title>
+          </g>
+        )
+      })}
     </svg>
   )
 }

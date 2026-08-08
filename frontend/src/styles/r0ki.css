@@ -377,6 +377,8 @@
 .r0ki .cmz text{font-family:var(--sans);font-size:8.5px;font-weight:700;letter-spacing:-.01em;
   fill:var(--text-1);paint-order:stroke;stroke:var(--page);stroke-width:2.4px;stroke-linejoin:round}
 .r0ki .cmz text.mid{font-size:9.5px}
+/* 구역명 아래 보조 표기(순찰 상세의 통과 시각) — 대시보드에는 쓰이지 않는다 */
+.r0ki .cmz text.sub{font-size:7.5px;font-weight:600;fill:var(--text-3)}
 /* 구역 설비 묘사 — 구역 색의 옅은 선/면. 라벨보다 뒤로 물러나야 한다 */
 .r0ki .cmfx line,.r0ki .cmfx rect,.r0ki .cmfx path{fill:none;stroke:var(--z);stroke-opacity:.3;stroke-width:0.9}
 .r0ki .cmfx .fill{fill:var(--z);fill-opacity:.16;stroke-opacity:.24}
