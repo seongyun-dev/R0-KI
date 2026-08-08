@@ -150,8 +150,14 @@ class LocalizationModeControllerTest(unittest.TestCase):
             0.35,
         )
 
-    def test_mapping_restores_the_mapping_nav2_profile(self) -> None:
-        """순찰 뒤 매핑은 DUBIN 을 물려받으면 안 된다. 회전반경이 못 버틴다."""
+    def test_mapping_does_not_touch_the_planner(self) -> None:
+        """매핑 진입은 /planner_server 를 건드리면 안 된다.
+
+        2026-08-08 실측: 그 노드에 SetParameters 를 하면 23~29초 블록되고,
+        4초 bond heartbeat 를 놓쳐 lifecycle manager 가 Nav2 전체를 내린다.
+        그러면 explore 가 비활성 Nav2 에 목표를 보내지 않아 매핑이 한 발도
+        못 움직인다. 렌더된 파일이 이미 매핑 값을 담으므로 얻는 것도 없다.
+        """
 
         self.controller.enter_patrol("/maps/session/posegraph")
         self.transport.calls.clear()
@@ -159,9 +165,13 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.controller.enter_mapping()
 
         injected = self.transport.injected()
+        self.assertNotIn("/planner_server", injected)
+        # 컨트롤러 쪽은 값이 싸므로 그대로 되돌린다.
         self.assertEqual(
-            injected["/planner_server"]["GridBased.motion_model_for_search"],
-            "REEDS_SHEPP",
+            injected["/controller_server"][
+                "general_goal_checker.yaw_goal_tolerance"
+            ],
+            3.15,
         )
 
     def test_patrol_refuses_when_the_profile_cannot_be_injected(self) -> None:
@@ -350,12 +360,8 @@ class LocalizationModeControllerTest(unittest.TestCase):
 
         self.assertTrue(ready)
         self.assertEqual(self.transport.mode_calls(), [("set_localization_mode", False)])
-        self.assertEqual(
-            self.transport.injected()["/planner_server"][
-                "GridBased.motion_model_for_search"
-            ],
-            "REEDS_SHEPP",
-        )
+        # 매핑 재적용도 플래너는 건드리지 않는다(23~29초 블록 -> Nav2 사망).
+        self.assertNotIn("/planner_server", self.transport.injected())
 
     def test_reassert_before_any_mode_is_a_no_op(self) -> None:
         ready, reason = self.controller.reassert()

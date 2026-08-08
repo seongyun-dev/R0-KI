@@ -143,18 +143,35 @@ class LocalizationModeController:
             self._invalidate()
             self._say(f"mode switch to mapping failed type={type(exc).__name__}")
             return False, "SET_MAPPING_MODE_FAILED"
-        # 매핑 값 주입이 실패해도 매핑을 막지 않는다. 렌더된 파라미터 파일이
-        # 이미 매핑 값을 담고 있어서(ros_config.apply_slam_shape) 주입은 순찰
-        # 뒤에 되돌리는 용도뿐이다. 여기서 실패로 처리하면 START_MAPPING 이
-        # rollback 돼 매핑 자체가 시작하지 못한다.
-        self._apply_mode_profile(self.MAPPING)
+        # 매핑 진입에서는 플래너 파라미터를 주입하지 않는다.
+        #
+        # 2026-08-08 실측: /planner_server 에 SetParameters 를 하면 노드가
+        # 23~29초 블록된다(유휴/바쁨 무관, 동적 파라미터 콜백이 플래너를
+        # 재초기화한다). 그러면 4초 bond heartbeat 를 놓쳐 lifecycle manager 가
+        # Nav2 전체를 비활성화하고, explore 는 비활성 Nav2 에 목표를 보내지
+        # 않으므로 매핑이 조용히 한 발도 움직이지 못한다.
+        #
+        #   idle: cache_obstacle_heuristic   28.05s
+        #   busy: motion_model_for_search    28.24s
+        #   busy: 3개 동시                    28.92s
+        #
+        # 그리고 매핑 쪽 주입은 애초에 얻는 것이 없다. 렌더된 파라미터 파일이
+        # 이미 매핑 값을 담고 있다(ros_config.apply_slam_shape). 순찰을 돌고 온
+        # 뒤 되돌리는 용도였는데, 그 대가가 Nav2 사망이라면 성립하지 않는다.
+        # 순찰 뒤 매핑으로 돌아갈 때 플래너를 되돌리는 문제는 별도로 풀어야
+        # 한다(스택 재기동, 또는 lifecycle 전환을 끼운 안전한 주입).
+        self._apply_mode_profile(self.MAPPING, planner=False)
         with self._lock:
             self._mode = self.MAPPING
             self._patrol_arguments = None
         self._say("mode=mapping")
         return True, "READY"
 
-    def _apply_mode_profile(self, mode: str) -> str | None:
+    #: SetParameters 가 노드를 20초 넘게 블록하는 대상. 2026-08-08 실측.
+    #: bond heartbeat 가 4초라 이 노드에 주입하면 Nav2 스택이 내려간다.
+    SLOW_PARAMETER_NODES = ("/planner_server",)
+
+    def _apply_mode_profile(self, mode: str, *, planner: bool = True) -> str | None:
         """운행별 Nav2 파라미터를 실행 중에 주입한다.
 
         2026-08-08 실기 확인: 순찰이 돌아야 하는 자리에 매핑 값이 그대로
@@ -171,6 +188,9 @@ class LocalizationModeController:
         if not profile:
             return None
         for node_name, overrides in profile.items():
+            if not planner and node_name in self.SLOW_PARAMETER_NODES:
+                self._say(f"profile skipped mode={mode} node={node_name} reason=SLOW_NODE")
+                continue
             try:
                 self._transport.set_node_parameters(node_name, overrides)
             except Exception as exc:
