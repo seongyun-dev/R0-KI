@@ -16,6 +16,8 @@ FIELD_ENV = {
     "ROKI_INITIAL_POSE_X_M": "0",
     "ROKI_INITIAL_POSE_Y_M": "0",
     "ROKI_INITIAL_POSE_YAW_RAD": "0",
+    # Unit tests must not inherit a map selected by another test or the host.
+    "ROKI_MAP_YAML": "",
 }
 
 
@@ -45,7 +47,7 @@ class MappingPreflightTest(unittest.TestCase):
         self.assertIsNone(result["routeId"])
         self.assertEqual(result["waypoints"], 0)
 
-    def test_legacy_ros_mode_does_not_replace_the_unified_nav2_runtime(self) -> None:
+    def test_no_active_map_ignores_stale_route_with_legacy_ros_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             stale_route = Path(directory) / "route.local.yaml"
             stale_route.write_text("stale: true\n", encoding="utf-8")
@@ -72,8 +74,8 @@ class MappingPreflightTest(unittest.TestCase):
             ):
                 result = run_integrated.preflight(stale_route)
 
-        self.assertEqual(result["navigationMode"], "nav2")
-        self.assertFalse(result["mappingModeRequested"])
+        self.assertEqual(result["navigationMode"], "mapping")
+        self.assertTrue(result["mappingModeRequested"])
         self.assertFalse(result["routeConfigured"])
         self.assertFalse(result["mapValidated"])
 
@@ -99,8 +101,8 @@ class MappingPreflightTest(unittest.TestCase):
                 result = run_integrated.preflight(missing_route)
 
         self.assertTrue(result["mappingAvailable"])
-        self.assertFalse(result["mappingModeRequested"])
-        self.assertEqual(result["navigationMode"], "nav2")
+        self.assertTrue(result["mappingModeRequested"])
+        self.assertEqual(result["navigationMode"], "mapping")
         self.assertFalse(result["routeConfigured"])
 
     def test_disabled_mapping_input_never_opens_device_or_thread(self) -> None:
