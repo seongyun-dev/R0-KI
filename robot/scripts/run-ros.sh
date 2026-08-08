@@ -51,12 +51,6 @@ start_component ros2 run tf2_ros static_transform_publisher \
 start_component ros2 run rf2o_laser_odometry rf2o_laser_odometry_node \
   --ros-args --params-file "${robot_root}/config/ros/rf2o.yaml"
 
-# Fail-closed boundary for slam_toolbox only. RF2O and Nav2 keep consuming
-# raw /scan; mapping/patrol lifecycle code opens this relay explicitly.
-start_component env \
-  PYTHONPATH="${robot_root}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  "${robot_root}/.venv/bin/python" -m aiot_robot.scan_gate
-
 # 매핑과 순찰이 같은 노드 집합으로 돈다. 예전에는 여기서 launch 파일 자체를
 # 갈아 끼웠고, 그래서 모드를 바꾸려면 이 서비스를 재시작해야 했다. 그 재시작이
 # 시리얼 소유자인 aiot-robot 까지 끌어내리면서 2026-08-07 에 관측된 고장

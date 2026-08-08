@@ -28,8 +28,6 @@ class MappingRuntimeSettings:
     upload_retry_initial_sec: float = 2.0
     upload_retry_max_sec: float = 30.0
     fresh_map_timeout_sec: float = 30.0
-    scan_quiescence_sec: float = 0.25
-    scan_quiescence_timeout_sec: float = 2.0
 
     def __post_init__(self) -> None:
         if not self.backend_base_url:
@@ -42,8 +40,6 @@ class MappingRuntimeSettings:
             raise ValueError("upload retry max must be >= initial")
         if self.fresh_map_timeout_sec <= 0:
             raise ValueError("fresh_map_timeout_sec must be positive")
-        if self.scan_quiescence_sec < 0 or self.scan_quiescence_timeout_sec <= 0:
-            raise ValueError("scan quiescence settings are invalid")
 
 
 ClientFactory = Callable[[], RobotBackendClient]
@@ -66,7 +62,7 @@ class ManualMappingRuntime:
         client_factory: ClientFactory | None = None,
         explore_supervisor: Any | None = None,
         localization: Any | None = None,
-        scan_gate: Any | None = None,
+        slam_session: Any | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._state_store = state_store
@@ -77,7 +73,7 @@ class ManualMappingRuntime:
         # 매핑<->순찰 전환. None 이면 전환을 시도하지 않는다 -- 기존 테스트가
         # 이 의존성을 모른 채로도 성립해야 한다.
         self._localization = localization
-        self._scan_gate = scan_gate
+        self._slam_session = slam_session
         self._settings = settings
         self._client_factory = client_factory or self._build_client
         # The explorer's lifetime belongs to the mapping session, not to the
@@ -129,10 +125,10 @@ class ManualMappingRuntime:
         return self._localization
 
     @property
-    def scan_gate(self) -> Any | None:
+    def slam_session(self) -> Any | None:
         """Internal SLAM scan boundary shared with patrol preparation."""
 
-        return self._scan_gate
+        return self._slam_session
 
     def lifecycle_snapshot(self) -> tuple[str, int | None]:
         """Return the current mapping state and session as one atomic snapshot."""
@@ -253,27 +249,24 @@ class ManualMappingRuntime:
             self._completed.clear()
             self._shutdown.clear()
 
-        # The gate is the first lifecycle action. Motion is still disabled and
-        # the explorer does not exist, so any failure stays safely CLOSED.
-        if not self._close_scan_gate("start"):
-            self._rollback_start("SCAN_GATE_CLOSE_FAILED")
-            return False, "SCAN_GATE_CLOSE_FAILED"
-
         ready, reason = self.readiness()
         if not ready:
             self._rollback_start(reason)
             return False, reason
         fresh_marker = None
-        if self._scan_gate is not None:
+        if self._slam_session is not None:
             try:
-                if not self._scan_gate.wait_for_quiescence(
-                    quiet_sec=self._settings.scan_quiescence_sec,
-                    timeout_sec=self._settings.scan_quiescence_timeout_sec,
-                ):
-                    self._rollback_start("SCAN_GATE_NOT_QUIESCENT")
-                    return False, "SCAN_GATE_NOT_QUIESCENT"
-                fresh_marker = self._scan_gate.marker()
-                self._scan_gate.reset_slam()
+                # 정적(quiescence) 대기를 하지 않는다. slam 이 라이다를 직접
+                # 구독하므로 스캔은 10Hz 로 계속 흐르고, 멎기를 기다리면 영원히
+                # 안 온다. 그 대기는 게이트가 /slam_scan 을 끊던 시절의 것이다.
+                #
+                # 없어도 리셋은 깨끗하다. Mapper::Reset() 이 smapper_mutex_ 를
+                # 잡고 laserCallback 도 같은 뮤텍스를 쓰므로 직렬화된다 --
+                # 리셋 직전 스캔은 리셋이 지우고, 직후 스캔은 새 지도의 첫
+                # 스캔이 된다. 그리고 아래 wait_for_fresh_map 이 "마커 이후의
+                # 스캔으로 만들어진 지도"만 통과시킨다.
+                fresh_marker = self._slam_session.marker()
+                self._slam_session.reset_slam()
             except Exception as exc:
                 print(
                     "[MAPPING] slam reset failed "
@@ -290,18 +283,9 @@ class ManualMappingRuntime:
             if not entered:
                 self._rollback_start(mode_reason)
                 return False, mode_reason
-        if self._scan_gate is not None:
-            try:
-                self._scan_gate.open()
-            except Exception as exc:
-                print(
-                    "[MAPPING] scan gate open failed "
-                    f"type={type(exc).__name__}"
-                )
-                self._rollback_start("SCAN_GATE_OPEN_FAILED")
-                return False, "SCAN_GATE_OPEN_FAILED"
+        if self._slam_session is not None:
             assert fresh_marker is not None
-            if not self._scan_gate.wait_for_fresh_map(
+            if not self._slam_session.wait_for_fresh_map(
                 fresh_marker,
                 timeout_sec=self._settings.fresh_map_timeout_sec,
             ):
@@ -368,22 +352,6 @@ class ManualMappingRuntime:
         if self._explore is not None:
             self._explore.stop("finish")
         stop_failures = self._stop_mapping_motion("finish")
-        if not self._close_scan_gate("finish"):
-            stop_failures.append(RuntimeError("scan gate close failed"))
-        elif self._scan_gate is not None:
-            try:
-                quiet = self._scan_gate.wait_for_quiescence(
-                    quiet_sec=self._settings.scan_quiescence_sec,
-                    timeout_sec=self._settings.scan_quiescence_timeout_sec,
-                )
-            except Exception as exc:
-                quiet = False
-                print(
-                    "[MAPPING] scan quiescence failed "
-                    f"type={type(exc).__name__}"
-                )
-            if not quiet:
-                stop_failures.append(RuntimeError("scan gate did not quiesce"))
         if stop_failures:
             self._notify_failure("MAPPING_STOP_FAILED")
             return False
@@ -428,7 +396,6 @@ class ManualMappingRuntime:
         finally:
             if self._drive_controller.active:
                 self._drive_controller.deactivate()
-        self._close_scan_gate("shutdown")
         worker = self._worker
         if worker is not None and worker is not threading.current_thread():
             worker.join(timeout=2.0)
@@ -449,7 +416,6 @@ class ManualMappingRuntime:
         self._stop_mapping_motion("abort")
         if self._explore is not None:
             self._explore.stop(reason)
-        self._close_scan_gate("abort")
         with self._lock:
             self._reset_locked()
             self._last_error = reason
@@ -477,8 +443,6 @@ class ManualMappingRuntime:
                     # Serialize recovery with abort(): once abort owns the
                     # lifecycle lock, no input source may be restarted after it
                     # has returned.
-                    if self._scan_gate is not None:
-                        self._scan_gate.open()
                     self._drive_controller.activate(mapping_session_id)
                     self._gamepad_input.start()
                 except Exception as exc:
@@ -634,7 +598,6 @@ class ManualMappingRuntime:
                 self._drive_controller.deactivate()
         except Exception as exc:
             print(f"[MAPPING] drive rollback failed type={type(exc).__name__}")
-        self._close_scan_gate("start-rollback")
         with self._lock:
             self._reset_locked()
             self._last_error = reason
@@ -658,19 +621,6 @@ class ManualMappingRuntime:
                 f"type={type(exc).__name__}"
             )
         return failures
-
-    def _close_scan_gate(self, operation: str) -> bool:
-        if self._scan_gate is None:
-            return True
-        try:
-            self._scan_gate.close()
-            return True
-        except Exception as exc:
-            print(
-                f"[MAPPING] scan gate {operation} close failed "
-                f"type={type(exc).__name__}"
-            )
-            return False
 
     def _notify_failure(self, reason: str) -> None:
         with self._lock:

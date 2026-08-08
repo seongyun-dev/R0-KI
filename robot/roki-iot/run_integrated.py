@@ -530,51 +530,37 @@ def _active_map_environment() -> dict[str, str]:
 
 
 def _prepare_patrol_localization(mapping_runtime: Any) -> tuple[bool, str]:
-    """Keep SLAM input closed until the active patrol map is ready."""
+    """포즈그래프를 적재하고 위치추정이 실제로 붙을 때까지 기다린다.
 
-    scan_gate = getattr(mapping_runtime, "scan_gate", None)
-    try:
-        if scan_gate is not None:
-            scan_gate.close()
-    except Exception as exc:
-        print(f"[SCAN_GATE] patrol close failed type={type(exc).__name__}")
-        return False, "SCAN_GATE_CLOSE_FAILED"
+    예전에는 여기서 스캔을 끊었다 다시 이었다. 그 게이팅은 걷어냈다 --
+    slam 이 라이다를 직접 구독하므로 끊을 수 있는 것이 없고, 끊으면 map
+    프레임이 사라져 Nav2 와 pose 가 함께 죽는다(slam_toolbox.yaml 주석).
 
+    남은 것은 관측이다. ``deserialize_map`` 은 빈 응답이라 성공/실패를
+    알려주지 않으므로, 적재 이후의 새 스캔과 그에 이어진 map->odom 을 직접
+    확인해야 순찰이 지도 없이 출발하는 것을 막을 수 있다.
+    """
+
+    slam = getattr(mapping_runtime, "slam_session", None)
     localization = getattr(mapping_runtime, "localization", None)
     if localization is None:
         return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
     directory = _active_map_directory()
     if directory is None:
         return False, "ACTIVE_MAP_MISSING"
+    marker = slam.marker() if slam is not None else None
     ready, reason = localization.ensure_patrol(str(directory / "posegraph"))
-    if not ready or scan_gate is None:
+    if not ready or slam is None:
         return ready, reason
 
-    marker = scan_gate.marker()
     try:
-        scan_gate.open()
         timeout_sec = float(os.getenv("AIOT_PATROL_LOCALIZATION_TIMEOUT_SEC", "30"))
-        if not scan_gate.wait_for_localization_ready(
-            marker, timeout_sec=timeout_sec
-        ):
-            scan_gate.close()
+        if not slam.wait_for_localization_ready(marker, timeout_sec=timeout_sec):
             return False, "LOCALIZATION_NOT_READY"
     except Exception as exc:
-        try:
-            scan_gate.close()
-        except Exception:
-            pass
-        print(f"[SCAN_GATE] patrol open failed type={type(exc).__name__}")
-        return False, "SCAN_GATE_OPEN_FAILED"
+        print(f"[SLAM] patrol localization wait failed type={type(exc).__name__}")
+        return False, "LOCALIZATION_NOT_READY"
     return True, reason
-
-
-def _close_patrol_scan_gate(mapping_runtime: Any, reason: str) -> None:
-    scan_gate = getattr(mapping_runtime, "scan_gate", None)
-    if scan_gate is None:
-        return
-    scan_gate.close()
-    print(f"[SCAN_GATE] patrol CLOSED reason={reason}")
 
 
 def _no_active_map() -> bool:
@@ -784,7 +770,7 @@ def _build_mapping_runtime(
         ManualMappingRuntime,
         MappingRuntimeSettings,
     )
-    from integration.scan_gate_control import RosScanGateControl
+    from integration.slam_session_control import RosSlamSessionControl
 
     drive_controller = ManualDriveController(
         runtime=runtime,
@@ -857,20 +843,21 @@ def _build_mapping_runtime(
         report=print,
     )
 
-    scan_gate = RosScanGateControl(
-        gate_service=os.getenv(
-            "AIOT_SCAN_GATE_SERVICE", "/roki/scan_gate/set_enabled"
-        ),
+    slam_session = RosSlamSessionControl(
         reset_service=os.getenv("AIOT_SLAM_RESET_SERVICE", "/slam_toolbox/reset"),
-        scan_topic=os.getenv("AIOT_SLAM_SCAN_TOPIC", "/slam_scan"),
+        # slam 이 실제로 소비하는 토픽을 관측해야 한다. 게이트가 /slam_scan 을
+        # 릴레이하던 시절의 값을 그대로 두면, 릴레이를 걷어내는 순간
+        # first_scan_after() 가 영원히 None 이 되어 wait_for_fresh_map 과
+        # wait_for_localization_ready 가 항상 실패한다.
+        scan_topic=os.getenv("AIOT_SLAM_SCAN_TOPIC", "/scan"),
         map_topic=os.getenv("AIOT_SLAM_MAP_TOPIC", "/map"),
         map_frame=os.getenv("AIOT_SLAM_MAP_FRAME", "map"),
         odom_frame=os.getenv("AIOT_SLAM_ODOM_FRAME", "odom"),
         discovery_timeout_sec=float(
-            os.getenv("AIOT_SCAN_GATE_DISCOVERY_TIMEOUT_SEC", "15")
+            os.getenv("AIOT_SLAM_SESSION_DISCOVERY_TIMEOUT_SEC", "15")
         ),
         service_timeout_sec=float(
-            os.getenv("AIOT_SCAN_GATE_SERVICE_TIMEOUT_SEC", "15")
+            os.getenv("AIOT_SLAM_SESSION_SERVICE_TIMEOUT_SEC", "15")
         ),
     )
     mapping_runtime = ManualMappingRuntime(
@@ -906,7 +893,7 @@ def _build_mapping_runtime(
             )
         ),
         localization=localization_controller,
-        scan_gate=scan_gate,
+        slam_session=slam_session,
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -921,12 +908,6 @@ def _build_mapping_runtime(
             ),
             fresh_map_timeout_sec=float(
                 os.getenv("AIOT_MAPPING_FRESH_MAP_TIMEOUT_SEC", "30")
-            ),
-            scan_quiescence_sec=float(
-                os.getenv("AIOT_MAPPING_SCAN_QUIESCENCE_SEC", "0.25")
-            ),
-            scan_quiescence_timeout_sec=float(
-                os.getenv("AIOT_MAPPING_SCAN_QUIESCENCE_TIMEOUT_SEC", "2")
             ),
         ),
     )
@@ -1119,9 +1100,9 @@ def create_integrated_application(
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
-    scan_gate = getattr(mapping_runtime, "scan_gate", None)
-    if scan_gate is not None:
-        runtime_components.append(scan_gate)
+    slam_session = getattr(mapping_runtime, "slam_session", None)
+    if slam_session is not None:
+        runtime_components.append(slam_session)
     if mapping_motion_bridge is not None:
         # Started and stopped with the rest of the runtime so the cmd_vel
         # subscription exists for the whole mapping session.
@@ -1189,9 +1170,6 @@ def create_integrated_application(
         mapping_runtime=mapping_runtime,
         readiness_checks=readiness_checks,
         localization_preparer=prepare_patrol_localization,
-        patrol_stop_hook=lambda reason: _close_patrol_scan_gate(
-            mapping_runtime, reason
-        ),
     )
     if mapping_runtime is not None:
         mapping_runtime.set_failure_listener(command_handler.on_runtime_failure)
