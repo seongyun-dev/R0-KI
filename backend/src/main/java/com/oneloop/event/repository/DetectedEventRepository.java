@@ -4,6 +4,7 @@ import com.oneloop.event.domain.DetectedEvent;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -42,4 +43,16 @@ public interface DetectedEventRepository extends JpaRepository<DetectedEvent, Lo
             @Param("fromAt") LocalDateTime fromAt,
             @Param("toAt") LocalDateTime toAt,
             Pageable pageable);
+
+    // 입주민 상세의 위반 이력 요약 - 해당 입주민 등록 차량 번호로 잡힌 이벤트 수를 센다
+    @Query(
+            """
+            SELECT COUNT(event)
+            FROM DetectedEvent event
+            WHERE event.robot.apartmentComplex.id = :apartmentComplexId
+              AND event.recognizedLicensePlate IN :licensePlates
+            """)
+    long countByApartmentComplexIdAndLicensePlateIn(
+            @Param("apartmentComplexId") Long apartmentComplexId,
+            @Param("licensePlates") Collection<String> licensePlates);
 }
