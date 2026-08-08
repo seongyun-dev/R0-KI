@@ -9,6 +9,16 @@ from unittest.mock import patch
 import run_integrated
 
 
+FIELD_ENV = {
+    "ROKI_NAVIGATION_MODE": "nav2",
+    "ROKI_WHEELBASE_M": "0.124",
+    "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG": "20",
+    "ROKI_INITIAL_POSE_X_M": "0",
+    "ROKI_INITIAL_POSE_Y_M": "0",
+    "ROKI_INITIAL_POSE_YAW_RAD": "0",
+}
+
+
 class MappingPreflightTest(unittest.TestCase):
     def test_mapping_only_preflight_allows_missing_route(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -17,9 +27,14 @@ class MappingPreflightTest(unittest.TestCase):
                 patch.dict(
                     os.environ,
                     {
+                        **FIELD_ENV,
                         "AIOT_MAPPING_GAMEPAD_ENABLED": "true",
-                        "ROKI_NAVIGATION_MODE": "encoder_limited",
                     },
+                ),
+                patch.object(
+                    run_integrated.importlib.util,
+                    "find_spec",
+                    return_value=object(),
                 ),
                 patch.object(run_integrated, "_validate_import_namespaces"),
             ):
@@ -30,7 +45,7 @@ class MappingPreflightTest(unittest.TestCase):
         self.assertIsNone(result["routeId"])
         self.assertEqual(result["waypoints"], 0)
 
-    def test_explicit_mapping_mode_ignores_stale_route(self) -> None:
+    def test_legacy_ros_mode_does_not_replace_the_unified_nav2_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             stale_route = Path(directory) / "route.local.yaml"
             stale_route.write_text("stale: true\n", encoding="utf-8")
@@ -38,10 +53,15 @@ class MappingPreflightTest(unittest.TestCase):
                 patch.dict(
                     os.environ,
                     {
+                        **FIELD_ENV,
                         "AIOT_MAPPING_GAMEPAD_ENABLED": "true",
                         "AIOT_ROS_MODE": "mapping",
-                        "ROKI_NAVIGATION_MODE": "nav2",
                     },
+                ),
+                patch.object(
+                    run_integrated.importlib.util,
+                    "find_spec",
+                    return_value=object(),
                 ),
                 patch.object(run_integrated, "_validate_import_namespaces"),
                 patch.object(
@@ -52,8 +72,8 @@ class MappingPreflightTest(unittest.TestCase):
             ):
                 result = run_integrated.preflight(stale_route)
 
-        self.assertEqual(result["navigationMode"], "mapping")
-        self.assertTrue(result["mappingModeRequested"])
+        self.assertEqual(result["navigationMode"], "nav2")
+        self.assertFalse(result["mappingModeRequested"])
         self.assertFalse(result["routeConfigured"])
         self.assertFalse(result["mapValidated"])
 
@@ -64,18 +84,23 @@ class MappingPreflightTest(unittest.TestCase):
                 patch.dict(
                     os.environ,
                     {
+                        **FIELD_ENV,
                         "AIOT_MAPPING_GAMEPAD_ENABLED": "false",
                         "AIOT_ROS_MODE": "mapping",
-                        "ROKI_NAVIGATION_MODE": "encoder_limited",
                     },
+                ),
+                patch.object(
+                    run_integrated.importlib.util,
+                    "find_spec",
+                    return_value=object(),
                 ),
                 patch.object(run_integrated, "_validate_import_namespaces"),
             ):
                 result = run_integrated.preflight(missing_route)
 
         self.assertTrue(result["mappingAvailable"])
-        self.assertTrue(result["mappingModeRequested"])
-        self.assertEqual(result["navigationMode"], "mapping")
+        self.assertFalse(result["mappingModeRequested"])
+        self.assertEqual(result["navigationMode"], "nav2")
         self.assertFalse(result["routeConfigured"])
 
     def test_disabled_mapping_input_never_opens_device_or_thread(self) -> None:

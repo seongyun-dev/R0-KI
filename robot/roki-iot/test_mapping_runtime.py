@@ -303,7 +303,7 @@ class MappingRuntimeTest(unittest.TestCase):
 
         self.assertFalse(self.runtime.finish())
 
-        self.assertEqual(failures, [("MAPPING_STOP_FAILED", "STOPPING", True)])
+        self.assertEqual(failures, [("MAPPING_STOP_FAILED", "STOPPING", False)])
         self.assertGreaterEqual(self.gamepad.stopped, 2)
         self.assertGreaterEqual(self.drive.deactivated, 1)
         self.assertEqual(self.exporter.exported, [])
@@ -328,7 +328,7 @@ class MappingRuntimeTest(unittest.TestCase):
 
         self.assertEqual(
             failures,
-            [("MAPPING_SAVE_WORKER_START_FAILED", "STOPPING", True)],
+            [("MAPPING_SAVE_WORKER_START_FAILED", "STOPPING", False)],
         )
         self.assertEqual(self.exporter.exported, [])
         self.assertFalse(self.runtime.active)
@@ -356,7 +356,7 @@ class MappingRuntimeTest(unittest.TestCase):
 
         self.assertEqual(
             failures,
-            [("MAPPING_RESTART_FAILED", "STARTING", True)],
+            [("MAPPING_RESTART_FAILED", "STARTING", False)],
         )
         self.assertEqual(self.exporter.exported, [12])
         self.assertEqual(self.drive.activated, [12, 12])

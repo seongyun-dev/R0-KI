@@ -13,6 +13,7 @@ from integration.localization_mode import (
     posegraph_files_present,
     wait_for_response,
 )
+from aiot_robot.ros_config import MODE_PROFILES
 
 
 class FakeFuture:
@@ -57,6 +58,20 @@ class RecordingTransport:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
         self.fail_on: set[str] = set()
+        self.lifecycle_states = {
+            node_name: "active"
+            for node_name in LocalizationModeController.MAPPING_NAV2_NODES
+        }
+        self.parameter_values: dict[str, dict[str, object]] = {}
+        for mode, profile in MODE_PROFILES.items():
+            for node_name, expected in profile.items():
+                names = LocalizationModeController._profile_instance_names(
+                    mode, node_name, expected
+                )
+                values = self.parameter_values.setdefault(node_name, {})
+                values.update(
+                    {names[generic_name]: value for generic_name, value in expected.items()}
+                )
 
     def set_localization_mode(self, localization: bool) -> None:
         self.calls.append(("set_localization_mode", localization))
@@ -68,20 +83,28 @@ class RecordingTransport:
         if "deserialize" in self.fail_on:
             raise RuntimeError("file missing")
 
-    def set_node_parameters(self, node_name, values) -> None:
-        self.calls.append(("set_node_parameters", node_name, dict(values)))
+    def get_node_parameters(self, node_name, names):
+        names = tuple(names)
+        self.calls.append(("get_node_parameters", node_name, names))
         if "parameters" in self.fail_on:
-            raise RuntimeError("parameter rejected")
+            raise RuntimeError("parameter query failed")
+        values = self.parameter_values.get(node_name, {})
+        return {name: values[name] for name in names if name in values}
 
-    def injected(self) -> dict:
-        """주입된 Nav2 파라미터를 노드별로 모은다."""
+    def get_lifecycle_state(self, node_name):
+        self.calls.append(("get_lifecycle_state", node_name))
+        if "lifecycle" in self.fail_on:
+            raise RuntimeError("lifecycle query failed")
+        return self.lifecycle_states.get(node_name, "unknown")
 
-        return {
-            call[1]: call[2] for call in self.calls if call[0] == "set_node_parameters"
-        }
+    def parameter_reads(self) -> list[tuple]:
+        return [call for call in self.calls if call[0] == "get_node_parameters"]
+
+    def lifecycle_reads(self) -> list[tuple]:
+        return [call for call in self.calls if call[0] == "get_lifecycle_state"]
 
     def mode_calls(self) -> list:
-        """slam_toolbox 모드 전환만 남긴다. 파라미터 주입은 세지 않는다."""
+        """slam_toolbox 모드 전환만 남긴다. 관측 호출은 세지 않는다."""
 
         return [call for call in self.calls if call[0] == "set_localization_mode"]
 
@@ -125,65 +148,54 @@ class LocalizationModeControllerTest(unittest.TestCase):
             ],
         )
 
-    def test_patrol_injects_the_patrol_nav2_profile(self) -> None:
-        """MODE_PROFILES["patrol"] 이 정의만 되고 적용되지 않았던 회귀를 막는다.
-
-        2026-08-08 실기: 순찰 자리에 매핑 값(REEDS_SHEPP / 1.3 / 3.15)이
-        그대로 올라가 있어 순찰이 후진하고 아무 방향으로나 도착 판정을 했다.
-        """
+    def test_patrol_reads_the_preloaded_patrol_profile_without_writing(self) -> None:
+        """순찰 인스턴스를 읽어 확인하되 런타임 파라미터는 쓰지 않는다."""
 
         ready, reason = self.controller.enter_patrol("/maps/session/posegraph")
 
         self.assertTrue(ready)
         self.assertEqual(reason, "READY")
-        injected = self.transport.injected()
-        self.assertEqual(
-            injected["/planner_server"]["GridBased.motion_model_for_search"],
-            "DUBIN",
+        reads = self.transport.parameter_reads()
+        planner_names = next(call[2] for call in reads if call[1] == "/planner_server")
+        controller_names = next(
+            call[2] for call in reads if call[1] == "/controller_server"
         )
-        self.assertEqual(injected["/planner_server"]["GridBased.reverse_penalty"], 2.1)
-        self.assertIs(
-            injected["/planner_server"]["GridBased.cache_obstacle_heuristic"], True
-        )
-        self.assertEqual(
-            injected["/controller_server"]["general_goal_checker.yaw_goal_tolerance"],
-            0.35,
-        )
+        self.assertIn("PatrolGridBased.motion_model_for_search", planner_names)
+        self.assertIn("PatrolGridBased.reverse_penalty", planner_names)
+        self.assertIn("patrol_goal_checker.yaw_goal_tolerance", controller_names)
+        self.assertFalse(any(call[0] == "set_node_parameters" for call in self.transport.calls))
 
-    def test_mapping_does_not_touch_the_planner(self) -> None:
-        """매핑 진입은 /planner_server 를 건드리면 안 된다.
-
-        2026-08-08 실측: 그 노드에 SetParameters 를 하면 23~29초 블록되고,
-        4초 bond heartbeat 를 놓쳐 lifecycle manager 가 Nav2 전체를 내린다.
-        그러면 explore 가 비활성 Nav2 에 목표를 보내지 않아 매핑이 한 발도
-        못 움직인다. 렌더된 파일이 이미 매핑 값을 담으므로 얻는 것도 없다.
-        """
+    def test_mapping_reads_mapping_instances_and_checks_lifecycle(self) -> None:
+        """매핑 프로필은 관측하고 Nav2 세 노드가 active인지 확인한다."""
 
         self.controller.enter_patrol("/maps/session/posegraph")
         self.transport.calls.clear()
 
         self.controller.enter_mapping()
 
-        injected = self.transport.injected()
-        self.assertNotIn("/planner_server", injected)
-        # 컨트롤러 쪽은 값이 싸므로 그대로 되돌린다.
-        self.assertEqual(
-            injected["/controller_server"][
-                "general_goal_checker.yaw_goal_tolerance"
-            ],
-            3.15,
+        planner_names = next(
+            call[2]
+            for call in self.transport.parameter_reads()
+            if call[1] == "/planner_server"
         )
+        self.assertIn("MappingGridBased.motion_model_for_search", planner_names)
+        self.assertEqual(
+            [call[1] for call in self.transport.lifecycle_reads()],
+            list(LocalizationModeController.MAPPING_NAV2_NODES),
+        )
+        self.assertFalse(any(call[0] == "set_node_parameters" for call in self.transport.calls))
 
-    def test_patrol_refuses_when_the_profile_cannot_be_injected(self) -> None:
-        """주입이 실패한 순찰을 READY 로 알리면 그 순찰은 후진한다."""
+    def test_patrol_profile_read_failure_is_non_blocking(self) -> None:
+        """프로필 관측 실패는 로그로 남기고 운행 자체는 막지 않는다."""
 
         self.transport.fail_on.add("parameters")
 
         ready, reason = self.controller.enter_patrol("/maps/session/posegraph")
 
-        self.assertFalse(ready)
-        self.assertEqual(reason, "MODE_PROFILE_APPLY_FAILED")
-        self.assertIsNone(self.controller.mode)
+        self.assertTrue(ready)
+        self.assertEqual(reason, "READY")
+        self.assertEqual(self.controller.mode, "patrol")
+        self.assertTrue(any("profile read failed mode=patrol" in msg for msg in self.messages))
 
     def test_ensure_patrol_loads_the_graph_when_nobody_did(self) -> None:
         """재부팅 뒤 첫 순찰. 그 부팅에 매핑이 없었으니 인계도 없었다."""
@@ -210,14 +222,7 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertEqual(
             [call for call in self.transport.calls if call[0] == "deserialize_map"], []
         )
-        # 그래프는 그대로 두되 프로필은 다시 밀어넣는다. 생애주기 복구가
-        # REEDS_SHEPP 으로 되돌려놓았을 수 있다.
-        self.assertEqual(
-            self.transport.injected()["/planner_server"][
-                "GridBased.motion_model_for_search"
-            ],
-            "DUBIN",
-        )
+        self.assertTrue(self.transport.parameter_reads())
 
     def test_ensure_patrol_reloads_when_the_active_map_changed(self) -> None:
         """방금 그린 지도는 이전 그래프와 다른 파일이다."""
@@ -241,8 +246,8 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertFalse(ready)
         self.assertEqual(reason, "POSEGRAPH_MISSING")
 
-    def test_mapping_survives_a_profile_injection_failure(self) -> None:
-        """렌더된 파일이 이미 매핑 값이다. 여기서 실패로 처리하면 매핑이 못 뜬다."""
+    def test_mapping_survives_a_profile_read_failure(self) -> None:
+        """관측이 실패해도 lifecycle이 active면 매핑은 시작한다."""
 
         self.transport.fail_on.add("parameters")
 
@@ -251,6 +256,23 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(reason, "READY")
         self.assertEqual(self.controller.mode, "mapping")
+
+    def test_mapping_rejects_inactive_nav2(self) -> None:
+        self.transport.lifecycle_states["/controller_server"] = "inactive"
+
+        ready, reason = self.controller.enter_mapping()
+
+        self.assertFalse(ready)
+        self.assertEqual(reason, "NAV2_NOT_READY")
+        self.assertIsNone(self.controller.mode)
+
+    def test_mapping_rejects_lifecycle_query_failure(self) -> None:
+        self.transport.fail_on.add("lifecycle")
+
+        ready, reason = self.controller.enter_mapping()
+
+        self.assertFalse(ready)
+        self.assertEqual(reason, "NAV2_NOT_READY")
 
     def test_patrol_defaults_to_the_dock_origin(self) -> None:
         self.controller.enter_patrol("/maps/session/posegraph")
@@ -343,14 +365,7 @@ class LocalizationModeControllerTest(unittest.TestCase):
                 ),
             ],
         )
-        # 복구가 되돌린 것이 바로 이 값들이다. 다시 밀어넣지 않으면 reassert 가
-        # 하려던 일의 절반만 한 것이 된다.
-        self.assertEqual(
-            self.transport.injected()["/planner_server"][
-                "GridBased.motion_model_for_search"
-            ],
-            "DUBIN",
-        )
+        self.assertTrue(self.transport.parameter_reads())
 
     def test_reassert_replays_mapping(self) -> None:
         self.controller.enter_mapping()
@@ -360,8 +375,8 @@ class LocalizationModeControllerTest(unittest.TestCase):
 
         self.assertTrue(ready)
         self.assertEqual(self.transport.mode_calls(), [("set_localization_mode", False)])
-        # 매핑 재적용도 플래너는 건드리지 않는다(23~29초 블록 -> Nav2 사망).
-        self.assertNotIn("/planner_server", self.transport.injected())
+        self.assertTrue(self.transport.parameter_reads())
+        self.assertEqual(len(self.transport.lifecycle_reads()), 3)
 
     def test_reassert_before_any_mode_is_a_no_op(self) -> None:
         ready, reason = self.controller.reassert()
@@ -386,7 +401,7 @@ class LocalizationModeControllerTest(unittest.TestCase):
         message = self.messages[-1]
         self.assertIn("lifecycle recovery observed", message)
         self.assertIn("mode=patrol", message)
-        self.assertIn("순찰 프로필", message)
+        self.assertIn("bond lost", message)
 
     def test_lifecycle_recovery_during_mapping_is_harmless(self) -> None:
         self.controller.enter_mapping()
@@ -394,7 +409,7 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.controller.note_lifecycle_recovery()
 
         self.assertIn("mode=mapping", self.messages[-1])
-        self.assertNotIn("순찰 프로필", self.messages[-1])
+        self.assertIn("lifecycle recovery observed", self.messages[-1])
 
     def test_dock_pose_seeds_the_graph_load(self) -> None:
         """도킹 표시를 옮기면 그 좌표를 줘야 스캔 매칭이 수렴한다."""

@@ -327,7 +327,7 @@ class RosSlamSessionControl:
 
         if self._node is None:
             return True
-        stamp_ns = self._stamp_ns(getattr(transform.header, "stamp", None))
+        stamp_ns = self._stamp_ns(transform)
         if not stamp_ns:
             return False
         now_ns = self._node.get_clock().now().nanoseconds

@@ -4,6 +4,7 @@ import threading
 import time
 import unittest
 import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -1458,11 +1459,16 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         from run_integrated import create_integrated_application
 
         runtime = FakeRuntime()
+        command_cache_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(command_cache_directory.cleanup)
         with patch.dict(
             os.environ,
             {
                 "AIOT_AI_REQUIRED_FOR_PATROL": "false",
                 "AIOT_LIDAR_REQUIRED_FOR_PATROL": "false",
+                "AIOT_COMMAND_CACHE_FILE": os.path.join(
+                    command_cache_directory.name, "command-cache.json"
+                ),
             },
         ):
             deployment_guard = Mock()
