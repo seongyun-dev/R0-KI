@@ -9,6 +9,30 @@ slam_toolbox:
     odom_frame: odom
     map_frame: map
     base_frame: base_link
+    # 라이다를 직접 구독한다. 스캔 게이트(/slam_scan)를 거치지 않는다.
+    #
+    # 2026-08-08 21:26 에 "완전히 빈 지도에서 매핑을 시작한다"는 보장을 위해
+    # 게이트를 거치도록 바뀌었다(젯슨 손수정, git 미반영). 그 보장은 필요했지만
+    # 수단이 틀렸다 -- 게이트가 닫혀 있으면 slam 이 스캔을 한 장도 못 받고,
+    # 그러면 map->odom 이 없어 map 프레임이 아예 존재하지 않는다.
+    #
+    # Nav2 의 Costmap2DROS::on_activate 는 map 프레임을 무한히 기다린다(실패
+    # 반환 경로가 없다). 그래서 게이트를 여는 코드보다 앞에 있는 모든 Nav2
+    # 확인이 순환 대기가 된다. 2026-08-09 하루 동안 같은 뿌리에서 다섯 번
+    # 터졌다: MAP_POSE_NOT_READY -> MODE_PROFILE_APPLY_FAILED ->
+    # NAV2_NOT_READY -> 얼어붙은 TF -> 백엔드 차단.
+    #
+    # 빈 지도 보장은 게이트가 아니라 reset_slam() 이 한다. 겹침(직사각형 방이
+    # 별모양이 되던 문제)의 원인은 toggleMode() 가 매핑->매핑에서 즉시 return
+    # 하며 그래프를 지우지 않는 것이었고(experimental/
+    # slam_toolbox_map_and_localization.cpp:59-63), 지우는 것은 매핑 START
+    # 마다 부르는 Mapper::Reset() 뿐이다(karto_sdk/src/Mapper.cpp:2685).
+    # 그 호출은 그대로 남아 있고 실패하면 SLAM_RESET_FAILED 로 매핑이
+    # 시작조차 안 된다.
+    #
+    # 상류 표준도 이쪽이다 -- nav2_bringup 어느 launch 에도 스캔 게이팅이 없다.
+    # 표준 스택이 순서를 설계하지 않아도 되는 이유가 센서가 항상 흐르기
+    # 때문이다.
     scan_topic: /scan
     use_map_saver: true
     mode: mapping
