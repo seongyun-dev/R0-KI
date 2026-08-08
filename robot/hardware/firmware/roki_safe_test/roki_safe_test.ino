@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_arduino_version.h>
+#include <esp_task_wdt.h>
 
 // RO-KI wiring fixed in the hardware assembly guide.
 constexpr uint8_t LEFT_RPWM = 25;
@@ -46,8 +47,12 @@ constexpr uint8_t MAX_DRIVE_SPEED_PERCENT = 20;
 constexpr uint32_t DRIVE_WATCHDOG_MS = 400;
 constexpr uint32_t ODOMETRY_INTERVAL_MS = 100;
 constexpr uint32_t HARDWARE_STATUS_INTERVAL_MS = 100;
+constexpr uint16_t MAX_SERIAL_BYTES_PER_LOOP = 128;
+constexpr uint8_t MAX_COMMANDS_PER_LOOP = 1;
 constexpr uint32_t MAX_COMMAND_SEQUENCE = 2147483647UL;
 
+constexpr uint8_t CONTROL_STEERING_MIN_ANGLE = 40;
+constexpr uint8_t CONTROL_STEERING_MAX_ANGLE = 120;
 constexpr uint8_t SERVO_MIN_TEST_ANGLE = 60;
 constexpr uint8_t SERVO_MAX_TEST_ANGLE = 100;
 constexpr uint8_t SERVO_CENTER_ANGLE = 80;
@@ -87,6 +92,7 @@ uint32_t driveWatchdogDeadline = 0;
 int16_t operatingLeftPwm = 0;
 int16_t operatingRightPwm = 0;
 uint8_t operatingServoAngle = SERVO_CENTER_ANGLE;
+bool operatingServoApplied = false;
 uint32_t odometrySequence = 0;
 uint32_t lastCommandSequence = 0;
 bool commandSequenceInitialized = false;
@@ -290,6 +296,7 @@ void printPcaStatus() {
 
 void servoOff() {
   if (pcaDetected) pcaChannelOff(SERVO_CHANNEL);
+  operatingServoApplied = false;
   servoPulseActive = false;
   servoArmed = false;
 }
@@ -494,9 +501,19 @@ void writeSignedMotorPwm(
 }
 
 bool setOperatingServo(uint8_t angle) {
-  if (!pcaDetected) pcaDetected = initializePca9685();
+  if (operatingServoApplied && angle == operatingServoAngle) return true;
+  if (!pcaDetected) {
+    pcaDetected = initializePca9685();
+    operatingServoApplied = false;
+  }
   if (!pcaDetected) return false;
-  return pcaWriteChannel(SERVO_CHANNEL, 0, servoAngleToCount(angle));
+  if (!pcaWriteChannel(SERVO_CHANNEL, 0, servoAngleToCount(angle))) {
+    operatingServoApplied = false;
+    return false;
+  }
+  operatingServoAngle = angle;
+  operatingServoApplied = true;
+  return true;
 }
 
 bool startOrRefreshOperatingControl(
@@ -555,8 +572,8 @@ bool processOperatingJson(const String &command) {
       sequence > MAX_COMMAND_SEQUENCE ||
       speed < -static_cast<int>(PWM_MAX) ||
       speed > static_cast<int>(PWM_MAX) ||
-      steering < SERVO_MIN_TEST_ANGLE ||
-      steering > SERVO_MAX_TEST_ANGLE
+      steering < CONTROL_STEERING_MIN_ANGLE ||
+      steering > CONTROL_STEERING_MAX_ANGLE
     ) {
       emergencyStop();
       stopReason = "INVALID_CONTROL";
@@ -687,6 +704,7 @@ void printI2cScan() {
   Serial.print("{\"type\":\"i2c\",\"addresses\":[");
   bool first = true;
   for (uint8_t address = 1; address < 127; ++address) {
+    esp_task_wdt_reset();
     Wire.beginTransmission(address);
     if (Wire.endTransmission() == 0) {
       if (!first) Serial.print(',');
@@ -856,8 +874,8 @@ void processCommand(String command) {
       leftPwm > static_cast<int>(PWM_MAX) ||
       rightPwm < -static_cast<int>(PWM_MAX) ||
       rightPwm > static_cast<int>(PWM_MAX) ||
-      servoAngle < SERVO_MIN_TEST_ANGLE ||
-      servoAngle > SERVO_MAX_TEST_ANGLE
+      servoAngle < CONTROL_STEERING_MIN_ANGLE ||
+      servoAngle > CONTROL_STEERING_MAX_ANGLE
     ) {
       emergencyStop();
       stopReason = "INVALID_CONTROL";
@@ -1081,6 +1099,22 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   commandBuffer.reserve(128);
   delay(150);
+
+  // Recover the whole firmware if the single Arduino loop stops progressing.
+  // The motor command watchdog remains the faster, independent motion stop.
+  enableLoopWDT();
+}
+
+void serviceTelemetry() {
+  if (deadlineReached(nextOdometryDeadline)) {
+    printOdometry();
+    nextOdometryDeadline = millis() + ODOMETRY_INTERVAL_MS;
+  }
+  if (deadlineReached(nextHardwareStatusDeadline)) {
+    printHardwareStatus();
+    nextHardwareStatusDeadline =
+      millis() + HARDWARE_STATUS_INTERVAL_MS;
+  }
 }
 
 void loop() {
@@ -1111,11 +1145,23 @@ void loop() {
     Serial.println("{\"type\":\"servo\",\"off\":true,\"reason\":\"AUTO_OFF\"}");
   }
 
-  while (Serial.available() > 0) {
+  // Telemetry is safety-critical progress, so never place an unbounded command
+  // backlog ahead of its deadline.
+  serviceTelemetry();
+
+  uint16_t serialBytesProcessed = 0;
+  uint8_t commandsProcessed = 0;
+  while (
+    Serial.available() > 0 &&
+    serialBytesProcessed < MAX_SERIAL_BYTES_PER_LOOP &&
+    commandsProcessed < MAX_COMMANDS_PER_LOOP
+  ) {
     const char incoming = static_cast<char>(Serial.read());
+    ++serialBytesProcessed;
     if (incoming == '\n') {
       processCommand(commandBuffer);
       commandBuffer = "";
+      ++commandsProcessed;
       continue;
     }
     if (incoming == '\r') continue;
@@ -1129,13 +1175,7 @@ void loop() {
     commandBuffer += incoming;
   }
 
-  if (deadlineReached(nextOdometryDeadline)) {
-    printOdometry();
-    nextOdometryDeadline = millis() + ODOMETRY_INTERVAL_MS;
-  }
-  if (deadlineReached(nextHardwareStatusDeadline)) {
-    printHardwareStatus();
-    nextHardwareStatusDeadline =
-      millis() + HARDWARE_STATUS_INTERVAL_MS;
-  }
+  // A CONTROL command may spend bounded time in I2C. Recheck deadlines before
+  // returning so that a busy input stream cannot starve either telemetry line.
+  serviceTelemetry();
 }
