@@ -301,6 +301,18 @@ def _build_nav2_driver(
             state["reverse"] = state.get("reverse", 0) + 1
         else:
             state["forward"] = state.get("forward", 0) + 1
+        # 조향 최소/최대를 남긴다. 2026-08-08 매핑이 4초 주행 뒤 펌웨어의
+        # ESP32_INVALID_CONTROL 로 중단됐는데, 저널에는 게이트 전이 한 줄
+        # (steering=67) 밖에 없어서 어느 값이 거부됐는지 알 수 없었다.
+        # 펌웨어 소스의 허용 범위는 60..100 인데 CLAUDE.md B-7/B-8 의 실측은
+        # 40/120 이 ACK 됐다고 기록한다 -- 둘 중 무엇이 실제인지 값을 봐야
+        # 정해진다. 정지 명령(0)은 중립을 싣고 오므로 세지 않는다.
+        if speed != 0:
+            steering = int(getattr(command, "steering_deg", 0))
+            low = state.get("steer_min")
+            high = state.get("steer_max")
+            state["steer_min"] = steering if low is None else min(low, steering)
+            state["steer_max"] = steering if high is None else max(high, steering)
         now = time.monotonic()
         started = state.get("at")
         if started is None:
@@ -312,11 +324,14 @@ def _build_nav2_driver(
                 f"calls={state.get('calls', 0)} auth={state.get('auth', 0)} "
                 f"fwd={state.get('forward', 0)} rev={state.get('reverse', 0)} "
                 f"zero={state.get('zero', 0)} "
+                f"steer={state.get('steer_min')}..{state.get('steer_max')} "
                 f"last_speed={speed} last_reason={getattr(command, 'stop_reason', None)}",
                 flush=True,
             )
             for key in ("calls", "auth", "forward", "reverse", "zero"):
                 state[key] = 0
+            state["steer_min"] = None
+            state["steer_max"] = None
         if authorised:
             mapping_sink(command)
             return
