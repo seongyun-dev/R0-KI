@@ -26,7 +26,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from aiot_robot.ros_config import MODE_PROFILES
 
@@ -82,6 +82,34 @@ class ModeTransport(Protocol):
     ) -> None:
         """실패하면 예외를 던진다. 하나라도 거부되면 실패다."""
 
+    def get_node_parameters(
+        self,
+        node_name: str,
+        names: Sequence[str],
+    ) -> Mapping[str, object]:
+        """현재 값을 돌려준다. 조회가 불완전하면 실패해야 한다."""
+
+    def get_lifecycle_state(self, node_name: str) -> str:
+        """Return the lifecycle state label; raise when it cannot be read."""
+
+
+def _profile_value_matches(current: object, requested: object) -> bool:
+    """ROS 파라미터의 값과 타입이 모두 같은지 본다.
+
+    Python에서는 ``True == 1`` 이므로 값만 비교하면 bool/int 타입 오류를
+    놓친다. profile에는 bool, int, float, str만 허용되므로 타입까지 확인한다.
+    """
+
+    if isinstance(requested, bool):
+        return isinstance(current, bool) and current is requested
+    if isinstance(requested, float):
+        return (
+            isinstance(current, float)
+            and not isinstance(current, bool)
+            and current == requested
+        )
+    return type(current) is type(requested) and current == requested
+
 
 class LocalizationModeController:
     """매핑/순찰 모드를 서비스 호출로 전환한다.
@@ -92,6 +120,11 @@ class LocalizationModeController:
 
     MAPPING = "mapping"
     PATROL = "patrol"
+    MAPPING_NAV2_NODES = (
+        "/planner_server",
+        "/controller_server",
+        "/bt_navigator",
+    )
 
     def __init__(
         self,
@@ -134,8 +167,10 @@ class LocalizationModeController:
         """
 
         with self._lock:
-            if self._mode == self.MAPPING:
-                return True, "ALREADY_MAPPING"
+            already_mapping = self._mode == self.MAPPING
+        if already_mapping:
+            ready, reason = self._mapping_readiness()
+            return (True, "ALREADY_MAPPING") if ready else (False, reason)
         try:
             self._transport.set_localization_mode(False)
         except Exception as exc:
@@ -143,35 +178,78 @@ class LocalizationModeController:
             self._invalidate()
             self._say(f"mode switch to mapping failed type={type(exc).__name__}")
             return False, "SET_MAPPING_MODE_FAILED"
-        # 매핑 진입에서는 플래너 파라미터를 주입하지 않는다.
-        #
-        # 2026-08-08 실측: /planner_server 에 SetParameters 를 하면 노드가
-        # 23~29초 블록된다(유휴/바쁨 무관, 동적 파라미터 콜백이 플래너를
-        # 재초기화한다). 그러면 4초 bond heartbeat 를 놓쳐 lifecycle manager 가
-        # Nav2 전체를 비활성화하고, explore 는 비활성 Nav2 에 목표를 보내지
-        # 않으므로 매핑이 조용히 한 발도 움직이지 못한다.
-        #
-        #   idle: cache_obstacle_heuristic   28.05s
-        #   busy: motion_model_for_search    28.24s
-        #   busy: 3개 동시                    28.92s
-        #
-        # 그리고 매핑 쪽 주입은 애초에 얻는 것이 없다. 렌더된 파라미터 파일이
-        # 이미 매핑 값을 담고 있다(ros_config.apply_slam_shape). 순찰을 돌고 온
-        # 뒤 되돌리는 용도였는데, 그 대가가 Nav2 사망이라면 성립하지 않는다.
-        # 순찰 뒤 매핑으로 돌아갈 때 플래너를 되돌리는 문제는 별도로 풀어야
-        # 한다(스택 재기동, 또는 lifecycle 전환을 끼운 안전한 주입).
-        self._apply_mode_profile(self.MAPPING, planner=False)
+        # 렌더된 파일은 이미 매핑 값을 담는다. 같은 값을 SetParameters 로 다시
+        # 보내면 SmacPlannerHybrid 가 휴리스틱 테이블을 동기적으로 재생성하고,
+        # 그동안 planner_server bond heartbeat 가 끊겨 Nav2 전체가 내려간다.
+        # mapping START 에서는 현재 값을 읽어 launch profile 과 일치하는지만
+        # 확인한다. 조회 실패나 불일치를 READY 로 알리면 외부 ACK 의미가
+        # 거짓이 되므로 기존 실패 reason 으로 fail-close 한다.
+        profile_failure = self._verify_mode_profile(self.MAPPING)
+        if profile_failure is not None:
+            self._invalidate()
+            return False, profile_failure
+        ready, readiness_reason = self._mapping_readiness()
+        if not ready:
+            self._invalidate()
+            return False, readiness_reason
         with self._lock:
             self._mode = self.MAPPING
             self._patrol_arguments = None
         self._say("mode=mapping")
         return True, "READY"
 
-    #: SetParameters 가 노드를 20초 넘게 블록하는 대상. 2026-08-08 실측.
-    #: bond heartbeat 가 4초라 이 노드에 주입하면 Nav2 스택이 내려간다.
-    SLOW_PARAMETER_NODES = ("/planner_server",)
+    def _mapping_readiness(self) -> tuple[bool, str]:
+        """Require responsive, active Nav2 servers before mapping is ACK-ready."""
 
-    def _apply_mode_profile(self, mode: str, *, planner: bool = True) -> str | None:
+        for node_name in self.MAPPING_NAV2_NODES:
+            try:
+                state = self._transport.get_lifecycle_state(node_name)
+            except Exception as exc:
+                self._say(
+                    f"lifecycle read failed node={node_name} "
+                    f"type={type(exc).__name__}"
+                )
+                return False, "NAV2_NOT_READY"
+            if state.strip().lower() != "active":
+                self._say(f"lifecycle not active node={node_name} state={state}")
+                return False, "NAV2_NOT_READY"
+        return True, "READY"
+
+    def _verify_mode_profile(self, mode: str) -> str | None:
+        """Check the active Nav2 profile without runtime reconfiguration."""
+
+        profile = self._profiles.get(mode)
+        if not profile:
+            return None
+        for node_name, expected in profile.items():
+            try:
+                current = self._transport.get_node_parameters(
+                    node_name, tuple(expected)
+                )
+                if set(current) != set(expected):
+                    raise RuntimeError("parameter query returned incomplete values")
+            except Exception as exc:
+                self._say(
+                    f"profile verify failed mode={mode} node={node_name} "
+                    f"type={type(exc).__name__}"
+                )
+                return "MODE_PROFILE_APPLY_FAILED"
+
+            mismatched = [
+                name
+                for name, value in expected.items()
+                if not _profile_value_matches(current[name], value)
+            ]
+            if mismatched:
+                self._say(
+                    f"profile mismatch mode={mode} node={node_name} "
+                    f"parameters={','.join(mismatched)}"
+                )
+                return "MODE_PROFILE_APPLY_FAILED"
+        self._say(f"profile verified mode={mode}")
+        return None
+
+    def _apply_mode_profile(self, mode: str) -> str | None:
         """운행별 Nav2 파라미터를 실행 중에 주입한다.
 
         2026-08-08 실기 확인: 순찰이 돌아야 하는 자리에 매핑 값이 그대로
@@ -188,9 +266,6 @@ class LocalizationModeController:
         if not profile:
             return None
         for node_name, overrides in profile.items():
-            if not planner and node_name in self.SLOW_PARAMETER_NODES:
-                self._say(f"profile skipped mode={mode} node={node_name} reason=SLOW_NODE")
-                continue
             try:
                 self._transport.set_node_parameters(node_name, overrides)
             except Exception as exc:
@@ -427,6 +502,10 @@ class RosLocalizationModeTransport:
         # 노드마다 클라이언트가 따로 필요하다(/planner_server, /controller_server).
         # 어느 노드를 쓸지는 MODE_PROFILES 가 정하므로 지연 생성한다.
         self._parameter_clients: dict[str, Any] = {}
+        self._get_parameter_clients: dict[str, Any] = {}
+        self._lifecycle_clients: dict[str, Any] = {}
+        self._get_parameters_type: Any = None
+        self._get_state_type: Any = None
         self._set_parameters_type: Any = None
         self._parameter_type: Any = None
         self._parameter_value_type: Any = None
@@ -439,14 +518,17 @@ class RosLocalizationModeTransport:
             import rclpy
             from geometry_msgs.msg import Pose2D
             from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
-            from rcl_interfaces.srv import SetParameters
+            from rcl_interfaces.srv import GetParameters, SetParameters
             from rclpy.executors import SingleThreadedExecutor
+            from lifecycle_msgs.srv import GetState
             from slam_toolbox.srv import DeserializePoseGraph
             from std_srvs.srv import SetBool
 
             self._set_bool_type = SetBool
             self._deserialize_type = DeserializePoseGraph
             self._pose_type = Pose2D
+            self._get_parameters_type = GetParameters
+            self._get_state_type = GetState
             self._set_parameters_type = SetParameters
             self._parameter_type = Parameter
             self._parameter_value_type = ParameterValue
@@ -488,6 +570,8 @@ class RosLocalizationModeTransport:
             # 노드를 파괴하면 그 노드가 만든 클라이언트도 죽는다. 남겨 두면
             # 다음 start() 가 죽은 클라이언트를 재사용한다.
             self._parameter_clients.clear()
+            self._get_parameter_clients.clear()
+            self._lifecycle_clients.clear()
 
     def set_localization_mode(self, localization: bool) -> None:
         request = self._set_bool_type.Request()
@@ -554,6 +638,44 @@ class RosLocalizationModeTransport:
                     f"{service} rejected {parameter.name}: {detail}"
                 )
 
+    def get_node_parameters(
+        self,
+        node_name: str,
+        names: Sequence[str],
+    ) -> Mapping[str, object]:
+        client = self._get_parameter_client(node_name)
+        request = self._get_parameters_type.Request()
+        request.names = list(names)
+        service = f"{node_name}/get_parameters"
+        response = self._invoke(
+            client, request, service, self._set_parameters_timeout_sec
+        )
+        values = list(getattr(response, "values", []))
+        if len(values) != len(request.names):
+            raise ServiceCallFailed(
+                f"{service} returned {len(values)} values for "
+                f"{len(request.names)} parameters"
+            )
+        return {
+            name: self._parameter_value_to_python(name, value)
+            for name, value in zip(request.names, values)
+        }
+
+    def get_lifecycle_state(self, node_name: str) -> str:
+        client = self._lifecycle_client(node_name)
+        service = f"{node_name}/get_state"
+        response = self._invoke(
+            client,
+            self._get_state_type.Request(),
+            service,
+            self._set_parameters_timeout_sec,
+        )
+        state = getattr(response, "current_state", None)
+        label = str(getattr(state, "label", "") or "").strip()
+        if not label:
+            raise ServiceCallFailed(f"{service} returned no lifecycle label")
+        return label
+
     def _parameter_client(self, node_name: str) -> Any:
         with self._lock:
             if self._node is None:
@@ -567,6 +689,49 @@ class RosLocalizationModeTransport:
                 )
                 self._parameter_clients[node_name] = client
             return client
+
+    def _get_parameter_client(self, node_name: str) -> Any:
+        with self._lock:
+            if self._node is None:
+                raise ServiceCallFailed(
+                    f"{node_name}/get_parameters transport is not started"
+                )
+            client = self._get_parameter_clients.get(node_name)
+            if client is None:
+                client = self._node.create_client(
+                    self._get_parameters_type, f"{node_name}/get_parameters"
+                )
+                self._get_parameter_clients[node_name] = client
+            return client
+
+    def _lifecycle_client(self, node_name: str) -> Any:
+        with self._lock:
+            if self._node is None:
+                raise ServiceCallFailed(
+                    f"{node_name}/get_state transport is not started"
+                )
+            client = self._lifecycle_clients.get(node_name)
+            if client is None:
+                client = self._node.create_client(
+                    self._get_state_type, f"{node_name}/get_state"
+                )
+                self._lifecycle_clients[node_name] = client
+            return client
+
+    def _parameter_value_to_python(self, name: str, value: Any) -> object:
+        value_type = int(getattr(value, "type", 0))
+        types = self._parameter_type_ids
+        if value_type == types.PARAMETER_BOOL:
+            return bool(value.bool_value)
+        if value_type == types.PARAMETER_INTEGER:
+            return int(value.integer_value)
+        if value_type == types.PARAMETER_DOUBLE:
+            return float(value.double_value)
+        if value_type == types.PARAMETER_STRING:
+            return str(value.string_value)
+        raise ServiceCallFailed(
+            f"unsupported or unset parameter type for {name}: {value_type}"
+        )
 
     def _parameter_message(self, name: str, value: object) -> Any:
         parameter = self._parameter_type()
