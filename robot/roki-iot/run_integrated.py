@@ -845,11 +845,12 @@ def _build_mapping_runtime(
 
     slam_session = RosSlamSessionControl(
         reset_service=os.getenv("AIOT_SLAM_RESET_SERVICE", "/slam_toolbox/reset"),
-        # slam 이 실제로 소비하는 토픽을 관측해야 한다. 게이트가 /slam_scan 을
-        # 릴레이하던 시절의 값을 그대로 두면, 릴레이를 걷어내는 순간
-        # first_scan_after() 가 영원히 None 이 되어 wait_for_fresh_map 과
-        # wait_for_localization_ready 가 항상 실패한다.
-        scan_topic=os.getenv("AIOT_SLAM_SCAN_TOPIC", "/scan"),
+        # slam 이 실제로 소비하는 토픽을 관측한다. 이름에 SLAM_SCAN 을 남기면
+        # 다음 사람이 /slam_scan 을 넣을 유인이 생기는데, 그 토픽은 이제
+        # 아무도 발행하지 않는다 -- 넣는 순간 first_scan_after() 가 영원히
+        # None 이 되어 wait_for_fresh_map 과 wait_for_localization_ready 가
+        # 조용히 항상 실패한다.
+        scan_topic=os.getenv("AIOT_SLAM_OBSERVE_SCAN_TOPIC", "/scan"),
         map_topic=os.getenv("AIOT_SLAM_MAP_TOPIC", "/map"),
         map_frame=os.getenv("AIOT_SLAM_MAP_FRAME", "map"),
         odom_frame=os.getenv("AIOT_SLAM_ODOM_FRAME", "odom"),

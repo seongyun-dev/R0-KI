@@ -260,13 +260,18 @@ class ManualMappingRuntime:
                 # 구독하므로 스캔은 10Hz 로 계속 흐르고, 멎기를 기다리면 영원히
                 # 안 온다. 그 대기는 게이트가 /slam_scan 을 끊던 시절의 것이다.
                 #
-                # 없어도 리셋은 깨끗하다. Mapper::Reset() 이 smapper_mutex_ 를
-                # 잡고 laserCallback 도 같은 뮤텍스를 쓰므로 직렬화된다 --
-                # 리셋 직전 스캔은 리셋이 지우고, 직후 스캔은 새 지도의 첫
-                # 스캔이 된다. 그리고 아래 wait_for_fresh_map 이 "마커 이후의
-                # 스캔으로 만들어진 지도"만 통과시킨다.
-                fresh_marker = self._slam_session.marker()
+                # 없어도 리셋은 깨끗하다. Mapper::Reset() 과 addScan 이 같은
+                # smapper_mutex_ 를 쓰므로 직렬화된다(slam_toolbox_common.cpp:575,
+                # laserCallback 이 아니라 addScan 이 락을 잡는다). 리셋 직전
+                # 스캔은 리셋이 지우고, 직후 스캔은 새 지도의 첫 스캔이 된다.
+                #
+                # 마커는 리셋이 **반환한 뒤**에 잡는다. 앞에서 잡으면 리셋이
+                # 진행되는 동안 도착한 (a) 마커 이후 스캔 한 장과 (b) 옛 그래프로
+                # 만들어진 지도 한 장이 fresh_map_ready 의 세 가드를 전부
+                # 통과한다. 리셋 자체는 이미 끝났으므로 지도가 겹치지는 않지만,
+                # "새 지도가 실제로 생겼다"는 확인이 무의미해진다.
                 self._slam_session.reset_slam()
+                fresh_marker = self._slam_session.marker()
             except Exception as exc:
                 print(
                     "[MAPPING] slam reset failed "

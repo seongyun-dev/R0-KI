@@ -64,6 +64,32 @@ class FreshMapReadyTest(unittest.TestCase):
 
         self.assertFalse(self.tracker.fresh_map_ready(marker))
 
+    def test_marker_taken_before_reset_would_pass_a_stale_map(self) -> None:
+        """마커를 리셋 앞에서 잡으면 옛 지도가 새것으로 통과한다.
+
+        이것이 mapping_runtime 이 ``reset_slam()`` **뒤에** 마커를 잡는 이유다.
+        리셋이 진행되는 동안 (a) 스캔 한 장과 (b) 옛 그래프로 만들어진 지도
+        한 장이 이 순서로 도착하면 세 가드를 전부 통과한다 -- 지도가 겹치지는
+        않지만 "새 지도가 생겼다"는 확인이 무의미해진다.
+        """
+
+        early = self.tracker.marker()  # 리셋 전에 잡은 마커
+        self.advance(0.05)
+        self.tracker.note_scan(stamp_ns=2_000)  # 리셋 진행 중 도착
+        self.advance(0.05)
+        self.tracker.note_map(stamp_ns=2_100)  # 아직 옛 그래프의 산물
+
+        self.assertTrue(
+            self.tracker.fresh_map_ready(early),
+            "리셋 앞 마커는 옛 지도를 걸러내지 못한다 -- 그래서 뒤에서 잡는다",
+        )
+
+        late = self.tracker.marker()  # 리셋이 반환한 뒤 잡은 마커
+        self.assertFalse(
+            self.tracker.fresh_map_ready(late),
+            "리셋 뒤 마커는 그 이후 산물만 통과시켜야 한다",
+        )
+
     def test_marker_moves_with_each_session(self) -> None:
         """두 번째 매핑이 첫 번째의 지도를 자기 것으로 세면 안 된다."""
 

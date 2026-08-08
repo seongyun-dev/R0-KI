@@ -1,4 +1,8 @@
-"""Internal ROS control and readiness observation for the SLAM scan gate."""
+"""slam_toolbox 세션 제어와 준비 상태 관측.
+
+예전에는 여기가 스캔 게이트 제어였다. 게이트는 08aa27f 에서 걷어냈고
+(slam 이 라이다를 직접 구독한다) 리셋과 관측만 남았다.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ class _Observation:
 
 
 class FreshMapTracker:
-    """Identify a map generated after the first post-reset relayed scan."""
+    """리셋 이후 첫 스캔의 산물인 지도만 새것으로 센다."""
 
     def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
@@ -85,7 +89,7 @@ class FreshMapTracker:
 
 
 class RosSlamSessionControl:
-    """Control the gate/reset services and observe post-reset map readiness."""
+    """리셋 서비스를 호출하고 리셋 이후의 지도/TF 가 실제로 왔는지 관측한다."""
 
     def __init__(
         self,
@@ -98,6 +102,10 @@ class RosSlamSessionControl:
         odom_frame: str = "odom",
         discovery_timeout_sec: float = 15.0,
         service_timeout_sec: float = 15.0,
+        # map->odom 이 이보다 오래됐으면 위치추정이 살아 있다고 보지 않는다.
+        # slam 이 죽어도 tf2 버퍼에 남은 값이 존재 검사를 통과하기 때문이다.
+        # slam 은 스캔마다 발행하므로(10Hz) 정상 운행에서 1초를 넘길 일이 없다.
+        transform_max_age_sec: float = 2.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._node_name = node_name
@@ -108,6 +116,7 @@ class RosSlamSessionControl:
         self._odom_frame = odom_frame
         self._discovery_timeout_sec = discovery_timeout_sec
         self._service_timeout_sec = service_timeout_sec
+        self._transform_max_age_sec = transform_max_age_sec
         self._clock = clock
         self._lock = threading.Lock()
         self._condition = threading.Condition()
@@ -181,16 +190,6 @@ class RosSlamSessionControl:
 
     def stop(self) -> None:
         with self._lock:
-            started = self._node is not None
-        if started:
-            try:
-                self.close()
-            except Exception as exc:
-                print(
-                    "[SLAM] shutdown close failed "
-                    f"type={type(exc).__name__}"
-                )
-        with self._lock:
             if self._executor is not None:
                 self._executor.shutdown()
             if self._thread is not None:
@@ -211,7 +210,7 @@ class RosSlamSessionControl:
 
     def reset_slam(self) -> None:
         if self._reset_type is None:
-            raise ServiceCallFailed("scan gate transport is not started")
+            raise ServiceCallFailed("slam session transport is not started")
         request = self._reset_type.Request()
         request.pause_new_measurements = False
         response = self._invoke(
@@ -285,13 +284,58 @@ class RosSlamSessionControl:
         )
 
     def _wait_for_transform(self, deadline: float) -> bool:
+        """map->odom 이 **최근에** 발행됐는지 본다. 존재만으로는 부족하다.
+
+        예전에는 ``can_transform(..., Time())`` 으로 "가장 최근 것"을 물었다.
+        그 조회는 나이를 보지 않으므로 **얼어붙은 TF 도 통과**한다.
+
+        성립 경로: slam 프로세스만 죽고 라이다는 살아 있는 경우. 관측자는
+        ``/scan`` 을 slam 을 거치지 않고 직접 구독하므로 "리셋 이후 스캔"
+        조건은 만족되고, tf2 버퍼에 남아 있는 직전 map->odom 이 존재 검사를
+        통과한다. 그러면 **죽은 위치추정 위에서 순찰이 출발한다.**
+
+        2026-08-09 02:45 에 같은 부류를 실제로 겪었다. 그때는 스캔을 끊어
+        스탬프가 얼어붙었고, pose 조회가 extrapolation 오류로 영구 실패했다.
+        지금은 스캔이 항상 흐르므로 그 경로는 사라졌지만, slam 이 죽는 경우는
+        남는다. 존재가 아니라 신선도를 물어야 그 부류가 닫힌다.
+        """
+
+        if self._tf_buffer is None:
+            return False
         while self._clock() < deadline:
-            if self._tf_buffer is not None and self._tf_buffer.can_transform(
-                self._map_frame,
-                self._odom_frame,
-                self._time_type(),
-                timeout=self._duration_type(seconds=0.1),
-            ):
+            try:
+                transform = self._tf_buffer.lookup_transform(
+                    self._map_frame,
+                    self._odom_frame,
+                    self._time_type(),
+                    timeout=self._duration_type(seconds=0.1),
+                )
+            except Exception:
+                time.sleep(0.05)
+                continue
+            if self._transform_is_fresh(transform):
                 return True
             time.sleep(0.05)
+        return False
+
+    def _transform_is_fresh(self, transform: Any) -> bool:
+        """발행 시각이 ROS 현재 시각에서 ``_transform_max_age_sec`` 이내인가.
+
+        벽시계가 아니라 ROS 시계로 비교해야 한다. TF 스탬프는 ROS 시각이고,
+        젯슨은 RTC 를 유지하지 않아 부팅 초반 두 시계가 크게 어긋난다.
+        """
+
+        if self._node is None:
+            return True
+        stamp_ns = self._stamp_ns(getattr(transform.header, "stamp", None))
+        if not stamp_ns:
+            return False
+        now_ns = self._node.get_clock().now().nanoseconds
+        age_sec = (now_ns - stamp_ns) / 1_000_000_000
+        if age_sec <= self._transform_max_age_sec:
+            return True
+        print(
+            f"[SLAM] {self._map_frame}->{self._odom_frame} is stale "
+            f"ageSec={age_sec:.1f} -- slam 이 살아 있는지 확인할 것"
+        )
         return False
