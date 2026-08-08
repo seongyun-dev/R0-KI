@@ -228,16 +228,29 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(reason, "READY")
 
-    def test_patrol_refuses_when_the_profile_cannot_be_read(self) -> None:
-        """대조를 못 한 순찰을 READY 로 알리면 그 순찰은 후진할 수 있다."""
+    def test_patrol_proceeds_when_the_profile_cannot_be_read(self) -> None:
+        """프로필을 못 읽었다고 순찰을 막으면 서로를 기다린다.
+
+        2026-08-09 01:15 실기: /planner_server 가 map 프레임을 기다리며 코스트맵
+        TF 루프에 갇혀 GetParameters 에 응답하지 않았다. 그 map 프레임은 스캔
+        게이트가 열려야 생기는데, 게이트를 여는 단계는 이 함수가 성공한 뒤에
+        온다. 막는 순간 순찰도 매핑도 영원히 시작되지 않는다.
+
+        값 자체는 기동 시 인스턴스별로 올라오고 실행 중에 바꾸는 경로가 없다.
+        읽기 실패는 관측 실패지 운행 실패가 아니다.
+        """
 
         self.transport.fail_on.add("get_parameters")
 
         ready, reason = self.controller.enter_patrol("/maps/session/posegraph")
 
-        self.assertFalse(ready)
-        self.assertEqual(reason, "MODE_PROFILE_APPLY_FAILED")
-        self.assertIsNone(self.controller.mode)
+        self.assertTrue(ready)
+        self.assertEqual(reason, "READY")
+        self.assertEqual(self.controller.mode, "patrol")
+        self.assertTrue(
+            any("profile read failed" in m for m in self.messages),
+            "막지 않더라도 관측 실패는 로그에 남아야 한다",
+        )
 
     def test_mapping_verifies_the_mapping_instance(self) -> None:
         ready, reason = self.controller.enter_mapping()
@@ -249,11 +262,12 @@ class LocalizationModeControllerTest(unittest.TestCase):
             profile_instance_names("mapping", "/planner_server"),
         )
 
-    def test_mapping_refuses_a_changed_profile(self) -> None:
-        """값이 어긋났는데 READY 를 주면 아무도 그것을 다시 보지 않는다.
+    def test_mapping_records_a_changed_profile_without_blocking(self) -> None:
+        """어긋난 값은 기록하되 막지 않는다.
 
-        고칠 방법이 없으므로 fail-close 한다 -- 쓰기 경로가 사라졌고, 되돌리는
-        길은 launch 파일을 고쳐 스택을 다시 띄우는 것뿐이다.
+        막아도 고칠 방법이 없다 -- 쓰기 경로가 사라졌고, 되돌리는 길은 launch
+        파일을 고쳐 스택을 다시 띄우는 것뿐이다. 그 사이 매핑을 세우면 잃는
+        것만 있다. 기록이 남으면 다음 사람이 launch 파일을 본다.
         """
 
         self.transport.current_parameters["/planner_server"][
@@ -262,8 +276,12 @@ class LocalizationModeControllerTest(unittest.TestCase):
 
         ready, reason = self.controller.enter_mapping()
 
-        self.assertFalse(ready)
-        self.assertEqual(reason, "MODE_PROFILE_APPLY_FAILED")
+        self.assertTrue(ready)
+        self.assertEqual(reason, "READY")
+        self.assertTrue(
+            any("profile mismatch" in m for m in self.messages),
+            "불일치는 막지 않더라도 반드시 기록돼야 한다",
+        )
 
     def test_ensure_patrol_loads_the_graph_when_nobody_did(self) -> None:
         """재부팅 뒤 첫 순찰. 그 부팅에 매핑이 없었으니 인계도 없었다."""
@@ -319,14 +337,20 @@ class LocalizationModeControllerTest(unittest.TestCase):
         self.assertFalse(ready)
         self.assertEqual(reason, "POSEGRAPH_MISSING")
 
-    def test_mapping_refuses_when_the_profile_cannot_be_read(self) -> None:
+    def test_mapping_proceeds_when_the_profile_cannot_be_read(self) -> None:
+        """2026-08-09 01:32~01:34 실기: 이 게이트가 매핑까지 세우고 있었다.
+
+        순찰이 막히면 "매핑을 한 번 돌려 스캔 게이트를 연다"는 우회로가 있었는데,
+        같은 게이트가 매핑에도 걸려 그 우회로마저 막혔다.
+        """
+
         self.transport.fail_on.add("get_parameters")
 
         ready, reason = self.controller.enter_mapping()
 
-        self.assertFalse(ready)
-        self.assertEqual(reason, "MODE_PROFILE_APPLY_FAILED")
-        self.assertIsNone(self.controller.mode)
+        self.assertTrue(ready)
+        self.assertEqual(reason, "READY")
+        self.assertEqual(self.controller.mode, "mapping")
 
     def test_mapping_requires_all_navigation_nodes_to_be_active(self) -> None:
         for failed_node in LocalizationModeController.MAPPING_NAV2_NODES:

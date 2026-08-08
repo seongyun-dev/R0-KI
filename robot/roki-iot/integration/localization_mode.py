@@ -185,13 +185,11 @@ class LocalizationModeController:
         # 렌더된 파일은 이미 매핑 값을 담는다. 같은 값을 SetParameters 로 다시
         # 보내면 SmacPlannerHybrid 가 휴리스틱 테이블을 동기적으로 재생성하고,
         # 그동안 planner_server bond heartbeat 가 끊겨 Nav2 전체가 내려간다.
-        # mapping START 에서는 현재 값을 읽어 launch profile 과 일치하는지만
-        # 확인한다. 조회 실패나 불일치를 READY 로 알리면 외부 ACK 의미가
-        # 거짓이 되므로 기존 실패 reason 으로 fail-close 한다.
-        profile_failure = self._verify_mode_profile(self.MAPPING)
-        if profile_failure is not None:
-            self._invalidate()
-            return False, profile_failure
+        # mapping START 에서는 현재 값을 읽어 기록만 한다. 막지 않는 이유는
+        # _report_mode_profile 주석 참고 -- 값이 런타임에 바뀔 경로가 없고,
+        # 여기서 막으면 /planner_server 가 응답 못 하는 동안 매핑 자체가 선다.
+        # Nav2 가 실제로 살아 있는지는 바로 아래 _mapping_readiness 가 본다.
+        self._report_mode_profile(self.MAPPING)
         ready, readiness_reason = self._mapping_readiness()
         if not ready:
             self._invalidate()
@@ -249,12 +247,35 @@ class LocalizationModeController:
             name: f"{instance}.{name.partition('.')[2]}" for name in expected
         }
 
-    def _verify_mode_profile(self, mode: str) -> str | None:
-        """Check the active Nav2 profile without runtime reconfiguration."""
+    def _report_mode_profile(self, mode: str) -> None:
+        """활성 Nav2 프로필을 읽어 기록한다. **막지 않는다.**
+
+        2026-08-08 13:10(4cb2422)에 이 검사를 넣을 때는 전환이 SetParameters
+        주입이었고, 주입이 실패하면 순찰이 매핑 값(REEDS_SHEPP / yaw 3.15)으로
+        달리므로 fail-close 가 옳았다.
+
+        그 위험은 인스턴스 분리로 사라졌다(adb91d6). 지금은 두 운행 값이
+        기동 시 각자의 플러그인 인스턴스로 올라오고(ros_config.apply_slam_shape
+        -> _preload_nav2_mode_plugins) BT 가 goal 마다 planner_id /
+        goal_checker_id 로 고른다. 실행 중에 이 값을 바꾸는 코드 경로가 없다
+        -- 쓰기 경로를 전송 경계에서 제거했다. 값이 틀릴 수 있는 경우는 렌더된
+        launch 파일이 틀렸을 때뿐이고, 그것은 순찰마다가 아니라 기동 시점의
+        속성이다.
+
+        그런데 이 검사가 fail-close 로 남아 매핑과 순찰을 둘 다 세우고 있었다.
+        2026-08-09 01:15~01:34 실측: /planner_server 가 map 프레임을 기다리며
+        코스트맵 TF 루프에 갇혀 GetParameters 에 응답하지 않고, 그 map 프레임은
+        스캔 게이트가 열려야 생기는데 게이트를 여는 단계가 이 검사 **뒤**에
+        있다. START_PATROL 과 START_MAPPING 이 함께 막혔다.
+
+        막을 이유가 사라진 위험을 계속 막으면서 두 운행을 세우는 것은 남는
+        장사가 아니다. 관측은 유지한다 -- 불일치가 생기면 그 사실은 여전히
+        알아야 하고, 로그가 그것을 남긴다.
+        """
 
         profile = self._profiles.get(mode)
         if not profile:
-            return None
+            return
         for node_name, expected in profile.items():
             names = self._profile_instance_names(mode, node_name, expected)
             try:
@@ -270,10 +291,10 @@ class LocalizationModeController:
                     raise RuntimeError("parameter query returned incomplete values")
             except Exception as exc:
                 self._say(
-                    f"profile verify failed mode={mode} node={node_name} "
-                    f"type={type(exc).__name__}"
+                    f"profile read failed mode={mode} node={node_name} "
+                    f"type={type(exc).__name__}  <- 관측만 실패. 운행은 진행한다"
                 )
-                return "MODE_PROFILE_APPLY_FAILED"
+                continue
 
             mismatched = [
                 names[name]
@@ -285,11 +306,10 @@ class LocalizationModeController:
                 # 모르면 로그를 보고도 어디를 고쳐야 할지 알 수 없다.
                 self._say(
                     f"profile mismatch mode={mode} node={node_name} "
-                    f"parameters={','.join(mismatched)}"
+                    f"parameters={','.join(mismatched)}  <- launch 파일 확인 필요"
                 )
-                return "MODE_PROFILE_APPLY_FAILED"
+                continue
         self._say(f"profile verified mode={mode}")
-        return None
 
     def enter_patrol(
         self,
@@ -342,12 +362,11 @@ class LocalizationModeController:
         # goal 마다 PatrolGridBased 를 고르므로, 순찰 값은 기동 시점에 이미
         # 제자리에 있다. 남은 일은 그것이 맞는지 확인하는 것뿐이다.
         #
-        # 불일치를 READY 로 알리면 그 순찰은 REEDS_SHEPP 으로 후진하며 아무
-        # 방향으로나 도착 판정을 한다. 미확정으로 남겨 fail-close 한다.
-        profile_failure = self._verify_mode_profile(self.PATROL)
-        if profile_failure is not None:
-            self._invalidate()
-            return False, profile_failure
+        # 대조는 하되 막지는 않는다(_report_mode_profile 주석 참고). 여기서
+        # 막으면 /planner_server 가 map 프레임을 기다리는 동안 순찰이 서고,
+        # 그 map 프레임은 이 함수가 성공해야 열리는 스캔 게이트에서 나온다 --
+        # 서로를 기다린다. 2026-08-09 01:15 실측.
+        self._report_mode_profile(self.PATROL)
         with self._lock:
             self._mode = self.PATROL
             self._patrol_arguments = (posegraph_path, pose)
@@ -381,12 +400,9 @@ class LocalizationModeController:
             )
         if not already:
             return self.enter_patrol(posegraph_path, dock_pose)
-        # 그래프는 그대로 두되 프로필은 다시 확인한다. 생애주기 복구가
-        # launch 파일을 다시 읽었을 수 있고, 그 확인은 조회 두 번이면 끝난다.
-        profile_failure = self._verify_mode_profile(self.PATROL)
-        if profile_failure is not None:
-            self._invalidate()
-            return False, profile_failure
+        # 그래프는 그대로 두되 프로필은 다시 기록한다. 생애주기 복구가 launch
+        # 파일을 다시 읽었을 수 있으니 관측 가치는 남아 있다. 막지는 않는다.
+        self._report_mode_profile(self.PATROL)
         return True, "ALREADY_PATROL"
 
     def note_lifecycle_recovery(self, detail: str = "") -> None:
@@ -503,7 +519,13 @@ class RosLocalizationModeTransport:
         set_mode_timeout_sec: float = 15.0,
         # 7.2MB 포즈그래프 적재에 수 초가 걸린다(2026-08-07 실측). 넉넉히 준다.
         deserialize_timeout_sec: float = 60.0,
-        parameter_query_timeout_sec: float = 15.0,
+        # 파라미터 읽기는 관측용이라 짧게 끊는다. /planner_server 가 map 프레임을
+        # 기다리며 코스트맵 TF 루프에 갇히면 이 호출은 그냥 응답이 없는데,
+        # 15초를 기다리면 노드당 그만큼이 START 명령의 TTL(30초)에서 빠진다.
+        # 2026-08-09 01:15:41 -> 01:15:56 실측이 정확히 그 15초였다.
+        parameter_query_timeout_sec: float = 3.0,
+        # 생애주기 상태는 여전히 운행을 막는 판정(NAV2_NOT_READY)이라 넉넉히 준다.
+        lifecycle_query_timeout_sec: float = 15.0,
     ) -> None:
         self._node_name = node_name
         self._set_mode_service = set_mode_service
@@ -512,6 +534,7 @@ class RosLocalizationModeTransport:
         self._set_mode_timeout_sec = set_mode_timeout_sec
         self._deserialize_timeout_sec = deserialize_timeout_sec
         self._parameter_query_timeout_sec = parameter_query_timeout_sec
+        self._lifecycle_query_timeout_sec = lifecycle_query_timeout_sec
         self._lock = threading.Lock()
         self._node: Any = None
         self._executor: Any = None
@@ -649,7 +672,7 @@ class RosLocalizationModeTransport:
             client,
             self._get_state_type.Request(),
             service,
-            self._parameter_query_timeout_sec,
+            self._lifecycle_query_timeout_sec,
         )
         state = getattr(response, "current_state", None)
         label = str(getattr(state, "label", "") or "").strip()
