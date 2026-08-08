@@ -11,6 +11,21 @@ from aiot_robot.ros_config import (
 )
 
 
+def _profile_suffix(overrides, suffix):
+    """플러그인 인스턴스 이름과 무관하게 파라미터 값을 꺼낸다.
+
+    2026-08-08 이후 MODE_PROFILES 의 키는 인스턴스별로 갈렸다
+    (MappingGridBased / PatrolGridBased, mapping_goal_checker /
+    patrol_goal_checker). 테스트가 확인해야 하는 것은 인스턴스 이름이 아니라
+    "그 운행의 값이 무엇인가" 이므로 접미사로 찾는다.
+    """
+
+    for dotted, value in overrides.items():
+        if dotted.split(".", 1)[1] == suffix:
+            return value
+    raise KeyError(suffix)
+
+
 class RosConfigTest(unittest.TestCase):
     def environment(self):
         return {
@@ -211,9 +226,7 @@ class RosConfigTest(unittest.TestCase):
                     self.assertEqual(checker["xy_goal_tolerance"], 0.2)
                     self.assertEqual(
                         checker["yaw_goal_tolerance"],
-                        MODE_PROFILES[mode]["/controller_server"][
-                            "general_goal_checker.yaw_goal_tolerance"
-                        ],
+                        _profile_suffix(MODE_PROFILES[mode]["/controller_server"], "yaw_goal_tolerance"),
                     )
 
     def test_rejects_missing_or_invalid_fixed_initial_pose(self):
@@ -322,28 +335,46 @@ class RosConfigTest(unittest.TestCase):
         # 프론트에 줄 .pgm 은 계속 필요하므로 map_saver 는 남는다.
         self.assertIn("map_saver", config)
 
-    def test_rendered_baseline_carries_the_mapping_profile(self):
-        """스택은 매핑 모드로 뜨고, 생애주기 복구도 이 파일로 되돌아간다.
+    def test_rendered_baseline_survives_lifecycle_recovery(self):
+        """생애주기 복구가 이 파일로 되돌아가도 두 운행이 다 살아 있어야 한다.
 
         2026-08-07 실측: 생애주기 관리자가 bond 끊김으로 스택을 복구하면
-        configure 가 이 파일을 다시 읽어 실행 중 주입한 값을 버린다. 그래서
-        기본값이 매핑이어야 복구가 매핑을 매핑으로 되돌린다.
+        configure 가 이 파일을 다시 읽어 실행 중 주입한 값을 버린다. 예전에는
+        기본 인스턴스 하나에 매핑 값만 넣어두고 순찰은 전환 시 주입했으므로
+        복구가 순찰을 매핑으로 되돌렸다. 지금은 두 값이 각자의 인스턴스로
+        파일에 박혀 있어 복구가 무엇도 잃지 않는다.
+
+        기본 인스턴스(GridBased / general_goal_checker)는 아무도 부르지
+        않는다. 프로필이 저기로 새면 -- 예전에 그랬듯 -- 검증도 주입도 엉뚱한
+        곳을 보게 되므로, 템플릿 값 그대로 남아 있는지 함께 확인한다.
         """
 
         config = self._render()
-        planner = config["planner_server"]["ros__parameters"]["GridBased"]
-        checker = config["controller_server"]["ros__parameters"][
-            "general_goal_checker"
-        ]
+        planner = config["planner_server"]["ros__parameters"]
+        controller = config["controller_server"]["ros__parameters"]
 
-        for dotted, expected in MODE_PROFILES["mapping"]["/planner_server"].items():
-            self.assertEqual(planner[dotted.split(".", 1)[1]], expected)
-        self.assertEqual(
-            checker["yaw_goal_tolerance"],
-            MODE_PROFILES["mapping"]["/controller_server"][
-                "general_goal_checker.yaw_goal_tolerance"
-            ],
-        )
+        for mode, plugin_id, checker_id in (
+            ("mapping", "MappingGridBased", "mapping_goal_checker"),
+            ("patrol", "PatrolGridBased", "patrol_goal_checker"),
+        ):
+            with self.subTest(mode=mode):
+                for dotted, expected in MODE_PROFILES[mode]["/planner_server"].items():
+                    self.assertEqual(
+                        planner[plugin_id][dotted.split(".", 1)[1]], expected
+                    )
+                self.assertEqual(
+                    controller[checker_id]["yaw_goal_tolerance"],
+                    _profile_suffix(
+                        MODE_PROFILES[mode]["/controller_server"],
+                        "yaw_goal_tolerance",
+                    ),
+                )
+
+        for profile in MODE_PROFILES.values():
+            for overrides in profile.values():
+                for dotted in overrides:
+                    head = dotted.split(".", 1)[0]
+                    self.assertNotIn(head, ("GridBased", "general_goal_checker"))
 
     def test_mode_profiles_cover_the_same_parameters(self):
         """한쪽에만 있는 항목은 전환해도 이전 모드 값이 남는다."""
@@ -351,18 +382,22 @@ class RosConfigTest(unittest.TestCase):
         mapping = MODE_PROFILES["mapping"]
         patrol = MODE_PROFILES["patrol"]
 
+        # 키는 인스턴스별로 갈렸다(MappingGridBased / PatrolGridBased).
+        # 확인할 것은 인스턴스 이름이 아니라 "같은 파라미터를 둘 다 정하는가"다 --
+        # 한쪽에만 있으면 그 값은 아무도 검증하지 않는 채로 남는다.
         self.assertEqual(set(mapping), set(patrol))
         for node in mapping:
             self.assertEqual(
-                set(mapping[node]),
-                set(patrol[node]),
+                {d.split(".", 1)[1] for d in mapping[node]},
+                {d.split(".", 1)[1] for d in patrol[node]},
                 f"{node} 의 항목이 두 프로필에서 다르다",
             )
-            for name in mapping[node]:
+            for dotted in mapping[node]:
+                suffix = dotted.split(".", 1)[1]
                 self.assertNotEqual(
-                    mapping[node][name],
-                    patrol[node][name],
-                    f"{name} 이 두 모드에서 같다면 프로필에 있을 이유가 없다",
+                    mapping[node][dotted],
+                    _profile_suffix(patrol[node], suffix),
+                    f"{suffix} 이 두 모드에서 같다면 프로필에 있을 이유가 없다",
                 )
 
     def test_rejects_unsafe_xy_goal_tolerance(self):

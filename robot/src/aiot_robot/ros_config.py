@@ -134,24 +134,42 @@ def nav2_xy_goal_tolerance(environment: Mapping[str, str]) -> float:
 # 모양도 같다(둘 다 slam_toolbox 의 /map 을 본다). 남은 차이가 이 넷뿐이라
 # 파일을 두 벌 둘 이유가 없어졌다.
 #
-# 이 값들은 실행 중 SetParameters 로 주입한다. 렌더된 파일은 매핑 값을 담는다 --
-# 스택은 매핑 모드로 뜨고, 생애주기 관리자가 복구할 때 되돌아갈 자리도 여기다.
+# 이 값들은 기동 시 렌더된 파일에 인스턴스별로 들어간다. 실행 중에 바꾸지 않는다.
+#
+# 2026-08-08 실측: /planner_server 에 SetParameters 를 하면 SmacPlannerHybrid 가
+# 휴리스틱 테이블을 동기 재생성하며 노드를 23~29초 블록한다. lifecycle manager 의
+# bond heartbeat 가 4초라 그 사이 Nav2 스택 전체가 내려가고, explore 는 비활성
+# Nav2 에 목표를 보내지 않으므로 매핑이 한 발도 못 움직인다.
+#
+# 그래서 전환은 파라미터 변경이 아니라 인스턴스 선택이다 -- BT 가 goal 마다
+# planner_id / goal_checker_id 로 고른다. 이 표는 이제 "무엇을 주입할까"가 아니라
+# "렌더된 값이 맞는가"를 검증하는 기준이다.
 MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
+    # 2026-08-08: 키를 실제 플러그인 인스턴스로 옮긴다.
+    #
+    # 예전에는 두 운행이 같은 GridBased 인스턴스 하나를 놓고 값을 주고받았고,
+    # 그래서 전환이 SetParameters 였다. 지금은 planner_plugins 가
+    # [GridBased, MappingGridBased, PatrolGridBased] 로 셋이고 BT 가 goal 마다
+    # 골라 쓴다. 값은 기동 시 인스턴스별로 이미 올라와 있다(실측:
+    # MappingGridBased=REEDS_SHEPP/1.3/False, PatrolGridBased=DUBIN/2.1/True).
+    #
+    # GridBased 는 더 이상 아무도 부르지 않는다. 거기를 가리키던 이 표가
+    # 검증도 주입도 엉뚱한 인스턴스를 보게 만들고 있었다.
     "mapping": {
         "/planner_server": {
             # 탐사는 아직 지도에 없는 공간을 헤쳐야 하는 유일한 운행이다.
             # Dubin 경로는 전진으로만 휘므로 회전반경 0.34 m 로는 0.3~0.4 m
             # 옆 벽을 비켜 갈 전진 호가 없다. Reeds-Shepp 이 후진 구간을 준다.
-            "GridBased.motion_model_for_search": "REEDS_SHEPP",
+            "MappingGridBased.motion_model_for_search": "REEDS_SHEPP",
             # 순찰용 2.1 은 탐사에서 과하다. 프론티어가 가깝고 축에서 크게
             # 벗어나 있을 때(실측 0.93 m, 121도) 유일한 해가 후진으로
             # 시작하는데, 2.1 에서는 탐색이 벽으로 쓸리는 전진 호만 골라
             # 결국 계획이 없었다. 1.0 보다는 높여 전진을 여전히 선호한다.
-            "GridBased.reverse_penalty": 1.3,
+            "MappingGridBased.reverse_penalty": 1.3,
             # 재계획 사이에 장애물 확장을 재사용하는 최적화다. SLAM 이 지도를
             # 키우는 동안은 그 전제가 매초 깨지므로, 낡은 휴리스틱으로
             # 도달 가능한 목표를 포기한다.
-            "GridBased.cache_obstacle_heuristic": False,
+            "MappingGridBased.cache_obstacle_heuristic": False,
         },
         "/controller_server": {
             # explore_lite 는 모든 프론티어 목표에 단위 쿼터니언을 찍는다
@@ -160,21 +178,21 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
             # 경로를 비틀어야 하고, 그 곡률이 선속을 0 으로 조이면서 각속만
             # 남겨 Ackermann 어댑터가 거부해야 하는 제자리 회전을 만든다.
             # 탐사에서 도착 방위는 의미가 없으므로 풀어준다.
-            "general_goal_checker.yaw_goal_tolerance": 3.15,
+            "mapping_goal_checker.yaw_goal_tolerance": 3.15,
         },
     },
     "patrol": {
         "/planner_server": {
             # 순찰은 운전자가 그린 경로를 따라 이미 주행 가능한 공간을 간다.
             # 여기서 후진하면 보내진 웨이포인트에서 멀어진다.
-            "GridBased.motion_model_for_search": "DUBIN",
-            "GridBased.reverse_penalty": 2.1,
+            "PatrolGridBased.motion_model_for_search": "DUBIN",
+            "PatrolGridBased.reverse_penalty": 2.1,
             # 지도가 고정되므로 확장 재사용이 성립한다.
-            "GridBased.cache_obstacle_heuristic": True,
+            "PatrolGridBased.cache_obstacle_heuristic": True,
         },
         "/controller_server": {
             # 순찰은 도착 방위가 의미를 갖는다. 다음 구간의 시작 자세다.
-            "general_goal_checker.yaw_goal_tolerance": 0.35,
+            "patrol_goal_checker.yaw_goal_tolerance": 0.35,
         },
     },
 }
@@ -241,18 +259,25 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
     # 값 자체는 템플릿이 MEASURED_INFLATION_RADIUS_M 로 이미 받는다. 여기서
     # 다시 쓰지 않는다 -- 같은 값을 두 곳에서 정하면 언젠가 어긋난다.
 
-    # 기동 시점의 모드는 매핑이다. 렌더된 파일이 그 값을 담아야, 생애주기
-    # 관리자가 bond 끊김으로 스택을 복구하며 파일을 다시 읽을 때도 매핑이
-    # 매핑으로 남는다. 순찰 값은 전환 시 주입되고 reassert 가 다시 밀어넣는다.
-    for node, overrides in MODE_PROFILES["mapping"].items():
-        section = (
-            config["planner_server"]["ros__parameters"]
-            if node == "/planner_server"
-            else config["controller_server"]["ros__parameters"]
-        )
-        for dotted, value in overrides.items():
-            head, _, tail = dotted.partition(".")
-            section[head][tail] = value
+    # 두 운행의 값을 각자의 인스턴스에 함께 넣는다.
+    #
+    # 예전에는 매핑 값만 넣었다. 스택이 매핑 모드로 뜨고 순찰 값은 전환 시
+    # 주입한다는 전제였기 때문이다. 그 주입이 Nav2 를 죽인다는 것이 실측으로
+    # 확인돼(위 주석) 전환이 인스턴스 선택으로 바뀌었으므로, 이제는 둘 다
+    # 기동 시점에 자리를 잡고 있어야 한다.
+    #
+    # 생애주기 관리자가 bond 끊김으로 스택을 복구하며 파일을 다시 읽어도
+    # 두 프로필이 그대로 살아난다 -- 예전에는 그때 순찰 값이 사라졌다.
+    for mode_profile in MODE_PROFILES.values():
+        for node, overrides in mode_profile.items():
+            section = (
+                config["planner_server"]["ros__parameters"]
+                if node == "/planner_server"
+                else config["controller_server"]["ros__parameters"]
+            )
+            for dotted, value in overrides.items():
+                head, _, tail = dotted.partition(".")
+                section[head][tail] = value
 
     # The template forbids negative linear velocity, which is right for a DUBIN
     # route that must never retreat from the waypoint it was sent to. It silently

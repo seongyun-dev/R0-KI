@@ -62,7 +62,14 @@ def posegraph_files_present(posegraph_path: str) -> bool:
 
 
 class ModeTransport(Protocol):
-    """slam_toolbox 서비스 두 개와 Nav2 파라미터 주입으로 좁힌 전송 경계."""
+    """slam_toolbox 서비스 두 개와 Nav2 상태 조회로 좁힌 전송 경계.
+
+    파라미터를 **쓰는** 경로는 일부러 없다. 2026-08-08 실측으로
+    ``/planner_server`` 에 SetParameters 를 하면 노드가 23~29초 블록되고,
+    4초 bond heartbeat 를 놓쳐 Nav2 스택 전체가 내려가는 것이 확인됐다.
+    운행별 값은 기동 시 인스턴스별로 올라가고(MappingGridBased /
+    PatrolGridBased) BT 가 goal 마다 고른다. 여기서는 읽어서 확인만 한다.
+    """
 
     def set_localization_mode(self, localization: bool) -> None:
         """실패하면 예외를 던진다. 조용히 실패하면 안 된다."""
@@ -74,13 +81,6 @@ class ModeTransport(Protocol):
         initial_pose: DockPose,
     ) -> None:
         """실패하면 예외를 던진다."""
-
-    def set_node_parameters(
-        self,
-        node_name: str,
-        values: Mapping[str, object],
-    ) -> None:
-        """실패하면 예외를 던진다. 하나라도 거부되면 실패다."""
 
     def get_node_parameters(
         self,
@@ -136,10 +136,10 @@ class LocalizationModeController:
         profiles: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
     ) -> None:
         self._transport = transport
-        # 운행별 Nav2 값. 렌더된 파라미터 파일은 매핑 값을 담고, 순찰 값은
-        # 전환 시 여기서 주입된다 -- ros_config.MODE_PROFILES 의 주석이 그렇게
-        # 설계라고 적어두었는데 주입하는 쪽이 없었다. 기본값을 두는 이유는
-        # 그것이다: 주입을 잊으면 "정의만 되고 적용되지 않는" 상태로 되돌아간다.
+        # 운행별 Nav2 값의 기준표. 주입하지 않고 검증에만 쓴다 -- 값은 기동 시
+        # MappingGridBased / PatrolGridBased 인스턴스에 이미 올라와 있고, BT 가
+        # goal 마다 고른다. 기본값을 두는 이유는 검증 기준이 코드와 한곳에서
+        # 나와야 하기 때문이다(ros_config.MODE_PROFILES).
         self._profiles = MODE_PROFILES if profiles is None else profiles
         # 그래프를 불러올 때 줄 초기 추정값. 규약상 웨이포인트 1 = 도킹 지점 =
         # 매핑 시작점 = map (0,0,0) 이므로 기본값이 곧 정답이지만, 도킹 표시를
@@ -249,37 +249,6 @@ class LocalizationModeController:
         self._say(f"profile verified mode={mode}")
         return None
 
-    def _apply_mode_profile(self, mode: str) -> str | None:
-        """운행별 Nav2 파라미터를 실행 중에 주입한다.
-
-        2026-08-08 실기 확인: 순찰이 돌아야 하는 자리에 매핑 값이 그대로
-        올라가 있었다 -- planner ``motion_model_for_search=REEDS_SHEPP``,
-        ``reverse_penalty=1.3``, controller ``yaw_goal_tolerance=3.15``.
-        ``MODE_PROFILES["patrol"]`` 은 정의만 돼 있고 읽는 쪽이 테스트뿐이었다.
-        그래서 순찰이 후진하고 아무 방향으로나 도착 판정을 했다.
-
-        실패하면 이유를 돌려주되 판단은 호출자에게 맡긴다. 매핑과 순찰이
-        실패를 다르게 감당하기 때문이다.
-        """
-
-        profile = self._profiles.get(mode)
-        if not profile:
-            return None
-        for node_name, overrides in profile.items():
-            try:
-                self._transport.set_node_parameters(node_name, overrides)
-            except Exception as exc:
-                # 이유까지 남긴다. 2026-08-08 실기에서 type=ServiceCallFailed
-                # 만 찍혀서 "서비스가 없다" 와 "노드가 값을 거부했다" 를
-                # 구분할 수 없었다. 그 둘은 고칠 곳이 다르다.
-                self._say(
-                    f"profile apply failed mode={mode} node={node_name} "
-                    f"type={type(exc).__name__} detail={exc}"
-                )
-                return "MODE_PROFILE_APPLY_FAILED"
-        self._say(f"profile applied mode={mode}")
-        return None
-
     def enter_patrol(
         self,
         posegraph_path: str,
@@ -319,11 +288,21 @@ class LocalizationModeController:
             self._invalidate()
             self._say(f"posegraph load failed type={type(exc).__name__}")
             return False, "POSEGRAPH_LOAD_FAILED"
-        # 순찰은 매핑과 달리 실패를 감당할 수 없다. 렌더된 파일에는 매핑 값이
-        # 들어 있으므로, 주입이 실패한 채 순찰을 READY 로 알리면 그 순찰은
-        # REEDS_SHEPP 으로 후진하며 아무 방향으로나 도착 판정을 한다.
-        # 미확정으로 남겨 다음 요청이 다시 전송하게 한다.
-        profile_failure = self._apply_mode_profile(self.PATROL)
+        # 순찰도 매핑과 같이 주입하지 않고 읽어서 대조한다.
+        #
+        # 2026-08-08 실측: /planner_server 에 SetParameters 를 하면 노드가
+        # 23~29초 블록되고, 4초 bond heartbeat 를 놓쳐 Nav2 스택 전체가
+        # 내려간다. 매핑 쪽은 이미 검증으로 바꿨는데 순찰만 주입으로 남아
+        # 있어서, 순찰을 시작하는 순간 Nav2 가 죽는 상태였다.
+        #
+        # 그리고 주입할 이유도 사라졌다. planner_plugins 가
+        # [GridBased, MappingGridBased, PatrolGridBased] 로 나뉘고 BT 가
+        # goal 마다 PatrolGridBased 를 고르므로, 순찰 값은 기동 시점에 이미
+        # 제자리에 있다. 남은 일은 그것이 맞는지 확인하는 것뿐이다.
+        #
+        # 불일치를 READY 로 알리면 그 순찰은 REEDS_SHEPP 으로 후진하며 아무
+        # 방향으로나 도착 판정을 한다. 미확정으로 남겨 fail-close 한다.
+        profile_failure = self._verify_mode_profile(self.PATROL)
         if profile_failure is not None:
             self._invalidate()
             return False, profile_failure
@@ -360,7 +339,9 @@ class LocalizationModeController:
             )
         if not already:
             return self.enter_patrol(posegraph_path, dock_pose)
-        profile_failure = self._apply_mode_profile(self.PATROL)
+        # 그래프는 그대로 두되 프로필은 다시 확인한다. 생애주기 복구가
+        # launch 파일을 다시 읽었을 수 있고, 그 확인은 조회 두 번이면 끝난다.
+        profile_failure = self._verify_mode_profile(self.PATROL)
         if profile_failure is not None:
             self._invalidate()
             return False, profile_failure
@@ -370,14 +351,15 @@ class LocalizationModeController:
         """생애주기 관리자가 스택을 복구했음을 기록만 한다.
 
         복구는 configure 를 다시 돌리고, 그 configure 가 launch 시점 파라미터
-        파일을 읽어 실행 중 주입한 값을 버린다. 렌더된 파일이 매핑 값을 담고
-        있으므로 **매핑 중 복구는 무해하고, 순찰 중 복구만 물린다** --
-        REEDS_SHEPP 과 yaw_goal_tolerance 3.15 로 되돌아가 순찰이 조용히
-        후진하고 아무 방향으로나 도착 판정을 하게 된다.
+        파일을 다시 읽는다. 예전에는 그 파일에 매핑 값만 있고 순찰 값은 실행
+        중 주입이었으므로, **순찰 중 복구가 순찰을 조용히 매핑으로 되돌렸다**
+        -- REEDS_SHEPP 과 yaw 3.15 로 돌아가 후진하고 아무 방향으로나 도착
+        판정을 했다. 지금은 두 운행 값이 각자의 플러그인 인스턴스로 그 파일에
+        박혀 있어(ros_config.apply_slam_shape) 복구가 무엇도 잃지 않는다.
 
-        여기서 자동 재적용을 하지 않는 이유: 복구가 실제로 얼마나 자주
-        일어나는지 아직 모른다. 빈도를 모르는 채 감시자를 만들면 폴링 주기를
-        추측으로 정하게 된다. 먼저 재고, 그 다음에 설계한다.
+        그래도 기록은 남긴다. 복구 자체가 bond 끊김의 신호이고, 그 빈도는
+        아직 재본 적이 없다. 파라미터 손실은 사라졌지만 복구 중 목표가
+        취소되는 것은 그대로다.
         """
 
         with self._lock:
@@ -385,17 +367,16 @@ class LocalizationModeController:
         self._say(
             f"lifecycle recovery observed mode={mode or 'unknown'}"
             f"{' ' + detail if detail else ''}"
-            + ("  ← 순찰 프로필이 매핑으로 되돌아갔을 수 있다" if mode == self.PATROL else "")
         )
 
     def reassert(self) -> tuple[bool, str]:
         """마지막으로 성립한 모드를 다시 적용한다.
 
-        Nav2 생애주기 관리자는 bond 가 끊기면 관리 노드 전체를 복구하고, 그
-        과정의 configure 가 launch 시점 파라미터 파일을 다시 읽는다. 실행 중
-        주입한 값은 그때 사라진다(2026-08-07 실측: DUBIN 으로 바꿔둔
-        motion_model_for_search 가 복구 후 REEDS_SHEPP 으로 되돌아옴).
-        같은 일이 slam_toolbox 에도 일어날 수 있으므로 재적용 경로를 둔다.
+        Nav2 파라미터는 이제 스스로 복구된다 -- 생애주기 관리자가 다시 읽는
+        파일에 두 운행 값이 다 들어 있다. 하지만 slam_toolbox 의 위치추정
+        모드와 적재된 포즈그래프는 파일이 아니라 **서비스 호출로만** 정해지는
+        런타임 상태다. 그 노드가 다시 뜨면 매핑 모드에 빈 그래프로 돌아오고,
+        되돌릴 방법은 같은 호출을 다시 하는 것뿐이다. 여기가 그 경로다.
         """
 
         with self._lock:
@@ -480,7 +461,7 @@ class RosLocalizationModeTransport:
         set_mode_timeout_sec: float = 15.0,
         # 7.2MB 포즈그래프 적재에 수 초가 걸린다(2026-08-07 실측). 넉넉히 준다.
         deserialize_timeout_sec: float = 60.0,
-        set_parameters_timeout_sec: float = 15.0,
+        parameter_query_timeout_sec: float = 15.0,
     ) -> None:
         self._node_name = node_name
         self._set_mode_service = set_mode_service
@@ -488,7 +469,7 @@ class RosLocalizationModeTransport:
         self._discovery_timeout_sec = discovery_timeout_sec
         self._set_mode_timeout_sec = set_mode_timeout_sec
         self._deserialize_timeout_sec = deserialize_timeout_sec
-        self._set_parameters_timeout_sec = set_parameters_timeout_sec
+        self._parameter_query_timeout_sec = parameter_query_timeout_sec
         self._lock = threading.Lock()
         self._node: Any = None
         self._executor: Any = None
@@ -501,14 +482,10 @@ class RosLocalizationModeTransport:
         self._pose_type: Any = None
         # 노드마다 클라이언트가 따로 필요하다(/planner_server, /controller_server).
         # 어느 노드를 쓸지는 MODE_PROFILES 가 정하므로 지연 생성한다.
-        self._parameter_clients: dict[str, Any] = {}
         self._get_parameter_clients: dict[str, Any] = {}
         self._lifecycle_clients: dict[str, Any] = {}
         self._get_parameters_type: Any = None
         self._get_state_type: Any = None
-        self._set_parameters_type: Any = None
-        self._parameter_type: Any = None
-        self._parameter_value_type: Any = None
         self._parameter_type_ids: Any = None
 
     def start(self) -> None:
@@ -517,8 +494,8 @@ class RosLocalizationModeTransport:
                 return
             import rclpy
             from geometry_msgs.msg import Pose2D
-            from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
-            from rcl_interfaces.srv import GetParameters, SetParameters
+            from rcl_interfaces.msg import ParameterType
+            from rcl_interfaces.srv import GetParameters
             from rclpy.executors import SingleThreadedExecutor
             from lifecycle_msgs.srv import GetState
             from slam_toolbox.srv import DeserializePoseGraph
@@ -529,9 +506,6 @@ class RosLocalizationModeTransport:
             self._pose_type = Pose2D
             self._get_parameters_type = GetParameters
             self._get_state_type = GetState
-            self._set_parameters_type = SetParameters
-            self._parameter_type = Parameter
-            self._parameter_value_type = ParameterValue
             self._parameter_type_ids = ParameterType
 
             self._owns_rclpy_context = not rclpy.ok()
@@ -569,7 +543,6 @@ class RosLocalizationModeTransport:
             self._thread = None
             # 노드를 파괴하면 그 노드가 만든 클라이언트도 죽는다. 남겨 두면
             # 다음 start() 가 죽은 클라이언트를 재사용한다.
-            self._parameter_clients.clear()
             self._get_parameter_clients.clear()
             self._lifecycle_clients.clear()
 
@@ -604,40 +577,6 @@ class RosLocalizationModeTransport:
             self._deserialize_timeout_sec,
         )
 
-    def set_node_parameters(
-        self,
-        node_name: str,
-        values: Mapping[str, object],
-    ) -> None:
-        """Nav2 노드에 파라미터를 실행 중 주입한다.
-
-        SetParameters 응답에는 ``success`` 가 없다. 요청마다 결과 배열이
-        따로 오고 거부는 그 안의 ``successful`` 로만 나타난다. ``_invoke``
-        의 일반 검사로는 걸리지 않으므로 여기서 직접 본다.
-        """
-
-        client = self._parameter_client(node_name)
-        request = self._set_parameters_type.Request()
-        request.parameters = [
-            self._parameter_message(name, value) for name, value in values.items()
-        ]
-        service = f"{node_name}/set_parameters"
-        response = self._invoke(
-            client, request, service, self._set_parameters_timeout_sec
-        )
-        results = list(getattr(response, "results", []))
-        if len(results) != len(request.parameters):
-            raise ServiceCallFailed(
-                f"{service} returned {len(results)} results for "
-                f"{len(request.parameters)} parameters"
-            )
-        for parameter, result in zip(request.parameters, results):
-            if not getattr(result, "successful", False):
-                detail = getattr(result, "reason", "") or "no reason"
-                raise ServiceCallFailed(
-                    f"{service} rejected {parameter.name}: {detail}"
-                )
-
     def get_node_parameters(
         self,
         node_name: str,
@@ -648,7 +587,7 @@ class RosLocalizationModeTransport:
         request.names = list(names)
         service = f"{node_name}/get_parameters"
         response = self._invoke(
-            client, request, service, self._set_parameters_timeout_sec
+            client, request, service, self._parameter_query_timeout_sec
         )
         values = list(getattr(response, "values", []))
         if len(values) != len(request.names):
@@ -668,27 +607,13 @@ class RosLocalizationModeTransport:
             client,
             self._get_state_type.Request(),
             service,
-            self._set_parameters_timeout_sec,
+            self._parameter_query_timeout_sec,
         )
         state = getattr(response, "current_state", None)
         label = str(getattr(state, "label", "") or "").strip()
         if not label:
             raise ServiceCallFailed(f"{service} returned no lifecycle label")
         return label
-
-    def _parameter_client(self, node_name: str) -> Any:
-        with self._lock:
-            if self._node is None:
-                raise ServiceCallFailed(
-                    f"{node_name}/set_parameters transport is not started"
-                )
-            client = self._parameter_clients.get(node_name)
-            if client is None:
-                client = self._node.create_client(
-                    self._set_parameters_type, f"{node_name}/set_parameters"
-                )
-                self._parameter_clients[node_name] = client
-            return client
 
     def _get_parameter_client(self, node_name: str) -> Any:
         with self._lock:
@@ -732,32 +657,6 @@ class RosLocalizationModeTransport:
         raise ServiceCallFailed(
             f"unsupported or unset parameter type for {name}: {value_type}"
         )
-
-    def _parameter_message(self, name: str, value: object) -> Any:
-        parameter = self._parameter_type()
-        parameter.name = name
-        parameter_value = self._parameter_value_type()
-        # bool 을 int 보다 먼저 본다. 파이썬에서 bool 은 int 의 하위형이라
-        # 순서를 뒤집으면 cache_obstacle_heuristic 이 정수로 전송되고
-        # Nav2 가 형 불일치로 거부한다.
-        if isinstance(value, bool):
-            parameter_value.type = self._parameter_type_ids.PARAMETER_BOOL
-            parameter_value.bool_value = value
-        elif isinstance(value, int):
-            parameter_value.type = self._parameter_type_ids.PARAMETER_INTEGER
-            parameter_value.integer_value = value
-        elif isinstance(value, float):
-            parameter_value.type = self._parameter_type_ids.PARAMETER_DOUBLE
-            parameter_value.double_value = value
-        elif isinstance(value, str):
-            parameter_value.type = self._parameter_type_ids.PARAMETER_STRING
-            parameter_value.string_value = value
-        else:
-            raise ServiceCallFailed(
-                f"unsupported parameter type for {name}: {type(value).__name__}"
-            )
-        parameter.value = parameter_value
-        return parameter
 
     def _invoke(
         self,
