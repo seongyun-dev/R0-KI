@@ -116,9 +116,15 @@ LiDAR 위치 값과 alias도 기존 ROS preflight를 통과해야 한다. 실제
 게임패드 수신기는 Jetson에 직접 연결한다. EC2나 별도 runner를 경유하지 않는다.
 
 완전히 새 지도를 다시 만들 때는 이전 SLAM graph를 이어 쓰지 않도록 맵핑 시작 전에
-`aiot-ros.service`의 SLAM Toolbox를 새로 기동해야 한다. 지도 업로드가 Backend에서
-완료된 이후의 patrol 전환만 `aiot-map-activate.path`가 root 권한으로 수행한다. Robot
-프로세스 자체에는 systemd 권한을 주지 않는다.
+`aiot-ros.service`의 SLAM Toolbox를 새로 기동해야 한다. `set_localization_mode(false)`는
+모드와 위치추정 버퍼만 되돌리고 전체 pose graph는 지우지 않는다(upstream 구현이 그렇다).
+빈 pose graph를 `deserialize_map`으로 주입하는 우회는 쓰지 않는다 — 2026-08-08 실기에서
+그 호출이 slam_toolbox 2.6.10 노드를 죽였다. 프로세스를 새로 띄우는 것이 유일하게
+검증된 초기화다.
+
+지도 업로드가 Backend에서 완료된 이후의 patrol 전환은 `localization_mode.py`가
+slam_toolbox 서비스 호출로 수행한다. 예전에 이 일을 하던 `aiot-map-activate.path`는
+`scripts/install.sh`가 제거한다. Robot 프로세스 자체에는 systemd 권한을 주지 않는다.
 
 ## 5. 실물 승인 후 검증 순서
 

@@ -17,6 +17,7 @@ from aiot_robot.backend_client import (
     RobotBackendClient,
 )
 from aiot_robot.mapping_artifacts import MapArtifact
+from integration.explore_supervisor import ExploreSupervisor
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,8 @@ class ManualMappingRuntime:
         map_activator: Any,
         settings: MappingRuntimeSettings,
         client_factory: ClientFactory | None = None,
+        explore_supervisor: Any | None = None,
+        localization: Any | None = None,
     ) -> None:
         self._runtime_service = runtime_service
         self._state_store = state_store
@@ -63,8 +66,20 @@ class ManualMappingRuntime:
         self._gamepad_input = gamepad_input
         self._map_exporter = map_exporter
         self._map_activator = map_activator
+        # 매핑<->순찰 전환. None 이면 전환을 시도하지 않는다 -- 기존 테스트가
+        # 이 의존성을 모른 채로도 성립해야 한다.
+        self._localization = localization
         self._settings = settings
         self._client_factory = client_factory or self._build_client
+        # The explorer's lifetime belongs to the mapping session, not to the
+        # ROS service (see explore_supervisor.py). Built from the environment
+        # here so run_integrated's construction call stays untouched; None
+        # when autonomous mapping is not enabled.
+        self._explore = (
+            explore_supervisor
+            if explore_supervisor is not None
+            else ExploreSupervisor.from_environment()
+        )
         self._lock = threading.Lock()
         self._state = "IDLE"
         self._mapping_session_id: int | None = None
@@ -89,6 +104,24 @@ class ManualMappingRuntime:
     def state(self) -> str:
         with self._lock:
             return self._state
+
+    @property
+    def localization(self) -> Any | None:
+        """매핑/순찰 모드 전환기. 순찰 시작도 이걸 써서 인계를 다시 확인한다.
+
+        이 클래스가 소유자인 이유는 매핑이 먼저 필요했기 때문이지 매핑
+        전용이기 때문이 아니다. 순찰 시작 경로에도 내줘야 한다 --
+        ``_enter_patrol_localization`` 이 실패했거나 그 부팅에 매핑이 없었으면
+        아무도 포즈그래프를 적재하지 않은 채로 순찰이 출발한다.
+        """
+
+        return self._localization
+
+    def lifecycle_snapshot(self) -> tuple[str, int | None]:
+        """Return the current mapping state and session as one atomic snapshot."""
+
+        with self._lock:
+            return self._state, self._mapping_session_id
 
     @property
     def last_error(self) -> str | None:
@@ -167,6 +200,24 @@ class ManualMappingRuntime:
             return False, str(exc)
         return True, "READY"
 
+    def _enter_patrol_localization(self, activated: Any) -> None:
+        """방금 활성화한 지도의 포즈그래프로 위치추정을 켠다.
+
+        세션 디렉터리가 아니라 활성 지도 디렉터리를 쓴다. 세션 산출물은
+        임시이고, 활성 번들이 다음 부팅에도 남는 쪽이다. 경로 규약은
+        map_exporter/map_activation 과 짝을 이룬다: 디렉터리 안의
+        ``posegraph`` 접두사에 .posegraph 와 .data 가 놓인다.
+        """
+
+        if self._localization is None:
+            return
+        posegraph = Path(activated.yaml_path).parent / "posegraph"
+        ready, reason = self._localization.enter_patrol(str(posegraph))
+        if not ready:
+            # 지도는 이미 저장·업로드됐다. 순찰 시작 시 다시 시도하면 되므로
+            # 매핑 세션을 실패로 되돌리지 않는다.
+            print(f"[MAPPING] localization handover deferred reason={reason}")
+
     def start(self, mapping_session_id: int, command_id: str) -> tuple[bool, str]:
         if isinstance(mapping_session_id, bool) or not isinstance(
             mapping_session_id, int
@@ -189,6 +240,14 @@ class ManualMappingRuntime:
         if not ready:
             self._rollback_start(reason)
             return False, reason
+        # 새 세션은 깨끗한 지도에서 시작해야 한다. 위치추정 모드로 남아 있으면
+        # 이전 지도의 포즈그래프 위에 그리게 되고, 매핑 모드로 돌리는 이 호출이
+        # 위치추정 버퍼를 비운다. 예전에는 이걸 하려고 aiot-ros 를 재시작했다.
+        if self._localization is not None:
+            entered, mode_reason = self._localization.enter_mapping()
+            if not entered:
+                self._rollback_start(mode_reason)
+                return False, mode_reason
         try:
             self._drive_controller.activate(mapping_session_id)
             self._gamepad_input.start()
@@ -215,12 +274,22 @@ class ManualMappingRuntime:
             f"mappingSessionId={mapping_session_id} "
             f"controller={self._gamepad_input.device_path}"
         )
+        # Only after the session is committed: the motion gate is open now, so
+        # the explorer's very first goal can actually drive the chassis
+        # instead of being refused and blacklisting its frontier.
+        if self._explore is not None:
+            self._explore.start(mapping_session_id)
         return True, "READY"
 
-    def finish(self) -> bool:
+    def finish(self, mapping_session_id: int | None = None) -> bool:
         """Stop motion immediately, then save and upload in a worker thread."""
 
         with self._lock:
+            if (
+                mapping_session_id is not None
+                and self._mapping_session_id != mapping_session_id
+            ):
+                return False
             if self._state != "MAPPING":
                 return False
             self._state = "STOPPING"
@@ -228,6 +297,11 @@ class ManualMappingRuntime:
             command_id = self._command_id
         assert mapping_session_id is not None and command_id is not None
 
+        # Silence the goal source before cutting the chassis: STOPPING still
+        # keeps the motion gate open, so a live explorer would keep steering
+        # the robot while the map is being saved.
+        if self._explore is not None:
+            self._explore.stop("finish")
         stop_failures = self._stop_mapping_motion("finish")
         if stop_failures:
             self._notify_failure("MAPPING_STOP_FAILED")
@@ -266,6 +340,8 @@ class ManualMappingRuntime:
 
     def stop(self) -> None:
         self._shutdown.set()
+        if self._explore is not None:
+            self._explore.stop("shutdown")
         try:
             self._gamepad_input.stop()
         finally:
@@ -289,6 +365,8 @@ class ManualMappingRuntime:
             self._state = "ABORTING"
             self._shutdown.set()
         self._stop_mapping_motion("abort")
+        if self._explore is not None:
+            self._explore.stop(reason)
         with self._lock:
             self._reset_locked()
             self._last_error = reason
@@ -381,6 +459,12 @@ class ManualMappingRuntime:
                 f"mappingSessionId={mapping_session_id} mapId={activated.map_id} "
                 f"mapVersion={activated.map_version}"
             )
+            # 방금 그린 지도로 위치추정을 시작한다. 예전에는 여기서 env 파일에
+            # AIOT_ROS_MODE=patrol 을 적고 서비스를 재시작했다. 그 재시작이
+            # 진행 중이던 세션을 고아로 만들고 시리얼을 다시 열게 했다.
+            # 실패해도 매핑 자체는 성공이므로 세션을 실패로 만들지는 않는다 --
+            # 순찰을 시작할 때 다시 시도한다.
+            self._enter_patrol_localization(activated)
             with self._lock:
                 self._reset_locked()
                 self._last_error = None

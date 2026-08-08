@@ -71,6 +71,7 @@ class RokiPublisherApplication:
         pose_source: Any | None = None,
         lidar_health_source: Any | None = None,
         pose_publish_activity_check: Callable[[], bool] | None = None,
+        obstacle_alert_activity_check: Callable[[], bool] | None = None,
         runtime_components: tuple[Any, ...] = (),
         start_serial_reader: bool = True,
     ) -> None:
@@ -85,6 +86,11 @@ class RokiPublisherApplication:
         self._pose_publish_activity_check = (
             pose_publish_activity_check
             if pose_publish_activity_check is not None
+            else lambda: True
+        )
+        self._obstacle_alert_activity_check = (
+            obstacle_alert_activity_check
+            if obstacle_alert_activity_check is not None
             else lambda: True
         )
         self._runtime_components = runtime_components
@@ -227,6 +233,7 @@ class RokiPublisherApplication:
             ),
             robot_key=self._settings.robot_key,
             status=status,
+            obstacle_alert_enabled=self._obstacle_alert_activity_check(),
         )
 
         self._mqtt_client.publish(

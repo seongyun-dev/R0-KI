@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import select
 import sys
 import time
 from dataclasses import dataclass
@@ -400,6 +401,198 @@ def run_servo_low_test(
     print("SERVO_LOW_TEST_COMPLETE_CENTERED_AND_OUTPUT_OFF")
 
 
+def _read_status_battery(client: Esp32Client) -> float:
+    """Read Battery B volts, tolerating the 100 ms telemetry stream.
+
+    ``STATUS`` competes with periodic ``odometry``/``hardwareStatus`` lines, so a
+    short capture window can miss the reply. Fall back to ``hardwareStatus``,
+    which carries the same ``batteryVoltage`` field.
+    """
+
+    status_lines = client.request("STATUS", duration=1.0, echo=False)
+    fallback: float | None = None
+    for line in reversed(status_lines):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") == "status":
+            return float(payload.get("batteryVoltage", 0.0))
+        if fallback is None and payload.get("type") == "hardwareStatus":
+            fallback = float(payload.get("batteryVoltage", 0.0))
+    if fallback is not None:
+        return fallback
+    raise SafetyError("ESP32 STATUS response is missing")
+
+
+def run_servo_range_probe(
+    client: Esp32Client,
+    confirmation: str | None,
+    *,
+    limit: int,
+    step: int,
+    dwell: float,
+) -> None:
+    """Find the steering linkage bind point by stepping outward from center.
+
+    The firmware caps the commanded angle, so this can only reach whatever
+    ``SERVO_MIN_TEST_ANGLE``/``SERVO_MAX_TEST_ANGLE`` allow. Each step parks the
+    angle, de-energizes the servo and waits, so the road-wheel angle can be read
+    with a protractor without the servo fighting the measurement.
+
+    Stop immediately if the servo buzzes or strains: that is a stall against the
+    linkage stop and it strips servo gears.
+    """
+
+    require_confirmation(confirmation, "LINKAGE_CLEAR")
+    client.require_safe_firmware()
+    client.request("ESTOP", duration=0.2)
+
+    battery_voltage = _read_status_battery(client)
+    if not 9.0 <= battery_voltage <= 12.8:
+        raise SafetyError(
+            "Battery B voltage is outside the servo-test range: "
+            f"{battery_voltage:.2f} V"
+        )
+    print(f"BATTERY_B_OK voltage={battery_voltage:.2f}V")
+
+    pca_lines = client.request("PCA_STATUS", duration=0.3, echo=False)
+    pca_ok = False
+    for line in reversed(pca_lines):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") == "pcaStatus":
+            pca_ok = payload.get("ok") is True
+            break
+    if not pca_ok:
+        raise SafetyError("PCA9685 CH0 status check failed")
+    print("PCA9685_OK address=0x60 channel=0")
+
+    center = 80
+    if step <= 0:
+        raise SafetyError("step must be positive")
+    if not 1 <= limit <= 80:
+        raise SafetyError("limit must be within 1..80 degrees from center")
+
+    interactive = sys.stdin.isatty()
+    print(
+        "MEASURE the actual road-wheel angle at each step. "
+        "ABORT (Ctrl-C) the moment the servo buzzes or strains."
+    )
+    for direction, name in ((1, "RIGHT"), (-1, "LEFT")):
+        offset = step
+        while offset <= limit:
+            angle = center + direction * offset
+            print(f"===== SERVO_{name}_OFFSET_{offset}_ANGLE_{angle} =====")
+            client.request("ARM SERVO", duration=0.15)
+            lines = client.request(f"SERVO {angle}", duration=0.4, echo=False)
+            rejected = any("INVALID_SERVO_ANGLE" in line for line in lines)
+            if rejected:
+                print(
+                    f"FIRMWARE_REJECTED angle={angle} "
+                    "(raise SERVO_MIN/MAX_TEST_ANGLE and reflash to go further)"
+                )
+                client.request("SERVO_OFF", duration=0.15)
+                break
+            time.sleep(0.6)
+            client.request("SERVO_OFF", duration=0.15)
+            if interactive:
+                input(
+                    f"  measured wheel angle at command {angle}? "
+                    "record it, then press Enter (Ctrl-C to abort) "
+                )
+            else:
+                time.sleep(dwell)
+            offset += step
+        client.request("ARM SERVO", duration=0.15)
+        client.request(f"SERVO {center}", duration=0.3)
+        time.sleep(0.5)
+        client.request("SERVO_OFF", duration=0.15)
+
+    client.request("ESTOP", duration=0.2)
+    print("SERVO_RANGE_PROBE_COMPLETE_CENTERED_AND_OUTPUT_OFF")
+
+
+def run_servo_extreme_hold(
+    client: Esp32Client,
+    confirmation: str | None,
+    *,
+    angles: list[int],
+    max_hold: float,
+) -> None:
+    """Hold each extreme steering angle until the operator types 완료.
+
+    The firmware de-energizes the servo ``SERVO_AUTO_OFF_MS`` after a command, so
+    the angle is re-commanded on a shorter interval to keep the wheel actually
+    held while the road-wheel angle is measured with a protractor.
+
+    Holding against a linkage stop is a stall, so type 중단 the moment the servo
+    buzzes or strains. ``max_hold`` is a backstop for a walked-away operator.
+    """
+
+    require_confirmation(confirmation, "LINKAGE_CLEAR")
+    if not sys.stdin.isatty():
+        raise SafetyError(
+            "servo-extreme needs a terminal: run it directly on the Jetson."
+        )
+    for angle in angles:
+        if not 30 <= angle <= 130:
+            raise SafetyError(f"angle {angle} is outside the flashed 30..130 cap")
+
+    client.require_safe_firmware()
+    client.request("ESTOP", duration=0.2)
+
+    battery_voltage = _read_status_battery(client)
+    if not 9.0 <= battery_voltage <= 12.8:
+        raise SafetyError(
+            "Battery B voltage is outside the servo-test range: "
+            f"{battery_voltage:.2f} V"
+        )
+    print(f"BATTERY_B_OK voltage={battery_voltage:.2f}V")
+
+    refresh_interval = 2.0  # shorter than the firmware's 3 s auto-off
+    aborted = False
+    for angle in angles:
+        offset = angle - 80
+        print(f"===== SERVO_HOLD_ANGLE_{angle} (offset {offset:+d}) =====")
+        print(
+            "  measure the road-wheel angle, then type 완료 + Enter to release "
+            "(중단 to abort immediately)"
+        )
+        deadline = time.monotonic() + max_hold
+        while True:
+            client.request("ARM SERVO", duration=0.1)
+            lines = client.request(f"SERVO {angle}", duration=0.2, echo=False)
+            if any("INVALID_SERVO_ANGLE" in line for line in lines):
+                print(f"FIRMWARE_REJECTED angle={angle}")
+                break
+            ready, _, _ = select.select([sys.stdin], [], [], refresh_interval)
+            if ready:
+                answer = sys.stdin.readline().strip()
+                if answer in ("완료", "done", "DONE"):
+                    break
+                if answer in ("중단", "abort", "ABORT"):
+                    aborted = True
+                    break
+                print("  type 완료 to release, or 중단 to abort")
+            if time.monotonic() > deadline:
+                print(f"  HOLD_TIMEOUT after {max_hold:.0f}s: releasing")
+                break
+        client.request("SERVO_OFF", duration=0.15)
+        if aborted:
+            print("ABORTED_BY_OPERATOR")
+            break
+
+    client.request("ARM SERVO", duration=0.15)
+    client.request("SERVO 80", duration=0.3)
+    time.sleep(0.5)
+    client.request("SERVO_OFF", duration=0.15)
+    client.request("ESTOP", duration=0.2)
+    print("SERVO_EXTREME_COMPLETE_CENTERED_AND_OUTPUT_OFF")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="RO-KI safe ESP32 hardware bench tests",
@@ -440,6 +633,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     servo_low_parser = subparsers.add_parser("servo-low")
     servo_low_parser.add_argument("--confirm")
+
+    servo_extreme_parser = subparsers.add_parser("servo-extreme")
+    servo_extreme_parser.add_argument(
+        "--angles",
+        default="130,30",
+        help="comma-separated angles to hold, default 130,30",
+    )
+    servo_extreme_parser.add_argument("--max-hold", type=float, default=120.0)
+    servo_extreme_parser.add_argument("--confirm")
+
+    servo_range_parser = subparsers.add_parser("servo-range-probe")
+    servo_range_parser.add_argument("--limit", type=int, default=20)
+    servo_range_parser.add_argument("--step", type=int, default=5)
+    servo_range_parser.add_argument("--dwell", type=float, default=3.0)
+    servo_range_parser.add_argument("--confirm")
 
     subparsers.add_parser("estop")
     return parser
@@ -495,6 +703,29 @@ def main() -> int:
                 run_servo_low_test(
                     client,
                     confirmation=args.confirm,
+                )
+            elif args.command == "servo-extreme":
+                try:
+                    angles = [
+                        int(part) for part in args.angles.split(",") if part.strip()
+                    ]
+                except ValueError as error:
+                    raise SafetyError(f"invalid --angles: {args.angles}") from error
+                if not angles:
+                    raise SafetyError("--angles must list at least one angle")
+                run_servo_extreme_hold(
+                    client,
+                    confirmation=args.confirm,
+                    angles=angles,
+                    max_hold=args.max_hold,
+                )
+            elif args.command == "servo-range-probe":
+                run_servo_range_probe(
+                    client,
+                    confirmation=args.confirm,
+                    limit=args.limit,
+                    step=args.step,
+                    dwell=args.dwell,
                 )
             elif args.command == "estop":
                 client.require_safe_firmware()

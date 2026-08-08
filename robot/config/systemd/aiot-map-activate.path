@@ -1,9 +1,0 @@
-[Unit]
-Description=Watch for an accepted AIoT map awaiting Nav2 activation
-
-[Path]
-PathExists=/var/lib/aiot/state/map-activation.pending
-Unit=aiot-map-activate.service
-
-[Install]
-WantedBy=multi-user.target

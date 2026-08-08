@@ -242,33 +242,17 @@ ROS2는 보통 문자열이나 메시지 객체를 사용합니다.
 - [roki/state/robot_state.py](roki/state/robot_state.py)
   - 현재는 비어 있는 파일이며, 상태 저장 구조를 확장할 위치입니다.
 
-- [roki/state/state_machine.py](roki/state/state_machine.py)
-  - 로봇의 상태 전환(예: IDLE, RUNNING, STOP)을 관리할 가능성이 있는 파일입니다.
-
 ### 역할 요약
 - “지금 로봇이 어떤 상태인가?”를 기억하는 공간입니다.
 
 ---
 
-## 5-7 [roki/camera](roki/camera)
-이 폴더는 카메라 관련 코드입니다.
-
-- [roki/camera/camera_manager.py](roki/camera/camera_manager.py)
-  - 현재는 비어 있으며, 카메라 장치를 관리하는 역할을 맡을 수 있습니다.
-
-- [roki/camera/frame_buffer.py](roki/camera/frame_buffer.py)
-  - 프레임 버퍼를 관리할 수 있는 코드입니다.
-
-### 역할 요약
-- 카메라 이미지나 프레임을 다루는 역할입니다.
-
----
-
-## 5-8 [roki/scripts](roki/scripts)
+## 5-7 [roki/scripts](roki/scripts)
 이 폴더는 테스트와 실행용 스크립트입니다.
 
-- [roki/scripts/run_roki.py](roki/scripts/run_roki.py)
-  - ROS2 노드와 MQTT 상태 브리지를 실행하는 진입점입니다.
+> 실행 진입점은 이 폴더가 아니라
+> [roki-iot/run_integrated.py](../roki-iot/run_integrated.py) 입니다.
+> 운영 서비스(`aiot-robot`)가 그 파일을 띄웁니다.
 
 - [roki/scripts/test_serial.py](roki/scripts/test_serial.py)
   - 시리얼 통신 테스트용입니다.
@@ -392,8 +376,8 @@ ROS2는 보통 문자열이나 메시지 객체를 사용합니다.
 
 아래 5개는 프로젝트의 핵심 흐름을 이해할 때 가장 중요합니다.
 
-1. [roki/scripts/run_roki.py](roki/scripts/run_roki.py)
-   - 실행 진입점입니다.
+1. [roki-iot/run_integrated.py](../roki-iot/run_integrated.py)
+   - 실행 진입점입니다. `aiot-robot` 서비스가 이 파일을 띄웁니다.
 
 2. [roki/serial_comm/serial_manager.py](roki/serial_comm/serial_manager.py)
    - 시리얼 통신의 기본 기능입니다.
@@ -425,7 +409,6 @@ ROS2는 보통 문자열이나 메시지 객체를 사용합니다.
 이 프로젝트에는 일부 파일이 비어 있거나, 백업 파일이 존재합니다.
 
 예:
-- [roki/camera/camera_manager.py](roki/camera/camera_manager.py)
 - [roki/state/robot_state.py](roki/state/robot_state.py)
 - [roki/safety/obstacle_guard.py](roki/safety/obstacle_guard.py)
 
@@ -439,7 +422,7 @@ ROS2는 보통 문자열이나 메시지 객체를 사용합니다.
 
 처음 볼 때는 아래 순서로 보면 이해가 쉽습니다.
 
-1. [roki/scripts/run_roki.py](roki/scripts/run_roki.py) 읽기
+1. [roki-iot/run_integrated.py](../roki-iot/run_integrated.py) 읽기
 2. [roki/serial_comm/serial_manager.py](roki/serial_comm/serial_manager.py) 읽기
 3. [roki/mqtt/publisher.py](roki/mqtt/publisher.py) 읽기
 4. [roki-iot/esp32_serial/reader.py](roki-iot/esp32_serial/reader.py) 읽기

@@ -208,6 +208,26 @@ class MappingRuntimeTest(unittest.TestCase):
         self.assertEqual(kwargs["resolution"], 0.05)
         self.assertEqual(self.activator.activations, [(self.artifact, 3, 1)])
 
+    def test_finish_with_matching_session_reuses_existing_finish_path(self) -> None:
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+        self.assertEqual(self.runtime.lifecycle_snapshot(), ("MAPPING", 12))
+
+        self.assertTrue(self.runtime.finish(12))
+        self.assertTrue(self.runtime.wait_for_completion(1.0))
+
+        self.assertEqual(self.exporter.exported, [12])
+        self.assertEqual(len(self.client.uploads), 1)
+
+    def test_finish_rejects_different_session_without_stopping_motion(self) -> None:
+        self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))
+
+        self.assertFalse(self.runtime.finish(13))
+
+        self.assertEqual(self.runtime.lifecycle_snapshot(), ("MAPPING", 12))
+        self.assertTrue(self.drive.active)
+        self.assertEqual(self.gamepad.stopped, 0)
+        self.assertEqual(self.exporter.exported, [])
+
     def test_transient_upload_failure_retries_then_activates(self) -> None:
         self.client.errors.append(BackendTransportError("offline"))
         self.assertEqual(self.runtime.start(12, "command-12"), (True, "READY"))

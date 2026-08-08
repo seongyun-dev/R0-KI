@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ import statistics
 from typing import Any, Callable
 
 from state.robot_state import ObstacleState
+
+logger = logging.getLogger(__name__)
 
 
 ObstacleActivityCheck = Callable[[], bool]
@@ -57,6 +60,7 @@ class RosLidarHealthBridge:
         settings: RosLidarHealthSettings,
         obstacle_detector: Any | None = None,
         obstacle_activity_check: ObstacleActivityCheck | None = None,
+        obstacle_clear_sink: Callable[[], None] | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state_store = state_store
@@ -68,6 +72,13 @@ class RosLidarHealthBridge:
             if obstacle_activity_check is not None
             else self._state_reports_active_operation
         )
+        # Nav2 hands the patrol to us on an obstacle abort and expects the
+        # clear-detect loop here to hand it back (see
+        # RosNav2Bridge._hold_for_obstacle). Without this sink nothing ever
+        # calls resume_patrol, the service stays paused and every later motion
+        # command is dropped as MOTION_INTERLOCK.
+        self._obstacle_clear_sink = obstacle_clear_sink
+        self._obstacle_stopped = False
         self._obstacle_was_active = False
         self._scan_lock = threading.Lock()
         self._last_scan_time: float | None = None
@@ -97,6 +108,39 @@ class RosLidarHealthBridge:
         if not callable(check):
             raise ValueError("obstacle activity check must be callable")
         self._obstacle_activity_check = check
+
+    def set_obstacle_clear_sink(self, sink: Callable[[], None]) -> None:
+        """STOP -> CLEAR 전이에서 운행 재개를 요청할 콜백을 연결한다.
+
+        ``set_obstacle_activity_check``와 같은 조립 단계에서 호출한다.
+        """
+
+        if not callable(sink):
+            raise ValueError("obstacle clear sink must be callable")
+        self._obstacle_clear_sink = sink
+
+    def _publish_obstacle(self, obstacle: Any) -> None:
+        """Store를 갱신하고 STOP -> CLEAR 전이에서만 재개를 요청한다.
+
+        Detector가 hysteresis(정지 0.30 m / 해제 0.40 m)를 이미 적용하므로
+        여기서는 전이 판정만 하고 임계값은 다시 만들지 않는다.
+        """
+
+        self._state_store.update_obstacle(obstacle)
+        stopped = str(getattr(obstacle, "status", "")) == "STOP"
+        if stopped:
+            self._obstacle_stopped = True
+            return
+        if not self._obstacle_stopped:
+            return
+        self._obstacle_stopped = False
+        if self._obstacle_clear_sink is None:
+            return
+        try:
+            self._obstacle_clear_sink()
+        except Exception:
+            # 재개 실패가 scan 콜백을 죽이면 이후 CLEAR 판정 자체가 멈춘다.
+            logger.exception("obstacle clear resume failed")
 
     def start(self) -> None:
         if self.is_running():
@@ -262,7 +306,7 @@ class RosLidarHealthBridge:
         if not self._obstacle_detection_active():
             self._clear_inactive_obstacle()
             return
-        self._state_store.update_obstacle(detection.obstacle)
+        self._publish_obstacle(detection.obstacle)
 
     def _state_reports_active_operation(self) -> bool:
         """Standalone runtime의 보수적인 fallback gate."""
@@ -282,6 +326,9 @@ class RosLidarHealthBridge:
 
     def _clear_inactive_obstacle(self) -> None:
         clear = ObstacleState()
+        # 운행이 끝나 detection이 꺼지면 래치도 버린다. 남겨두면 다음 운행의
+        # 첫 CLEAR가 "이전 STOP의 해제"로 오인돼 엉뚱한 resume을 부른다.
+        self._obstacle_stopped = False
         if self._obstacle_was_active:
             reset = getattr(self._obstacle_detector, "reset", None)
             if callable(reset):
