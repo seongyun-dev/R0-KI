@@ -478,6 +478,68 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         guard.release.assert_called_once_with()
         self.assertEqual(runtime.state_store.get_status().state, "ERROR")
 
+    def test_preflight_readiness_skips_the_localization_products(self) -> None:
+        """pose 는 인계 뒤에야 생긴다. 인계 전 게이트가 그것을 물으면 안 된다.
+
+        깊은 판정은 그대로 막아야 한다 -- 얕은 게이트는 순서를 고치는 것이지
+        검사를 없애는 것이 아니다.
+        """
+
+        runtime = FakeRuntime()
+        # readiness 는 snapshot 이 없으면 조기에 READY 를 돌려주므로, pose 가지에
+        # 도달하려면 스냅샷을 갖춘 상태여야 한다. 실기의 상태 저장소가 그렇다.
+        runtime.state_store.snapshot = lambda: SimpleNamespace(
+            motion_state=SimpleNamespace(
+                left_distance_m=0.0, right_distance_m=0.0
+            ),
+            safety_decision=SimpleNamespace(allowed=True, fault="NONE"),
+        )
+        driver = Mock()
+        driver.is_ready.return_value = True
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=Mock(),
+            navigation_driver=driver,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+        # 오도메트리는 살아 있지만 지도 좌표 pose 는 아직 없는 상태.
+        self.assertIsNone(runtime.state_store.get_pose())
+
+        self.assertEqual(service.readiness(), (False, "MAP_POSE_NOT_READY"))
+        ready, reason = service.patrol_preflight_readiness()
+        self.assertTrue(ready, f"얕은 게이트가 막았다: {reason}")
+
+    def test_preflight_readiness_still_enforces_serial_and_odometry(self) -> None:
+        runtime = FakeRuntime()
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=Mock(),
+            navigation_driver=Mock(),
+        )
+
+        # 런타임이 아예 안 돌고 있으면 얕은 게이트도 막아야 한다.
+        self.assertEqual(
+            service.patrol_preflight_readiness(),
+            (False, "SERIAL_RUNTIME_NOT_RUNNING"),
+        )
+
+        # 오도메트리가 아직 없으면 -- pose 와 달리 인계가 만들어주지 않는다 --
+        # 얕은 게이트도 막아야 한다.
+        runtime.state_store.snapshot = lambda: SimpleNamespace(
+            motion_state=None,
+            safety_decision=SimpleNamespace(allowed=True, fault="NONE"),
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+
+        self.assertEqual(
+            service.patrol_preflight_readiness(),
+            (False, "ODOMETRY_NOT_READY"),
+        )
+
     def _interlocked_service(self) -> tuple:
         """순찰이 끝난 직후 -- 그런데 cmd_vel 은 아직 날아오는 상태를 만든다."""
 

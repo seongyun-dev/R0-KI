@@ -272,6 +272,27 @@ class FinalRuntimeService:
     def readiness(self) -> tuple[bool, str]:
         """Return the physical/navigation gate without issuing a command."""
 
+        return self._readiness(require_localization=True)
+
+    def patrol_preflight_readiness(self) -> tuple[bool, str]:
+        """위치추정 인계 **전에** 이미 알 수 있는 것만 본다.
+
+        지도 좌표 pose 와 Nav2 준비는 slam_toolbox 가 위치추정 모드로 바뀌고
+        포즈그래프가 올라온 뒤에야 성립한다. 그 인계를 하는 것이 START_PATROL
+        의 세 번째 단계(command_handler 의 localization_preparer)인데, 첫
+        readiness 가 그 결과물을 요구하고 있었다. 재시작 뒤 매핑을 한 번도
+        안 한 부팅에서는 스캔 게이트가 닫혀 있어 pose 가 없고, 그래서 첫
+        게이트에서 MAP_POSE_NOT_READY 로 잘려 인계 단계에 도달하지 못했다
+        -- 순찰이 영원히 시작되지 않는다(2026-08-09 00:35:35 실측).
+
+        그래서 여기서는 인계 전에 판정 가능한 것만 본다. pose 와 Nav2 는
+        인계 직후의 재확인(같은 함수의 ``readiness``)이 그대로 맡는다.
+        약해지는 것이 아니라, 아직 알 수 없는 것을 묻지 않는 것뿐이다.
+        """
+
+        return self._readiness(require_localization=False)
+
+    def _readiness(self, *, require_localization: bool) -> tuple[bool, str]:
         if not self.is_running():
             return False, "SERIAL_RUNTIME_NOT_RUNNING"
         if (
@@ -295,7 +316,7 @@ class FinalRuntimeService:
         safety = getattr(snapshot, "safety_decision", None)
         if safety is None or not getattr(safety, "allowed", False):
             return False, str(getattr(safety, "fault", "SAFETY_NOT_READY"))
-        if self._navigation_driver is not None:
+        if require_localization and self._navigation_driver is not None:
             get_pose = getattr(self._runtime.state_store, "get_pose", None)
             if not callable(get_pose) or get_pose() is None:
                 return False, "MAP_POSE_NOT_READY"

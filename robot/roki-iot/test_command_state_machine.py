@@ -274,6 +274,82 @@ class CommandStateMachineTest(unittest.TestCase):
             localization_preparer=lambda: decisions.pop(0),
         )
 
+    def test_preflight_gate_does_not_demand_what_localization_provides(self) -> None:
+        """첫 게이트가 인계 결과물을 요구하면 인계에 도달하지 못한다.
+
+        2026-08-09 00:35:35 실기: 재시작 뒤 매핑을 한 번도 안 한 부팅에서
+        스캔 게이트가 닫혀 있어 지도 좌표 pose 가 없었고, START_PATROL 이
+        첫 readiness 에서 MAP_POSE_NOT_READY 로 잘렸다. 그 pose 를 만들어주는
+        것이 바로 아래 단계인 localization_preparer 라서, 순찰이 영원히
+        시작되지 않았다.
+
+        런타임이 얕은 판정을 제공하면 첫 게이트는 그것을 써야 한다.
+        """
+
+        prepared: list[str] = []
+        # 깊은 판정은 아직 pose 가 없다고 답한다. 얕은 판정은 통과시킨다.
+        self.runtime.ready_decision = (False, "MAP_POSE_NOT_READY")
+        self.runtime.patrol_preflight_readiness = lambda: (True, "READY")
+        handler = self._handler_with_localization([(True, "READY")])
+        original = handler._localization_preparer
+
+        def recording_preparer():
+            prepared.append("localization")
+            # 인계가 끝나면 pose 가 생긴다. 이후 재확인은 통과해야 한다.
+            self.runtime.ready_decision = (True, "READY")
+            return original()
+
+        handler._localization_preparer = recording_preparer
+
+        handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "preflight-1", patrol_id=21),
+        )
+
+        self.assertEqual(prepared, ["localization"], "인계에 도달해야 한다")
+        self.assertNotEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+
+    def test_preflight_gate_still_blocks_what_it_can_already_judge(self) -> None:
+        """얕아진 게이트가 시리얼/오도메트리까지 통과시키면 안 된다."""
+
+        prepared: list[str] = []
+        self.runtime.patrol_preflight_readiness = lambda: (
+            False,
+            "ODOMETRY_NOT_READY",
+        )
+        handler = self._handler_with_localization([(True, "READY")])
+        original = handler._localization_preparer
+        handler._localization_preparer = lambda: (
+            prepared.append("localization") or original()
+        )
+
+        handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "preflight-2", patrol_id=22),
+        )
+
+        self.assertEqual(prepared, [], "판정 가능한 실패는 인계 전에 막아야 한다")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"], "ODOMETRY_NOT_READY"
+        )
+
+    def test_preflight_falls_back_when_runtime_has_no_shallow_gate(self) -> None:
+        """훅이 없는 런타임에서는 기존 계약 그대로여야 한다."""
+
+        self.runtime.ready_decision = (False, "MAP_POSE_NOT_READY")
+        handler = self._handler_with_localization([(True, "READY")])
+
+        handler.handle(
+            self.settings.command_topic,
+            payload("START_PATROL", "preflight-3", patrol_id=23),
+        )
+
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "REJECTED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["reason"], "MAP_POSE_NOT_READY"
+        )
+
     def test_start_patrol_prepares_localization_before_the_physical_start(self) -> None:
         """재부팅 뒤 첫 순찰은 아무도 포즈그래프를 적재해주지 않는다.
 

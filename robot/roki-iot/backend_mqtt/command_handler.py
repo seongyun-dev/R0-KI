@@ -389,7 +389,15 @@ class PatrolCommandHandler:
                 print(f"[COMMAND] START_PATROL interlock rejected reason={reason}")
                 return
 
-        ready, reason = self._readiness()
+        # 인계 전이므로 인계 결과물은 묻지 않는다.
+        #
+        # 이 게이트가 지도 좌표 pose 와 Nav2 준비를 요구하고 있었는데, 그것은
+        # 아래 localization_preparer 가 만들어주는 것이다. 재시작 뒤 매핑을
+        # 한 번도 안 한 부팅에서는 스캔 게이트가 닫혀 있어 pose 가 없고,
+        # 그래서 여기서 MAP_POSE_NOT_READY 로 잘려 인계에 도달하지 못했다 --
+        # 순찰이 영원히 시작되지 않는다(2026-08-09 00:35:35 실측). 시리얼과
+        # 오도메트리처럼 지금 판정 가능한 것은 그대로 여기서 막는다.
+        ready, reason = self._preflight_readiness()
         if not ready:
             self._cancel_prepared_patrol()
             self._record_and_publish_command(
@@ -692,8 +700,23 @@ class PatrolCommandHandler:
         self._record_and_publish_command(command, "SUCCEEDED")
         print("[COMMAND] SET_TOKEN stored in protected runtime file")
 
-    def _readiness(self) -> tuple[bool, str]:
+    def _preflight_readiness(self) -> tuple[bool, str]:
+        """위치추정 인계 전 게이트. 런타임이 얕은 판정을 제공하면 그것을 쓴다.
+
+        제공하지 않으면 기존 계약 그대로 ``readiness`` 로 떨어진다 -- 이 훅이
+        없는 런타임 구현(테스트 더블 포함)에서 동작이 달라지지 않아야 한다.
+        """
+
+        return self._readiness(preflight=True)
+
+    def _readiness(self, *, preflight: bool = False) -> tuple[bool, str]:
         runtime_check = getattr(self._serial_reader, "readiness", None)
+        if preflight:
+            shallow = getattr(
+                self._serial_reader, "patrol_preflight_readiness", None
+            )
+            if callable(shallow):
+                runtime_check = shallow
         checks: list[ReadinessCheck] = []
         if callable(runtime_check):
             checks.append(runtime_check)
