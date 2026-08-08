@@ -11,6 +11,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from navigation.cmd_vel_adapter import (
@@ -37,6 +38,9 @@ PATROL_LIFECYCLE_HOLDS = frozenset({"NAV2_PATROL_STOPPED"})
 @dataclass(frozen=True)
 class RosNav2BridgeSettings:
     ackermann: AckermannCommandSettings
+    patrol_behavior_tree_xml: str = (
+        "/opt/aiot/iot/current/robot/config/ros/nav2_fixed_path.xml"
+    )
     cmd_vel_topic: str = "/cmd_vel"
     navigate_action: str = "/navigate_to_pose"
     map_frame: str = "map"
@@ -50,6 +54,11 @@ class RosNav2BridgeSettings:
     goal_abort_retry_limit: int = 3
 
     def __post_init__(self) -> None:
+        patrol_bt = self.patrol_behavior_tree_xml.strip()
+        if not patrol_bt or not Path(patrol_bt).is_absolute():
+            raise ValueError(
+                "patrol_behavior_tree_xml must be a non-empty absolute path"
+            )
         for name, value in (
             ("cmd_vel_topic", self.cmd_vel_topic),
             ("navigate_action", self.navigate_action),
@@ -522,6 +531,10 @@ class RosNav2Bridge:
         pose.pose.orientation.z = math.sin(yaw / 2.0)
         pose.pose.orientation.w = math.cos(yaw / 2.0)
         goal.pose = pose
+        # Mapping goals come from explore_lite and keep Nav2's mapping default.
+        # Patrol goals originate here, so select the dedicated patrol tree on
+        # every goal instead of mutating the active Nav2 parameter set.
+        goal.behavior_tree = self._settings.patrol_behavior_tree_xml
         try:
             future = self._action_client.send_goal_async(goal)
         except Exception as exc:

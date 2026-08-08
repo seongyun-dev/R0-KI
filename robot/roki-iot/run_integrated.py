@@ -26,6 +26,20 @@ for path in (str(ROBOT_SRC_ROOT), str(FINAL_RUNTIME_ROOT), str(PROJECT_ROOT)):
         sys.path.insert(0, path)
 
 
+def _patrol_behavior_tree_xml() -> str:
+    """Return the Patrol-only BT path without reusing the Mapping default."""
+
+    configured = os.getenv("ROKI_NAV2_PATROL_BT_XML", "").strip()
+    path = (
+        Path(configured)
+        if configured
+        else ROBOT_ROOT / "config" / "ros" / "nav2_fixed_path.xml"
+    )
+    if not path.is_absolute():
+        raise RuntimeError("ROKI_NAV2_PATROL_BT_XML must be an absolute path")
+    return path.as_posix()
+
+
 def _build_final_components() -> tuple[Any, Any, Any]:
     """Build the sole ESP32 owner and read-only ROS sensor bridges."""
 
@@ -262,6 +276,7 @@ def _build_nav2_driver(
         goal_abort_retry_limit=int(
             os.getenv("ROKI_NAV2_GOAL_ABORT_RETRY_LIMIT", "3")
         ),
+        patrol_behavior_tree_xml=_patrol_behavior_tree_xml(),
     )
     def route_motion(command: Any) -> None:
         """실행 중인 운행에 따라 cmd_vel 을 알맞은 게이트로 보낸다.
