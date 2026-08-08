@@ -174,9 +174,12 @@ class LocalizationModeController:
             try:
                 self._transport.set_node_parameters(node_name, overrides)
             except Exception as exc:
+                # 이유까지 남긴다. 2026-08-08 실기에서 type=ServiceCallFailed
+                # 만 찍혀서 "서비스가 없다" 와 "노드가 값을 거부했다" 를
+                # 구분할 수 없었다. 그 둘은 고칠 곳이 다르다.
                 self._say(
                     f"profile apply failed mode={mode} node={node_name} "
-                    f"type={type(exc).__name__}"
+                    f"type={type(exc).__name__} detail={exc}"
                 )
                 return "MODE_PROFILE_APPLY_FAILED"
         self._say(f"profile applied mode={mode}")
