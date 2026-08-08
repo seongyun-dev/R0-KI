@@ -115,6 +115,8 @@ class FinalRuntimeService:
         self._runtime_fault_generation = 0
         self._active_patrol_id: int | None = None
         self._paused = False
+        # 인터락 STOP 을 이미 전달했는가. 아래 _apply_motion_command_locked 참고.
+        self._interlock_stop_delivered = False
         self._fault_listener: Any | None = None
         self._scan_context_listener: Any | None = None
         if navigation_service is not None:
@@ -500,8 +502,28 @@ class FinalRuntimeService:
 
     def _apply_motion_command_locked(self, command: Any) -> None:
         if self._active_patrol_id is None or self._paused:
-            self._best_effort_stop_runtime_patrol("MOTION_INTERLOCK")
+            # 전달된 STOP 을 매 cmd_vel 마다 다시 보내지 않는다.
+            #
+            # Nav2 velocity smoother 는 순찰이 끝난 뒤에도 램프다운하며 계속
+            # 발행하고, 그 명령은 전부 이 가지로 떨어진다. 2026-08-09 실측:
+            # 세션 종료마다 20Hz 로 수십 건(오늘 88건), 그 중 55건이 살아 있는
+            # 시리얼에 실제 STOP 프레임을 썼다. mapping_motion_sink._stop 이
+            # 같은 이유로 이미 같은 가드를 두고 있고, 그 주석이 대가를 적어뒀다
+            # -- "floods the serial link at the smoother's rate, which is enough
+            # to reset the ESP32 link and drop motion authorization".
+            #
+            # 한 번 전달된 STOP 이면 충분하다. 런타임은 이미 멈춰 있고, 펌웨어
+            # 워치독(DRIVE_WATCHDOG_MS=400)이 섀시를 잡고 있다. 전달에 실패하면
+            # 플래그를 세우지 않으므로 다음 명령이 다시 시도한다.
+            if self._interlock_stop_delivered:
+                return
+            if self._best_effort_stop_runtime_patrol("MOTION_INTERLOCK"):
+                self._interlock_stop_delivered = True
             return
+        # 여기 도달했다는 것은 주행이 다시 인가됐다는 뜻이다. 다음 인터락은
+        # 새 STOP 을 받아야 한다. 상태 전환 지점이 11곳이라 그쪽에 플래그를
+        # 흩뿌리는 대신, 실제로 명령이 받아들여지는 이 한 곳에서 되돌린다.
+        self._interlock_stop_delivered = False
         if int(command.speed_pwm) == 0:
             self._best_effort_stop_runtime_patrol(
                 command.stop_reason or "NAV2_STOP"

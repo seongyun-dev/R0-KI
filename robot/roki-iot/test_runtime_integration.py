@@ -478,6 +478,89 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         guard.release.assert_called_once_with()
         self.assertEqual(runtime.state_store.get_status().state, "ERROR")
 
+    def _interlocked_service(self) -> tuple:
+        """순찰이 끝난 직후 -- 그런데 cmd_vel 은 아직 날아오는 상태를 만든다."""
+
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=95)
+        motion = SimpleNamespace(speed_pwm=45, steering_deg=80, stop_reason=None)
+        service.apply_motion_command(motion)
+        # 순찰을 무효화한다. 이후 cmd_vel 은 전부 인터락으로 떨어진다.
+        runtime.simulate_connection()
+        return service, runtime, motion
+
+    def test_interlocked_cmd_vel_flood_delivers_one_stop(self) -> None:
+        """램프다운 cmd_vel 마다 STOP 을 다시 쓰면 시리얼이 그 속도로 잠긴다.
+
+        2026-08-09 실측: 세션 종료마다 20Hz 로 수십 건(88건), 그 중 55건이
+        살아 있는 링크에 실제 STOP 프레임을 썼다. mapping_motion_sink._stop 은
+        같은 이유로 이미 같은 가드를 둔다 -- 그쪽 주석이 대가를 적어뒀다.
+        """
+
+        service, runtime, motion = self._interlocked_service()
+        runtime.stop_reasons.clear()
+
+        for _ in range(20):
+            service.apply_motion_command(motion)
+
+        self.assertEqual(
+            runtime.stop_reasons.count("MOTION_INTERLOCK"),
+            1,
+            "인터락 STOP 은 램프다운 한 번에 한 번만 나가야 한다",
+        )
+
+    def test_interlock_stop_is_retried_until_it_lands(self) -> None:
+        """실패한 STOP 을 전달됐다고 기억하면 섀시가 명령 없이 남는다."""
+
+        service, runtime, motion = self._interlocked_service()
+        runtime.stop_reasons.clear()
+        runtime.stop_error = RuntimeError("serial closed")
+
+        service.apply_motion_command(motion)
+        service.apply_motion_command(motion)
+        runtime.stop_error = None
+        service.apply_motion_command(motion)
+        service.apply_motion_command(motion)
+
+        # 실패 2회는 기록하지 않으므로 계속 재시도하고, 세 번째에 전달된다.
+        # 네 번째는 이미 전달됐으므로 다시 쓰지 않는다.
+        self.assertEqual(runtime.stop_reasons.count("MOTION_INTERLOCK"), 3)
+
+    def test_reauthorized_motion_rearms_the_interlock_stop(self) -> None:
+        """다음 순찰이 끝날 때는 STOP 이 다시 나가야 한다.
+
+        플래그를 한 번 세우고 두면 두 번째 순찰의 램프다운은 STOP 없이 지나간다.
+        """
+
+        service, runtime, motion = self._interlocked_service()
+        service.apply_motion_command(motion)
+
+        # 다시 순찰을 인가하고 명령을 하나 받아들인다.
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=96)
+        service.apply_motion_command(motion)
+        runtime.simulate_connection()
+        runtime.stop_reasons.clear()
+
+        service.apply_motion_command(motion)
+        service.apply_motion_command(motion)
+
+        self.assertEqual(runtime.stop_reasons.count("MOTION_INTERLOCK"), 1)
+
     def test_runtime_safety_fault_cleans_nav_lease_and_notifies_ai_owner(
         self,
     ) -> None:
