@@ -4,7 +4,11 @@ from pathlib import Path
 
 import yaml
 
-from aiot_robot.ros_config import build_nav2_values, render_nav2_config
+from aiot_robot.ros_config import (
+    MODE_PROFILES,
+    build_nav2_values,
+    render_nav2_config,
+)
 
 
 class RosConfigTest(unittest.TestCase):
@@ -151,6 +155,83 @@ class RosConfigTest(unittest.TestCase):
             self.assertEqual(parameters["height"], 20)
             self.assertTrue(parameters["rolling_window"])
             self.assertEqual(parameters["plugins"], ["inflation_layer"])
+
+    def test_preloads_mapping_and_patrol_planner_profiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "nav2.yaml"
+            template = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / "ros"
+                / "nav2.params.yaml.template"
+            )
+
+            render_nav2_config(template, output, self.environment())
+            planner = yaml.safe_load(output.read_text(encoding="utf-8"))[
+                "planner_server"
+            ]["ros__parameters"]
+
+            self.assertEqual(
+                planner["planner_plugins"],
+                ["GridBased", "MappingGridBased", "PatrolGridBased"],
+            )
+            for mode, plugin_id in (
+                ("mapping", "MappingGridBased"),
+                ("patrol", "PatrolGridBased"),
+            ):
+                with self.subTest(mode=mode):
+                    plugin = planner[plugin_id]
+                    self.assertEqual(
+                        plugin["plugin"],
+                        "nav2_smac_planner/SmacPlannerHybrid",
+                    )
+                    for dotted, expected in MODE_PROFILES[mode][
+                        "/planner_server"
+                    ].items():
+                        self.assertEqual(
+                            plugin[dotted.split(".", 1)[1]], expected
+                        )
+
+    def test_preloads_mapping_and_patrol_goal_checkers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "nav2.yaml"
+            template = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / "ros"
+                / "nav2.params.yaml.template"
+            )
+
+            render_nav2_config(template, output, self.environment())
+            controller = yaml.safe_load(output.read_text(encoding="utf-8"))[
+                "controller_server"
+            ]["ros__parameters"]
+
+            self.assertEqual(
+                controller["goal_checker_plugins"],
+                [
+                    "general_goal_checker",
+                    "mapping_goal_checker",
+                    "patrol_goal_checker",
+                ],
+            )
+            for mode, plugin_id in (
+                ("mapping", "mapping_goal_checker"),
+                ("patrol", "patrol_goal_checker"),
+            ):
+                with self.subTest(mode=mode):
+                    checker = controller[plugin_id]
+                    self.assertEqual(
+                        checker["plugin"],
+                        "nav2_controller::SimpleGoalChecker",
+                    )
+                    self.assertEqual(checker["xy_goal_tolerance"], 0.2)
+                    self.assertEqual(
+                        checker["yaw_goal_tolerance"],
+                        MODE_PROFILES[mode]["/controller_server"][
+                            "general_goal_checker.yaw_goal_tolerance"
+                        ],
+                    )
 
     def test_rejects_missing_or_invalid_fixed_initial_pose(self):
         for name, value, message in (

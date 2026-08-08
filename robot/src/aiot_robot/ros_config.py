@@ -22,6 +22,32 @@ FIELD_VARIABLES = (
 DEFAULT_NAV2_XY_GOAL_TOLERANCE_M = 0.20
 
 
+# Nav2 starts with both profiles registered. Mapping startup verifies these
+# values but does not mutate an active planner at runtime.
+MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
+    "mapping": {
+        "/planner_server": {
+            "GridBased.motion_model_for_search": "REEDS_SHEPP",
+            "GridBased.reverse_penalty": 1.3,
+            "GridBased.cache_obstacle_heuristic": False,
+        },
+        "/controller_server": {
+            "general_goal_checker.yaw_goal_tolerance": 3.15,
+        },
+    },
+    "patrol": {
+        "/planner_server": {
+            "GridBased.motion_model_for_search": "DUBIN",
+            "GridBased.reverse_penalty": 2.1,
+            "GridBased.cache_obstacle_heuristic": True,
+        },
+        "/controller_server": {
+            "general_goal_checker.yaw_goal_tolerance": 0.35,
+        },
+    },
+}
+
+
 def missing_field_variables(environment: Mapping[str, str]) -> list[str]:
     return [name for name in FIELD_VARIABLES if not environment.get(name, "").strip()]
 
