@@ -458,7 +458,7 @@
    기존 크기 그대로고, 좁아지면 지도와 같은 비율로 함께 줄어든다 */
 .r0ki .cmovl{position:absolute;z-index:2;display:flex;flex-direction:column;gap:clamp(4px,.9cqw,8px);
   --ovl-gap:clamp(6px,1.3cqw,12px)}
-.r0ki .cmovl.tl{left:var(--ovl-gap);top:var(--ovl-gap)}
+.r0ki .cmovl.cmovl-tl{left:var(--ovl-gap);top:var(--ovl-gap);gap:clamp(6px,1.1cqw,10px)}
 .r0ki .cmovl.tr{right:var(--ovl-gap);top:var(--ovl-gap);align-items:flex-end}
 .r0ki .cmovl.bl{left:var(--ovl-gap);bottom:clamp(4px,.9cqw,8px)}
 /* 우측 하단 — 좌측 하단 범례와 같은 높이로 모서리에 붙인다.
@@ -510,27 +510,13 @@
 .r0ki .cam{position:relative;margin-top:var(--s4);border-radius:var(--r-inner);overflow:hidden;aspect-ratio:16/10;
   background:#1B2836;border:1px solid var(--edge);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 6px 16px rgba(12,40,74,.18)}
-.r0ki .cam svg{display:block;width:100%;height:100%}
 .r0ki .cam .camstream{display:block;width:100%;height:100%;object-fit:contain;background:#07101a}
-.r0ki .cam .camstate{position:absolute;top:8px;left:10px;padding:3px 7px;border-radius:999px;
-  background:rgba(3,15,25,.72);color:#DCEBF8;font-size:8px;font-weight:700;letter-spacing:.02em;
-  backdrop-filter:blur(5px)}
+.r0ki .cam .cam-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  z-index:2;color:rgba(255,255,255,.75);font-size:14px;font-weight:500;text-align:center;
+  pointer-events:none}
 .r0ki .cam .rec{position:absolute;top:9px;right:10px;width:8px;height:8px;border-radius:50%;background:#FF5B5B;
   box-shadow:0 0 10px rgba(255,91,91,.85);animation:r0ki-pulse 1.8s var(--e-glass) infinite}
 .r0ki .cam .rec.paused{background:#8190A0;box-shadow:none;animation:none}
-@keyframes r0ki-scan{0%{transform:translateY(0)}100%{transform:translateY(197px)}}
-.r0ki .scanline{animation:r0ki-scan 3.6s linear infinite}
-@keyframes r0ki-bflick{0%,92%{opacity:1}94%,100%{opacity:.45}}
-.r0ki .bbox{animation:r0ki-bflick 3.2s steps(1,end) infinite}
-@keyframes r0ki-subdrift{0%,100%{transform:translateX(0)}50%{transform:translateX(7px)}}
-.r0ki .camsub{animation:r0ki-subdrift 8s var(--e-glass) infinite}
-.r0ki .camnow{display:flex;align-items:center;gap:var(--s4);margin-top:var(--s4)}
-.r0ki .cn{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text-2)}
-.r0ki .cn b{font-size:16px;font-weight:700;color:var(--text-1)}
-.r0ki .cnu{color:var(--urgent-text);font-weight:700}
-.r0ki .cnu b{color:var(--urgent-text)}
-.r0ki .cn .dot{width:7px;height:7px;border-radius:50%;flex:none}
-.r0ki .cnr{margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text-3)}
 
 /* ══ 최근 순찰 이력 ══ */
 .r0ki .hist{flex:1;overflow-y:auto;min-height:0;padding-right:6px;position:relative}
