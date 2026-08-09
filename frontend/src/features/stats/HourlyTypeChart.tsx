@@ -25,14 +25,20 @@ export const HOURLY_SERIES = [
 /** 시리즈명 → 명도 (툴팁 마커 공유용) */
 export const HOURLY_OPACITIES = Object.fromEntries(HOURLY_SERIES.map((s) => [s.key, s.opacity]))
 
-export function HourlyTypeChart({ data }: { data: HourlyEventStat[] }) {
+export function HourlyTypeChart({
+  data,
+  includeA11yTable = true,
+}: {
+  data: HourlyEventStat[]
+  includeA11yTable?: boolean
+}) {
   const withTotal = data.map((d) => ({ ...d, total: d.주차 + d.쓰레기 }))
 
   return (
     <div className="st-chart">
       <ResponsiveContainer width="100%" height="100%">
         {/* 8칸 기준: 막대 간격만 소폭 조정(높이·패널 크기는 CSS 그대로) */}
-        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 0, left: -26 }} barCategoryGap="18%">
+        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 8, left: -26 }} barCategoryGap="18%">
           <CartesianGrid vertical={false} stroke="var(--hair)" strokeDasharray="4 4" />
           <XAxis
             dataKey="slot"
@@ -81,23 +87,25 @@ export function HourlyTypeChart({ data }: { data: HourlyEventStat[] }) {
         </BarChart>
       </ResponsiveContainer>
 
-      <table className="sr-only">
-        <caption>시간대별 유형별 이벤트 발생 건수</caption>
-        <thead>
-          <tr>
-            <th scope="col">시간대</th>
-            <th scope="col">주차</th><th scope="col">쓰레기</th><th scope="col">합계</th>
-          </tr>
-        </thead>
-        <tbody>
-          {withTotal.map((d) => (
-            <tr key={d.slot}>
-              <th scope="row">{d.slot}</th>
-              <td>{d.주차}</td><td>{d.쓰레기}</td><td>{d.total}</td>
+      {includeA11yTable && (
+        <table className="sr-only">
+          <caption>시간대별 유형별 이벤트 발생 건수</caption>
+          <thead>
+            <tr>
+              <th scope="col">시간대</th>
+              <th scope="col">주차</th><th scope="col">쓰레기</th><th scope="col">합계</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {withTotal.map((d) => (
+              <tr key={d.slot}>
+                <th scope="row">{d.slot}</th>
+                <td>{d.주차}</td><td>{d.쓰레기}</td><td>{d.total}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }

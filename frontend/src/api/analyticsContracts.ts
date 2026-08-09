@@ -92,7 +92,7 @@ export type AnalyticsByZoneItem = {
   topEventType: string | null
 }
 
-/** insights — 직전 완료 주/월 AI 리포트 */
+/** insights — 주/월 AI 리포트 (periodKey로 특정 구간 지정 가능) */
 export type AnalyticsInsightPeriodType = 'WEEK' | 'MONTH'
 
 export type AnalyticsInsightGenerationStatus =

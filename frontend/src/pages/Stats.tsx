@@ -1,19 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { R0KiDropdown } from '../components/ui/R0KiDropdown'
-import { InsightReportPanel } from '../features/stats/InsightReportPanel'
+import {
+  formatInsightPeriodRange,
+  InsightReportPanel,
+} from '../features/stats/InsightReportPanel'
 import { RAMP } from '../features/stats/chartTheme'
 import { EventTrendChart } from '../features/stats/EventTrendChart'
 import { HandlingChart, HANDLING_OPACITIES } from '../features/stats/HandlingChart'
 import { HourlyTypeChart, HOURLY_SERIES } from '../features/stats/HourlyTypeChart'
 import { ZonePieChart } from '../features/stats/ZonePieChart'
+import { exportStatsPdf } from '../features/stats/exportStatsPdf'
+import { formatHandleMinutes } from '../features/stats/mapAnalyticsToStats'
+import { parseInsightMarkdown } from '../features/stats/parseInsightMarkdown'
+import { resolveInsightPeriod } from '../features/stats/resolveInsightPeriod'
+import { useAnalyticsInsight } from '../features/stats/useAnalyticsInsight'
 import { useStats, useStatsPeriodLabel } from '../features/stats/useStats'
 import type { StatsUnit } from '../features/stats/resolveAnalyticsRange'
-import { downloadCsv } from '../lib/downloadCsv'
 
 /* R0-Ki 통계 — 시안 R0Ki-stats 그대로.
-   기간: 주/월 단위 + 화살표로 과거 구간 이동 (차트만, AI 리포트는 독립). */
+   기간: 주/월/분기/연. AI·PDF는 주/월(+완료 구간)만. */
 
 const UNIT_OPTIONS = [
   { value: 'week', label: '주 단위' },
@@ -37,12 +44,20 @@ export default function Stats() {
   const [offset, setOffset] = useState(0)
   const [zone, setZone] = useState('')
   const periodLabel = useStatsPeriodLabel(unit, offset)
+  const insightPeriod = useMemo(() => resolveInsightPeriod(unit, offset), [unit, offset])
+  const canExportPdf = unit === 'week' || unit === 'month'
   const { data, isLoading, error, refetch } = useStats({
     unit,
     offset,
     zone: zone || 'all',
   })
+  const insightQuery = useAnalyticsInsight(
+    insightPeriod?.periodType ?? 'WEEK',
+    insightPeriod?.periodKey,
+    Boolean(insightPeriod?.isComplete),
+  )
   const [toast, setToast] = useState<string>()
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (!toast) return
@@ -56,29 +71,50 @@ export default function Stats() {
     setOffset(0)
   }
 
-  const onExport = () => {
-    if (!data) return
-    const rows: (string | number)[][] = [
-      ['구분', '항목', '값'],
-      ['기간', periodLabel, ''],
-      ['KPI', '총 순찰 횟수', data.summary.totalPatrols],
-      ['KPI', '총 이벤트', data.summary.totalEvents],
-      ['KPI', '평균 처리시간(분)', data.summary.avgHandleMin],
-      [],
-      ['이벤트 추이', '기간', '건수'],
-      ...data.daily.map((d) => ['', d.date, d.count]),
-      [],
-      ['시간대별 이벤트(유형별)', '시간대', '주차', '쓰레기'],
-      ...data.hourly.map((h) => ['', h.slot, h.주차, h.쓰레기]),
-      [],
-      ['처리 현황', '항목', '처리(건)', '미처리(건)', '처리율(%)'],
-      ...data.handling.map((h) => ['', h.label, h.handled, h.pending, h.handledPct]),
-      [],
-      ['구역별 이벤트 비율', '구역', '건수', '비율(%)'],
-      ...data.zones.map((z) => ['', z.zone, z.count, z.pct]),
-    ]
-    downloadCsv('patrol-stats.csv', rows)
-    setToast('CSV를 내보냈습니다')
+  const onExportPdf = async () => {
+    if (!data || !canExportPdf) return
+    setExporting(true)
+    try {
+      const insightSections =
+        insightQuery.data?.generationStatus === 'COMPLETED' && insightQuery.data.insightContent
+          ? parseInsightMarkdown(insightQuery.data.insightContent)
+          : []
+
+      let emptyMessage = '표시할 AI 리포트가 없습니다.'
+      if (!insightPeriod) emptyMessage = '주·월 단위에서만 AI 리포트가 제공됩니다.'
+      else if (!insightPeriod.isComplete)
+        emptyMessage = '진행 중인 기간에는 AI 리포트가 아직 없습니다. 완료된 과거 기간을 선택해 주세요.'
+      else if (insightQuery.isLoading || insightQuery.isPolling)
+        emptyMessage = 'AI 리포트를 생성·불러오는 중입니다. 완료 후 다시 내보내 주세요.'
+      else if (insightQuery.isError) emptyMessage = insightQuery.error?.message ?? emptyMessage
+
+      await exportStatsPdf({
+        periodLabel,
+        periodKey: insightPeriod?.periodKey,
+        trendTitle: '이벤트 추이',
+        trendPrevLabel: '전일',
+        summary: data.summary,
+        daily: data.daily,
+        hourly: data.hourly,
+        zones: data.zones,
+        handling: data.handling,
+        themeRoot: document.querySelector('.r0ki'),
+        insight: {
+          periodLabel: insightPeriod?.label ?? periodLabel,
+          periodKey: insightPeriod?.periodKey,
+          periodRange: insightQuery.data
+            ? formatInsightPeriodRange(insightQuery.data.periodFrom, insightQuery.data.periodTo)
+            : undefined,
+          sections: insightSections,
+          emptyMessage,
+        },
+      })
+      setToast('PDF를 내보냈습니다')
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : 'PDF 내보내기에 실패했습니다')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const last = data?.daily[data.daily.length - 1]
@@ -96,7 +132,13 @@ export default function Stats() {
     ? [
         { k: '총 순찰 횟수', v: data.summary.totalPatrols, u: '회', d: data.summary.deltas?.patrols, ar: '▲' },
         { k: '총 이벤트', v: data.summary.totalEvents, u: '건', d: data.summary.deltas?.events, ar: '▲' },
-        { k: '평균 처리시간', v: data.summary.avgHandleMin, u: '분', d: data.summary.deltas?.handle, ar: '▼' },
+        {
+          k: '평균 처리시간',
+          v: formatHandleMinutes(data.summary.avgHandleMin),
+          u: '',
+          d: data.summary.deltas?.handle,
+          ar: '▼',
+        },
       ]
     : []
 
@@ -138,10 +180,17 @@ export default function Stats() {
               <svg viewBox="0 0 24 24"><path d="M9 5.5 15.5 12 9 18.5" /></svg>
             </button>
             <R0KiDropdown allLabel="구역: 전체" options={ZONE_OPTIONS} value={zone} onChange={setZone} />
-            <button type="button" className="btn btn-s btn-add" onClick={onExport} disabled={!data}>
-              <svg viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 19h16" /></svg>
-              CSV 내보내기
-            </button>
+            {canExportPdf && (
+              <button
+                type="button"
+                className="btn btn-s btn-add"
+                onClick={() => void onExportPdf()}
+                disabled={!data || exporting}
+              >
+                <svg viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 19h16" /></svg>
+                {exporting ? 'PDF 생성 중…' : 'PDF 내보내기'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -237,11 +286,29 @@ export default function Stats() {
               </div>
             </div>
 
-            <InsightReportPanel />
+            <InsightReportPanel
+              insightPeriod={insightPeriod}
+              data={insightQuery.data}
+              isLoading={insightQuery.isLoading}
+              isPolling={insightQuery.isPolling}
+              isError={insightQuery.isError}
+              error={insightQuery.error}
+              onRetry={insightQuery.refetch}
+            />
           </div>
         )}
 
-        {(error || !data) && <InsightReportPanel />}
+        {(error || !data) && (
+          <InsightReportPanel
+            insightPeriod={insightPeriod}
+            data={insightQuery.data}
+            isLoading={insightQuery.isLoading}
+            isPolling={insightQuery.isPolling}
+            isError={insightQuery.isError}
+            error={insightQuery.error}
+            onRetry={insightQuery.refetch}
+          />
+        )}
       </div>
 
       <div className={`toast${toast ? ' on' : ''}`} role="status" aria-live="polite">

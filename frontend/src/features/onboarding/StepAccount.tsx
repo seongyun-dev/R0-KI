@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { authApi } from '../../api/services'
 import { useComplexSearch } from '../auth/useComplexSearch'
 import { formatPhone } from '../../lib/formatters'
 import type { SignUpRequest } from '../../api/contracts'
@@ -14,16 +15,32 @@ export type StepAccountProps = {
   errorMessage?: string
 }
 
+type EmailNotice = {
+  kind: 'success' | 'error'
+  target: 'send' | 'verify'
+  message: string
+}
+
 // 목업 중복 데이터 — 서버 연동 시 API 교체 (Signup 과 동일 기준)
 const normalize = (s: string) => s.trim().replace(/\s+/g, '')
+const isEmailValid = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
 
 /** Step 1/3 — 계정·단지 (1u). R0Kiauth 시안 pNew: 이미 등록된 단지면 안내 배너 */
 export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [passwordError, setPasswordError] = useState<string>()
+  const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [passwordConfirmError, setPasswordConfirmError] = useState<string>()
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [emailCode, setEmailCode] = useState('')
+  const [isEmailCodeSent, setIsEmailCodeSent] = useState(false)
+  const [isEmailVerified, setIsEmailVerified] = useState(false)
+  const [isSendingEmail, setIsSendingEmail] = useState(false)
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false)
+  const [emailNotice, setEmailNotice] = useState<EmailNotice>()
   const [zipcode, setZipcode] = useState('')
   const [complexName, setComplexName] = useState('')
   const [address, setAddress] = useState('')
@@ -49,11 +66,28 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
       return
     }
     setPasswordError(undefined)
+
+    if (password !== passwordConfirm) {
+      setPasswordConfirmError('비밀번호가 일치하지 않습니다.')
+      return
+    }
+
+    setPasswordConfirmError(undefined)
+    if (!isEmailVerified) {
+      setEmailNotice({
+        kind: 'error',
+        target: isEmailCodeSent ? 'verify' : 'send',
+        message: '이메일 인증을 완료해주세요.',
+      })
+      return
+    }
+
     const request: SignUpRequest = {
       username: username.trim(),
       password,
       name,
       phoneNumber: phone,
+      email: email.trim(),
       apartment: {
         name: complexName,
         postalCode: zipcode,
@@ -61,6 +95,64 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
       },
     }
     onNext(request)
+  }
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value)
+    setEmailCode('')
+    setIsEmailCodeSent(false)
+    setIsEmailVerified(false)
+    setEmailNotice(undefined)
+  }
+
+  const handleSendEmail = async () => {
+    const normalizedEmail = email.trim()
+    if (!isEmailValid(normalizedEmail) || isSendingEmail) return
+
+    setIsSendingEmail(true)
+    setEmailCode('')
+    setIsEmailCodeSent(false)
+    setIsEmailVerified(false)
+    setEmailNotice(undefined)
+
+    try {
+      const response = await authApi.sendEmailVerification({ email: normalizedEmail })
+      setIsEmailCodeSent(true)
+      setEmailNotice({ kind: 'success', target: 'send', message: response.message })
+    } catch (error) {
+      setEmailNotice({
+        kind: 'error',
+        target: 'send',
+        message: error instanceof Error ? error.message : '이메일 인증번호 발송에 실패했습니다.',
+      })
+    } finally {
+      setIsSendingEmail(false)
+    }
+  }
+
+  const handleVerifyEmail = async () => {
+    if (emailCode.length !== 6 || isVerifyingEmail) return
+
+    setIsVerifyingEmail(true)
+    setEmailNotice(undefined)
+
+    try {
+      const response = await authApi.verifyEmail({
+        email: email.trim(),
+        code: emailCode,
+      })
+      setIsEmailVerified(true)
+      setEmailNotice({ kind: 'success', target: 'verify', message: response.message })
+    } catch (error) {
+      setIsEmailVerified(false)
+      setEmailNotice({
+        kind: 'error',
+        target: 'verify',
+        message: error instanceof Error ? error.message : '이메일 인증에 실패했습니다.',
+      })
+    } finally {
+      setIsVerifyingEmail(false)
+    }
   }
 
   const handlePostcodeSearch = async () => {
@@ -104,8 +196,18 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
             type="password"
             value={password}
             onChange={(e) => {
-              setPassword(e.target.value)
+              const value = e.target.value
+
+              setPassword(value)
               setPasswordError(undefined)
+
+              if (passwordConfirm) {
+                setPasswordConfirmError(
+                  value === passwordConfirm
+                    ? undefined
+                    : '비밀번호가 일치하지 않습니다.',
+                )
+              }
             }}
             placeholder="비밀번호 입력"
             autoComplete="new-password"
@@ -129,6 +231,47 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
           />
         </div>
 
+        <div className={passwordConfirmError ? 'au-row bad' : 'au-row'}>
+          <label className="au-lab" htmlFor="ob-pw-confirm">
+            비밀번호 확인<span className="req">*</span>
+          </label>
+
+          <input
+            className={passwordConfirmError ? 'au-in bad' : 'au-in'}
+            id="ob-pw-confirm"
+            type="password"
+            value={passwordConfirm}
+            onChange={(e) => {
+              const value = e.target.value
+              setPasswordConfirm(value)
+
+              if (!value) {
+                setPasswordConfirmError(undefined)
+                return
+              }
+
+              setPasswordConfirmError(
+                password === value
+                  ? undefined
+                  : '비밀번호가 일치하지 않습니다.',
+              )
+            }}
+            placeholder="비밀번호 다시 입력"
+            autoComplete="new-password"
+            required
+          />
+
+          {passwordConfirm && !passwordConfirmError && (
+            <p className="au-help">비밀번호가 일치합니다.</p>
+          )}
+
+          {passwordConfirmError && (
+            <p className="au-err" role="alert">
+              {passwordConfirmError}
+            </p>
+          )}
+        </div>
+
         <div className="au-row">
           <label className="au-lab" htmlFor="ob-phone">전화번호<span className="req">*</span></label>
           <input
@@ -141,6 +284,92 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
             required
           />
         </div>
+
+        <div className="au-row">
+          <label className="au-lab" htmlFor="ob-email">
+            이메일<span className="req">*</span>
+          </label>
+
+          <div className="au-pair">
+            <input
+              className="au-in"
+              id="ob-email"
+              type="email"
+              value={email}
+              onChange={(e) => handleEmailChange(e.target.value)}
+              placeholder="example@email.com"
+              autoComplete="email"
+              disabled={isSendingEmail || isVerifyingEmail}
+              required
+            />
+
+            <button
+              type="button"
+              className="btn btn-s"
+              onClick={handleSendEmail}
+              disabled={!isEmailValid(email) || isSendingEmail || isEmailVerified}
+            >
+              {isSendingEmail ? '발송 중…' : '인증'}
+            </button>
+          </div>
+
+          <p className="au-help">
+            본인 확인을 위한 이메일 인증이 필요합니다.
+          </p>
+          {emailNotice?.target === 'send' && emailNotice.message && (
+            <p
+              className={emailNotice.kind === 'success' ? 'au-ok' : 'au-err'}
+              role={emailNotice.kind === 'success' ? 'status' : 'alert'}
+            >
+              {emailNotice.message}
+            </p>
+          )}
+        </div>
+
+        {isEmailCodeSent && (
+          <div className="au-row au-email-code">
+            <label className="au-lab" htmlFor="ob-email-code">
+              인증번호<span className="req">*</span>
+            </label>
+
+            <div className="au-pair">
+              <input
+                className="au-in num"
+                id="ob-email-code"
+                value={emailCode}
+                onChange={(e) => {
+                  setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                  if (emailNotice?.target === 'verify') setEmailNotice(undefined)
+                }}
+                placeholder="6자리 숫자"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                autoComplete="one-time-code"
+                disabled={isVerifyingEmail || isEmailVerified}
+                required
+              />
+
+              <button
+                type="button"
+                className="btn btn-s"
+                onClick={handleVerifyEmail}
+                disabled={emailCode.length !== 6 || isVerifyingEmail || isEmailVerified}
+              >
+                {isEmailVerified ? '완료' : isVerifyingEmail ? '확인 중…' : '확인'}
+              </button>
+            </div>
+
+            {emailNotice?.target === 'verify' && emailNotice.message && (
+              <p
+                className={emailNotice.kind === 'success' ? 'au-ok' : 'au-err'}
+                role={emailNotice.kind === 'success' ? 'status' : 'alert'}
+              >
+                {emailNotice.message}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="au-sec">아파트단지 정보</div>
@@ -219,7 +448,11 @@ export function StepAccount({ onNext, isSubmitting, errorMessage }: StepAccountP
         <span className="grow" />
         {/* 이 버튼으로 계정 등록이 끝난다(POST /api/auth/signup).
             로봇·지도는 이어지는 단계라 여기서 "다음"이 아니라 "완료"로 끊는다. */}
-        <button type="submit" className="btn btn-p btn-add" disabled={isSubmitting}>
+        <button
+          type="submit"
+          className="btn btn-p btn-add"
+          disabled={isSubmitting || !isEmailVerified}
+        >
           {isSubmitting ? '등록 중…' : '회원가입 완료'}
           <svg viewBox="0 0 24 24"><path d="m5 13 4.5 4.5L19 7" /></svg>
         </button>

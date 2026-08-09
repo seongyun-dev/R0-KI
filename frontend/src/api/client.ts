@@ -107,6 +107,49 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return unwrapEnvelope(body) as T
 }
 
+export type ApiMessageResponse<T> = {
+  data: T
+  message: string
+}
+
+// 성공·실패 여부와 함께 서버의 안내 문구를 화면에 그대로 표시해야 하는 요청에 사용한다.
+export async function apiRequestWithMessage<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<ApiMessageResponse<T>> {
+  const isFormData = init.body instanceof FormData
+  const headers = new Headers(init.headers)
+  headers.set('Accept', 'application/json')
+  if (!isFormData && init.body) headers.set('Content-Type', 'application/json')
+  const auth = authHeaders()
+  if (auth && !headers.has('Authorization')) headers.set('Authorization', auth.Authorization)
+
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    headers,
+  })
+  const body = await readResponse(response)
+  const envelope =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as { success?: unknown; message?: unknown; data?: unknown })
+      : undefined
+  const serverMessage =
+    typeof envelope?.message === 'string' ? envelope.message : undefined
+
+  if (!response.ok || envelope?.success === false) {
+    throw new ApiError(
+      response.status,
+      serverMessage ?? apiErrorMessage(response.status, body),
+      body,
+    )
+  }
+
+  return {
+    data: (envelope && 'data' in envelope ? envelope.data : body) as T,
+    message: serverMessage ?? '',
+  }
+}
+
 export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob> {
   const headers = new Headers()
   const auth = authHeaders()

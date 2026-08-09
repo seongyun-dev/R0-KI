@@ -368,8 +368,11 @@
 .r0ki .cmwrap.pan .cmview{transition:none}
 /* 백엔드 ROS 점유격자 도면 — 원본 회색이 유리 무대에서 얼룩으로 읽힌다.
    회색조로 눌러 톤을 통일하고 투명도를 낮춰 무대 색이 비치게 한다. */
-.r0ki .cmap .mapbase{filter:grayscale(1) contrast(.78) brightness(1.16);opacity:.42}
-.r0ki[data-theme="nocturne"] .cmap .mapbase{filter:grayscale(1) invert(1) contrast(.72) brightness(.9);opacity:.3}
+/* 순찰 상세 지도(.rmap)도 같은 톤으로 깐다 — 스캔 원본을 그대로 깔면 벽선이 새까매서
+   같은 도면인데 화면마다 진하기가 달라 보인다 */
+.r0ki .cmap .mapbase,.r0ki .rmap .mapbase{filter:grayscale(1) contrast(.78) brightness(1.16);opacity:.42}
+.r0ki[data-theme="nocturne"] .cmap .mapbase,
+.r0ki[data-theme="nocturne"] .rmap .mapbase{filter:grayscale(1) invert(1) contrast(.72) brightness(.9);opacity:.3}
 /* 구역 — 온보딩 편집기(.au-zone)와 같은 반투명 레시피로 색을 잇는다 */
 .r0ki .cmz rect{fill:color-mix(in srgb,var(--z) 13%,transparent);
   stroke:color-mix(in srgb,var(--z) 62%,transparent);stroke-width:1.2}
@@ -377,6 +380,36 @@
 .r0ki .cmz text{font-family:var(--sans);font-size:8.5px;font-weight:700;letter-spacing:-.01em;
   fill:var(--text-1);paint-order:stroke;stroke:var(--page);stroke-width:2.4px;stroke-linejoin:round}
 .r0ki .cmz text.mid{font-size:9.5px}
+/* 구역명 아래 보조 표기(순찰 상세의 통과 시각) — 대시보드에는 쓰이지 않는다 */
+.r0ki .cmz text.sub{font-weight:600;fill:var(--text-3)}
+/* 순찰 상세 지도의 구역 라벨.
+   ① 대시보드보다 구역이 촘촘해 글자를 한 단계 줄인다.
+      PatrolDetail 의 ZONE_FS/ZONE_FS_MID/ZONE_FS_SUB 와 같은 값이어야 겹침 판정이 맞는다.
+   ② `.rmap text` 가 파일 뒤쪽에 있어 같은 순위인 `.cmz text` 를 덮어쓴다.
+      색·헤일로·정렬을 여기서 다시 세워 대시보드와 같은 모습을 유지한다. */
+.r0ki .rmap .cmz text{font-size:7px;fill:var(--text-2);text-anchor:middle;
+  paint-order:stroke;stroke:var(--page);stroke-width:2.4px;stroke-linejoin:round}
+.r0ki .rmap .cmz text.mid{font-size:7.5px}
+.r0ki .rmap .cmz text.sub{font-size:6px;fill:var(--text-3)}
+/* 불릿형(좁은 구역)은 불릿 오른쪽에서 시작한다 — CSS 가 presentation attribute 를 이기므로 클래스로 건다 */
+.r0ki .rmap .cmz text.lft{text-anchor:start}
+/* 순찰 이동 경로 — 도면(.mapbase, 42%) 위에 얹히므로 불투명 100% 로 그으면 혼자 튄다.
+   광을 깔지 않고 점선 하나만, 투명도로만 낮춘다. */
+.r0ki .rmap .rroute{fill:none;stroke:var(--graphic);stroke-opacity:.5;stroke-width:4;
+  stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:10 9}
+/* 시작·끝 지점 — 대시보드 체크포인트(.cmwp)와 같은 레시피. 끝점은 비운 원 */
+.r0ki .rmap .rrend{fill:var(--page);stroke:var(--graphic);stroke-opacity:.65;stroke-width:3}
+.r0ki .rmap .rrend.start{fill:var(--graphic);fill-opacity:.85;stroke:#fff;stroke-opacity:.9}
+/* 이벤트 핀 색은 공용 .cmmark 을 그대로 쓴다(--graphic / 응급은 --urgent).
+   ⚠️ 상태 램프(--alert 등)를 채움색으로 쓰면 안 된다. 야간에서 --alert 가 #FFFFFF 라
+      흰 외곽선과 겹쳐 핀 전체가 하얗게 뭉개진다. 램프는 작은 상태 점 전용이다.
+   이름표는 칩(둥근 카드)으로 띄운다 — 구역명은 도면 위 평서 글씨라,
+   색만이 아니라 '카드냐 글씨냐'로 갈려서 한눈에 구분된다(대시보드 .cmcard 와 같은 결). */
+.r0ki .rmap .evlbl rect{fill:var(--focus-in);fill-opacity:.96;stroke:var(--graphic);
+  stroke-opacity:.5;stroke-width:1.6}
+.r0ki .rmap .evlbl text{font-size:12px;font-weight:800;fill:var(--text-1);stroke:none}
+.r0ki .rmap .evlbl.urg rect{stroke:var(--urgent);stroke-opacity:.85}
+.r0ki .rmap .evlbl.urg text{fill:var(--urgent-text)}
 /* 구역 설비 묘사 — 구역 색의 옅은 선/면. 라벨보다 뒤로 물러나야 한다 */
 .r0ki .cmfx line,.r0ki .cmfx rect,.r0ki .cmfx path{fill:none;stroke:var(--z);stroke-opacity:.3;stroke-width:0.9}
 .r0ki .cmfx .fill{fill:var(--z);fill-opacity:.16;stroke-opacity:.24}
@@ -425,7 +458,7 @@
    기존 크기 그대로고, 좁아지면 지도와 같은 비율로 함께 줄어든다 */
 .r0ki .cmovl{position:absolute;z-index:2;display:flex;flex-direction:column;gap:clamp(4px,.9cqw,8px);
   --ovl-gap:clamp(6px,1.3cqw,12px)}
-.r0ki .cmovl.tl{left:var(--ovl-gap);top:var(--ovl-gap)}
+.r0ki .cmovl.cmovl-tl{left:var(--ovl-gap);top:var(--ovl-gap);gap:clamp(6px,1.1cqw,10px)}
 .r0ki .cmovl.tr{right:var(--ovl-gap);top:var(--ovl-gap);align-items:flex-end}
 .r0ki .cmovl.bl{left:var(--ovl-gap);bottom:clamp(4px,.9cqw,8px)}
 /* 우측 하단 — 좌측 하단 범례와 같은 높이로 모서리에 붙인다.
@@ -477,27 +510,13 @@
 .r0ki .cam{position:relative;margin-top:var(--s4);border-radius:var(--r-inner);overflow:hidden;aspect-ratio:16/10;
   background:#1B2836;border:1px solid var(--edge);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 6px 16px rgba(12,40,74,.18)}
-.r0ki .cam svg{display:block;width:100%;height:100%}
 .r0ki .cam .camstream{display:block;width:100%;height:100%;object-fit:contain;background:#07101a}
-.r0ki .cam .camstate{position:absolute;top:8px;left:10px;padding:3px 7px;border-radius:999px;
-  background:rgba(3,15,25,.72);color:#DCEBF8;font-size:8px;font-weight:700;letter-spacing:.02em;
-  backdrop-filter:blur(5px)}
+.r0ki .cam .cam-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  z-index:2;color:rgba(255,255,255,.75);font-size:14px;font-weight:500;text-align:center;
+  pointer-events:none}
 .r0ki .cam .rec{position:absolute;top:9px;right:10px;width:8px;height:8px;border-radius:50%;background:#FF5B5B;
   box-shadow:0 0 10px rgba(255,91,91,.85);animation:r0ki-pulse 1.8s var(--e-glass) infinite}
 .r0ki .cam .rec.paused{background:#8190A0;box-shadow:none;animation:none}
-@keyframes r0ki-scan{0%{transform:translateY(0)}100%{transform:translateY(197px)}}
-.r0ki .scanline{animation:r0ki-scan 3.6s linear infinite}
-@keyframes r0ki-bflick{0%,92%{opacity:1}94%,100%{opacity:.45}}
-.r0ki .bbox{animation:r0ki-bflick 3.2s steps(1,end) infinite}
-@keyframes r0ki-subdrift{0%,100%{transform:translateX(0)}50%{transform:translateX(7px)}}
-.r0ki .camsub{animation:r0ki-subdrift 8s var(--e-glass) infinite}
-.r0ki .camnow{display:flex;align-items:center;gap:var(--s4);margin-top:var(--s4)}
-.r0ki .cn{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text-2)}
-.r0ki .cn b{font-size:16px;font-weight:700;color:var(--text-1)}
-.r0ki .cnu{color:var(--urgent-text);font-weight:700}
-.r0ki .cnu b{color:var(--urgent-text)}
-.r0ki .cn .dot{width:7px;height:7px;border-radius:50%;flex:none}
-.r0ki .cnr{margin-left:auto;font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text-3)}
 
 /* ══ 최근 순찰 이력 ══ */
 .r0ki .hist{flex:1;overflow-y:auto;min-height:0;padding-right:6px;position:relative}
@@ -659,7 +678,11 @@
 .r0ki .btn-stop{color:var(--urgent-text);background:var(--urgent-bg);border:1px solid var(--urgent-edge)}
 .r0ki .btn-stop:hover{border-color:var(--urgent);box-shadow:0 8px 20px rgba(192,39,45,.12)}
 
-/* 표 (목록) — 유리 패널 안에서 내부 스크롤 */
+/* 표 (목록) — 유리 패널 안에서 내부 스크롤.
+   유리 껍데기(.tblshell)와 스크롤러(.tblwrap)는 반드시 서로 다른 엘리먼트여야 한다.
+   .g2 의 ::before(안쪽 링)/::after(면광)는 position:absolute 라서, 스크롤 컨테이너와
+   같은 엘리먼트에 올리면 콘텐츠와 함께 스크롤돼 목록 중간에 가로선으로 찍힌다. */
+.r0ki .tblshell{display:flex;flex-direction:column;flex:1;min-height:0}
 .r0ki .tblwrap{padding:var(--s3) var(--s5) var(--s5);flex:1;min-height:0;overflow-y:auto}
 .r0ki .tblwrap::-webkit-scrollbar{width:6px}
 .r0ki .tblwrap::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
@@ -736,6 +759,15 @@
   box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(255,255,255,.5)}
 .r0ki[data-theme="nocturne"] .st{box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
 .r0ki .st i{width:7px;height:7px;border-radius:50%;flex:none;font-style:normal}
+/* 처리 상태 배지 — 상세 버튼과 동일 (파랑·초록·회청) */
+.r0ki .st[data-status="detected"],
+.r0ki .st[data-status="processing"],
+.r0ki .st[data-status="completed"]{border-color:transparent;color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 1px 4px rgba(6,48,88,.18)}
+.r0ki .st[data-status="detected"]{background:var(--st-patrol)}
+.r0ki .st[data-status="processing"]{background:var(--st-charge)}
+.r0ki .st[data-status="completed"]{background:var(--st-idle)}
+.r0ki .st[data-status] i{background:#fff;opacity:.92}
 
 /* AI 요약 */
 .r0ki .aisum{padding:var(--s3) var(--s6) var(--s4);margin-top:var(--s2)}
@@ -809,6 +841,7 @@
   background:var(--track);border:1px solid var(--edge);flex:none}
 .r0ki .memo .k{display:block;font-size:12.5px;font-weight:600;color:var(--text-3);margin-bottom:6px}
 .r0ki .memo .t{font-size:14.5px;font-weight:600;color:var(--text-1)}
+.r0ki .memo .btn{margin-top:var(--s3);align-self:flex-start}
 
 /* 처리 상태 컨트롤 — 경비원이 직접 변경 */
 .r0ki .actwrap{flex:none;margin-top:auto;padding-top:var(--s4);border-top:1px solid var(--hair)}
@@ -818,11 +851,16 @@
   font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text-2);
   transition:all var(--d-base) var(--e-glass)}
 .r0ki .acts button:hover:not(:disabled){color:var(--text-1)}
-.r0ki .acts button:disabled{cursor:default}
-.r0ki .acts button[aria-pressed="true"]{color:var(--accent-ink,#fff);font-weight:700;
-  background:linear-gradient(180deg,var(--accent-fill-1,var(--accent)),var(--accent-fill-2,var(--accent-2)));
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(5,42,71,.22),0 2px 5px rgba(6,48,88,.42),0 6px 16px var(--accent-glow)}
-.r0ki[data-theme="nocturne"] .acts button[aria-pressed="true"]{color:var(--accent-ink)}
+.r0ki .acts button:disabled{cursor:default;opacity:.55}
+/* 칩용 --detect/--charge/--offline 은 명도만 달라 버튼에선 구분이 안 된다.
+   선택 배경은 로봇 상태 팔레트(파랑·초록·회청)로 상태를 분명히 나눈다. */
+.r0ki .acts button[aria-pressed="true"][data-status]{font-weight:700;color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 2px 8px rgba(6,48,88,.28)}
+.r0ki .acts button[aria-pressed="true"][data-status="detected"]{background:var(--st-patrol)}
+.r0ki .acts button[aria-pressed="true"][data-status="processing"]{background:var(--st-charge)}
+.r0ki .acts button[aria-pressed="true"][data-status="completed"]{background:var(--st-idle)}
+.r0ki[data-theme="nocturne"] .acts button[aria-pressed="true"][data-status]{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 2px 10px rgba(0,0,0,.35)}
 
 /* 커스텀 드롭다운 — 네이티브 select 는 OS 메뉴가 떠서 톤이 깨짐 */
 .r0ki .dd{position:relative}
@@ -1379,7 +1417,11 @@
 /* ── 폼 ── */
 .r0ki .au-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 var(--s5)}
 .r0ki .au-grid .full{grid-column:1/-1}
-@media(max-width:760px){.r0ki .au-grid{grid-template-columns:1fr}}
+.r0ki .au-email-code{grid-column:2}
+@media(max-width:760px){
+  .r0ki .au-grid{grid-template-columns:1fr}
+  .r0ki .au-email-code{grid-column:1}
+}
 .r0ki .au-row{margin-bottom:var(--s5)}
 .r0ki .au-lab{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.01em;color:var(--text-2);margin-bottom:var(--s2)}
 /* 필수 표시 — --urgent 는 응급 전용이라 쓰지 않는다(시안 각주) */

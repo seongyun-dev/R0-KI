@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useClockText } from '../../components/layout/R0KiShell'
 import { cn } from '../../lib/cn'
+import { pinPath, zoneVar } from './mapStyle'
 import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneType } from '../../types/domain'
 
 /* 단지 실시간 지도 (1c) — 백엔드(IoT 스캔 맵) 데이터를 받아 그리는 순수 렌더러.
@@ -27,6 +28,22 @@ const SUB = 2 // 셀당 잔격자 분할 수 — 격자를 잘게 보이게 한�
 const PAD = { l: 11, t: 11, r: 11, b: 11 } // 외곽 라벨·마커가 잘리지 않을 만큼의 여백
 const ZOOM_MAX = 3
 const CORNER = 9 // 순찰 경로 꺾임 반경
+/** 축척 막대용 — 고정 2칸+반올림 대신, 맵 폭에 맞는 “읽기 좋은” 미터를 고른다 */
+const NICE_SCALE_METERS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500] as const
+
+function scaleBar(metersPerCell: number, cols: number, zoom: number) {
+  const worldWidth = metersPerCell * cols
+  const target = Math.min(worldWidth / 6, worldWidth * 0.35)
+  let meters: number = NICE_SCALE_METERS[0]
+  for (const candidate of NICE_SCALE_METERS) {
+    if (candidate <= target) meters = candidate
+    else break
+  }
+  return {
+    length: (meters / metersPerCell) * CELL * zoom,
+    label: meters < 1 ? `${Math.round(meters * 100)}cm` : `${meters}미터`,
+  }
+}
 
 /** 이벤트 핀 색 — 긴급만 --urgent, 나머지는 명도 램프 */
 const toneVar: Record<Tone, string> = {
@@ -37,15 +54,7 @@ const toneVar: Record<Tone, string> = {
   neutral: 'var(--offline)',
 }
 
-/** 구역 색 — 온보딩 StepZones 와 동일 매핑 */
-const zoneTone: Record<ZoneType, string> = {
-  주차장: 'patrol',
-  분리수거장: 'charge',
-  출입구: 'detect',
-  도착지: 'offline',
-  기타: 'offline',
-}
-const zoneVar = (type: ZoneType) => ({ '--z': `var(--${zoneTone[type]})` }) as CSSProperties
+/* 구역 색 매핑은 순찰 상세 지도와 공유한다 — zoneStyle.ts */
 
 type Pt = { x: number; y: number }
 
@@ -69,15 +78,6 @@ function roundedPath(pts: Pt[], r: number) {
   }
   const last = pts[pts.length - 1]
   return `${d} L${last.x} ${last.y}`
-}
-
-/** 지도 마커(물방울) — 팁이 원점, 위로 부풀어 오르는 풍선. 접선점을 계산해 꼬리를 잇는다 */
-function pinPath(r: number, h: number) {
-  const len = Math.sqrt(h * h - r * r)
-  const a = Math.asin(r / h)
-  const tx = len * Math.sin(a)
-  const ty = -len * Math.cos(a)
-  return `M0 0 L${tx.toFixed(2)} ${ty.toFixed(2)} A${r} ${r} 0 1 0 ${(-tx).toFixed(2)} ${ty.toFixed(2)} Z`
 }
 
 /** 라벨 폭 추정 — 한글은 폰트 크기만큼, 라틴·숫자는 약 0.56배. 카드 크기 계산용 */
@@ -130,7 +130,7 @@ function Callout({
 
 /** 구역 내부 설비 묘사 — 유형에서 유도되는 것만 그린다(없는 데이터를 지어내지 않는다).
     구역이 작으면 생략해 뭉개짐을 피한다. */
-function ZoneDetail({ type, x, y, w, h }: { type: ZoneType; x: number; y: number; w: number; h: number }) {
+export function ZoneDetail({ type, x, y, w, h }: { type: ZoneType; x: number; y: number; w: number; h: number }) {
   const inset = 7
   const ix = x + inset
   const iy = y + inset
@@ -362,7 +362,9 @@ export function ComplexMap({
     : 0
   const cpLabel = (c: MapCheckpoint, i: number) => (c.label ? `${i + 1}번 · ${c.label}` : `${i + 1}번`)
   const hasUrgentPin = pins.some((p) => p.tone === 'danger')
-  const scaleLen = px(2) * view.k
+  const scale = map.metersPerCell != null
+    ? scaleBar(map.metersPerCell, map.cols, view.k)
+    : null
   /* 우측 하단에 조작키를 얹으면 축척을 그만큼 왼쪽으로 비켜 그린다.
      조작키도 지도 폭에 비례(cqw)해 커지므로 viewBox 기준 고정값으로 맞아떨어진다 */
   const scaleShift = bottomRight ? 118 : 0
@@ -629,26 +631,26 @@ export function ComplexMap({
           </g>
         </g>
 
-        {/* 축척 — 확대해도 실제 거리를 유지하도록 배율만큼 늘린다.
+        {/* 축척 — nice 미터를 고르고 막대 길이를 그에 맞춘다(줌 배율 포함).
            백엔드 resolution 이 있을 때만 그린다(지어내지 않음) */}
-        {map.metersPerCell != null && (
+        {scale && (
           <g
             className="cmscale"
-            transform={`translate(${VW - PAD.r - scaleLen - scaleShift},${VH - 12})`}
+            transform={`translate(${VW - PAD.r - scale.length - scaleShift},${VH - 12})`}
             aria-hidden
           >
-            <line x1="0" y1="0" x2={scaleLen} y2="0" />
+            <line x1="0" y1="0" x2={scale.length} y2="0" />
             <line x1="0" y1="-3" x2="0" y2="3" />
-            <line x1={scaleLen} y1="-3" x2={scaleLen} y2="3" />
-            <text x={scaleLen / 2} y="-6" textAnchor="middle">
-              {Math.round(map.metersPerCell * 2)}미터
+            <line x1={scale.length} y1="-3" x2={scale.length} y2="3" />
+            <text x={scale.length / 2} y="-6" textAnchor="middle">
+              {scale.label}
             </text>
           </g>
         )}
       </svg>
 
       {/* ── 오버레이 — 확대해도 크기가 고정돼야 하는 조작·표기 ── */}
-      <div className="cmovl tl">
+      <div className="cmovl cmovl-tl">
         <button type="button" className="cmbtn" onClick={() => zoomBy(1.5)} disabled={view.k >= ZOOM_MAX} aria-label="지도 확대">
           <svg viewBox="0 0 16 16" aria-hidden>
             <path d="M8 3.4V12.6M3.4 8H12.6" />
