@@ -37,7 +37,11 @@ public enum ErrorCode {
     ROBOT_NOT_READY(HttpStatus.CONFLICT, "ROBOT_003", "로봇의 통신 또는 모듈 상태가 순찰 가능한 상태가 아닙니다."),
     EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EVENT_001", "존재하지 않는 이벤트입니다."),
     FILE_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "EVENT_003", "파일 저장 중 오류가 발생했습니다."),
-    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTI_001", "존재하지 않는 알림입니다.");
+    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTI_001", "존재하지 않는 알림입니다."),
+    RESIDENT_NOT_FOUND(HttpStatus.NOT_FOUND, "RESIDENT_001", "존재하지 않는 입주민입니다."),
+    RESIDENT_ALREADY_EXISTS(HttpStatus.CONFLICT, "RESIDENT_002", "같은 동·호수·연락처로 등록된 입주민이 이미 있습니다."),
+    RESIDENT_VEHICLE_NOT_FOUND(HttpStatus.NOT_FOUND, "RESIDENT_003", "존재하지 않는 등록 차량입니다."),
+    RESIDENT_VEHICLE_DUPLICATE(HttpStatus.CONFLICT, "RESIDENT_004", "이미 등록된 차량 번호입니다.");
 
     private final HttpStatus status;
     private final String code;

@@ -34,7 +34,9 @@ public class AnalyticsInsightController {
     @Operation(
             summary = "AI 인사이트 조회",
             description =
-                    "직전 완료 주(WEEK) 또는 직전 월(MONTH) 인사이트를 조회합니다. "
+                    "주(WEEK) 또는 월(MONTH) AI 인사이트를 조회합니다. "
+                            + "periodKey가 없으면 직전 완료 구간, 있으면 해당 키(예: 2026-W30, 2026-07) 구간입니다. "
+                            + "진행 중·미래 구간 periodKey는 거절합니다. "
                             + "COMPLETED면 DB 캐시를 즉시 반환하고, "
                             + "없거나 PENDING/FAILED면 백그라운드에서 LLM 생성을 시작한 뒤 현재 상태를 반환합니다. "
                             + "생성 완료 여부는 동일 API를 다시 호출해 확인합니다.")
@@ -43,10 +45,17 @@ public class AnalyticsInsightController {
             @AuthenticationPrincipal CustomUserDetails principal,
             @Parameter(description = "기간 유형 (WEEK | MONTH)", required = true, example = "WEEK")
                     @RequestParam
-                    AnalyticsInsightPeriodType periodType) {
+                    AnalyticsInsightPeriodType periodType,
+            @Parameter(
+                            description =
+                                    "기간 키 (선택). WEEK: 2026-W30, MONTH: 2026-07. "
+                                            + "없으면 직전 완료 구간",
+                            example = "2026-W30")
+                    @RequestParam(required = false)
+                    String periodKey) {
         return ApiResponse.success(
                 "AI 인사이트를 조회했습니다.",
                 analyticsInsightService.getInsight(
-                        principal.getApartmentComplexId(), periodType));
+                        principal.getApartmentComplexId(), periodType, periodKey));
     }
 }

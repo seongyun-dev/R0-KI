@@ -28,6 +28,8 @@ import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -239,19 +241,63 @@ public class RobotService {
             return 0.0;
         }
 
-        long activeSeconds =
-                patrolRepository.findAllByRobotIdAndStartedAtGreaterThanEqual(robotId, weekStart).stream()
-                        .mapToLong(patrol -> patrolActiveSeconds(patrol, now))
-                        .sum();
-
-        return Math.min(100.0, Math.round((activeSeconds * 1000.0 / elapsedSeconds)) / 10.0);
+        List<Patrol> patrols = patrolRepository.findAllOverlappingPeriod(robotId, weekStart, now);
+        return calculateWeeklyOperationRate(patrols, weekStart, now);
     }
 
-    // 완료된 순찰은 저장된 총 소요시간을, 진행중인 순찰은 시작 시각부터 지금까지의 경과시간을 사용한다.
-    private long patrolActiveSeconds(Patrol patrol, LocalDateTime now) {
-        if (patrol.getTotalDuration() != null) {
-            return patrol.getTotalDuration();
+    // totalDuration의 null 여부가 아니라 순찰 상태와 실제 시작/종료 시각으로 이번 주 가동 시간을 계산한다.
+    // 겹치는 순찰 구간은 합쳐 중복 집계하지 않으므로 비정상 데이터가 있어도 가동률이 100%를 넘지 않는다.
+    static double calculateWeeklyOperationRate(
+            List<Patrol> patrols, LocalDateTime weekStart, LocalDateTime now) {
+        long elapsedSeconds = Duration.between(weekStart, now).getSeconds();
+        if (elapsedSeconds <= 0) {
+            return 0.0;
         }
-        return Duration.between(patrol.getStartedAt(), now).getSeconds();
+
+        List<OperationInterval> intervals = new ArrayList<>();
+        for (Patrol patrol : patrols) {
+            LocalDateTime start = patrol.getStartedAt();
+            LocalDateTime end =
+                    switch (patrol.getStatus()) {
+                        case IN_PROGRESS, STOP_REQUESTED -> now;
+                        case COMPLETED, STOPPED, FAILED -> patrol.getEndedAt();
+                    };
+
+            if (start == null || end == null) {
+                continue;
+            }
+
+            LocalDateTime effectiveStart = start.isBefore(weekStart) ? weekStart : start;
+            LocalDateTime effectiveEnd = end.isAfter(now) ? now : end;
+            if (effectiveEnd.isAfter(effectiveStart)) {
+                intervals.add(new OperationInterval(effectiveStart, effectiveEnd));
+            }
+        }
+
+        intervals.sort(Comparator.comparing(OperationInterval::start));
+        long activeSeconds = 0L;
+        LocalDateTime mergedStart = null;
+        LocalDateTime mergedEnd = null;
+        for (OperationInterval interval : intervals) {
+            if (mergedStart == null) {
+                mergedStart = interval.start();
+                mergedEnd = interval.end();
+            } else if (!interval.start().isAfter(mergedEnd)) {
+                if (interval.end().isAfter(mergedEnd)) {
+                    mergedEnd = interval.end();
+                }
+            } else {
+                activeSeconds += Duration.between(mergedStart, mergedEnd).getSeconds();
+                mergedStart = interval.start();
+                mergedEnd = interval.end();
+            }
+        }
+        if (mergedStart != null) {
+            activeSeconds += Duration.between(mergedStart, mergedEnd).getSeconds();
+        }
+
+        return Math.round((activeSeconds * 1000.0 / elapsedSeconds)) / 10.0;
     }
+
+    private record OperationInterval(LocalDateTime start, LocalDateTime end) {}
 }
