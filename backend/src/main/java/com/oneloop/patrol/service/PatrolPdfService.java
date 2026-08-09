@@ -152,9 +152,12 @@ public class PatrolPdfService {
             byte[] source = input.readAllBytes();
             PatrolMap patrolMap =
                     patrolMapRepository.findByApartmentComplexId(apartmentComplexId).orElse(null);
+            /* fetch join 필수 — 이 서비스는 트랜잭션이 없어(open-in-view 도 꺼짐) LAZY 인
+               checkpoint 를 렌더러가 읽는 순간 LazyInitializationException 이 났고,
+               렌더러의 실패 폴백이 그걸 삼켜 PDF 에 구역·경로가 통째로 빠졌다. */
             List<Checkpoint> zones =
                     patrolCheckpointVisitRepository
-                            .findAllByPatrolIdOrderByVisitSequence(patrolId)
+                            .findAllWithCheckpointByPatrolId(patrolId)
                             .stream()
                             .map(visit -> visit.getCheckpoint())
                             .distinct()
