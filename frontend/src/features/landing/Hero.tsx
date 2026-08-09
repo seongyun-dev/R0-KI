@@ -15,18 +15,8 @@ export function Hero({ hintHidden }: HeroProps) {
     <section id="home">
       <div className="hero-vignette" />
 
-      <div className="robot-chip robot-chip--status">
-        <span className="live" />
-        <span>가동중 · 3대</span>
-      </div>
-      <div className="robot-chip robot-chip--event">
-        <span className="k"><AlertTriangleIcon style={{ fontSize: '.9rem' }} /></span>
-        <span>
-          <span className="t">불법주차 · A동</span>
-          <br />
-          <span className="s">2분 전 감지</span>
-        </span>
-      </div>
+
+
       <div className="robot-hint" style={{ opacity: hintHidden ? 0 : 1 }}>
         커서를 움직이면 로봇이 따라 순찰해요
       </div>

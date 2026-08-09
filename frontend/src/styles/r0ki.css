@@ -425,7 +425,7 @@
    기존 크기 그대로고, 좁아지면 지도와 같은 비율로 함께 줄어든다 */
 .r0ki .cmovl{position:absolute;z-index:2;display:flex;flex-direction:column;gap:clamp(4px,.9cqw,8px);
   --ovl-gap:clamp(6px,1.3cqw,12px)}
-.r0ki .cmovl.tl{left:var(--ovl-gap);top:var(--ovl-gap);gap:clamp(6px,1.1cqw,10px)}
+.r0ki .cmovl.cmovl-tl{left:var(--ovl-gap);top:var(--ovl-gap);gap:clamp(6px,1.1cqw,10px)}
 .r0ki .cmovl.tr{right:var(--ovl-gap);top:var(--ovl-gap);align-items:flex-end}
 .r0ki .cmovl.bl{left:var(--ovl-gap);bottom:clamp(4px,.9cqw,8px)}
 /* 우측 하단 — 좌측 하단 범례와 같은 높이로 모서리에 붙인다.

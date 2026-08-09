@@ -648,7 +648,7 @@ export function ComplexMap({
       </svg>
 
       {/* ── 오버레이 — 확대해도 크기가 고정돼야 하는 조작·표기 ── */}
-      <div className="cmovl tl">
+      <div className="cmovl cmovl-tl">
         <button type="button" className="cmbtn" onClick={() => zoomBy(1.5)} disabled={view.k >= ZOOM_MAX} aria-label="지도 확대">
           <svg viewBox="0 0 16 16" aria-hidden>
             <path d="M8 3.4V12.6M3.4 8H12.6" />
