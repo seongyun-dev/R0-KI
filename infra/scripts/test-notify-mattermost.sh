@@ -79,7 +79,8 @@ import json
 import os
 
 text = json.loads(os.environ["MM_TEST_PAYLOAD"])["text"]
-assert text.startswith("# :small_blue_circle: Jetson 릴리스 게시 완료")
+assert text.startswith("# :small_blue_circle: Jetson IoT 릴리스 게시 완료")
+assert "AI baseline은 변경하지 않습니다." in text
 PY
 
 connection_payload="$(env "${common_env[@]}" bash "${notify_script}" connection_test all 0)"

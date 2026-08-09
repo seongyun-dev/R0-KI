@@ -1,5 +1,12 @@
 # AIoT infrastructure handoff
 
+> **2026-08-03 Jetson 갱신:** 기존 EC2 이력은 아래에 보존한다. 현재 Jetson
+> 릴리스는 AI와 IoT를 합친 bundle이 아니라 `robot/` 전용 `iot-vX.Y.Z`다.
+> `aiot-update.timer`가 부팅 2분 후와 이후 5분마다 확인하고, 순찰/배포 advisory
+> lock으로 이동 중 활성화를 보류한다. 성공한 pre/post smoke와 서비스 재시작까지
+> 확인한 뒤에만 `current`를 유지하고 실패하면 `previous`로 복구한다. 실제 운영은
+> `infra/jetson/README.md`와 `robot/docs/integrated-runtime-operations.md`가 기준이다.
+
 > **Legacy document:** This file preserves the original `develop`-centric
 > rollout history and must not be used as the current deployment procedure.
 > The migration is complete. Use [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md)
@@ -31,7 +38,7 @@ Jetson Pull OTA, 운영 모니터링 코드와 격리 검증까지 완료**된 �
 | GitLab Runner | 완료 | Project Runner `#1934`, Online, Shell executor |
 | 기존 CI 인프라 검증 | 완료 | 초기 Pipeline `#154891` Passed |
 | 이번 통합 Pipeline | 구현·로컬 검증 완료, 실실행 대기 | `infra/dev` push 후 결과 확인 필요 |
-| MySQL 8.4 | 완료 | `aiot-mysql`, healthy, 호스트 포트 미공개 |
+| MySQL 8.4 | 완료 | `aiot-mysql`, healthy, 호스트 loopback 3306만 공개 |
 | 보안 MQTT | 완료 | `aiot-mosquitto`, 인증 필수, 외부 TLS 8883 |
 | 일일 로컬 백업 | 가동 중 | 기존 `aiot-backup.timer`; 개선된 원자적 백업 코드는 서버 재설치 대기 |
 | Frontend 컨테이너 | 계약·검증 완료, 실배포 대기 | React 실제 코드가 아직 없음 |
@@ -118,14 +125,14 @@ listener는 없다. Nginx는 기존 기본 사이트의 80 포트를 유지하�
 
 | 컨테이너 | 포트 | 상태/정책 |
 | --- | --- | --- |
-| `aiot-mysql` | Docker 내부 3306 | healthy, 외부 미공개 |
+| `aiot-mysql` | Docker 내부 3306, host `127.0.0.1:3306` | healthy, SSH tunnel 전용 |
 | `aiot-mosquitto` | 내부 1883, 외부 TLS 8883 | 가동 중, 익명 접속 금지 |
 | `hanbakwi-mosquitto` | 외부 1883 | 기존 Jetson 마이그레이션용 임시 유지 |
 | `aiot-frontend` | loopback 3000 예정 | 아직 없음 |
 | `aiot-backend` | loopback 8080 예정 | 아직 없음 |
 
 모든 신규 애플리케이션 컨테이너는 외부 Docker network `aiot-network`를 사용한다.
-MySQL은 절대로 호스트의 3306 포트로 publish하지 않는다.
+MySQL은 운영자 SSH tunnel용 `127.0.0.1:3306`에만 publish하며 공인 인터페이스에는 공개하지 않는다.
 UFW에는 8080 허용 규칙이 남아 있지만 현재 listener는 없으며, 애플리케이션
 Compose는 3000/8080을 `127.0.0.1`에만 bind한다. AWS Security Group은 별도로
 확인해야 한다.

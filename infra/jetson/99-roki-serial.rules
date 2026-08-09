@@ -1,0 +1,8 @@
+# RO-KI Jetson Orin Nano physical USB topology.
+#
+# Both the ESP32 board and the LiDAR expose a CP2102 with the same factory
+# serial number (0001), so /dev/serial/by-id is ambiguous. Keep the labelled
+# cables in these Jetson USB sockets; these aliases then remain stable across
+# reboot and reconnect order.
+ACTION=="add|change", SUBSYSTEM=="tty", ENV{ID_VENDOR_ID}=="10c4", ENV{ID_MODEL_ID}=="ea60", ENV{ID_PATH}=="platform-3610000.usb-usb-0:2.4:1.0", SYMLINK+="roki_esp32"
+ACTION=="add|change", SUBSYSTEM=="tty", ENV{ID_VENDOR_ID}=="10c4", ENV{ID_MODEL_ID}=="ea60", ENV{ID_PATH}=="platform-3610000.usb-usb-0:2.2:1.0", SYMLINK+="roki_lidar"

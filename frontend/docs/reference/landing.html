@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI 순찰 시스템 — 단지의 눈이 되는 자율 순찰 로봇</title>
+<meta name="description" content="순찰, 이상 감지, 보고까지 — 관리실 화면 하나로 단지 전체를 실시간 관제하는 AI 자율 순찰 로봇 시스템." />
+<meta name="theme-color" content="#0a0a0a" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<style>
+:root{
+  --bg:#ffffff; --fg:#111111; --ink:#0a0a0a;
+  --muted:#8a8a8a; --subtle:#b6b6b6;
+  --line:#e6e5e2; --surface:#f2f1ef; --surface-2:#e7e5e1;
+  --card:#0d0d10;
+  --accent:#e0532a; --accent-2:#ff6a3d; --accent-deep:#b8431e; --accent-soft:#f6d9cb;
+  --hero-to:#eceae7;
+  --radius-card:2rem; --radius-card-sm:1.25rem; --radius-control:0.875rem;
+  --shell:88rem;
+  --font:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,system-ui,'Segoe UI',sans-serif;
+}
+*{ box-sizing:border-box; margin:0; padding:0 }
+html{ font-size:16px; -webkit-font-smoothing:antialiased }
+body{ background:var(--bg); color:var(--fg); font-family:var(--font); overflow-x:hidden; letter-spacing:-0.01em }
+a{ color:inherit; text-decoration:none }
+button{ font:inherit; color:inherit; background:none; border:none; cursor:pointer }
+ul{ list-style:none }
+img,canvas{ display:block }
+.sr-only{ position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0 }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
+@media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important } }
+
+/* adaptive rem grid */
+@media (max-width:1920px){ html{ font-size:0.833333vw } }
+@media (max-width:1440px){ html{ font-size:1.111111vw } }
+@media (max-width:1024px){ html{ font-size:1.5625vw } }
+@media (max-width:640px){  html{ font-size:4.166666vw } }
+
+.shell{ max-width:var(--shell); margin-inline:auto }
+.skip{ position:fixed; left:1rem; top:1rem; z-index:60; border-radius:.875rem; background:var(--ink); padding:.5rem 1rem; font-size:.875rem; color:#fff; transform:translateY(-200%) }
+.skip:focus{ transform:none }
+
+/* ===== reveal engine ===== */
+[data-reveal]{ will-change:transform,opacity }
+[data-reveal="fade"]{ opacity:0; transition:opacity .7s cubic-bezier(.22,1,.36,1) }
+[data-reveal="up"]{ opacity:0; transform:translateY(var(--ry,16px)); transition:opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1) }
+[data-reveal="scale"]{ opacity:0; transform:translateY(var(--ry,16px)) scale(.96); transition:opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1) }
+[data-reveal].rv-in{ opacity:1; transform:none }
+.line{ display:block; overflow:hidden }
+.line > .inner{ display:block; transform:translateY(110%); opacity:0; transition:transform .9s cubic-bezier(.215,.61,.355,1), opacity .9s cubic-bezier(.215,.61,.355,1) }
+[data-reveal="line"].rv-in .inner{ transform:none; opacity:1 }
+.word{ display:inline-block; overflow:hidden }
+.word > .w-inner{ display:inline-block; transform:translateY(24px); opacity:0; transition:transform .7s cubic-bezier(.165,.84,.44,1), opacity .7s cubic-bezier(.165,.84,.44,1) }
+[data-reveal="word"].rv-in .w-inner{ transform:none; opacity:1 }
+
+.ico{ width:1em; height:1em; display:inline-block; flex:none }
+
+/* ===== pill button ===== */
+.pill{ display:inline-block }
+.pill-inner{ display:inline-flex; align-items:center; gap:.6rem; border-radius:9999px; font-size:.9rem; font-weight:600; transition:transform .35s cubic-bezier(.2,.8,.2,1) }
+.pill--noarrow .pill-inner{ padding:.85rem 1.6rem }
+.pill--arrow .pill-inner{ padding:.375rem .375rem .375rem 1.4rem }
+.pill--dark .pill-inner{ background:var(--ink); color:#fff }
+.pill--accent .pill-inner{ background:linear-gradient(120deg,var(--accent-2),var(--accent-deep)); color:#fff }
+.pill--light .pill-inner{ background:var(--surface); color:#111 }
+.pill--outline .pill-inner{ border:1px solid var(--line); background:transparent; color:#111 }
+.pill-badge{ width:2.2rem; height:2.2rem; display:grid; place-items:center; border-radius:9999px; font-size:1rem; flex:none }
+.pill--dark .pill-badge, .pill--accent .pill-badge{ background:#fff; color:var(--ink) }
+.pill--light .pill-badge, .pill--outline .pill-badge{ background:var(--ink); color:#fff }
+.pill-badge .ico{ transition:transform .35s cubic-bezier(.2,.8,.2,1) }
+@media (hover:hover) and (pointer:fine){
+  .pill:hover .pill-inner{ transform:scale(1.04) }
+  .pill--arrow[data-arrow="right"]:hover .pill-badge .ico{ transform:translate(3px,0) }
+  .pill--arrow[data-arrow="up-right"]:hover .pill-badge .ico{ transform:translate(2px,-2px) }
+}
+
+/* ===== eyebrow ===== */
+.eyebrow{ display:inline-flex; align-items:center; gap:.5rem; font-size:.85rem; font-weight:600 }
+.eyebrow .dot{ width:.4rem; height:.4rem; border-radius:9999px; background:var(--accent) }
+.eyebrow--dark{ color:rgba(17,17,17,.7) }
+.eyebrow--light{ color:rgba(255,255,255,.7) }
+.eyebrow--light .dot{ background:var(--accent-2) }
+.eyebrow--bordered{ border:1px solid var(--line); border-radius:9999px; padding:.4rem 1rem }
+
+.tag{ display:inline-flex; align-items:center; gap:.4rem; border-radius:9999px; padding:.45rem 1rem; font-size:.82rem; border:1px solid rgba(255,255,255,.25); color:#fff }
+.mono{ font-variant-numeric:tabular-nums; font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
+
+.hv{ display:inline-flex; transition:transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s cubic-bezier(.2,.8,.2,1) }
+
+/* ===== loader ===== */
+.loader{ position:fixed; inset:0; z-index:120; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2rem; background:var(--ink); color:#fff; border-radius:0 0 2rem 2rem; transform:translateY(0%); transition:transform .7s cubic-bezier(.22,1,.36,1) }
+.loader.exit{ transform:translateY(-100%) }
+.loader__center{ display:flex; flex-direction:column; align-items:center; gap:1.1rem; text-align:center; transition:opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1) }
+.loader.exit .loader__center{ opacity:0; transform:translateY(-12px) }
+.loader__brand{ display:flex; align-items:center; gap:.6rem; font-weight:700; font-size:1.6rem }
+.loader__brand .mk{ width:2rem; height:2rem; color:var(--accent-2) }
+.loader__tag{ max-width:26ch; font-size:.9rem; color:rgba(255,255,255,.55) }
+.loader__progress{ width:min(22rem,72vw); display:flex; flex-direction:column; gap:.75rem }
+.loader__track{ height:2px; width:100%; background:rgba(255,255,255,.15); border-radius:2px; overflow:hidden }
+.loader__fill{ height:100%; background:linear-gradient(90deg,var(--accent-2),var(--accent)); width:0%; transition:width .1s ease-out }
+.loader__row{ display:flex; justify-content:space-between; font-size:.72rem; font-weight:600; letter-spacing:.1em; color:rgba(255,255,255,.45) }
+.loader__count{ color:rgba(255,255,255,.85) }
+
+/* ===== header ===== */
+.header{ position:absolute; inset-inline:0; top:0; z-index:50; opacity:0; transform:translateY(-14px); transition:opacity .7s cubic-bezier(.22,1,.36,1), transform .7s cubic-bezier(.22,1,.36,1) }
+.header.in{ opacity:1; transform:none }
+.header__row{ display:flex; align-items:center; justify-content:space-between; gap:1.5rem; padding:1.15rem 1.25rem }
+@media (min-width:640px){ .header__row{ padding:1.4rem 2rem } }
+.brand{ display:flex; align-items:center; gap:.55rem; font-size:1.1rem; font-weight:700 }
+.brand .mk{ width:1.5rem; height:1.5rem; color:var(--accent) }
+.nav-primary{ display:none }
+@media (min-width:1024px){ .nav-primary{ display:flex } }
+.nav-primary ul{ display:flex; align-items:center; gap:1.9rem; font-size:.9rem; font-weight:600 }
+.nav-primary .lift{ display:inline-block; transition:transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s cubic-bezier(.2,.8,.2,1); opacity:.82 }
+@media (hover:hover) and (pointer:fine){ .nav-primary button:hover .lift{ transform:translateY(-2px); opacity:1 } }
+.header__right{ display:flex; align-items:center; gap:.75rem }
+.clock-chip{ display:none; align-items:center; gap:.6rem; border:1px solid rgba(230,229,226,.9); background:rgba(255,255,255,.45); backdrop-filter:blur(6px); border-radius:.875rem; padding:.5rem .8rem; font-size:.72rem; color:rgba(17,17,17,.7) }
+@media (min-width:768px){ .clock-chip{ display:flex } }
+.clock-chip .lbl{ color:rgba(17,17,17,.45) }
+.clock-chip .time{ min-width:4.6rem; font-weight:600; color:#111 }
+.clock-chip .live{ width:.4rem; height:.4rem; border-radius:9999px; background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.18) }
+.menu-btn{ border:1px solid rgba(230,229,226,.9); background:rgba(255,255,255,.45); backdrop-filter:blur(6px); border-radius:.875rem; transition:background .25s }
+@media (hover:hover) and (pointer:fine){ .menu-btn:hover{ background:rgba(255,255,255,.75) } }
+.menu-btn .hv{ align-items:center; gap:.5rem; padding:.55rem 1rem; font-size:.78rem; font-weight:600; letter-spacing:.02em }
+.menu-btn .ico{ font-size:1rem }
+@media (hover:hover) and (pointer:fine){ .menu-btn:hover .hv{ transform:scale(1.05) } }
+.header-cta{ display:none }
+@media (min-width:1024px){ .header-cta{ display:inline-block } }
+
+/* ===== hero ===== */
+#home{ position:relative; isolation:isolate; overflow:hidden; min-height:100lvh; border-radius:0 0 2rem 2rem; background:linear-gradient(180deg,#ffffff 0%,var(--hero-to) 100%) }
+/* full-bleed 3D robot behind everything */
+.hero-liquid{ position:absolute; inset:0; z-index:0 }
+#robotCanvas{ display:block; width:100%; height:100% }
+/* legibility scrim so text stays readable over the robot */
+.hero-vignette{ position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:
+    linear-gradient(100deg, rgba(247,246,244,.95) 0%, rgba(247,246,244,.74) 26%, rgba(247,246,244,.28) 46%, rgba(247,246,244,0) 64%),
+    linear-gradient(to bottom, rgba(247,246,244,.55) 0%, transparent 16%),
+    linear-gradient(to top, rgba(247,246,244,.8) 0%, transparent 22%) }
+@media (max-width:1023px){
+  .hero-vignette{ background:
+    linear-gradient(to bottom, rgba(247,246,244,.98) 0%, rgba(247,246,244,.95) 42%, rgba(247,246,244,.55) 62%, rgba(247,246,244,.05) 80%),
+    linear-gradient(to top, rgba(247,246,244,.8) 0%, transparent 20%) }
+}
+.hero-grid{ position:relative; z-index:20; display:flex; flex-direction:column; justify-content:flex-start; min-height:100lvh; padding:6.5rem 1.25rem 6rem }
+@media (min-width:640px){ .hero-grid{ padding-left:2rem; padding-right:2rem } }
+@media (min-width:1024px){ .hero-grid{ justify-content:center; padding:9.5rem 2rem 7rem } }
+.hero-left{ display:flex; flex-direction:column; gap:1.6rem; max-width:40rem }
+.hero-eyebrow{ display:inline-flex; align-items:center; gap:.5rem; font-size:.85rem; font-weight:600; color:rgba(17,17,17,.7) }
+.hero-eyebrow .dot{ width:.4rem; height:.4rem; background:var(--accent); border-radius:9999px }
+.hero-h1{ max-width:16ch; font-size:2.5rem; font-weight:700; line-height:1.06; letter-spacing:-.03em }
+@media (min-width:640px){ .hero-h1{ font-size:3.4rem } }
+@media (min-width:768px){ .hero-h1{ font-size:4.2rem } }
+@media (min-width:1280px){ .hero-h1{ font-size:4.8rem } }
+.hero-h1 .accent{ color:var(--accent) }
+.hero-sub{ max-width:34ch; font-size:1.02rem; line-height:1.6; color:rgba(17,17,17,.62) }
+.cta-row{ display:flex; flex-wrap:wrap; gap:.75rem }
+.hero-stats{ display:flex; flex-wrap:wrap; gap:2.2rem; margin-top:.5rem }
+.hero-stat .n{ font-size:1.7rem; font-weight:700; letter-spacing:-.02em }
+.hero-stat .n b{ color:var(--accent); font-weight:700 }
+.hero-stat .l{ margin-top:.15rem; font-size:.8rem; color:rgba(17,17,17,.5) }
+
+/* floating product chips over the full-bleed robot */
+.robot-chip{ position:absolute; z-index:20; display:inline-flex; align-items:center; gap:.5rem; border-radius:9999px; background:rgba(13,13,16,.82); color:#fff; backdrop-filter:blur(8px); padding:.45rem .85rem; font-size:.72rem; font-weight:600; box-shadow:0 8px 24px -10px rgba(0,0,0,.5) }
+.robot-chip .live{ width:.42rem; height:.42rem; border-radius:9999px; background:#3ddc84; box-shadow:0 0 0 3px rgba(61,220,132,.25) }
+.robot-chip--status{ top:6.5rem; right:2rem }
+.robot-chip--event{ bottom:7rem; right:2rem; background:rgba(255,255,255,.92); color:#111; box-shadow:0 10px 30px -12px rgba(0,0,0,.25) }
+.robot-chip--event .k{ width:1.6rem; height:1.6rem; display:grid; place-items:center; border-radius:9999px; background:var(--accent-soft); color:var(--accent-deep) }
+.robot-chip--event .t{ font-weight:700 } .robot-chip--event .s{ font-weight:500; color:#8a8a8a; font-size:.66rem }
+.robot-hint{ position:absolute; z-index:20; bottom:4.5rem; right:2rem; font-size:.7rem; color:rgba(17,17,17,.5); font-weight:600; letter-spacing:.02em; transition:opacity .4s }
+@media (max-width:1023px){
+  .robot-chip--status{ top:5rem; right:1.25rem }
+  .robot-chip--event{ display:none }
+  .robot-hint{ left:1.25rem; right:auto; bottom:4.2rem }
+}
+
+.hero-status{ position:absolute; inset-inline:0; bottom:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-inline:auto; max-width:var(--shell); border-top:1px solid rgba(17,17,17,.12); padding:1.2rem 1.25rem; font-size:.74rem; font-weight:600; letter-spacing:.02em; color:rgba(17,17,17,.6) }
+@media (min-width:640px){ .hero-status{ padding-left:2rem; padding-right:2rem } }
+.hero-status .mid{ display:none } @media (min-width:640px){ .hero-status .mid{ display:inline } }
+.hero-status .end{ display:inline-flex; gap:.5rem }
+
+/* ===== features ===== */
+#features{ background:#fff }
+.sec-pad{ padding:4.5rem 1.25rem }
+@media (min-width:640px){ .sec-pad{ padding-left:2rem; padding-right:2rem } }
+@media (min-width:1024px){ .sec-pad{ padding-top:7rem; padding-bottom:7rem } }
+.center-head{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:1rem }
+.sec-h2{ font-size:2rem; font-weight:700; letter-spacing:-.03em }
+@media (min-width:640px){ .sec-h2{ font-size:2.7rem } }
+.feat-grid{ display:grid; grid-template-columns:1fr; gap:1.25rem; margin-top:3rem }
+@media (min-width:768px){ .feat-grid{ grid-template-columns:1fr 1fr } }
+.feat-card{ position:relative; min-height:19rem; overflow:hidden; border-radius:2rem; background:var(--card); padding:1.75rem; color:#fff; box-shadow:0 0 0 1px rgba(255,255,255,.05); transition:transform .4s cubic-bezier(.2,.8,.2,1) }
+@media (min-width:640px){ .feat-card{ padding:2.1rem } }
+@media (hover:hover) and (pointer:fine){ .feat-card:hover{ transform:translateY(-8px) } }
+.feat-card .glow{ position:absolute; right:-6rem; top:-6rem; width:16rem; height:16rem; border-radius:9999px; background:radial-gradient(closest-side, rgba(224,83,42,.35), transparent 70%); pointer-events:none }
+.feat-top{ display:flex; align-items:center; justify-content:space-between }
+.feat-ico{ width:3rem; height:3rem; display:grid; place-items:center; border-radius:1rem; background:rgba(255,255,255,.08); color:var(--accent-2); box-shadow:inset 0 0 0 1px rgba(255,255,255,.1) }
+.feat-ico .ico{ font-size:1.4rem }
+.feat-no{ font-size:.75rem; font-weight:700; color:rgba(255,255,255,.35); letter-spacing:.1em }
+.feat-body{ position:absolute; inset-inline:1.75rem; bottom:1.75rem }
+@media (min-width:640px){ .feat-body{ inset-inline:2.1rem; bottom:2.1rem } }
+.feat-body h3{ font-size:1.4rem; font-weight:700; letter-spacing:-.02em }
+@media (min-width:640px){ .feat-body h3{ font-size:1.65rem } }
+.feat-body p{ margin-top:.6rem; max-width:32ch; font-size:.9rem; line-height:1.55; color:rgba(255,255,255,.58) }
+.feat-body .tags{ margin-top:1.1rem; display:flex; flex-wrap:wrap; gap:.5rem }
+
+/* ===== how it works ===== */
+#how{ background:#fff }
+.how-h2{ margin:1rem 0 2.5rem; max-width:14ch; font-size:2rem; font-weight:700; letter-spacing:-.03em }
+@media (min-width:640px){ .how-h2{ font-size:2.7rem; margin-bottom:3rem } }
+.how-row{ border-top:1px solid var(--line) }
+.how-row.first{ border-top:0 }
+.how-link{ display:flex; align-items:center; gap:1rem; border-radius:1.25rem; padding:1.6rem 1.25rem; background:rgba(242,241,239,0); transition:background .45s cubic-bezier(.2,.8,.2,1), padding .45s cubic-bezier(.2,.8,.2,1) }
+@media (min-width:640px){ .how-link{ gap:1.5rem; padding:2rem 1.5rem } }
+@media (hover:hover) and (pointer:fine){ .how-row:hover .how-link{ background:rgba(242,241,239,1); padding-left:2rem } }
+.how-idx{ width:2rem; font-size:.85rem; font-weight:700; color:var(--accent); flex:none }
+@media (min-width:640px){ .how-idx{ width:3rem; font-size:.95rem } }
+.how-title{ flex:1; font-size:1.35rem; font-weight:700; letter-spacing:-.02em }
+@media (min-width:640px){ .how-title{ font-size:1.9rem } }
+.how-desc{ display:none; max-width:24rem; font-size:.9rem; line-height:1.55; color:rgba(17,17,17,.55) }
+@media (min-width:1024px){ .how-desc{ display:block } }
+.how-arrow{ width:2.6rem; height:2.6rem; display:grid; place-items:center; border-radius:9999px; background:var(--ink); color:#fff; flex:none; transition:transform .35s cubic-bezier(.2,.8,.2,1) }
+@media (hover:hover) and (pointer:fine){ .how-row:hover .how-arrow{ transform:translateX(5px) } }
+
+/* ===== impact ===== */
+#impact{ background:#fff }
+.impact-inner{ padding:0 1.25rem 4.5rem }
+@media (min-width:640px){ .impact-inner{ padding-left:2rem; padding-right:2rem } }
+@media (min-width:1024px){ .impact-inner{ padding-bottom:7rem } }
+.impact-panel{ position:relative; overflow:hidden; border-radius:2rem; background:var(--card); padding:3rem 1.5rem; color:#fff }
+@media (min-width:640px){ .impact-panel{ padding:4rem 2rem } }
+@media (min-width:768px){ .impact-panel{ padding-left:4rem; padding-right:4rem } }
+.impact-panel .glow{ position:absolute; left:-8rem; bottom:-8rem; width:24rem; height:24rem; border-radius:9999px; background:radial-gradient(closest-side, rgba(224,83,42,.28), transparent 70%); pointer-events:none }
+.impact-h2{ position:relative; margin-top:1rem; max-width:20ch; font-size:1.8rem; font-weight:700; letter-spacing:-.02em }
+@media (min-width:768px){ .impact-h2{ font-size:2.3rem } }
+.impact-grid{ position:relative; margin-top:3rem; display:grid; grid-template-columns:repeat(2,1fr); column-gap:2rem; row-gap:2.75rem }
+@media (min-width:1024px){ .impact-grid{ grid-template-columns:repeat(4,1fr) } }
+.impact-num{ font-size:2.8rem; font-weight:700; letter-spacing:-.03em }
+@media (min-width:640px){ .impact-num{ font-size:3.6rem } }
+.impact-num .suf{ color:var(--accent-2) }
+.impact-lbl{ margin-top:.6rem; font-size:.86rem; color:rgba(255,255,255,.55) }
+
+/* ===== footer ===== */
+.footer{ position:relative; overflow:hidden; border-radius:2rem 2rem 0 0; background:var(--ink); color:#fff }
+.footer-inner{ position:relative; z-index:10; padding:4.5rem 1.25rem 2.5rem }
+@media (min-width:640px){ .footer-inner{ padding-left:2rem; padding-right:2rem } }
+@media (min-width:1024px){ .footer-inner{ padding-top:6rem } }
+.footer-cta{ display:flex; flex-direction:column; gap:2rem; border-bottom:1px solid rgba(255,255,255,.1); padding-bottom:3.5rem }
+@media (min-width:1024px){ .footer-cta{ flex-direction:row; align-items:flex-end; justify-content:space-between } }
+.footer-cta h2{ max-width:18ch; font-size:2rem; font-weight:700; letter-spacing:-.03em }
+@media (min-width:640px){ .footer-cta h2{ font-size:2.8rem } }
+.footer-cta p{ margin-top:1rem; max-width:34ch; font-size:.95rem; color:rgba(255,255,255,.55) }
+.footer-cols{ display:grid; grid-template-columns:1fr; gap:2.5rem; padding-top:3.5rem; padding-bottom:3.5rem }
+@media (min-width:768px){ .footer-cols{ grid-template-columns:1.4fr 1fr 1fr 1fr } }
+.fcol-brand .b{ display:flex; align-items:center; gap:.55rem; font-size:1.1rem; font-weight:700 }
+.fcol-brand .b .mk{ width:1.5rem; height:1.5rem; color:var(--accent-2) }
+.fcol-brand p{ max-width:24rem; margin-top:1rem; font-size:.88rem; line-height:1.6; color:rgba(255,255,255,.5) }
+.fcol h4{ font-size:.75rem; letter-spacing:.05em; color:rgba(255,255,255,.4); margin-bottom:1rem }
+.fcol li{ font-size:.9rem; margin-bottom:.7rem }
+.alink{ display:inline-flex }
+.alink > span{ display:inline-block; opacity:.7; transition:transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s cubic-bezier(.2,.8,.2,1) }
+@media (hover:hover) and (pointer:fine){ .alink:hover > span{ transform:translateX(4px); opacity:1 } }
+.footer-legal{ display:flex; flex-direction:column; align-items:center; justify-content:space-between; gap:1rem; border-top:1px solid rgba(255,255,255,.1); padding-top:2rem; font-size:.75rem; color:rgba(255,255,255,.45) }
+@media (min-width:640px){ .footer-legal{ flex-direction:row } }
+.footer-legal .lg-links{ display:flex; gap:1.5rem }
+.footer-wm{ position:absolute; inset-inline:0; bottom:-1.5rem; z-index:0; text-align:center; pointer-events:none; user-select:none; font-weight:800; line-height:1; font-size:11rem; letter-spacing:.05em; color:rgba(255,255,255,.045) }
+
+/* ===== nav menu ===== */
+.navmenu{ position:fixed; inset:0; z-index:115; display:flex; flex-direction:column; background:var(--ink); color:#fff; opacity:0; pointer-events:none; transition:opacity .35s cubic-bezier(.22,1,.36,1) }
+.navmenu.open{ opacity:1; pointer-events:auto }
+.navmenu__top{ display:flex; align-items:center; justify-content:space-between; padding:1.15rem 1.25rem }
+@media (min-width:640px){ .navmenu__top{ padding:1.4rem 2rem } }
+.navmenu__brand{ display:flex; align-items:center; gap:.55rem; font-size:1.1rem; font-weight:700 }
+.navmenu__brand .mk{ width:1.5rem; height:1.5rem; color:var(--accent-2) }
+.nm-close{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid rgba(255,255,255,.15); border-radius:.875rem; padding:.55rem 1rem; font-size:.75rem; font-weight:600; letter-spacing:.02em; color:rgba(255,255,255,.7); transition:border-color .25s, color .25s }
+.nm-close .ico{ font-size:1rem }
+@media (hover:hover) and (pointer:fine){ .nm-close:hover{ border-color:rgba(255,255,255,.4); color:#fff } }
+.navmenu__nav{ flex:1; display:flex; flex-direction:column; justify-content:center }
+.navmenu__nav ul{ display:flex; flex-direction:column; gap:.25rem }
+.nm-item{ display:flex; align-items:baseline; gap:1rem; padding:.5rem 0; text-align:left; font-size:2rem; font-weight:700; letter-spacing:-.02em; width:100%; transform:translateY(1rem); opacity:0; transition:transform .5s ease-out, opacity .5s ease-out }
+@media (min-width:640px){ .nm-item{ font-size:3.2rem } }
+.navmenu.open .nm-item{ transform:none; opacity:1 }
+.nm-item .n{ font-size:1rem; font-weight:500; color:rgba(255,255,255,.3); transition:color .3s }
+.nm-item .l{ color:rgba(255,255,255,.7); transition:color .3s }
+@media (hover:hover) and (pointer:fine){ .nm-item:hover .n{ color:var(--accent-2) } .nm-item:hover .l{ color:#fff } }
+.navmenu__bottom{ display:flex; flex-direction:column; gap:.75rem; border-top:1px solid rgba(255,255,255,.1); padding:1.4rem 1.25rem; font-size:.75rem; letter-spacing:.02em; color:rgba(255,255,255,.45) }
+@media (min-width:640px){ .navmenu__bottom{ flex-direction:row; align-items:center; justify-content:space-between; padding-left:2rem; padding-right:2rem } }
+.nm-start{ color:rgba(255,255,255,.7); transition:color .25s }
+@media (hover:hover) and (pointer:fine){ .nm-start:hover{ color:#fff; text-decoration:underline } }
+
+/* ===== modal ===== */
+.modal{ position:fixed; inset:0; z-index:110; display:flex; align-items:flex-end; justify-content:center; padding:1rem; background:rgba(17,17,17,.3); backdrop-filter:blur(16px); opacity:0; pointer-events:none; transition:opacity .35s cubic-bezier(.2,.8,.2,1) }
+@media (min-width:640px){ .modal{ align-items:center } }
+.modal.open{ opacity:1; pointer-events:auto }
+.modal__panel{ position:relative; width:100%; max-width:32rem; overflow:hidden; border-radius:2rem; background:#fff; padding:1.5rem; box-shadow:0 25px 50px -12px rgba(0,0,0,.25), 0 0 0 1px var(--line); transform:translateY(28px); opacity:0; transition:transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s cubic-bezier(.2,.8,.2,1) }
+@media (min-width:640px){ .modal__panel{ padding:2rem } }
+.modal.open .modal__panel{ transform:none; opacity:1 }
+.modal__close{ position:absolute; right:1rem; top:1rem; width:2.25rem; height:2.25rem; display:grid; place-items:center; border-radius:9999px; background:var(--surface); color:rgba(17,17,17,.6); transition:background .2s, color .2s }
+@media (hover:hover) and (pointer:fine){ .modal__close:hover{ background:var(--surface-2); color:#111 } }
+.modal__head{ margin-bottom:1.5rem; display:flex; flex-direction:column; gap:.4rem }
+.modal__eyebrow{ display:inline-flex; align-items:center; gap:.5rem; font-size:.85rem; font-weight:600; color:rgba(17,17,17,.6) }
+.modal__eyebrow .dot{ width:.4rem; height:.4rem; border-radius:9999px; background:var(--accent) }
+.modal__head h2{ font-size:1.5rem; font-weight:700; letter-spacing:-.02em }
+@media (min-width:640px){ .modal__head h2{ font-size:1.8rem } }
+.modal form{ display:flex; flex-direction:column; gap:1rem }
+.field{ display:flex; flex-direction:column; gap:.5rem }
+.field .cap{ font-size:.75rem; font-weight:600; letter-spacing:.02em; color:rgba(17,17,17,.5) }
+.field input, .field textarea{ width:100%; border:1px solid var(--line); background:rgba(242,241,239,.5); border-radius:.875rem; padding:.75rem 1rem; font-size:.9rem; outline:none; font-family:inherit; transition:border-color .2s, background .2s }
+.field textarea{ resize:none }
+.field input:focus, .field textarea:focus{ border-color:rgba(17,17,17,.3); background:#fff }
+.modal__submit{ margin-top:.5rem; display:flex; align-items:center; justify-content:space-between; gap:1rem }
+.modal__note{ font-size:.75rem; color:rgba(17,17,17,.45) }
+.modal__success{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:1rem; padding:2rem 0 }
+.modal__success .badge{ width:3.5rem; height:3.5rem; display:grid; place-items:center; border-radius:9999px; background:var(--ink); color:var(--accent-2) }
+.modal__success .badge .mk{ width:1.8rem; height:1.8rem }
+.modal__success h2{ font-size:1.5rem; font-weight:700 }
+.modal__success p{ max-width:34ch; font-size:.9rem; color:rgba(17,17,17,.6) }
+.hidden{ display:none !important }
+</style>
+</head>
+<body>
+<a href="#main" class="skip">본문 바로가기</a>
+
+<!-- brand mark svg symbol -->
+<svg width="0" height="0" style="position:absolute"><symbol id="mk" viewBox="0 0 48 48"><path fill="currentColor" d="M24 3c1.9 8.2 4.4 12.6 9.8 16.6l-4.5 3.4a12 12 0 0 0-10.6 0L14.2 19.6C19.6 15.6 22.1 11.2 24 3Z"/><circle cx="24" cy="30" r="9" fill="none" stroke="currentColor" stroke-width="3.4"/><circle cx="24" cy="30" r="2.6" fill="currentColor"/></symbol></svg>
+
+<!-- ===== loader ===== -->
+<div class="loader" id="loader">
+  <div class="loader__center">
+    <div class="loader__brand"><svg class="mk"><use href="#mk"/></svg><span>AI 순찰 시스템</span></div>
+    <p class="loader__tag">단지의 눈이 되는 자율 순찰 로봇 — 관제 시스템을 준비하고 있습니다.</p>
+  </div>
+  <div class="loader__progress">
+    <div class="loader__track"><div class="loader__fill" id="loaderFill"></div></div>
+    <div class="loader__row"><span>SYSTEM BOOT</span><span class="loader__count" id="loaderCount">000</span></div>
+  </div>
+</div>
+
+<!-- ===== header ===== -->
+<header class="header" id="header">
+  <div class="shell header__row">
+    <button class="brand" data-scroll="home" aria-label="AI 순찰 시스템 홈"><svg class="mk"><use href="#mk"/></svg><span>AI 순찰 시스템</span></button>
+    <nav class="nav-primary" aria-label="주요 메뉴">
+      <ul>
+        <li><button data-scroll="features"><span class="lift">기능</span></button></li>
+        <li><button data-scroll="how"><span class="lift">작동방식</span></button></li>
+        <li><button data-scroll="impact"><span class="lift">도입효과</span></button></li>
+        <li><button data-modal><span class="lift">로그인</span></button></li>
+      </ul>
+    </nav>
+    <div class="header__right">
+      <div class="clock-chip"><span class="live"></span><span class="lbl">관제 시각</span><span class="time" id="clockTime">09:41:00</span></div>
+      <button class="pill pill--accent pill--arrow header-cta" data-arrow="up-right" data-modal>
+        <span class="pill-inner">도입 문의하기<span class="pill-badge"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></span></span>
+      </button>
+      <button class="menu-btn" id="menuOpen" aria-label="메뉴 열기">
+        <span class="hv"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>메뉴</span></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<!-- ===== hero ===== -->
+<section id="home">
+  <!-- full-bleed 3D robot behind everything -->
+  <div class="hero-liquid" aria-hidden="true">
+    <canvas id="robotCanvas" aria-label="AI 순찰 로봇 3D 모델"></canvas>
+  </div>
+  <div class="hero-vignette"></div>
+  <!-- floating product chips -->
+  <div class="robot-chip robot-chip--status"><span class="live"></span><span>가동중 · 3대</span></div>
+  <div class="robot-chip robot-chip--event">
+    <span class="k"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="font-size:.9rem"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span>
+    <span><span class="t">불법주차 · A동</span><br><span class="s">2분 전 감지</span></span>
+  </div>
+  <div class="robot-hint" id="robotHint">커서를 움직이면 로봇이 따라 순찰해요</div>
+
+  <div class="shell hero-grid">
+    <div class="hero-left">
+      <span class="hero-eyebrow" data-reveal="up" data-gate="ready" data-delay="200" style="--ry:10px"><span class="dot"></span>실시간 관제 대시보드 제공</span>
+      <h1 class="hero-h1" data-reveal="line" data-gate="ready" data-delay="250" data-line-stagger="110">
+        <span class="line"><span class="inner">단지의 눈이 되는</span></span>
+        <span class="line"><span class="inner"><span class="accent">AI 순찰 로봇</span></span></span>
+      </h1>
+      <p class="hero-sub" data-reveal="up" data-gate="ready" data-delay="450" style="--ry:10px">순찰, 이상 감지, 보고까지 — 관리실 화면 하나로 단지 안 모든 상황을 실시간으로 확인하세요.</p>
+      <div class="cta-row" data-reveal="up" data-gate="ready" data-delay="600" style="--ry:10px">
+        <button class="pill pill--accent pill--arrow" data-arrow="right" data-modal>
+          <span class="pill-inner">도입 문의하기<span class="pill-badge"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></span>
+        </button>
+        <button class="pill pill--outline pill--noarrow" data-modal>
+          <span class="pill-inner">관리자 로그인 →</span>
+        </button>
+      </div>
+      <div class="hero-stats" data-reveal="up" data-gate="ready" data-delay="750" style="--ry:10px">
+        <div class="hero-stat"><div class="n"><b>0</b>건</div><div class="l">야간 사각지대</div></div>
+        <div class="hero-stat"><div class="n"><b>70%</b>↓</div><div class="l">인력 피로도</div></div>
+        <div class="hero-stat"><div class="n"><b>50+</b></div><div class="l">도입 단지</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="shell hero-status" data-reveal="fade" data-gate="ready" data-delay="900">
+    <span>2014년부터 자율 주행 기술 개발</span>
+    <span class="mid">전국 어디서나 원격 관제</span>
+    <span class="end">아래로 스크롤 <span aria-hidden="true">↓</span></span>
+  </div>
+</section>
+
+<!-- ===== features ===== -->
+<section id="features">
+  <div class="shell sec-pad">
+    <div class="center-head">
+      <span class="eyebrow eyebrow--dark eyebrow--bordered" data-reveal="up" style="--ry:10px"><span class="dot"></span>주요 기능</span>
+      <h2 class="sec-h2" data-reveal="line" data-delay="120"><span class="line"><span class="inner">단지 전체를 한눈에 관리합니다</span></span></h2>
+    </div>
+    <ul class="feat-grid" id="featGrid"></ul>
+  </div>
+</section>
+
+<!-- ===== how it works ===== -->
+<section id="how">
+  <div class="shell sec-pad">
+    <span class="eyebrow eyebrow--dark" data-reveal="up" style="--ry:10px"><span class="dot"></span>작동방식</span>
+    <h2 class="how-h2" data-reveal="line" data-delay="120"><span class="line"><span class="inner">설치부터 순찰까지, 사람 손이 거의 필요 없습니다</span></span></h2>
+    <ul id="howList"></ul>
+  </div>
+</section>
+
+<!-- ===== impact ===== -->
+<section id="impact">
+  <div class="shell impact-inner">
+    <div class="impact-panel" data-reveal="scale" style="--ry:40px">
+      <div class="glow"></div>
+      <span class="eyebrow eyebrow--light"><span class="dot"></span>도입효과</span>
+      <h2 class="impact-h2" data-reveal="line" data-delay="120"><span class="line"><span class="inner">숫자로 증명되는 순찰의 변화</span></span></h2>
+      <ul class="impact-grid" id="impactGrid"></ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- ===== footer ===== -->
+<footer class="footer">
+  <div class="shell footer-inner">
+    <div class="footer-cta">
+      <div>
+        <h2 data-reveal="line" data-line-stagger="100">
+          <span class="line"><span class="inner">지금 도입 상담을</span></span>
+          <span class="line"><span class="inner">받아보세요.</span></span>
+        </h2>
+        <p>전문 상담원이 단지 환경에 맞는 맞춤형 견적을 안내해 드립니다.</p>
+      </div>
+      <button class="pill pill--accent pill--arrow" data-arrow="up-right" data-modal>
+        <span class="pill-inner">도입 문의하기<span class="pill-badge"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></span></span>
+      </button>
+    </div>
+    <div class="footer-cols">
+      <div class="fcol fcol-brand">
+        <div class="b"><svg class="mk"><use href="#mk"/></svg><span>AI 순찰 시스템</span></div>
+        <p>자율 주행 순찰 로봇과 실시간 관제 대시보드로 단지의 안전을 지키는 통합 보안 플랫폼입니다.</p>
+      </div>
+      <div class="fcol"><h4>제품</h4><ul>
+        <li><a class="alink" href="#features"><span>주요 기능</span></a></li>
+        <li><a class="alink" href="#how"><span>작동방식</span></a></li>
+        <li><a class="alink" href="#impact"><span>도입효과</span></a></li>
+        <li><a class="alink" href="#" data-modal><span>관리자 로그인</span></a></li>
+      </ul></div>
+      <div class="fcol"><h4>회사</h4><ul>
+        <li><a class="alink" href="#"><span>회사 소개</span></a></li>
+        <li><a class="alink" href="#"><span>도입 사례</span></a></li>
+        <li><a class="alink" href="#"><span>채용</span></a></li>
+        <li><a class="alink" href="#" data-modal><span>문의하기</span></a></li>
+      </ul></div>
+      <div class="fcol"><h4>고객지원</h4><ul>
+        <li><a class="alink" href="#"><span>자주 묻는 질문</span></a></li>
+        <li><a class="alink" href="#"><span>기술 지원</span></a></li>
+        <li><a class="alink" href="#"><span>이용약관</span></a></li>
+        <li><a class="alink" href="#"><span>개인정보처리방침</span></a></li>
+      </ul></div>
+    </div>
+    <div class="footer-legal">
+      <span>© 2026 AI Patrol Robot Management System. All rights reserved.</span>
+      <div class="lg-links">
+        <a class="alink" href="#"><span>개인정보처리방침</span></a>
+        <a class="alink" href="#"><span>이용약관</span></a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-wm">PATROL</div>
+</footer>
+
+<!-- ===== nav menu ===== -->
+<div class="navmenu" id="navmenu" aria-hidden="true">
+  <div class="shell navmenu__top">
+    <div class="navmenu__brand"><svg class="mk"><use href="#mk"/></svg><span>AI 순찰 시스템</span></div>
+    <button class="nm-close" id="menuClose"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l16 16M20 4 4 20"/></svg>닫기</button>
+  </div>
+  <nav class="shell navmenu__nav" aria-label="메뉴"><ul id="navmenuList"></ul></nav>
+  <div class="shell navmenu__bottom">
+    <span id="navmenuTime">관제 시각</span>
+    <button class="nm-start" data-modal>도입 문의하기 →</button>
+  </div>
+</div>
+
+<!-- ===== modal ===== -->
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-hidden="true" aria-label="도입 문의">
+  <div class="modal__panel" id="modalPanel">
+    <button class="modal__close" id="modalClose" aria-label="닫기"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l16 16M20 4 4 20"/></svg></button>
+    <div id="modalForm">
+      <div class="modal__head">
+        <span class="modal__eyebrow"><span class="dot"></span>도입 문의</span>
+        <h2>단지에 맞는 견적을 받아보세요.</h2>
+      </div>
+      <form id="requestForm">
+        <label class="field"><span class="cap">담당자 이름</span><input type="text" name="name" required placeholder="이름을 입력하세요" /></label>
+        <label class="field"><span class="cap">단지명</span><input type="text" name="site" required placeholder="예: 가온아파트" /></label>
+        <label class="field"><span class="cap">연락처</span><input type="tel" name="phone" required placeholder="010-0000-0000" /></label>
+        <label class="field"><span class="cap">문의 내용</span><textarea name="message" rows="3" placeholder="단지 규모, 도입 시기, 궁금한 점을 자유롭게 적어주세요."></textarea></label>
+        <div class="modal__submit">
+          <span class="modal__note">평일 기준 1영업일 내 연락드립니다.</span>
+          <button type="submit" class="pill pill--accent pill--arrow" data-arrow="up-right" id="submitBtn">
+            <span class="pill-inner"><span id="submitLabel">문의 보내기</span><span class="pill-badge"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></span></span>
+          </button>
+        </div>
+      </form>
+    </div>
+    <div id="modalSuccess" class="modal__success hidden">
+      <div class="badge"><svg class="mk"><use href="#mk"/></svg></div>
+      <h2>문의가 접수되었습니다</h2>
+      <p>담당 상담원이 평일 기준 1영업일 내에 연락드리겠습니다. 감사합니다.</p>
+      <button class="pill pill--dark pill--noarrow" id="successClose"><span class="pill-inner">닫기</span></button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+  "lenis": "https://unpkg.com/lenis@1.3.23/dist/lenis.mjs"
+} }
+</script>
+<script type="module">
+import Lenis from 'lenis';
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ===== adaptive grid (scale up >1920) ===== */
+function applyAdaptiveGrid(){
+  const FONT_BASE=16, baseWidth=1920, coef=0.6666, w=window.innerWidth;
+  const widthReduction=((baseWidth-w)/baseWidth)*100;
+  const size=FONT_BASE-(FONT_BASE*(widthReduction*coef))/100;
+  if(size>FONT_BASE) document.documentElement.style.fontSize=size+'px';
+  else document.documentElement.style.removeProperty('font-size');
+}
+applyAdaptiveGrid(); addEventListener('resize', applyAdaptiveGrid);
+
+/* ===== lenis + scroll lock ===== */
+window.scrollTo(0,0);
+const lenis=new Lenis({ smoothWheel:true });
+function raf(t){ lenis.raf(t); requestAnimationFrame(raf); }
+requestAnimationFrame(raf);
+let scrollEnabled=true;
+function stopScroll(){ scrollEnabled=false; lenis.stop(); const h=document.documentElement; h.style.position='relative'; h.style.overflow='hidden'; h.style.height='100%'; }
+function startScroll(){ scrollEnabled=true; lenis.start(); const h=document.documentElement; h.style.removeProperty('position'); h.style.removeProperty('overflow'); h.style.removeProperty('height'); }
+function scrollToId(id){ const el=document.getElementById(id); if(!el) return; const was=scrollEnabled; scrollEnabled=false; setTimeout(()=>{ const top=el.getBoundingClientRect().top+window.pageYOffset; window.scrollTo({top,behavior:'smooth'}); setTimeout(()=>{scrollEnabled=was;},100); },50); }
+
+/* ===== reveal engine ===== */
+window.__ready=false; const pendingReady=[];
+function doReveal(el){
+  const delay=parseInt(el.dataset.delay||'0',10);
+  if(el.dataset.reveal==='line'){ const s=parseInt(el.dataset.lineStagger||'0',10); el.querySelectorAll('.inner').forEach((n,i)=>n.style.transitionDelay=(delay+i*s)+'ms'); }
+  else if(el.dataset.reveal==='word'){ const s=parseInt(el.dataset.wordStagger||'35',10); el.querySelectorAll('.w-inner').forEach((n,i)=>n.style.transitionDelay=(delay+i*s)+'ms'); }
+  else if(delay) el.style.transitionDelay=delay+'ms';
+  requestAnimationFrame(()=>el.classList.add('rv-in'));
+}
+function splitWords(el){
+  const words=[];
+  function walk(node,frag){ node.childNodes.forEach(c=>{ if(c.nodeType===3){ c.textContent.split(/(\s+)/).forEach(p=>{ if(p.trim()===''){ frag.appendChild(document.createTextNode(p)); return; } const w=document.createElement('span'); w.className='word'; const inner=document.createElement('span'); inner.className='w-inner'; inner.textContent=p; w.appendChild(inner); frag.appendChild(w); words.push(inner); }); } else if(c.nodeType===1){ const cl=c.cloneNode(false); walk(c,cl); frag.appendChild(cl); } }); }
+  const frag=document.createDocumentFragment(); walk(el,frag); el.textContent=''; el.appendChild(frag);
+}
+document.querySelectorAll('[data-reveal="word"]').forEach(splitWords);
+const revObserver=new IntersectionObserver((entries)=>{ entries.forEach(e=>{ if(!e.isIntersecting) return; const el=e.target; revObserver.unobserve(el); if(el.dataset.gate==='ready' && !window.__ready){ pendingReady.push(el); return; } doReveal(el); }); },{ threshold:0.15, rootMargin:'0px 0px -8% 0px' });
+function observeReveals(root){ (root||document).querySelectorAll('[data-reveal]').forEach(el=>revObserver.observe(el)); }
+
+function fireReady(){
+  window.__ready=true;
+  setTimeout(()=>document.getElementById('header').classList.add('in'),150);
+  pendingReady.forEach(doReveal); pendingReady.length=0;
+}
+
+/* ===== build feature / how / impact content ===== */
+(function(){
+  const features=[
+    { no:'01', title:'실시간 360도 영상 관제', desc:'로봇에 장착된 다중 카메라로 단지 곳곳을 관리실에서 실시간 확인. 끊김 없는 고화질 스트리밍으로 야간에도 선명한 시야를 확보합니다.', tags:['다중 카메라','야간 IR','고화질 스트리밍'], icon:'<path d="M2 8a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="m15 10 5-3v10l-5-3"/>' },
+    { no:'02', title:'이상 상황 즉각 감지', desc:'쓰러진 사람, 화재 연기, 미인가 차량 등 위험 요소를 AI 비전이 감지해 관제 화면에 즉시 알림을 띄웁니다.', tags:['AI 비전','침입 감지','즉시 알림'], icon:'<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>' },
+    { no:'03', title:'자동 순찰 일지', desc:'순찰 시간, 경로, 특이사항을 매일 자동으로 기록해 수기 작성의 번거로움을 없앱니다. 필요할 때 바로 조회·내보내기.', tags:['자동 기록','경로 로그','리포트'], icon:'<path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"/><path d="M14 4v5h5M8 13h8M8 17h5"/>' },
+    { no:'04', title:'자율 주행 및 충전', desc:'정해진 스케줄에 맞춰 스스로 출동하고, 배터리가 부족해지면 스테이션으로 복귀해 자동 충전합니다.', tags:['자율 주행','스케줄 순찰','자동 충전'], icon:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' }
+  ];
+  const grid=document.getElementById('featGrid');
+  features.forEach((f,i)=>{
+    const li=document.createElement('li');
+    li.setAttribute('data-reveal','up'); li.setAttribute('data-delay',String(i*90)); li.style.setProperty('--ry','40px');
+    li.innerHTML='<article class="feat-card"><div class="glow"></div>'+
+      '<div class="feat-top"><span class="feat-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+f.icon+'</svg></span><span class="feat-no">'+f.no+'</span></div>'+
+      '<div class="feat-body"><h3>'+f.title+'</h3><p>'+f.desc+'</p><div class="tags">'+f.tags.map(t=>'<span class="tag">'+t+'</span>').join('')+'</div></div></article>';
+    grid.appendChild(li);
+  });
+
+  const steps=[
+    { no:'01', title:'로봇 등록 & 맵 생성', desc:'로봇을 단지에 배치하면 스스로 순찰하며 맵을 그리고, 관제 화면에 실시간으로 반영합니다.' },
+    { no:'02', title:'구역·체크포인트 지정', desc:'맵 위에서 순찰 구역과 체크포인트를 지정하면 로봇이 최적 경로로 순찰합니다.' },
+    { no:'03', title:'실시간 감지 & 알림', desc:'순찰 중 이상 상황을 AI가 감지하면 관제 화면과 담당자에게 즉시 알림을 보냅니다.' },
+    { no:'04', title:'자동 기록 & 복귀 충전', desc:'순찰 일지를 자동으로 남기고, 배터리가 부족하면 스테이션으로 복귀해 충전합니다.' }
+  ];
+  const howList=document.getElementById('howList');
+  const arrowUR='<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>';
+  steps.forEach((s,i)=>{
+    const li=document.createElement('li');
+    li.className='how-row'+(i===0?' first':'');
+    li.setAttribute('data-reveal','up'); li.setAttribute('data-delay',String(i*80)); li.style.setProperty('--ry','24px');
+    li.innerHTML='<div class="how-link"><span class="how-idx">'+s.no+'</span><h3 class="how-title">'+s.title+'</h3><p class="how-desc">'+s.desc+'</p><span class="how-arrow">'+arrowUR+'</span></div>';
+    howList.appendChild(li);
+  });
+
+  const stats=[
+    { value:50, suf:'+', label:'도입 단지' },
+    { value:70, suf:'%↓', label:'인력 피로도' },
+    { value:98, suf:'%', label:'이벤트 감지율' },
+    { value:24, suf:'/7', label:'무중단 순찰' }
+  ];
+  const impactGrid=document.getElementById('impactGrid');
+  window.__statNums=[];
+  stats.forEach((s,i)=>{
+    const li=document.createElement('li');
+    li.setAttribute('data-reveal','up'); li.setAttribute('data-delay',String(i*90)); li.style.setProperty('--ry','20px');
+    li.innerHTML='<div class="impact-num"><span class="v">0</span><span class="suf">'+s.suf+'</span></div><div class="impact-lbl">'+s.label+'</div>';
+    impactGrid.appendChild(li);
+    window.__statNums.push({ el:li.querySelector('.v'), value:s.value });
+  });
+
+  const menuItems=[
+    { label:'홈', target:'home' },{ label:'기능', target:'features' },{ label:'작동방식', target:'how' },
+    { label:'도입효과', target:'impact' },{ label:'로그인', modal:true },{ label:'도입 문의', modal:true }
+  ];
+  const navList=document.getElementById('navmenuList');
+  menuItems.forEach((it,i)=>{
+    const li=document.createElement('li'); const btn=document.createElement('button');
+    btn.className='nm-item'; btn.style.transitionDelay=(i*45+80)+'ms';
+    btn.innerHTML='<span class="n">0'+(i+1)+'</span><span class="l">'+it.label+'</span>';
+    btn.addEventListener('click',()=>{ window.__closeMenu(); if(it.modal) setTimeout(openModal,60); else setTimeout(()=>scrollToId(it.target),60); });
+    li.appendChild(btn); navList.appendChild(li);
+  });
+})();
+observeReveals();
+
+/* ===== loader ===== */
+const loader=document.getElementById('loader'), loaderFill=document.getElementById('loaderFill'), loaderCount=document.getElementById('loaderCount');
+const FILL_MS=1300; const easeInOutCubic=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2; const pad3=n=>String(n).padStart(3,'0');
+stopScroll();
+if(reduceMotion){ loaderCount.textContent='100'; loaderFill.style.width='100%'; loader.remove(); startScroll(); fireReady(); }
+else{
+  const startT=performance.now();
+  (function tick(now){ const t=Math.min((now-startT)/FILL_MS,1); const p=Math.round(easeInOutCubic(t)*100); loaderCount.textContent=pad3(p); loaderFill.style.width=p+'%'; if(t<1) requestAnimationFrame(tick); else exitLoader(); })(startT);
+  function exitLoader(){ loader.classList.add('exit'); const onEnd=e=>{ if(e.propertyName!=='transform') return; loader.removeEventListener('transitionend',onEnd); loader.remove(); startScroll(); fireReady(); }; loader.addEventListener('transitionend',onEnd); setTimeout(()=>{ if(document.body.contains(loader)){ loader.remove(); startScroll(); fireReady(); } },900); }
+}
+
+/* ===== live clock ===== */
+const clockTime=document.getElementById('clockTime'), navmenuTime=document.getElementById('navmenuTime');
+function pad2(n){ return String(n).padStart(2,'0'); }
+function updateClock(){ const d=new Date(); const t=pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); clockTime.textContent=t; navmenuTime.textContent='관제 시각 · '+t; }
+updateClock(); setInterval(updateClock,1000);
+
+/* ===== stats count-up ===== */
+(function(){
+  let last=0;
+  function update(){ const now=performance.now(); if(now-last<30) return; last=now; const vh=window.innerHeight;
+    (window.__statNums||[]).forEach(n=>{ const r=n.el.getBoundingClientRect(); const center=r.top+r.height/2; let p=(vh-center)/(vh-vh/2); p=Math.max(0,Math.min(1,p)); n.el.textContent=Math.round(p*n.value); }); }
+  window.addEventListener('scroll',update,{passive:true}); lenis.on('scroll',update); window.addEventListener('resize',update); update();
+})();
+
+/* ===== nav wiring ===== */
+document.querySelectorAll('[data-scroll]').forEach(b=>b.addEventListener('click',()=>scrollToId(b.getAttribute('data-scroll'))));
+
+/* ===== nav menu ===== */
+(function(){
+  const navmenu=document.getElementById('navmenu');
+  function openMenu(){ navmenu.classList.add('open'); navmenu.setAttribute('aria-hidden','false'); stopScroll(); document.addEventListener('keydown',onKey); }
+  function closeMenu(){ navmenu.classList.remove('open'); navmenu.setAttribute('aria-hidden','true'); startScroll(); document.removeEventListener('keydown',onKey); }
+  function onKey(e){ if(e.key==='Escape') closeMenu(); }
+  document.getElementById('menuOpen').addEventListener('click',openMenu);
+  document.getElementById('menuClose').addEventListener('click',closeMenu);
+  window.__closeMenu=closeMenu;
+})();
+
+/* ===== modal ===== */
+const modal=document.getElementById('modal'), modalPanel=document.getElementById('modalPanel'), modalForm=document.getElementById('modalForm'), modalSuccess=document.getElementById('modalSuccess'), requestForm=document.getElementById('requestForm'), submitLabel=document.getElementById('submitLabel');
+function openModal(){ modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); stopScroll(); document.addEventListener('keydown',onModalKey); }
+function closeModal(){ modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); startScroll(); document.removeEventListener('keydown',onModalKey); setTimeout(()=>{ modalForm.classList.remove('hidden'); modalSuccess.classList.add('hidden'); requestForm.reset(); submitLabel.textContent='문의 보내기'; },300); }
+function onModalKey(e){ if(e.key==='Escape') closeModal(); }
+window.__openModal=openModal;
+function openModal2(){ openModal(); }
+document.querySelectorAll('[data-modal]').forEach(el=>el.addEventListener('click',e=>{ e.preventDefault(); openModal(); }));
+document.getElementById('modalClose').addEventListener('click',closeModal);
+document.getElementById('successClose').addEventListener('click',closeModal);
+modal.addEventListener('click',e=>{ if(e.target===modal) closeModal(); });
+modalPanel.addEventListener('click',e=>e.stopPropagation());
+requestForm.addEventListener('submit',e=>{ e.preventDefault(); submitLabel.textContent='보내는 중…'; setTimeout(()=>{ modalForm.classList.add('hidden'); modalSuccess.classList.remove('hidden'); },600); });
+
+/* ============================================================
+   THREE.JS — interactive 3D patrol robot
+   ============================================================ */
+(async function(){
+  const canvas=document.getElementById('robotCanvas');
+  const stage=document.querySelector('.hero-liquid');
+  const hint=document.getElementById('robotHint');
+  let robotBaseY=0.15;
+  let THREE, RoomEnvironment, RoundedBoxGeometry;
+  try{
+    THREE=await import('three');
+    ({ RoomEnvironment }=await import('three/addons/environments/RoomEnvironment.js'));
+    ({ RoundedBoxGeometry }=await import('three/addons/geometries/RoundedBoxGeometry.js'));
+  }catch(err){ console.warn('three load failed', err); canvas.style.display='none'; return; }
+
+  // Wait for the intro loader to finish before the heavy 3D build, so its countdown
+  // (and the hero text reveals gated on it) are never starved by scene initialisation.
+  await new Promise(r=>{ const c=()=>{ window.__ready ? r() : setTimeout(c,40); }; c(); });
+
+  const renderer=new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true, powerPreference:'high-performance' });
+  renderer.setClearColor(0x000000,0);
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.12;
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  renderer.setPixelRatio(dpr);
+
+  const scene=new THREE.Scene();
+  scene.fog=new THREE.Fog(0xece9e6, 15, 42);       // blend the map into the light page
+  const camera=new THREE.PerspectiveCamera(40,1,0.1,120);
+  camera.position.set(0,8.6,12.2);
+  camera.lookAt(0,0.3,-1.5);
+
+  // environment for glossy reflections
+  const pmrem=new THREE.PMREMGenerator(renderer);
+  const envScene=new RoomEnvironment();
+  scene.environment=pmrem.fromScene(envScene,0.04).texture;
+
+  // lights
+  const hemi=new THREE.HemisphereLight(0xffffff,0x8a8a8a,0.65); scene.add(hemi);
+  const key=new THREE.DirectionalLight(0xffffff,2.1); key.position.set(-3,4,5); scene.add(key);
+  const rim=new THREE.DirectionalLight(0xff7a45,1.4); rim.position.set(4,-1,-3); scene.add(rim);
+  const fill=new THREE.DirectionalLight(0xdfe6ff,0.5); fill.position.set(3,2,4); scene.add(fill);
+
+  // materials
+  const bodyMat=new THREE.MeshPhysicalMaterial({ color:0x0c0c10, metalness:0.55, roughness:0.32, clearcoat:0.9, clearcoatRoughness:0.28, envMapIntensity:1.0 });
+  const headMat=new THREE.MeshPhysicalMaterial({ color:0x0a0a0d, metalness:0.5, roughness:0.12, clearcoat:1.0, clearcoatRoughness:0.08, envMapIntensity:1.25 });
+  const trimMat=new THREE.MeshStandardMaterial({ color:0x1a1a20, metalness:0.7, roughness:0.4, envMapIntensity:0.8 });
+  const visorMat=new THREE.MeshStandardMaterial({ color:0x120400, emissive:0xff5a26, emissiveIntensity:5.0, roughness:0.35, metalness:0.2 });
+  const lensMat=new THREE.MeshPhysicalMaterial({ color:0x050506, metalness:0.2, roughness:0.05, clearcoat:1, transmission:0.1, envMapIntensity:1.4 });
+
+  const robot=new THREE.Group(); scene.add(robot);
+  const head=new THREE.Group(); robot.add(head);
+
+  // ---- head (helmet dome) ----
+  const skull=new THREE.Mesh(new THREE.SphereGeometry(1.18,72,72), headMat);
+  skull.scale.set(1.0,1.02,1.06);
+  head.add(skull);
+  // slightly flattened lower-front "face" via a rounded box overlay
+  const faceGeo=new RoundedBoxGeometry(1.62,1.42,0.46,6,0.55);
+  const face=new THREE.Mesh(faceGeo, headMat);
+  face.position.set(0,0.02,0.9); face.scale.set(1,1,1);
+  head.add(face);
+  head.position.y=1.28;
+
+  // ---- visor (near-straight emissive eye slit) ----
+  const visorCurve=new THREE.Mesh(new THREE.CapsuleGeometry(0.058,1.32,6,20), visorMat);
+  visorCurve.rotation.z=Math.PI/2; // horizontal scanner slit
+  visorCurve.position.set(0,-0.02,1.24);
+  head.add(visorCurve);
+  // glow sprite behind visor
+  function glowTexture(){ const c=document.createElement('canvas'); c.width=c.height=128; const g=c.getContext('2d'); const grd=g.createRadialGradient(64,64,0,64,64,64); grd.addColorStop(0,'rgba(255,150,90,1)'); grd.addColorStop(0.35,'rgba(255,90,38,0.65)'); grd.addColorStop(1,'rgba(255,90,38,0)'); g.fillStyle=grd; g.fillRect(0,0,128,128); const tx=new THREE.CanvasTexture(c); return tx; }
+  const glowTex=glowTexture();
+  const glowMat=new THREE.SpriteMaterial({ map:glowTex, color:0xff6a30, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false });
+  const glow=new THREE.Sprite(glowMat); glow.scale.set(2.1,0.66,1); glow.position.set(0,-0.02,1.28); head.add(glow);
+  const glow2=new THREE.Sprite(glowMat.clone()); glow2.scale.set(3.7,1.3,1); glow2.material.opacity=0.5; glow2.position.set(0,-0.02,1.12); head.add(glow2);
+
+  // ---- side sensor pod ----
+  const podArm=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.18,24), trimMat);
+  podArm.rotation.z=Math.PI/2; podArm.position.set(1.08,0.05,0.15); head.add(podArm);
+  const pod=new THREE.Mesh(new THREE.SphereGeometry(0.3,40,40), headMat); pod.position.set(1.28,0.05,0.15); pod.scale.set(1,1,0.85); head.add(pod);
+  const lens=new THREE.Mesh(new THREE.CircleGeometry(0.16,32), lensMat); lens.position.set(1.42,0.05,0.16); lens.lookAt(3.2,0.05,0.7); head.add(lens);
+  const lensRing=new THREE.Mesh(new THREE.TorusGeometry(0.17,0.02,12,32), trimMat); lensRing.position.copy(lens.position); lensRing.quaternion.copy(lens.quaternion); head.add(lensRing);
+
+  // head seam line
+  const seam=new THREE.Mesh(new THREE.TorusGeometry(1.16,0.012,10,80,Math.PI), trimMat);
+  seam.rotation.x=Math.PI/2; seam.position.y=0.25; head.add(seam);
+  // two tiny top vents
+  const ventGeo=new THREE.CapsuleGeometry(0.02,0.14,4,8);
+  const vA=new THREE.Mesh(ventGeo,trimMat); vA.rotation.x=0.5; vA.position.set(-0.18,0.95,0.5); head.add(vA);
+  const vB=new THREE.Mesh(ventGeo,trimMat); vB.rotation.x=0.5; vB.position.set(0.02,1.0,0.45); head.add(vB);
+
+  // ---- neck ----
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.4,0.4,32), trimMat);
+  neck.position.y=0.42; robot.add(neck);
+
+  // ---- body (seated) ----
+  const torso=new THREE.Mesh(new RoundedBoxGeometry(1.7,1.5,1.25,8,0.5), bodyMat);
+  torso.position.y=-0.35; torso.scale.set(1,1,1); robot.add(torso);
+  // chest panel line
+  const chest=new THREE.Mesh(new THREE.PlaneGeometry(0.7,0.9), trimMat);
+  chest.position.set(0,-0.3,0.64); robot.add(chest);
+  const chestDot=new THREE.Mesh(new THREE.CircleGeometry(0.08,24), visorMat); chestDot.position.set(0,0.05,0.645); robot.add(chestDot);
+
+  // ---- shoulders / stub arms ----
+  function arm(sx){ const g=new THREE.Group();
+    const sh=new THREE.Mesh(new THREE.SphereGeometry(0.42,32,32), bodyMat); sh.position.set(sx*0.98,-0.05,0.05); g.add(sh);
+    const fore=new THREE.Mesh(new THREE.CapsuleGeometry(0.3,0.5,8,16), bodyMat); fore.position.set(sx*1.02,-0.62,0.28); fore.rotation.z=sx*0.25; fore.rotation.x=-0.5; g.add(fore);
+    const hand=new THREE.Mesh(new THREE.SphereGeometry(0.3,28,28), headMat); hand.position.set(sx*0.98,-0.98,0.6); g.add(hand);
+    return g; }
+  robot.add(arm(-1)); robot.add(arm(1));
+
+  // ---- base pods (feet) ----
+  function foot(x){ const m=new THREE.Mesh(new RoundedBoxGeometry(0.7,0.5,1.0,6,0.24), bodyMat); m.position.set(x,-1.25,0.28); return m; }
+  robot.add(foot(-0.5)); robot.add(foot(0.5));
+  const baseRing=new THREE.Mesh(new THREE.TorusGeometry(0.9,0.05,16,48), trimMat); baseRing.rotation.x=Math.PI/2; baseRing.position.y=-1.5; robot.add(baseRing);
+
+  robot.position.y=1.55;                          // feet rest on the map (y ~ 0) inside the rig
+  const rig=new THREE.Group(); rig.add(robot); scene.add(rig);
+  const RSCALE=0.62; rig.scale.setScalar(RSCALE);
+
+  // ---------- ground map ----------
+  function gridTexture(){
+    const s=1024, c=document.createElement('canvas'); c.width=c.height=s; const g=c.getContext('2d');
+    g.fillStyle='#f3f1ee'; g.fillRect(0,0,s,s);
+    const step=s/16;
+    g.strokeStyle='rgba(24,30,48,0.06)'; g.lineWidth=2;
+    for(let i=0;i<=16;i++){ const p=i*step; g.beginPath(); g.moveTo(p,0); g.lineTo(p,s); g.stroke(); g.beginPath(); g.moveTo(0,p); g.lineTo(s,p); g.stroke(); }
+    g.strokeStyle='rgba(24,30,48,0.11)'; g.lineWidth=3;
+    for(let i=0;i<=16;i+=4){ const p=i*step; g.beginPath(); g.moveTo(p,0); g.lineTo(p,s); g.stroke(); g.beginPath(); g.moveTo(0,p); g.lineTo(s,p); g.stroke(); }
+    const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(7,7); t.anisotropy=4; return t;
+  }
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(120,120), new THREE.MeshStandardMaterial({ color:0xf4f2ef, roughness:1, metalness:0, map:gridTexture() }));
+  ground.rotation.x=-Math.PI/2; scene.add(ground);
+
+  // ---------- contact shadow ----------
+  const shadowTex=(()=>{ const c=document.createElement('canvas'); c.width=c.height=128; const g=c.getContext('2d'); const rd=g.createRadialGradient(64,64,0,64,64,64); rd.addColorStop(0,'rgba(20,18,15,0.5)'); rd.addColorStop(0.6,'rgba(20,18,15,0.16)'); rd.addColorStop(1,'rgba(20,18,15,0)'); g.fillStyle=rd; g.fillRect(0,0,128,128); return new THREE.CanvasTexture(c); })();
+  const shadow=new THREE.Mesh(new THREE.PlaneGeometry(2.6,2.6), new THREE.MeshBasicMaterial({ map:shadowTex, transparent:true, depthWrite:false }));
+  shadow.rotation.x=-Math.PI/2; shadow.position.y=0.03; scene.add(shadow);
+
+  const clock=new THREE.Clock();
+
+  // ---------- orange patrol trail (breadcrumbs left behind) ----------
+  const TRAIL=34, trail=[], trailGeo=new THREE.CircleGeometry(0.16,18);
+  for(let i=0;i<TRAIL;i++){ const m=new THREE.MeshBasicMaterial({ color:0xff6a30, transparent:true, opacity:0, depthWrite:false });
+    const d=new THREE.Mesh(trailGeo,m); d.rotation.x=-Math.PI/2; d.position.y=0.02; d.visible=false; scene.add(d); trail.push({mesh:d,mat:m,age:1e9}); }
+  let trailIdx=0; const lastDrop=new THREE.Vector3(9999,0,0);
+
+  // ---------- checkpoints (fixed spots on the map) ----------
+  const COOL=new THREE.Color(0x5f6f9e), WARM=new THREE.Color(0xff6a30);
+  const cpPos=[ new THREE.Vector3(-6,0,-3.5), new THREE.Vector3(4.5,0,-4.5), new THREE.Vector3(6.5,0,3), new THREE.Vector3(-4,0,4.5) ];
+  const checkpoints=cpPos.map(p=>{
+    const grp=new THREE.Group(); grp.position.set(p.x,0.05,p.z);
+    const ringMat=new THREE.MeshBasicMaterial({ color:0x5f6f9e, transparent:true, opacity:0.5 });
+    const ring=new THREE.Mesh(new THREE.RingGeometry(0.4,0.5,36), ringMat); ring.rotation.x=-Math.PI/2; grp.add(ring);
+    const dotMat=new THREE.MeshBasicMaterial({ color:0x5f6f9e });
+    const dot=new THREE.Mesh(new THREE.CircleGeometry(0.14,24), dotMat); dot.rotation.x=-Math.PI/2; dot.position.y=0.01; grp.add(dot);
+    scene.add(grp); return { pos:p, ring, ringMat, dotMat, lit:0 };
+  });
+
+  // event ping (red) — echoes the "불법주차 · A동" chip
+  const evGrp=new THREE.Group(); evGrp.position.set(-1.5,0.06,-2.0);
+  const evRingMat=new THREE.MeshBasicMaterial({ color:0xe5484d, transparent:true, opacity:0.5 });
+  const evRing=new THREE.Mesh(new THREE.RingGeometry(0.18,0.26,28), evRingMat); evRing.rotation.x=-Math.PI/2; evGrp.add(evRing);
+  const evDot=new THREE.Mesh(new THREE.CircleGeometry(0.15,20), new THREE.MeshBasicMaterial({ color:0xe5484d })); evDot.rotation.x=-Math.PI/2; evDot.position.y=0.01; evGrp.add(evDot);
+  scene.add(evGrp);
+
+  // ---------- the cursor drives the robot ----------
+  const raycaster=new THREE.Raycaster();
+  const groundPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+  const ndc=new THREE.Vector2(), hitPt=new THREE.Vector3();
+  const target=new THREE.Vector3(4,0,0), botPos=new THREE.Vector3(4,0,0), vel=new THREE.Vector3(), tmp=new THREE.Vector3();
+  let lastPointer=-1e9;
+  function pointerToGround(cx,cy){
+    const r=canvas.getBoundingClientRect();
+    ndc.x=((cx-r.left)/r.width)*2-1; ndc.y=-((cy-r.top)/r.height)*2+1;
+    raycaster.setFromCamera(ndc,camera);
+    if(raycaster.ray.intersectPlane(groundPlane,hitPt)){
+      hitPt.x=Math.max(-8.5,Math.min(8.5,hitPt.x)); hitPt.z=Math.max(-7,Math.min(7,hitPt.z));
+      target.copy(hitPt); return true;
+    }
+    return false;
+  }
+  window.addEventListener('pointermove',e=>{ if(pointerToGround(e.clientX,e.clientY)){ lastPointer=clock.elapsedTime; if(hint) hint.style.opacity='0'; } });
+
+  let visible=true;
+  new IntersectionObserver(es=>{ visible=es[0].isIntersecting; },{threshold:0.01}).observe(stage);
+
+  let followCam=false; const camGoal=new THREE.Vector3();
+  function sizeAll(){
+    const r=stage.getBoundingClientRect(); const cw=Math.max(1,r.width), ch=Math.max(1,r.height);
+    renderer.setPixelRatio(dpr); renderer.setSize(cw,ch,false);
+    const aspect=cw/ch; camera.aspect=aspect;
+    followCam = aspect < 0.95;                        // portrait/mobile: chase the robot
+    if(!followCam){ const tall=Math.max(0,(1.1-aspect)); camera.position.set(0, 8.6+tall*3.2, 12.2+tall*5.0); camera.lookAt(0, 0.3, -1.5-tall*1.2); }
+    camera.updateProjectionMatrix();
+  }
+  const ro=new ResizeObserver(sizeAll); ro.observe(stage); sizeAll();
+
+  function animate(){
+    requestAnimationFrame(animate);
+    if(!visible) return;
+    const dt=Math.min(clock.getDelta(),0.05), t=clock.elapsedTime;
+
+    // no recent cursor (idle / touch / mobile) → auto-patrol along a slow wandering path
+    if(t-lastPointer>2.2){ const a=t*0.25; target.set(Math.cos(a)*6.2+Math.cos(a*2.3)*1.2, 0, Math.sin(a*1.1)*4.8+Math.sin(a*1.7)*1.0); }
+
+    // steer toward the target (accelerate, cap speed, ease near the goal)
+    tmp.copy(target).sub(botPos); tmp.y=0; const dist=tmp.length();
+    const speed=Math.min(9.5, dist*3.2);
+    if(dist>0.001){ tmp.normalize().multiplyScalar(speed); vel.lerp(tmp,0.12); } else vel.multiplyScalar(0.8);
+    botPos.addScaledVector(vel,dt);
+    botPos.x=Math.max(-8.5,Math.min(8.5,botPos.x)); botPos.z=Math.max(-7,Math.min(7,botPos.z));
+
+    rig.position.set(botPos.x, Math.sin(t*3)*0.03, botPos.z);
+    shadow.position.set(botPos.x,0.03,botPos.z);
+    if(vel.length()>0.15){ const heading=Math.atan2(vel.x,vel.z); let dh=heading-rig.rotation.y; while(dh>Math.PI)dh-=2*Math.PI; while(dh<-Math.PI)dh+=2*Math.PI; rig.rotation.y+=dh*Math.min(1,dt*8); }
+
+    // leave a fading orange trail
+    if(botPos.distanceTo(lastDrop)>0.5){ const s=trail[trailIdx%TRAIL]; trailIdx++; lastDrop.copy(botPos); s.mesh.position.set(botPos.x,0.02,botPos.z); s.mesh.visible=true; s.age=0; }
+    trail.forEach(s=>{ s.age+=dt; const a=Math.max(0,1-s.age/1.8); s.mat.opacity=a*0.55; s.mesh.scale.setScalar(0.6+a*0.6); if(a<=0) s.mesh.visible=false; });
+
+    if(followCam){ camGoal.set(botPos.x, 7.7, botPos.z+5.5); camera.position.lerp(camGoal,0.09); camera.lookAt(botPos.x, 3.4, botPos.z-0.2); }
+
+    // robot life
+    visorMat.emissiveIntensity=4.2+Math.sin(t*3)*1.1;
+    const gp=0.85+Math.sin(t*3)*0.15; glow.material.opacity=gp; glow2.material.opacity=gp*0.5;
+    head.rotation.z=Math.sin(t*2)*0.03;
+
+    // checkpoints light up when the robot is near
+    checkpoints.forEach(cp=>{ const near=botPos.distanceTo(cp.pos)<1.3;
+      cp.lit+=((near?1:0)-cp.lit)*0.12;
+      const col=COOL.clone().lerp(WARM,cp.lit); cp.ringMat.color.copy(col); cp.dotMat.color.copy(col);
+      cp.ring.scale.setScalar(1+cp.lit*0.6+(near?Math.sin(t*6)*0.05:0)); cp.ringMat.opacity=0.45+cp.lit*0.5; });
+    const k=(Math.sin(t*3.4)*0.5+0.5); evRing.scale.setScalar(1+k*0.9); evRingMat.opacity=0.55*(1-k);
+    renderer.render(scene,camera);
+  }
+  if(reduceMotion){ sizeAll(); rig.position.set(botPos.x,0,botPos.z); shadow.position.set(botPos.x,0.03,botPos.z); renderer.render(scene,camera); if(hint) hint.style.display='none'; }
+  else animate();
+})();
+</script>
+</body>
+</html>
