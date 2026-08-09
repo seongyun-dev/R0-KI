@@ -1,6 +1,10 @@
 package com.oneloop.patrol.service;
 
 import com.oneloop.patrol.dto.response.PatrolAiSummaryResponse;
+import com.oneloop.map.domain.Checkpoint;
+import com.oneloop.map.domain.PatrolMap;
+import com.oneloop.map.repository.CheckpointRepository;
+import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.service.MapFileStorage;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
@@ -30,10 +34,13 @@ public class PatrolPdfService {
 
     private final PatrolService patrolService;
     private final MapFileStorage mapFileStorage;
+    private final PatrolMapRepository patrolMapRepository;
+    private final CheckpointRepository checkpointRepository;
+    private final PatrolMapRenderer patrolMapRenderer;
 
     public byte[] generate(Long apartmentComplexId, Long patrolId) {
         PatrolDetailResponse detail = patrolService.findDetail(apartmentComplexId, patrolId);
-        String html = buildHtml(patrolId, detail);
+        String html = buildHtml(apartmentComplexId, patrolId, detail);
 
         try (ByteArrayOutputStream output = new ByteArrayOutputStream();
                 InputStream font = getClass().getResourceAsStream(FONT_RESOURCE)) {
@@ -53,7 +60,8 @@ public class PatrolPdfService {
         }
     }
 
-    private String buildHtml(Long patrolId, PatrolDetailResponse detail) {
+    private String buildHtml(
+            Long apartmentComplexId, Long patrolId, PatrolDetailResponse detail) {
         StringBuilder html = new StringBuilder();
         html.append(
                 """
@@ -77,7 +85,7 @@ public class PatrolPdfService {
                   table.data td { padding: 7px; border: 1px solid #dce3ee; vertical-align: top; }
                   table.data tr { break-inside: avoid; }
                   .ai { padding: 12px; background: #f8fafc; border-left: 4px solid #2563eb; white-space: pre-wrap; }
-                  .map { width: 100%; max-height: 270px; object-fit: contain; border: 1px solid #dce3ee; }
+                  .map { width: 100%; max-height: 430px; object-fit: contain; border: 1px solid #dce3ee; }
                   .empty { color: #94a3b8; padding: 10px 0; }
                 </style></head><body>
                 """);
@@ -86,7 +94,7 @@ public class PatrolPdfService {
                 .append(patrolId)
                 .append("</div></div>");
         appendSummary(html, detail);
-        appendMap(html, mapDataUri(detail.getMapUrl()));
+        appendMap(html, mapDataUri(apartmentComplexId, detail));
         appendRoute(html, detail.getRoute());
         appendTimeline(html, detail.getTimeline());
         appendAiSummary(html, detail.getAiSummary());
@@ -121,10 +129,30 @@ public class PatrolPdfService {
                 .append("' /></div>");
     }
 
-    private String mapDataUri(String mapUrl) {
+    /**
+     * 도면에 구역·순찰 경로·이벤트 위치를 얹어 data URI 로 만든다. 화면(순찰 상세)에서는 SVG 로 얹지만 openhtmltopdf 에는 SVG
+     * 플러그인이 없어 서버에서 직접 합성한다.
+     */
+    private String mapDataUri(Long apartmentComplexId, PatrolDetailResponse detail) {
+        String mapUrl = detail.getMapUrl();
         if (mapUrl == null || mapUrl.isBlank()) return null;
         try (InputStream input = mapFileStorage.loadByUrl(mapUrl).getInputStream()) {
-            return "data:image/png;base64," + Base64.getEncoder().encodeToString(input.readAllBytes());
+            byte[] source = input.readAllBytes();
+            PatrolMap patrolMap =
+                    patrolMapRepository.findByApartmentComplexId(apartmentComplexId).orElse(null);
+            List<Checkpoint> zones =
+                    patrolMap == null
+                            ? List.of()
+                            : checkpointRepository.findAllByPatrolMapIdOrderByIdAsc(patrolMap.getId());
+            byte[] rendered =
+                    patrolMapRenderer.render(
+                            patrolMap,
+                            source,
+                            zones,
+                            detail.getRoutePoints(),
+                            detail.getTimeline(),
+                            this::eventTypeLabel);
+            return "data:image/png;base64," + Base64.getEncoder().encodeToString(rendered);
         } catch (Exception exception) {
             return null;
         }
