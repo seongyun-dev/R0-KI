@@ -2,9 +2,9 @@
   <BehaviorTree ID="MainTree">
     <Sequence name="PlanOnceThroughPosesAndFollow">
       <ComputePathThroughPoses goals="{goals}" path="{path}"
-                               planner_id="GridBased"/>
+                               planner_id="PatrolGridBased"/>
       <FollowPath path="{path}" controller_id="FollowPath"
-                  goal_checker_id="general_goal_checker"/>
+                  goal_checker_id="patrol_goal_checker"/>
     </Sequence>
   </BehaviorTree>
 </root>

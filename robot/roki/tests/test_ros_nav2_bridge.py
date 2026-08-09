@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import math
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -83,7 +84,119 @@ def reached(waypoint):
     )
 
 
+def continuous_route():
+    return parse_route(
+        {
+            "schema_version": 1,
+            "map_id": "map-1",
+            "map_version": 60,
+            "route_id": "continuous-patrol-test",
+            "frame_id": "map",
+            "waypoints": [
+                {
+                    "sequence": 1,
+                    "name": "START",
+                    "x": 0.541,
+                    "y": 0.930,
+                    "yaw_deg": None,
+                    "acceptance_radius_m": 0.3,
+                    "action": "PASS",
+                },
+                {
+                    "sequence": 2,
+                    "name": "CORNER",
+                    "x": 0.552,
+                    "y": 1.666,
+                    "yaw_deg": None,
+                    "acceptance_radius_m": 0.3,
+                    "action": "PASS",
+                },
+                {
+                    "sequence": 3,
+                    "name": "DESTINATION",
+                    "x": -0.145,
+                    "y": 1.765,
+                    "yaw_deg": None,
+                    "acceptance_radius_m": 0.3,
+                    "action": "DESTINATION",
+                },
+            ],
+        }
+    )
+
+
 class RosNav2BridgeTest(unittest.TestCase):
+    def test_segment_sends_one_through_poses_goal_with_tangent_headings(self):
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=lambda _command: None,
+        )
+        future = Mock()
+        bridge._navigate_type = SimpleNamespace(
+            Goal=lambda: SimpleNamespace(poses=[], behavior_tree="")
+        )
+        bridge._pose_type = lambda: SimpleNamespace(
+            header=SimpleNamespace(frame_id="", stamp=None),
+            pose=SimpleNamespace(
+                position=SimpleNamespace(x=0.0, y=0.0),
+                orientation=SimpleNamespace(z=0.0, w=1.0),
+            ),
+        )
+        bridge._node = SimpleNamespace(
+            get_clock=lambda: SimpleNamespace(
+                now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
+            )
+        )
+        bridge._action_client = SimpleNamespace(
+            send_goal_async=Mock(return_value=future)
+        )
+        bridge._route = continuous_route()
+        bridge._current_sequence = 2
+
+        bridge._send_segment(2)
+
+        goal = bridge._action_client.send_goal_async.call_args.args[0]
+        self.assertEqual(len(goal.poses), 2)
+        self.assertEqual(
+            [(pose.pose.position.x, pose.pose.position.y) for pose in goal.poses],
+            [(0.552, 1.666), (-0.145, 1.765)],
+        )
+        yaws = [
+            math.degrees(
+                2.0
+                * math.atan2(
+                    pose.pose.orientation.z,
+                    pose.pose.orientation.w,
+                )
+            )
+            for pose in goal.poses
+        ]
+        self.assertAlmostEqual(yaws[0], 130.53, places=2)
+        self.assertAlmostEqual(yaws[1], 171.92, places=2)
+        self.assertEqual(bridge._segment_end_sequence, 3)
+        self.assertTrue(goal.behavior_tree.endswith("through_poses.xml"))
+        future.add_done_callback.assert_called_once()
+
+    def test_pass_inside_active_segment_does_not_replace_nav2_goal(self):
+        bridge = RosNav2Bridge(
+            settings=RosNav2BridgeSettings(
+                AckermannCommandSettings(0.124, 8.6)
+            ),
+            motion_sink=lambda _command: None,
+        )
+        route = continuous_route()
+        bridge._route = route
+        bridge._current_sequence = 2
+        bridge._segment_end_sequence = 3
+        bridge._send_segment = Mock()
+
+        bridge.on_navigation_event(reached(route.waypoints[1]))
+
+        self.assertEqual(bridge._current_sequence, 3)
+        bridge._send_segment.assert_not_called()
+
     def test_start_never_overwrites_localization(self) -> None:
         """START_PATROL must not teleport AMCL to the route's waypoint 1.
 
@@ -107,7 +220,7 @@ class RosNav2BridgeTest(unittest.TestCase):
                 now=lambda: SimpleNamespace(to_msg=lambda: "stamp")
             )
         )
-        bridge._send_sequence = Mock()
+        bridge._send_segment = Mock()
         route = demo_route()
         first_event = SimpleNamespace(
             mission_event=SimpleNamespace(waypoint=route.waypoints[0])
@@ -119,7 +232,7 @@ class RosNav2BridgeTest(unittest.TestCase):
         self.assertEqual(sleeps, [])
         # Waypoint 1 stays the externally confirmed anchor; navigation begins
         # when the outer service reports it reached and sequence 2 dispatches.
-        bridge._send_sequence.assert_not_called()
+        bridge._send_segment.assert_not_called()
 
     def test_start_waits_for_first_post_anchor_goal_acceptance(self) -> None:
         bridge = RosNav2Bridge(
@@ -145,7 +258,7 @@ class RosNav2BridgeTest(unittest.TestCase):
             response.result.return_value = handle
             bridge._on_goal_response(response, bridge._goal_generation)
 
-        bridge._send_sequence = accept_first_goal
+        bridge._send_segment = accept_first_goal
         route = demo_route()
         first_event = SimpleNamespace(
             mission_event=SimpleNamespace(waypoint=route.waypoints[0])
@@ -182,7 +295,7 @@ class RosNav2BridgeTest(unittest.TestCase):
             response.result.return_value = handle
             bridge._on_goal_response(response, bridge._goal_generation)
 
-        bridge._send_sequence = reject_first_goal
+        bridge._send_segment = reject_first_goal
         route = demo_route()
         first_event = SimpleNamespace(
             mission_event=SimpleNamespace(waypoint=route.waypoints[0])
@@ -251,16 +364,16 @@ class RosNav2BridgeTest(unittest.TestCase):
         route = demo_route()
         bridge._route = route
         bridge._current_sequence = 1
-        bridge._send_sequence = Mock()
+        bridge._send_segment = Mock()
 
         bridge.on_navigation_event(reached(route.waypoints[0]))
-        bridge._send_sequence.assert_called_once_with(2)
-        bridge._send_sequence.reset_mock()
+        bridge._send_segment.assert_called_once_with(2)
+        bridge._send_segment.reset_mock()
 
         active_handle = Mock()
         bridge._goal_handle = active_handle
         bridge.on_navigation_event(reached(route.waypoints[1]))
-        bridge._send_sequence.assert_not_called()
+        bridge._send_segment.assert_not_called()
         active_handle.cancel_goal_async.assert_called_once_with()
         self.assertEqual(commands[-1].stop_reason, "SCAN_DWELL")
         self.assertEqual(timers[-1].seconds, 4.0)
@@ -274,7 +387,7 @@ class RosNav2BridgeTest(unittest.TestCase):
 
         timers[-1].fire_even_if_cancelled()
         self.assertIsNone(scan_contexts[-1])
-        bridge._send_sequence.assert_called_once_with(3)
+        bridge._send_segment.assert_called_once_with(3)
         self.assertEqual(bridge._current_sequence, 3)
 
     def test_pause_stop_and_failure_cancel_scan_dwell(self) -> None:
@@ -302,7 +415,7 @@ class RosNav2BridgeTest(unittest.TestCase):
                 route = demo_route()
                 bridge._route = route
                 bridge._current_sequence = 2
-                bridge._send_sequence = Mock()
+                bridge._send_segment = Mock()
                 bridge.on_navigation_event(reached(route.waypoints[1]))
                 timer = timers[-1]
                 active_handle = Mock()
@@ -318,7 +431,7 @@ class RosNav2BridgeTest(unittest.TestCase):
                 self.assertTrue(timer.cancelled)
                 active_handle.cancel_goal_async.assert_called_once_with()
                 timer.fire_even_if_cancelled()
-                bridge._send_sequence.assert_not_called()
+                bridge._send_segment.assert_not_called()
                 if operation == "pause":
                     self.assertIsNone(scan_contexts[-1])
                     bridge.resume_patrol()
@@ -327,83 +440,11 @@ class RosNav2BridgeTest(unittest.TestCase):
                     self.assertIs(scan_contexts[-1], route.waypoints[1])
                     timers[-1].fire_even_if_cancelled()
                     self.assertIsNone(scan_contexts[-1])
-                    bridge._send_sequence.assert_called_once_with(3)
+                    bridge._send_segment.assert_called_once_with(3)
                 else:
                     self.assertIsNone(scan_contexts[-1])
                 if operation == "fail":
                     self.assertEqual(failures, ["TEST_FAILURE"])
-
-    def test_null_yaw_uses_route_direction_instead_of_zero_default(self) -> None:
-        route = parse_route(
-            {
-                "schema_version": 1,
-                "map_id": "demo-map",
-                "map_version": 1,
-                "route_id": "nullable-yaw",
-                "frame_id": "map",
-                "waypoints": [
-                    {
-                        "sequence": 1,
-                        "name": "PASS",
-                        "x": 1.0,
-                        "y": 1.0,
-                        "yaw_deg": None,
-                        "acceptance_radius_m": 0.2,
-                        "action": "PASS",
-                    },
-                    {
-                        "sequence": 2,
-                        "name": "DESTINATION",
-                        "x": 1.0,
-                        "y": 2.0,
-                        "yaw_deg": None,
-                        "acceptance_radius_m": 0.2,
-                        "action": "DESTINATION",
-                    },
-                ],
-            }
-        )
-        bridge = RosNav2Bridge(
-            settings=RosNav2BridgeSettings(
-                AckermannCommandSettings(0.124, 8.6)
-            ),
-            motion_sink=lambda _command: None,
-        )
-
-        self.assertIsNone(route.waypoints[0].yaw_deg)
-        self.assertAlmostEqual(bridge._resolve_goal_yaw_deg(route, 1), 90.0)
-        self.assertAlmostEqual(bridge._resolve_goal_yaw_deg(route, 2), 90.0)
-
-    def test_single_null_yaw_uses_current_localization_heading(self) -> None:
-        route = parse_route(
-            {
-                "schema_version": 1,
-                "map_id": "demo-map",
-                "map_version": 1,
-                "route_id": "single-null-yaw",
-                "frame_id": "map",
-                "waypoints": [
-                    {
-                        "sequence": 1,
-                        "name": "DESTINATION",
-                        "x": 1.0,
-                        "y": 1.0,
-                        "yaw_deg": None,
-                        "acceptance_radius_m": 0.2,
-                        "action": "DESTINATION",
-                    }
-                ],
-            }
-        )
-        bridge = RosNav2Bridge(
-            settings=RosNav2BridgeSettings(
-                AckermannCommandSettings(0.124, 8.6)
-            ),
-            motion_sink=lambda _command: None,
-            heading_source=lambda: 37.5,
-        )
-
-        self.assertEqual(bridge._resolve_goal_yaw_deg(route, 1), 37.5)
 
     def test_stale_goal_callbacks_cannot_restart_scan_motion_or_fail_patrol(self) -> None:
         failures = []
@@ -454,7 +495,7 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge._route = demo_route()
         bridge._current_sequence = 2
         bridge._goal_generation = 2
-        bridge._send_sequence = Mock()
+        bridge._send_segment = Mock()
         result = Mock()
         result.result.return_value = SimpleNamespace(status=6)
 
@@ -470,11 +511,11 @@ class RosNav2BridgeTest(unittest.TestCase):
         self.assertEqual(bridge._cmd_vel_hold_reason, "OBSTACLE")
         self.assertTrue(commands[-1].stopped)
         self.assertEqual(commands[-1].stop_reason, "OBSTACLE")
-        bridge._send_sequence.assert_not_called()
+        bridge._send_segment.assert_not_called()
 
         # Once the obstacle clears the runtime resumes the very same waypoint.
         bridge.resume_patrol()
-        bridge._send_sequence.assert_called_once_with(2)
+        bridge._send_segment.assert_called_once_with(2)
         self.assertFalse(bridge._paused)
 
     def test_repeated_nav2_aborts_eventually_fail_closed(self) -> None:
@@ -491,7 +532,7 @@ class RosNav2BridgeTest(unittest.TestCase):
         )
         bridge._route = demo_route()
         bridge._current_sequence = 2
-        bridge._send_sequence = Mock()
+        bridge._send_segment = Mock()
 
         def abort_once() -> None:
             bridge._goal_generation += 1
@@ -525,7 +566,7 @@ class RosNav2BridgeTest(unittest.TestCase):
         bridge._route = route
         bridge._current_sequence = 1
         bridge._goal_aborts_at_sequence = 2
-        bridge._send_sequence = Mock()
+        bridge._send_segment = Mock()
 
         bridge.on_navigation_event(reached(route.waypoints[0]))
 

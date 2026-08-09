@@ -33,7 +33,10 @@ def _patrol_behavior_tree_xml() -> str:
     path = (
         Path(configured)
         if configured
-        else ROBOT_ROOT / "config" / "ros" / "nav2_fixed_path.xml"
+        else ROBOT_ROOT
+        / "config"
+        / "ros"
+        / "nav2_fixed_path_through_poses.xml"
     )
     if not path.is_absolute():
         raise RuntimeError("ROKI_NAV2_PATROL_BT_XML must be an absolute path")
@@ -268,7 +271,9 @@ def _build_nav2_driver(
         ),
         patrol_behavior_tree_xml=_patrol_behavior_tree_xml(),
         cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
-        navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
+        navigate_action=os.getenv(
+            "ROKI_NAVIGATE_ACTION", "/navigate_through_poses"
+        ),
         map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
         scan_dwell_sec=float(os.getenv("ROKI_SCAN_DWELL_SECONDS", "3.0")),
         cmd_vel_timeout_sec=float(
@@ -373,7 +378,6 @@ def _build_nav2_driver(
         scan_context_sink=lambda waypoint: service_holder[
             "service"
         ].update_scan_context(waypoint),
-        heading_source=lambda: service_holder["service"].current_heading_deg(),
         external_motion_authority=mapping_holds_motion_authority,
     )
 
@@ -435,7 +439,9 @@ def _build_mapping_nav2_bridge(
                 steering_right_deg=120,
             ),
             cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
-            navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
+            navigate_action=os.getenv(
+                "ROKI_NAVIGATE_ACTION", "/navigate_through_poses"
+            ),
             map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
         ),
         motion_sink=sink,
