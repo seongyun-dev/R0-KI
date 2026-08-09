@@ -158,6 +158,8 @@ export interface Patrol {
   endDateTime?: string | null;      // 25/12/14 01:42
   routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 지하주차장 B2, 출발지]
   routeSummary?: string;            // 상세 요약용 경로 표기 (1e: "101동→102동→103동")
+  /** 이 순찰 당시의 방문 구역(좌표 포함) — 상세 지도는 현재 활성 구역 대신 이걸 그린다 */
+  visitedZones?: import('../api/contracts').ZoneCreateResponse[];
   eventCount: number;               // 2
   status: StatusLabel;              // 완료 / 진행중
   batteryFrom?: number;             // 100
