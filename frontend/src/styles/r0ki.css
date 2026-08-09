@@ -1582,51 +1582,79 @@
 .r0ki .au-mfoot{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4)}
 .r0ki .au-mfoot .au-note{flex:1}
 
-/* Dashboard 2.5D view. World coordinates remain the source of truth; this is display-only. */
+/* Dashboard 2.5D polish. All geometry is display-only; world coordinates remain unchanged. */
 .r0ki .monitoring-map{position:relative;width:100%;height:100%;min-height:0}
-.r0ki .monitoring-map-modes{position:absolute;z-index:30;top:10px;left:50%;transform:translateX(-50%);
-  display:inline-flex;gap:3px;padding:3px;border-radius:var(--r-pill);
-  border:1px solid var(--edge);background:var(--focus-in);box-shadow:var(--shadow-1)}
-.r0ki .monitoring-map-modes button{min-width:48px;height:28px;padding:0 10px;border:0;
+.r0ki .monitoring-map-modes{position:absolute;z-index:40;top:11px;left:50%;transform:translateX(-50%);
+  display:inline-flex;gap:2px;padding:3px;border-radius:var(--r-pill);
+  border:1px solid var(--edge);background:color-mix(in srgb,var(--focus-in) 92%,transparent);
+  box-shadow:0 5px 16px color-mix(in srgb,var(--graphic) 10%,transparent);backdrop-filter:blur(8px)}
+.r0ki .monitoring-map-modes button{min-width:46px;height:26px;padding:0 9px;border:0;
   border-radius:var(--r-pill);background:transparent;color:var(--text-3);cursor:pointer;
-  font-family:var(--sans);font-size:12px;font-weight:700}
+  font-family:var(--sans);font-size:11.5px;font-weight:700}
 .r0ki .monitoring-map-modes button[aria-pressed="true"]{background:var(--graphic);color:var(--page)}
 .r0ki .monitoring-map-modes button:disabled{opacity:.45;cursor:not-allowed}
-.r0ki .dm25-wrap{position:relative;width:100%;height:100%;min-height:300px;overflow:hidden;
-  background:linear-gradient(180deg,var(--track),var(--page));color:var(--text-1)}
+.r0ki .dm25-wrap{--dm25-wall-side:color-mix(in srgb,var(--text-3) 78%,var(--page));
+  --dm25-wall-top:color-mix(in srgb,var(--text-2) 58%,var(--page));
+  position:relative;width:100%;height:100%;min-height:300px;overflow:hidden;
+  background:radial-gradient(ellipse at 50% 38%,color-mix(in srgb,var(--page) 86%,var(--track)),var(--track));
+  color:var(--text-1)}
 .r0ki .dm25-map{display:block;width:100%;height:100%;min-height:300px;touch-action:none;cursor:default}
 .r0ki .dm25-wrap.pan .dm25-map{cursor:grabbing}
-.r0ki .dm25-floor{fill:var(--page);stroke:var(--edge);stroke-width:1.5;vector-effect:non-scaling-stroke}
-.r0ki .dm25-map-image{opacity:.48;filter:grayscale(1) contrast(.82) brightness(1.12);pointer-events:none}
-.r0ki[data-theme="nocturne"] .dm25-map-image{filter:grayscale(1) invert(1) contrast(.72);opacity:.34}
-.r0ki .dm25-zone polygon{fill:color-mix(in srgb,var(--patrol) 13%,transparent);
-  stroke:color-mix(in srgb,var(--patrol) 58%,transparent);stroke-width:1.5;vector-effect:non-scaling-stroke}
-.r0ki .dm25-zone text,.r0ki .dm25-waypoint text,.r0ki .dm25-event text,.r0ki .dm25-robot text{
-  fill:var(--text-1);font-family:var(--sans);font-size:11px;font-weight:700;text-anchor:middle;
-  paint-order:stroke;stroke:var(--page);stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+.r0ki .dm25-floor-shadow{fill:color-mix(in srgb,var(--text-3) 16%,transparent);filter:blur(7px)}
+.r0ki .dm25-floor{fill:color-mix(in srgb,var(--page) 90%,var(--track));stroke:var(--edge);
+  stroke-width:1.25;vector-effect:non-scaling-stroke}
+.r0ki .dm25-map-image{opacity:.27;filter:grayscale(1) contrast(.72) brightness(1.14);pointer-events:none}
+.r0ki[data-theme="nocturne"] .dm25-map-image{filter:grayscale(1) invert(1) contrast(.7);opacity:.24}
+.r0ki .dm25-wall-side{opacity:.68}
+.r0ki .dm25-wall-mid{opacity:.8}
+.r0ki .dm25-wall-top{opacity:.96}
+.r0ki .dm25-zone .platform{fill:color-mix(in srgb,var(--patrol) 21%,transparent);stroke:none}
+.r0ki .dm25-zone .surface{fill:color-mix(in srgb,var(--patrol) 10%,transparent);
+  stroke:color-mix(in srgb,var(--patrol) 46%,transparent);stroke-width:1.15;vector-effect:non-scaling-stroke}
 .r0ki .dm25-route{fill:none;stroke:var(--graphic);stroke-linecap:round;stroke-linejoin:round;
   vector-effect:non-scaling-stroke}
-.r0ki .dm25-route.planned{stroke-width:2;stroke-dasharray:6 5;stroke-opacity:.72}
-.r0ki .dm25-route.actual{stroke-width:3;stroke-opacity:.95}
-.r0ki .dm25-waypoint circle{fill:var(--page);stroke:var(--graphic);stroke-width:2;vector-effect:non-scaling-stroke}
+.r0ki .dm25-route.planned{stroke-width:2;stroke-dasharray:5 5;stroke-opacity:.56}
+.r0ki .dm25-route.actual{stroke-width:2.6;stroke-opacity:.84;
+  filter:drop-shadow(0 0 3px color-mix(in srgb,var(--graphic) 30%,transparent))}
+.r0ki .dm25-waypoint circle{fill:var(--page);stroke:var(--graphic);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .dm25-waypoint .core{fill:var(--graphic);stroke:none}
+.r0ki .dm25-robot .ring{fill:color-mix(in srgb,var(--graphic) 12%,var(--page));stroke:var(--graphic);
+  stroke-width:2;vector-effect:non-scaling-stroke;filter:drop-shadow(0 2px 5px color-mix(in srgb,var(--graphic) 34%,transparent))}
+.r0ki .dm25-robot .core{fill:var(--graphic);stroke:var(--page);stroke-width:1.25;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .pulse{fill:none;stroke:var(--graphic);stroke-width:1.25;stroke-opacity:.35;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .heading line{stroke:var(--graphic);stroke-width:2;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .heading path{fill:var(--graphic);stroke:var(--page);stroke-width:.8;vector-effect:non-scaling-stroke}
 .r0ki .dm25-event{--dm25-pin:var(--urgent)}
 .r0ki .dm25-event path{fill:var(--dm25-pin);stroke:var(--page);stroke-width:1.4;vector-effect:non-scaling-stroke}
 .r0ki .dm25-event .pulse{fill:none;stroke:var(--dm25-pin);stroke-width:1.5;stroke-opacity:.5;
   vector-effect:non-scaling-stroke}
-.r0ki .dm25-event text{fill:var(--dm25-pin)}
-.r0ki .dm25-robot path{fill:var(--graphic);stroke:var(--page);stroke-width:1.7;vector-effect:non-scaling-stroke}
-.r0ki .dm25-robot .pulse{fill:none;stroke:var(--graphic);stroke-width:1.5;stroke-opacity:.45;
-  vector-effect:non-scaling-stroke}
-.r0ki .dm25-controls{position:absolute;z-index:20;top:10px;left:10px;display:inline-flex;gap:4px}
-.r0ki .dm25-controls button{width:30px;height:30px;border:1px solid var(--edge);border-radius:50%;
-  background:var(--focus-in);color:var(--text-1);font-family:var(--sans);font-size:15px;font-weight:700;
-  cursor:pointer;box-shadow:var(--shadow-1)}
+.r0ki .dm25-label{pointer-events:none}
+.r0ki .dm25-label rect{fill:color-mix(in srgb,var(--focus-in) 94%,transparent);stroke:var(--edge);
+  stroke-width:.8;vector-effect:non-scaling-stroke;filter:drop-shadow(0 2px 5px color-mix(in srgb,var(--text-1) 10%,transparent))}
+.r0ki .dm25-label text{fill:var(--text-2);font-family:var(--sans);font-size:12px;font-weight:600;
+  text-anchor:middle;letter-spacing:-.01em}
+.r0ki .dm25-label.zone text{font-size:12.5px;fill:var(--patrol)}
+.r0ki .dm25-label.zone rect{fill:color-mix(in srgb,var(--patrol) 8%,var(--page));stroke:color-mix(in srgb,var(--patrol) 34%,var(--edge))}
+.r0ki .dm25-label.robot text{font-size:13px;font-weight:700;fill:var(--text-1)}
+.r0ki .dm25-label.robot rect{stroke:color-mix(in srgb,var(--graphic) 48%,var(--edge))}
+.r0ki .dm25-label.event text{fill:var(--dm25-pin);font-weight:700}
+.r0ki .dm25-label.event rect{stroke:color-mix(in srgb,var(--dm25-pin) 48%,var(--edge))}
+.r0ki .dm25-controls{position:absolute;z-index:30;top:11px;left:11px;display:inline-flex;gap:4px}
+.r0ki .dm25-controls button{width:29px;height:29px;border:1px solid var(--edge);border-radius:50%;
+  background:color-mix(in srgb,var(--focus-in) 92%,transparent);color:var(--text-1);
+  font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 12px color-mix(in srgb,var(--text-1) 10%,transparent);backdrop-filter:blur(8px)}
 .r0ki .dm25-controls button:disabled{opacity:.4;cursor:default}
-.r0ki .dm25-bottom-right{position:absolute;z-index:20;right:10px;bottom:10px;display:flex;gap:8px;align-items:center}
+.r0ki .dm25-bottom-right{position:absolute;z-index:30;right:10px;bottom:10px;display:flex;gap:8px;align-items:center}
+@media(max-width:1440px){
+  .r0ki .dm25-label text{font-size:11.5px}
+  .r0ki .dm25-label.robot text{font-size:12.5px}
+}
 @media(max-width:680px){
   .r0ki .monitoring-map-modes{top:8px}
   .r0ki .dm25-controls{top:8px;left:8px}
-  .r0ki .dm25-zone text,.r0ki .dm25-waypoint text,.r0ki .dm25-event text,.r0ki .dm25-robot text{font-size:10px}
+  .r0ki .dm25-label text{font-size:11px}
 }
 
 /* ── 맵 등록 내부 단계 · 순서형 순찰 경로 편집기 ── */

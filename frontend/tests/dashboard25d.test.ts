@@ -10,7 +10,12 @@ import {
   worldToMapPixel,
 } from '../src/features/onboarding/mapCoordinates.ts'
 import {
+  applyIsometricScreenFit,
+  applyViewTransform,
   createIsometricProjection,
+  fitIsometricProjection,
+  invertIsometricScreenFit,
+  invertViewTransform,
   isometricToWorld,
   worldToIsometric,
 } from '../src/features/onboarding/mapProjection25d.ts'
@@ -90,4 +95,53 @@ test('a new active map replaces all previous projection constants', () => {
 test('2.5D mode fails closed when complete map metadata is unavailable', () => {
   assert.equal(complexMapCoordinateMetadata(map({ originYaw: Number.NaN })), undefined)
   assert.equal(complexMapCoordinateMetadata(map({ pixelWidth: undefined })), undefined)
+})
+
+test('screen fit keeps robot, waypoint, zone and event aligned with the 2D logical map', () => {
+  const activeMap = map({ originYaw: -0.43 })
+  const metadata = complexMapCoordinateMetadata(activeMap)
+  assert.ok(metadata)
+  const projection = createIsometricProjection(metadata, { tileX: 1, tileY: 0.58, margin: 8 })
+  const fixtures = [
+    { kind: 'robot', pixel: { x: 32.25, y: 88.5 } },
+    { kind: 'waypoint', pixel: { x: 116.75, y: 41.25 } },
+    { kind: 'zone-corner', pixel: { x: 154, y: 72 } },
+    { kind: 'event', pixel: { x: 83.5, y: 104.75 } },
+  ].map((fixture) => ({
+    ...fixture,
+    world: mapPixelToWorld(metadata, fixture.pixel),
+  }))
+  const viewports = [
+    { width: 1366, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]
+  const view = { zoom: 1.45, panX: 37, panY: -24 }
+
+  for (const viewport of viewports) {
+    const fit = fitIsometricProjection(projection, viewport, 0.065)
+    const fittedWidthRatio = projection.viewWidth * fit.scale / viewport.width
+    assert.ok(
+      fittedWidthRatio >= 0.8 && fittedWidthRatio <= 0.9,
+      `map width ratio ${fittedWidthRatio} must stay within the visual fit target`,
+    )
+    for (const fixture of fixtures) {
+      const point2d = worldToDashboardGrid(activeMap, fixture.world)
+      assert.ok(point2d, `${fixture.kind} must be visible in 2D`)
+
+      const iso = worldToIsometric(metadata, projection, fixture.world)
+      const fitted = applyIsometricScreenFit(iso, fit)
+      const displayed = applyViewTransform(fitted, view)
+      const restoredFitPoint = invertViewTransform(displayed, view)
+      const restoredIso = invertIsometricScreenFit(restoredFitPoint, fit)
+      const restoredWorld = isometricToWorld(metadata, projection, restoredIso)
+      const point25d = worldToDashboardGrid(activeMap, restoredWorld)
+      assert.ok(point25d, `${fixture.kind} must be visible in 2.5D`)
+
+      close(point25d.x / activeMap.cols, point2d.x / activeMap.cols)
+      close(point25d.y / activeMap.rows, point2d.y / activeMap.rows)
+      close(point25d.worldX, point2d.worldX)
+      close(point25d.worldY, point2d.worldY)
+    }
+  }
 })

@@ -23,6 +23,13 @@ export type IsometricProjection = {
 export type SvgViewBox = { x: number; y: number; width: number; height: number }
 export type ViewTransform = { zoom: number; panX: number; panY: number }
 export type ClientRect = { left: number; top: number; width: number; height: number }
+export type IsometricScreenFit = {
+  scale: number
+  translateX: number
+  translateY: number
+  viewportWidth: number
+  viewportHeight: number
+}
 
 export function createIsometricProjection(
   map: MapCoordinateMetadata,
@@ -150,4 +157,55 @@ export function svgPointToClient(
 
 export function pointsAttribute(points: IsometricPoint[]) {
   return points.map((point) => `${point.x},${point.y}`).join(' ')
+}
+
+/** Fit projection coordinates into a viewport without changing map/world geometry. */
+export function fitIsometricProjection(
+  projection: IsometricProjection,
+  viewport: { width: number; height: number },
+  paddingRatio = 0.07,
+): IsometricScreenFit {
+  if (
+    !Number.isFinite(viewport.width) || viewport.width <= 0 ||
+    !Number.isFinite(viewport.height) || viewport.height <= 0 ||
+    !Number.isFinite(paddingRatio) || paddingRatio < 0 || paddingRatio >= 0.5
+  ) {
+    throw new Error('2.5D 화면 fit 설정이 올바르지 않습니다.')
+  }
+  const availableWidth = viewport.width * (1 - paddingRatio * 2)
+  const availableHeight = viewport.height * (1 - paddingRatio * 2)
+  const scale = Math.min(
+    availableWidth / projection.viewWidth,
+    availableHeight / projection.viewHeight,
+  )
+  return {
+    scale,
+    translateX: (viewport.width - projection.viewWidth * scale) / 2,
+    translateY: (viewport.height - projection.viewHeight * scale) / 2,
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+  }
+}
+
+export function applyIsometricScreenFit(
+  point: IsometricPoint,
+  fit: IsometricScreenFit,
+): IsometricPoint {
+  return {
+    x: fit.translateX + point.x * fit.scale,
+    y: fit.translateY + point.y * fit.scale,
+  }
+}
+
+export function invertIsometricScreenFit(
+  point: IsometricPoint,
+  fit: IsometricScreenFit,
+): IsometricPoint {
+  if (!Number.isFinite(fit.scale) || fit.scale <= 0) {
+    throw new Error('2.5D 화면 fit scale은 0보다 커야 합니다.')
+  }
+  return {
+    x: (point.x - fit.translateX) / fit.scale,
+    y: (point.y - fit.translateY) / fit.scale,
+  }
 }
