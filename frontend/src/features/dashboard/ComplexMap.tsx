@@ -28,6 +28,22 @@ const SUB = 2 // 셀당 잔격자 분할 수 — 격자를 잘게 보이게 한�
 const PAD = { l: 11, t: 11, r: 11, b: 11 } // 외곽 라벨·마커가 잘리지 않을 만큼의 여백
 const ZOOM_MAX = 3
 const CORNER = 9 // 순찰 경로 꺾임 반경
+/** 축척 막대용 — 고정 2칸+반올림 대신, 맵 폭에 맞는 “읽기 좋은” 미터를 고른다 */
+const NICE_SCALE_METERS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500] as const
+
+function scaleBar(metersPerCell: number, cols: number, zoom: number) {
+  const worldWidth = metersPerCell * cols
+  const target = Math.min(worldWidth / 6, worldWidth * 0.35)
+  let meters = NICE_SCALE_METERS[0]
+  for (const candidate of NICE_SCALE_METERS) {
+    if (candidate <= target) meters = candidate
+    else break
+  }
+  return {
+    length: (meters / metersPerCell) * CELL * zoom,
+    label: meters < 1 ? `${Math.round(meters * 100)}cm` : `${meters}미터`,
+  }
+}
 
 /** 이벤트 핀 색 — 긴급만 --urgent, 나머지는 명도 램프 */
 const toneVar: Record<Tone, string> = {
@@ -346,7 +362,9 @@ export function ComplexMap({
     : 0
   const cpLabel = (c: MapCheckpoint, i: number) => (c.label ? `${i + 1}번 · ${c.label}` : `${i + 1}번`)
   const hasUrgentPin = pins.some((p) => p.tone === 'danger')
-  const scaleLen = px(2) * view.k
+  const scale = map.metersPerCell != null
+    ? scaleBar(map.metersPerCell, map.cols, view.k)
+    : null
   /* 우측 하단에 조작키를 얹으면 축척을 그만큼 왼쪽으로 비켜 그린다.
      조작키도 지도 폭에 비례(cqw)해 커지므로 viewBox 기준 고정값으로 맞아떨어진다 */
   const scaleShift = bottomRight ? 118 : 0
@@ -613,19 +631,19 @@ export function ComplexMap({
           </g>
         </g>
 
-        {/* 축척 — 확대해도 실제 거리를 유지하도록 배율만큼 늘린다.
+        {/* 축척 — nice 미터를 고르고 막대 길이를 그에 맞춘다(줌 배율 포함).
            백엔드 resolution 이 있을 때만 그린다(지어내지 않음) */}
-        {map.metersPerCell != null && (
+        {scale && (
           <g
             className="cmscale"
-            transform={`translate(${VW - PAD.r - scaleLen - scaleShift},${VH - 12})`}
+            transform={`translate(${VW - PAD.r - scale.length - scaleShift},${VH - 12})`}
             aria-hidden
           >
-            <line x1="0" y1="0" x2={scaleLen} y2="0" />
+            <line x1="0" y1="0" x2={scale.length} y2="0" />
             <line x1="0" y1="-3" x2="0" y2="3" />
-            <line x1={scaleLen} y1="-3" x2={scaleLen} y2="3" />
-            <text x={scaleLen / 2} y="-6" textAnchor="middle">
-              {Math.round(map.metersPerCell * 2)}미터
+            <line x1={scale.length} y1="-3" x2={scale.length} y2="3" />
+            <text x={scale.length / 2} y="-6" textAnchor="middle">
+              {scale.label}
             </text>
           </g>
         )}
