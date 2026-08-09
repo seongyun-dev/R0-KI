@@ -90,7 +90,7 @@ curl --fail --silent --show-error "${base_url}/v3/api-docs" >"${openapi_file}"
 if python3 -c 'import json,sys; sys.exit(0 if "/api/auth/signup" in json.load(open(sys.argv[1], encoding="utf-8"))["paths"] else 1)' "${openapi_file}"; then
   curl --fail --silent --show-error \
     -H 'Content-Type: application/json' \
-    -d "{\"username\":\"${username}\",\"password\":\"integration-password-1!\",\"name\":\"CI User\",\"phoneNumber\":\"010-0000-0000\",\"apartment\":{\"name\":\"CI Apartment\",\"postalCode\":\"00000\",\"address\":\"Integration Test\"}}" \
+    -d "{\"username\":\"${username}\",\"password\":\"integration-password-1!\",\"name\":\"CI User\",\"phoneNumber\":\"010-0000-0000\",\"email\":\"${username}@integration.local\",\"apartment\":{\"name\":\"CI Apartment\",\"postalCode\":\"00000\",\"address\":\"Integration Test\"}}" \
     "${base_url}/api/auth/signup" >"${signup_file}"
   grep -q '"success":true' "${signup_file}"
 

@@ -45,6 +45,7 @@ services:
       MQTT_BROKER_URI: tcp://mosquitto:1883
       MQTT_USERNAME: integration
       MQTT_PASSWORD: integration
+      APP_EMAIL_VERIFICATION_ENABLED: "false"
       MAP_DIR: /app/data/maps
       UPLOAD_DIR: /app/data/uploads
     depends_on:
