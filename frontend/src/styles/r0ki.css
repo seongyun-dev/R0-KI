@@ -1516,6 +1516,11 @@
 
 .r0ki .au-mhead{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s3);flex-wrap:wrap;min-height:34px}
 .r0ki .au-mhead .hint{margin-left:auto;font-size:12.5px;color:var(--text-3)}
+.r0ki .au-map-view-tools{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s3);flex-wrap:wrap}
+.r0ki .au-map-view-tools>.btn[aria-pressed="true"]{color:var(--accent-ink);border-color:transparent;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2))}
+.r0ki .au-iso-controls{display:inline-flex;align-items:center;gap:var(--s2);margin-left:auto}
+.r0ki .au-iso-controls .hint{font-size:12px;color:var(--text-3)}
 .r0ki .au-warn{display:inline-flex;align-items:center;gap:9px;height:34px;padding:0 14px;border-radius:var(--r-pill);
   background:var(--urgent-bg);border:1px solid var(--urgent-edge);color:var(--urgent-text);
   font-size:13px;font-weight:700;white-space:nowrap;animation:r0ki-warnIn 200ms var(--e-glass)}
@@ -1554,8 +1559,75 @@
 .r0ki .au-draft{position:absolute;border-radius:9px;border:1.5px dashed var(--graphic);
   background:var(--accent-glow);pointer-events:none}
 .r0ki .au-draft.bad{border-color:var(--urgent);background:var(--urgent-bg)}
+.r0ki .au-iso-canvas{position:relative;overflow:hidden;border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);user-select:none}
+.r0ki .au-iso-canvas[aria-disabled="true"]::after{content:'';position:absolute;inset:0;z-index:20;
+  background:color-mix(in srgb,var(--page) 42%,transparent)}
+.r0ki .au-iso-canvas>svg{display:block;width:100%;min-height:300px;max-height:540px;touch-action:none;cursor:crosshair}
+.r0ki .au-iso-floor{fill:var(--page);stroke:var(--edge);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .au-iso-map-image{opacity:.4;pointer-events:none}
+.r0ki .au-iso-grid{pointer-events:none}
+.r0ki .au-iso-grid line{stroke:var(--hair);stroke-width:1;vector-effect:non-scaling-stroke}
+.r0ki .au-iso-hit{fill:transparent;stroke:none}
+.r0ki .au-iso-zone{cursor:pointer;color:var(--z)}
+.r0ki .au-iso-zone polygon{fill:color-mix(in srgb,var(--z) 18%,transparent);
+  stroke:color-mix(in srgb,var(--z) 70%,transparent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .au-iso-zone:hover polygon{fill:color-mix(in srgb,var(--z) 26%,transparent)}
+.r0ki .au-iso-zone text{fill:currentColor;font-family:var(--sans);font-size:12px;font-weight:700;
+  text-anchor:middle;dominant-baseline:middle;paint-order:stroke;stroke:var(--page);stroke-width:3px;
+  stroke-linejoin:round;pointer-events:none}
+.r0ki .au-iso-draft{fill:var(--accent-glow);stroke:var(--graphic);stroke-width:1.5;
+  stroke-dasharray:5 4;vector-effect:non-scaling-stroke;pointer-events:none}
+.r0ki .au-iso-draft.bad{fill:var(--urgent-bg);stroke:var(--urgent)}
 .r0ki .au-mfoot{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4)}
 .r0ki .au-mfoot .au-note{flex:1}
+
+/* Dashboard 2.5D view. World coordinates remain the source of truth; this is display-only. */
+.r0ki .monitoring-map{position:relative;width:100%;height:100%;min-height:0}
+.r0ki .monitoring-map-modes{position:absolute;z-index:30;top:10px;left:50%;transform:translateX(-50%);
+  display:inline-flex;gap:3px;padding:3px;border-radius:var(--r-pill);
+  border:1px solid var(--edge);background:var(--focus-in);box-shadow:var(--shadow-1)}
+.r0ki .monitoring-map-modes button{min-width:48px;height:28px;padding:0 10px;border:0;
+  border-radius:var(--r-pill);background:transparent;color:var(--text-3);cursor:pointer;
+  font-family:var(--sans);font-size:12px;font-weight:700}
+.r0ki .monitoring-map-modes button[aria-pressed="true"]{background:var(--graphic);color:var(--page)}
+.r0ki .monitoring-map-modes button:disabled{opacity:.45;cursor:not-allowed}
+.r0ki .dm25-wrap{position:relative;width:100%;height:100%;min-height:300px;overflow:hidden;
+  background:linear-gradient(180deg,var(--track),var(--page));color:var(--text-1)}
+.r0ki .dm25-map{display:block;width:100%;height:100%;min-height:300px;touch-action:none;cursor:default}
+.r0ki .dm25-wrap.pan .dm25-map{cursor:grabbing}
+.r0ki .dm25-floor{fill:var(--page);stroke:var(--edge);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .dm25-map-image{opacity:.48;filter:grayscale(1) contrast(.82) brightness(1.12);pointer-events:none}
+.r0ki[data-theme="nocturne"] .dm25-map-image{filter:grayscale(1) invert(1) contrast(.72);opacity:.34}
+.r0ki .dm25-zone polygon{fill:color-mix(in srgb,var(--patrol) 13%,transparent);
+  stroke:color-mix(in srgb,var(--patrol) 58%,transparent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .dm25-zone text,.r0ki .dm25-waypoint text,.r0ki .dm25-event text,.r0ki .dm25-robot text{
+  fill:var(--text-1);font-family:var(--sans);font-size:11px;font-weight:700;text-anchor:middle;
+  paint-order:stroke;stroke:var(--page);stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+.r0ki .dm25-route{fill:none;stroke:var(--graphic);stroke-linecap:round;stroke-linejoin:round;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-route.planned{stroke-width:2;stroke-dasharray:6 5;stroke-opacity:.72}
+.r0ki .dm25-route.actual{stroke-width:3;stroke-opacity:.95}
+.r0ki .dm25-waypoint circle{fill:var(--page);stroke:var(--graphic);stroke-width:2;vector-effect:non-scaling-stroke}
+.r0ki .dm25-event{--dm25-pin:var(--urgent)}
+.r0ki .dm25-event path{fill:var(--dm25-pin);stroke:var(--page);stroke-width:1.4;vector-effect:non-scaling-stroke}
+.r0ki .dm25-event .pulse{fill:none;stroke:var(--dm25-pin);stroke-width:1.5;stroke-opacity:.5;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-event text{fill:var(--dm25-pin)}
+.r0ki .dm25-robot path{fill:var(--graphic);stroke:var(--page);stroke-width:1.7;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .pulse{fill:none;stroke:var(--graphic);stroke-width:1.5;stroke-opacity:.45;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-controls{position:absolute;z-index:20;top:10px;left:10px;display:inline-flex;gap:4px}
+.r0ki .dm25-controls button{width:30px;height:30px;border:1px solid var(--edge);border-radius:50%;
+  background:var(--focus-in);color:var(--text-1);font-family:var(--sans);font-size:15px;font-weight:700;
+  cursor:pointer;box-shadow:var(--shadow-1)}
+.r0ki .dm25-controls button:disabled{opacity:.4;cursor:default}
+.r0ki .dm25-bottom-right{position:absolute;z-index:20;right:10px;bottom:10px;display:flex;gap:8px;align-items:center}
+@media(max-width:680px){
+  .r0ki .monitoring-map-modes{top:8px}
+  .r0ki .dm25-controls{top:8px;left:8px}
+  .r0ki .dm25-zone text,.r0ki .dm25-waypoint text,.r0ki .dm25-event text,.r0ki .dm25-robot text{font-size:10px}
+}
 
 /* ── 맵 등록 내부 단계 · 순서형 순찰 경로 편집기 ── */
 .r0ki .au-editor-steps{display:flex;align-items:center;gap:8px;margin-bottom:var(--s4);flex-wrap:wrap}

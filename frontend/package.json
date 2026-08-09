@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test:map-coordinates": "node --experimental-strip-types --test tests/mapCoordinates25d.test.ts",
+    "test:dashboard-25d": "node --experimental-strip-types --test tests/dashboard25d.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

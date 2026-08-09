@@ -37,6 +37,7 @@ export interface Zone {
   label: string;                    // 예: 주차장 A, 지하주차장 B2
   // 구역 지정(1y): 그리드 좌표(열 A~N, 행 1~7) 또는 rect
   rect?: { x: number; y: number; w: number; h: number };
+  worldBounds?: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 // ---- IoT 맵 (백엔드 → 프론트) ----
@@ -54,6 +55,7 @@ export interface ComplexMapData {
   resolution?: number;
   originX?: number;
   originY?: number;
+  originYaw?: number;
   pixelWidth?: number;
   pixelHeight?: number;
 }
@@ -67,6 +69,8 @@ export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표
   heading?: number;
   battery?: number;
   updatedAt?: string;
+  worldX?: number;
+  worldY?: number;
   routePoints?: PatrolRoutePoint[];
 }
 
@@ -77,6 +81,8 @@ export interface MapPin {           // 지도 위 이벤트 핀
   detail?: string;
   x: number;
   y: number;
+  worldX?: number;
+  worldY?: number;
   tone: Tone;
 }
 
@@ -86,6 +92,8 @@ export interface MapCheckpoint {    // 순찰 체크포인트 (1h LIVE MAP)
   label: string;                    // 출발지, 분리수거장, 주차장 A…
   x: number;
   y: number;
+  worldX?: number;
+  worldY?: number;
   /** 통과 기록 등 부가 설명 — "02:03 통과 · 최근 지점".
       값이 있는 지점만 지도에서 물방울 마커 + 콜아웃 카드로 강조된다 */
   note?: string;
@@ -133,6 +141,8 @@ export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)
 export interface PatrolRoutePoint {
   x: number;
   y: number;
+  worldX?: number;
+  worldY?: number;
   recordedAt: string;
 }
 
