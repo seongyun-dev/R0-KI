@@ -11,11 +11,17 @@ import {
   worldBoundsToIsometricPolygon,
   worldToIsometric,
 } from '../onboarding/mapProjection25d'
+import {
+  cleanupDisplayOccupiedMask,
+  occupiedMaskToImageData,
+  rgbaToOccupiedMask,
+} from './displayGeometry25d'
 import { complexMapCoordinateMetadata } from './mapCoordinateMetadata'
 import type { ComplexMapProps } from './ComplexMap'
 
 const MAX_ZOOM = 2.5
-const WALL_HEIGHT_PX = 10
+const WALL_HEIGHT_PX = 8
+const BASE_HEIGHT_PX = 2
 const DEFAULT_VIEWPORT = { width: 960, height: 540 }
 
 const pinColor: Record<Tone, string> = {
@@ -34,10 +40,10 @@ const zonePrefix: Partial<Record<ZoneType, string>> = {
 }
 
 const labelOffsets = [
-  { dx: -12, dy: -15, side: 'left' as const },
-  { dx: 12, dy: -15, side: 'right' as const },
-  { dx: 12, dy: 17, side: 'right' as const },
-  { dx: -12, dy: 19, side: 'left' as const },
+  { dx: 11, dy: -19, side: 'right' as const },
+  { dx: 11, dy: -31, side: 'right' as const },
+  { dx: -11, dy: 19, side: 'left' as const },
+  { dx: -11, dy: -19, side: 'left' as const },
 ]
 
 function validWorldPoint(value: { worldX?: number; worldY?: number }) {
@@ -46,6 +52,55 @@ function validWorldPoint(value: { worldX?: number; worldY?: number }) {
 
 function markerLabel(pin: MapPin) {
   return pin.detail ? `${pin.label} · ${pin.detail}` : pin.label
+}
+
+function useDisplayWallMask(source: string | undefined, width: number | undefined, height: number | undefined) {
+  const [displayMaskUrl, setDisplayMaskUrl] = useState<string>()
+
+  useEffect(() => {
+    setDisplayMaskUrl(undefined)
+    if (!source || !width || !height || typeof window === 'undefined') return
+    let disposed = false
+    let objectUrl: string | undefined
+    const image = new Image()
+
+    try {
+      const resolved = new URL(source, window.location.href)
+      if (resolved.origin !== window.location.origin) image.crossOrigin = 'anonymous'
+    } catch {
+      // Relative and opaque URLs can still be loaded. Canvas security is handled by the fallback below.
+    }
+
+    image.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const context = canvas.getContext('2d', { willReadFrequently: true })
+        if (!context) return
+        context.drawImage(image, 0, 0, width, height)
+        const raw = context.getImageData(0, 0, width, height)
+        const occupied = rgbaToOccupiedMask(raw.data, width, height)
+        const cleaned = cleanupDisplayOccupiedMask(occupied, width, height)
+        context.putImageData(occupiedMaskToImageData(cleaned, width, height), 0, 0)
+        canvas.toBlob((blob) => {
+          if (disposed || !blob) return
+          objectUrl = URL.createObjectURL(blob)
+          setDisplayMaskUrl(objectUrl)
+        }, 'image/png')
+      } catch {
+        // CORS-tainted or unsupported map images safely fall back to the original display filter.
+      }
+    }
+    image.src = source
+
+    return () => {
+      disposed = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [height, source, width])
+
+  return displayMaskUrl
 }
 
 function DisplayLabel({
@@ -65,14 +120,14 @@ function DisplayLabel({
   className: string
   side?: 'left' | 'right' | 'center'
 }) {
-  const width = Math.max(42, Math.min(164, text.length * 7 + 16))
+  const width = Math.max(40, Math.min(154, text.length * 6.4 + 14))
   const desiredLeft = side === 'left' ? x - width : side === 'right' ? x : x - width / 2
   const left = Math.max(6, Math.min(viewportWidth - width - 6, desiredLeft))
-  const top = Math.max(6, Math.min(viewportHeight - 28, y - 11))
+  const top = Math.max(6, Math.min(viewportHeight - 26, y - 10))
   return (
     <g className={`dm25-label ${className}`} transform={`translate(${left} ${top})`}>
-      <rect width={width} height="22" rx="11" />
-      <text x={width / 2} y="14">{text}</text>
+      <rect width={width} height="20" rx="10" />
+      <text x={width / 2} y="13">{text}</text>
     </g>
   )
 }
@@ -124,6 +179,7 @@ export function ComplexMap25D({
   }, [])
 
   const metadata = complexMapCoordinateMetadata(map)
+  const displayWallMaskUrl = useDisplayWallMask(map.mapImageUrl, metadata?.width, metadata?.height)
   if (!metadata) return null
 
   const projection = createIsometricProjection(metadata, { tileX: 1, tileY: 0.58, margin: 8 })
@@ -152,6 +208,8 @@ export function ComplexMap25D({
       toScreen(worldToIsometric(metadata, projection, { x: point.worldX!, y: point.worldY! }))),
   })).filter((route) => route.points.length > 1)
   const wallOffset = WALL_HEIGHT_PX / fit.scale
+  const baseOffset = BASE_HEIGHT_PX / fit.scale
+  const wallImageUrl = displayWallMaskUrl ?? map.mapImageUrl
 
   const zoomBy = (factor: number) => setView((current) => ({
     ...current,
@@ -204,8 +262,12 @@ export function ComplexMap25D({
             <feComponentTransfer in="occupied" result="threshold">
               <feFuncA type="discrete" tableValues="0 0 1 1" />
             </feComponentTransfer>
+            <feMorphology in="threshold" operator="erode" radius="0.35" result="openedInset" />
+            <feMorphology in="openedInset" operator="dilate" radius="0.35" result="opened" />
+            <feMorphology in="opened" operator="dilate" radius="0.22" result="closedOutset" />
+            <feMorphology in="closedOutset" operator="erode" radius="0.22" result="cleaned" />
             <feFlood floodColor="var(--dm25-wall-side)" result="wallColor" />
-            <feComposite in="wallColor" in2="threshold" operator="in" />
+            <feComposite in="wallColor" in2="cleaned" operator="in" />
           </filter>
           <filter id="dm25-wall-top-mask" colorInterpolationFilters="sRGB">
             <feColorMatrix
@@ -216,14 +278,19 @@ export function ComplexMap25D({
             <feComponentTransfer in="occupied" result="threshold">
               <feFuncA type="discrete" tableValues="0 0 1 1" />
             </feComponentTransfer>
+            <feMorphology in="threshold" operator="erode" radius="0.35" result="openedInset" />
+            <feMorphology in="openedInset" operator="dilate" radius="0.35" result="opened" />
+            <feMorphology in="opened" operator="dilate" radius="0.22" result="closedOutset" />
+            <feMorphology in="closedOutset" operator="erode" radius="0.22" result="cleaned" />
             <feFlood floodColor="var(--dm25-wall-top)" result="wallColor" />
-            <feComposite in="wallColor" in2="threshold" operator="in" />
+            <feComposite in="wallColor" in2="cleaned" operator="in" />
           </filter>
         </defs>
 
         <g transform={`translate(${view.panX} ${view.panY}) scale(${view.zoom})`}>
           <g transform={`translate(${fit.translateX} ${fit.translateY}) scale(${fit.scale})`}>
-            <polygon className="dm25-floor-shadow" points={pointsAttribute(floor)} transform={`translate(0 ${wallOffset + 5 / fit.scale})`} />
+            <polygon className="dm25-floor-shadow" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset + 4 / fit.scale})`} />
+            <polygon className="dm25-floor-side" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset})`} />
             <polygon className="dm25-floor" points={pointsAttribute(floor)} />
             {map.mapImageUrl && (
               <>
@@ -235,14 +302,11 @@ export function ComplexMap25D({
                   preserveAspectRatio="none"
                   transform={`matrix(${imageTransform})`}
                 />
-                <g className="dm25-wall-side" transform={`translate(0 ${wallOffset})`}>
-                  <image href={map.mapImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-side-mask)" />
+                <g className="dm25-wall-side" transform={`translate(0 ${wallOffset})`} data-cleanup={displayWallMaskUrl ? 'ready' : 'fallback'}>
+                  <image href={wallImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-side-mask)" />
                 </g>
-                <g className="dm25-wall-mid" transform={`translate(0 ${wallOffset * 0.48})`}>
-                  <image href={map.mapImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-side-mask)" />
-                </g>
-                <g className="dm25-wall-top">
-                  <image href={map.mapImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-top-mask)" />
+                <g className="dm25-wall-top" data-cleanup={displayWallMaskUrl ? 'ready' : 'fallback'}>
+                  <image href={wallImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-top-mask)" />
                 </g>
               </>
             )}
@@ -260,7 +324,7 @@ export function ComplexMap25D({
               <g className="dm25-zone" key={zone.id}>
                 <polygon className="platform" points={pointsAttribute(polygon.map((point) => ({ x: point.x, y: point.y + 4 })))} />
                 <polygon className="surface" points={pointsAttribute(polygon)} />
-                <DisplayLabel x={center.x} y={center.y} viewportWidth={viewport.width} viewportHeight={viewport.height} text={prefix ? `[${prefix}] ${zone.label}` : zone.label} className="zone" />
+                <DisplayLabel x={center.x} y={center.y + 20} viewportWidth={viewport.width} viewportHeight={viewport.height} text={prefix ? `[${prefix}] ${zone.label}` : zone.label} className="zone" />
               </g>
             )]
           })}
@@ -274,8 +338,8 @@ export function ComplexMap25D({
             const offset = labelOffsets[index % labelOffsets.length]
             return [(
               <g className="dm25-waypoint" key={checkpoint.id}>
-                <circle cx={point.x} cy={point.y} r="7" />
-                <circle className="core" cx={point.x} cy={point.y} r="2.4" />
+                <circle cx={point.x} cy={point.y} r="6.5" />
+                <circle className="core" cx={point.x} cy={point.y} r="2.2" />
                 <DisplayLabel x={point.x + offset.dx} y={point.y + offset.dy} viewportWidth={viewport.width} viewportHeight={viewport.height} text={`${index + 1}번 · ${checkpoint.label}`} className="waypoint" side={offset.side} />
                 <title>{checkpoint.note ? `${checkpoint.label} · ${checkpoint.note}` : checkpoint.label}</title>
               </g>
@@ -288,14 +352,27 @@ export function ComplexMap25D({
             const heading = headingOnScreen(metadata, projection, item)
             return [(
               <g className="dm25-robot" key={item.id}>
-                {patrolling && <circle className="pulse" cx={point.x} cy={point.y} r="15" />}
-                <circle className="ring" cx={point.x} cy={point.y} r="12" />
-                <circle className="core" cx={point.x} cy={point.y} r="6" />
+                {patrolling && <ellipse className="pulse" cx={point.x} cy={point.y + 1} rx="15" ry="6" />}
                 <g className="heading" transform={`translate(${point.x} ${point.y}) rotate(${heading})`}>
-                  <line x1="5" y1="0" x2="15" y2="0" />
-                  <path d="M16 0 L11 -3.5 L11 3.5 Z" />
+                  <line x1="7" y1="0" x2="14" y2="0" />
+                  <path d="M15 0 L11 -2.7 L11 2.7 Z" />
                 </g>
-                <DisplayLabel x={point.x} y={point.y - 25} viewportWidth={viewport.width} viewportHeight={viewport.height} text={item.name ?? item.id} className="robot" />
+                <g className="figurine" transform={`translate(${point.x} ${point.y})`}>
+                  <ellipse className="glow" cx="0" cy="2" rx="12" ry="4.5" />
+                  <ellipse className="plinth-shadow" cx="0" cy="1.6" rx="9.2" ry="3.4" />
+                  <ellipse className="plinth" cx="0" cy="0" rx="8.3" ry="3.2" />
+                  <path className="body" d="M-6.1 -11.2 L-5.6 -2.4 Q-5.2 .2 0 .8 Q5.2 .2 5.6 -2.4 L6.1 -11.2 Z" />
+                  <ellipse className="body-top" cx="0" cy="-11.1" rx="6.1" ry="2.5" />
+                  <rect className="head" x="-5.3" y="-19.5" width="10.6" height="8.7" rx="4.2" />
+                  <ellipse className="head-top" cx="0" cy="-18.2" rx="5.1" ry="2.2" />
+                  <rect className="visor" x="-4.5" y="-17.2" width="9" height="3.8" rx="1.8" />
+                  <circle className="visor-led" cx="-2.5" cy="-15.3" r=".65" />
+                  <circle className="visor-led" cx="0" cy="-15.3" r=".65" />
+                  <circle className="visor-led" cx="2.5" cy="-15.3" r=".65" />
+                  <line className="antenna" x1="0" y1="-20" x2="0" y2="-22" />
+                  <circle className="antenna-tip" cx="0" cy="-22.5" r="1" />
+                </g>
+                <DisplayLabel x={point.x} y={point.y - 31} viewportWidth={viewport.width} viewportHeight={viewport.height} text={item.name ?? item.id} className="robot" />
                 <title>{`${item.name ?? item.id} · x ${item.worldX!.toFixed(2)}, y ${item.worldY!.toFixed(2)}, heading ${item.heading ?? 0}°`}</title>
               </g>
             )]
