@@ -136,6 +136,19 @@ class RobotStateStore:
         with self._lock:
             return self._hardware_status is not None
 
+    def get_publishable_status(self) -> RobotStatusState | None:
+        """수신 여부와 상태를 **한 lock 안에서** 함께 준다.
+
+        판정과 읽기를 나누면 그 사이에 ``reset_connection()`` 이 끼어들 수 있다.
+        그러면 판정은 참인데 읽은 값은 초기화된 DISCONNECTED 라서, 이 게이트가
+        막으려던 바로 그 payload 가 나간다.
+        """
+
+        with self._lock:
+            if self._hardware_status is None:
+                return None
+            return self._status
+
     def update_robot_state(self, state: str) -> None:
         with self._lock:
             self._set_status_if_changed(replace(self._status, state=state))

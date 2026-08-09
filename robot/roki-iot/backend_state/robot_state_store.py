@@ -183,6 +183,18 @@ class RobotStateStore:
         with self._lock:
             return self._hardware_status_received
 
+    def get_publishable_status(self) -> RobotStatusState | None:
+        """수신 여부와 상태를 **한 lock 안에서** 함께 준다.
+
+        나눠 부르면 그 사이에 세대가 바뀌어 초기화된 상태를 실제 보고로
+        발행할 수 있다.
+        """
+
+        with self._lock:
+            if not self._hardware_status_received:
+                return None
+            return self._status
+
     def get_snapshot(self) -> RobotStateSnapshot:
         """
         현재 로봇의 Status와 Pose를 한 번에 반환한다.

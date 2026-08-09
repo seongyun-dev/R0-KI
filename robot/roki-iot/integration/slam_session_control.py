@@ -139,6 +139,7 @@ class RosSlamSessionControl:
         self._time_type: Any = None
         self._duration_type: Any = None
         self._last_localization_pose_at: float | None = None
+        self._last_localization_stamp_ns: int = 0
 
     def start(self) -> None:
         with self._lock:
@@ -299,10 +300,21 @@ class RosSlamSessionControl:
         그쪽 신선도로는 실행 여부를 알 수 없다 -- 어제 얼어붙은 TF 에 당한
         지점이 정확히 그것이다.
 
-        **정지 중에는 오지 않는다.** ``ProcessLocalization`` 이 ``HasMovedEnough``
-        로 막힌다(minimum_travel_distance 0.10m, minimum_travel_heading 0.10rad
-        = 5.7도). 강제 매칭(``ProcessAgainstNodesNearBy``)만 그 게이트를 우회한다.
-        그래서 "몇 초 동안 안정되는지"는 정지 상태에서 판정할 수 없다.
+        ``HasMovedEnough`` 는 모터가 아니라 **오도메트리 변화**를 본다. 그래서
+        섀시가 서 있어도 발행된다 -- 2026-08-09 14:32:42~14:33:24 실측:
+        ``auth=0 fwd=0 rev=0`` 로 295초간 인가 명령이 0건인 구간에서 16건.
+        rf2o 가 정지 중 임계값(0.10m / 0.10rad)을 넘게 흘러가고 스캔매칭이
+        매번 당겨오기 때문이다. 그때 교정된 자세는 ±3cm 안에서 흔들릴 뿐
+        누적되지 않았고 covXX/covYY 0.0012~0.0019, covYaw 0.0001~0.0004 였다.
+        이것이 **정상 배치의 기준선**이다.
+
+        간격은 그 구간에서 중앙값 약 2초, 최대 10.4초였다. 판정에 "N건을
+        기다린다" 를 넣을 때 이 최대값을 넘겨야 한다.
+
+        한 건이 증명하는 것은 "스캔이 처리되고 자세가 발행됐다" 까지다.
+        재위치추정이 **맞았다**는 증거가 아니고, 매핑 모드에서도 발행되므로
+        위치추정 모드라는 증거도 아니다. 강제 매칭인지 일상적인
+        ``ProcessLocalization`` 인지도 이 메시지만으로는 구별되지 않는다.
 
         지금은 **관측만 한다.** covariance 임계값을 지금 추측으로 정하면
         근거 없는 상수가 하나 더 생길 뿐이다. 배치를 바꿔가며 실측한 분포가
@@ -313,20 +325,37 @@ class RosSlamSessionControl:
         if pose is None:
             return
         arrival = self._clock()
+        stamp_ns = self._stamp_ns(message)
         with self._condition:
-            previous = self._last_localization_pose_at
+            previous_arrival = self._last_localization_pose_at
+            previous_stamp = self._last_localization_stamp_ns
             self._last_localization_pose_at = arrival
+            self._last_localization_stamp_ns = stamp_ns
         covariance = getattr(getattr(message, "pose", None), "covariance", None)
         yaw = self._yaw_from_quaternion(pose.orientation)
-        gap = "-" if previous is None else f"{arrival - previous:.2f}"
+        # 도착 간격과 발행 간격을 따로 적는다. executor 가 밀리면 오래된
+        # 메시지가 몰려 도착해 도착 간격만 짧아진다. slam 이 언제 처리했는지는
+        # 스탬프로만 안다.
+        arrival_gap = (
+            "-"
+            if previous_arrival is None
+            else f"{arrival - previous_arrival:.2f}"
+        )
+        source_gap = (
+            "-"
+            if not previous_stamp or not stamp_ns
+            else f"{(stamp_ns - previous_stamp) / 1_000_000_000:.2f}"
+        )
+        frame = getattr(getattr(message, "header", None), "frame_id", "") or "?"
         print(
             "[SLAM POSE] "
+            f"frame={frame} "
             f"x={pose.position.x:.3f} y={pose.position.y:.3f} "
             f"yawDeg={math.degrees(yaw):.1f} "
             f"covXX={self._covariance_at(covariance, 0):.4f} "
             f"covYY={self._covariance_at(covariance, 7):.4f} "
             f"covYaw={self._covariance_at(covariance, 35):.4f} "
-            f"sinceLastSec={gap}"
+            f"arrivalGapSec={arrival_gap} sourceGapSec={source_gap}"
         )
 
     @staticmethod

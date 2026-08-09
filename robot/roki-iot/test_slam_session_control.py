@@ -187,7 +187,15 @@ class TransformFreshnessTest(unittest.TestCase):
         self.assertFalse(control._transform_is_fresh(_Transform(0)))
 
 
-def _pose_message(x: float, y: float, yaw_deg: float, covariance: object) -> object:
+def _pose_message(
+    x: float,
+    y: float,
+    yaw_deg: float,
+    covariance: object,
+    *,
+    stamp_ns: int = 0,
+    frame_id: str = "map",
+) -> object:
     """PoseWithCovarianceStamped 의 최소 형태."""
 
     yaw = math.radians(yaw_deg)
@@ -203,6 +211,9 @@ def _pose_message(x: float, y: float, yaw_deg: float, covariance: object) -> obj
     inner.covariance = covariance
     message = type("M", (), {})()
     message.pose = inner
+    message.header = type("H", (), {})()
+    message.header.stamp = _Stamp(stamp_ns)
+    message.header.frame_id = frame_id
     return message
 
 
@@ -241,19 +252,40 @@ class LocalizationPoseObservationTest(unittest.TestCase):
 
         line = self.observe(control, _pose_message(0.0, 0.0, 0.0, [0.0] * 36))
 
-        self.assertIn("sinceLastSec=-", line)
+        self.assertIn("arrivalGapSec=-", line)
+        self.assertIn("sourceGapSec=-", line)
 
-    def test_interval_since_the_previous_pose_is_reported(self) -> None:
-        """정지 중 침묵과 주행 중 연속 발행을 구분할 유일한 값이다."""
+    def test_arrival_and_source_intervals_are_reported_separately(self) -> None:
+        """executor 가 밀리면 둘이 어긋난다.
+
+        오래된 메시지가 몰려 도착하면 도착 간격만 짧아진다. slam 이 실제로
+        언제 처리했는지는 헤더 스탬프로만 알 수 있으므로 둘을 따로 적는다.
+        """
 
         now = 100.0
         control = RosSlamSessionControl(clock=lambda: now)
-        self.observe(control, _pose_message(0.0, 0.0, 0.0, [0.0] * 36))
-        now = 100.4
+        self.observe(
+            control, _pose_message(0.0, 0.0, 0.0, [0.0] * 36, stamp_ns=5_000_000_000)
+        )
+        now = 100.05  # 도착은 50ms 뒤 -- 밀렸다가 몰려 왔다
 
-        line = self.observe(control, _pose_message(0.1, 0.0, 0.0, [0.0] * 36))
+        line = self.observe(
+            control, _pose_message(0.1, 0.0, 0.0, [0.0] * 36, stamp_ns=7_000_000_000)
+        )
 
-        self.assertIn("sinceLastSec=0.40", line)
+        self.assertIn("arrivalGapSec=0.05", line)
+        self.assertIn("sourceGapSec=2.00", line)
+
+    def test_frame_id_is_reported(self) -> None:
+        """/pose 는 이름이 흔하다. 나중에 게이트로 쓰려면 frame 확인이 필요하다."""
+
+        control = RosSlamSessionControl()
+
+        line = self.observe(
+            control, _pose_message(0.0, 0.0, 0.0, [0.0] * 36, frame_id="map")
+        )
+
+        self.assertIn("frame=map", line)
 
     def test_missing_covariance_does_not_raise(self) -> None:
         """콜백에서 예외가 나가면 executor spin 이 죽고 구독 전체를 잃는다."""
