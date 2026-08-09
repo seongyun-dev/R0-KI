@@ -34,7 +34,7 @@ const NICE_SCALE_METERS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500] as const
 function scaleBar(metersPerCell: number, cols: number, zoom: number) {
   const worldWidth = metersPerCell * cols
   const target = Math.min(worldWidth / 6, worldWidth * 0.35)
-  let meters = NICE_SCALE_METERS[0]
+  let meters: number = NICE_SCALE_METERS[0]
   for (const candidate of NICE_SCALE_METERS) {
     if (candidate <= target) meters = candidate
     else break
