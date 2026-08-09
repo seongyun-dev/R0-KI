@@ -538,7 +538,6 @@ export default function Dashboard() {
                       <path d="M20 4v5h-5" />
                     </svg>
                   </button>
-                  <span className="chip"><span className="d" style={{ background: 'var(--graphic)' }} />최신순</span>
                 </span>
               </div>
 
