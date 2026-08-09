@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.oneloop.apartment.domain.ApartmentComplex;
+import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.map.domain.NavigationWaypoint;
@@ -56,6 +57,7 @@ class PatrolCommandServiceTest {
     @Mock private RobotRepository robotRepository;
     @Mock private PatrolMapRepository patrolMapRepository;
     @Mock private NavigationWaypointService navigationWaypointService;
+    @Mock private DetectedEventRepository detectedEventRepository;
     @Mock private NavigationWaypoint destinationWaypoint;
     @Mock private PatrolAiSummaryService patrolAiSummaryService;
     @Mock private ObjectProvider<MqttPublisher> mqttPublisherProvider;
@@ -375,7 +377,8 @@ class PatrolCommandServiceTest {
                         patrolRepository,
                         robotRepository,
                         patrolMapRepository,
-                        navigationWaypointService));
+                        navigationWaypointService,
+                        detectedEventRepository));
     }
 
     private void stubSingleDestination() {
