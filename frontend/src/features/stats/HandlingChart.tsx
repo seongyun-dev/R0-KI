@@ -2,6 +2,7 @@ import {
   Bar,
   BarChart,
   LabelList,
+  Rectangle,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -15,6 +16,10 @@ import { ChartTooltip } from './ChartTooltip'
    세그먼트 안에 "N건 · P%" 직접 라벨로 이중 부호화. */
 export const HANDLING_OPACITIES: Record<string, number> = { 처리: 0.28, 미처리: 1 }
 
+/** "N건 · P%" 가 세그먼트 안에 들어가려면 대략 이 정도 폭이 필요하다 */
+const MIN_LABEL_WIDTH = 80
+const BAR_RADIUS = 7
+
 type SegLabelProps = {
   x?: number | string
   y?: number | string
@@ -23,17 +28,32 @@ type SegLabelProps = {
   index?: number
 }
 
-/** 세그먼트 중앙 라벨 — "N건 · P%" */
+type BarShapeProps = {
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  index?: number
+  fill?: string
+  fillOpacity?: number
+}
+
+type CornerRadius = [number, number, number, number]
+
+/** 세그먼트 중앙 라벨 — 폭이 좁으면 생략하고 툴팁으로만 본다 */
 function segLabel(data: HandlingStat[], key: 'handled' | 'pending', color: string) {
   return function SegLabel({ x, y, width, height, index }: SegLabelProps) {
     if (index == null) return null
     const d = data[index]
-    const cx = Number(x) + Number(width) / 2
+    const segmentWidth = Number(width)
+    if (segmentWidth < MIN_LABEL_WIDTH) return null
+    const pct = key === 'handled' ? d.handledPct : d.pendingPct
+    if (pct <= 0) return null
+
+    const cx = Number(x) + segmentWidth / 2
     const cy = Number(y) + Number(height) / 2
     const text =
       key === 'handled' ? `${d.handled}건 · ${d.handledPct}%` : `${d.pending}건 · ${d.pendingPct}%`
-    // 세그먼트가 극단적으로 좁을 때만 생략 — 시안(ECharts)은 항상 표시한다
-    if (Number(width) < 36) return null
     return (
       <text
         x={cx}
@@ -47,6 +67,48 @@ function segLabel(data: HandlingStat[], key: 'handled' | 'pending', color: strin
       >
         {text}
       </text>
+    )
+  }
+}
+
+/** 한쪽만 100%면 네 모서리, 둘 다 있으면 바깥쪽만 라운드 */
+function stackRadius(
+  row: HandlingStat | undefined,
+  side: 'handled' | 'pending',
+): CornerRadius {
+  const hasHandled = (row?.handledPct ?? 0) > 0
+  const hasPending = (row?.pendingPct ?? 0) > 0
+  const r = BAR_RADIUS
+  if (side === 'handled') {
+    if (!hasHandled) return [0, 0, 0, 0]
+    return hasPending ? [r, 0, 0, r] : [r, r, r, r]
+  }
+  if (!hasPending) return [0, 0, 0, 0]
+  return hasHandled ? [0, r, r, 0] : [r, r, r, r]
+}
+
+function barShape(data: HandlingStat[], side: 'handled' | 'pending') {
+  return function Shape(props: unknown) {
+    const {
+      x = 0,
+      y = 0,
+      width = 0,
+      height = 0,
+      index = 0,
+      fill,
+      fillOpacity,
+    } = props as BarShapeProps
+    if (width <= 0) return <g />
+    return (
+      <Rectangle
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill={fill}
+        fillOpacity={fillOpacity}
+        radius={stackRadius(data[index], side)}
+      />
     )
   }
 }
@@ -82,7 +144,7 @@ export function HandlingChart({
             maxBarSize={26}
             fill="var(--graphic)"
             fillOpacity={HANDLING_OPACITIES.처리}
-            radius={[7, 0, 0, 7]}
+            shape={barShape(data, 'handled')}
             isAnimationActive={false}
           >
             <LabelList content={segLabel(data, 'handled', 'var(--text-1)')} />
@@ -93,7 +155,7 @@ export function HandlingChart({
             stackId="d"
             maxBarSize={26}
             fill="var(--graphic)"
-            radius={[0, 7, 7, 0]}
+            shape={barShape(data, 'pending')}
             isAnimationActive={false}
           >
             <LabelList content={segLabel(data, 'pending', 'var(--accent-ink)')} />
