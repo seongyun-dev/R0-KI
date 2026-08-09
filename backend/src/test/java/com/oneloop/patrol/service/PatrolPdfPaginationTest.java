@@ -9,6 +9,7 @@ import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import com.oneloop.map.service.MapFileStorage;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.dto.response.PatrolDetailResponse;
@@ -45,6 +46,7 @@ class PatrolPdfPaginationTest {
     @Mock private MapFileStorage mapFileStorage;
     @Mock private PatrolMapRepository patrolMapRepository;
     @Mock private CheckpointRepository checkpointRepository;
+    @Mock private PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
     @Mock private PatrolMapRenderer patrolMapRenderer;
 
     @Test
@@ -68,6 +70,7 @@ class PatrolPdfPaginationTest {
                                 mapFileStorage,
                                 patrolMapRepository,
                                 checkpointRepository,
+                                patrolCheckpointVisitRepository,
                                 patrolMapRenderer)
                         .generate(complexId, patrolId);
 
