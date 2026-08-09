@@ -534,13 +534,17 @@ export const statsApi = {
   },
 
   /**
-   * 직전 완료 주/월 AI 인사이트 리포트 조회.
+   * AI 인사이트 리포트 조회.
    *
+   * - periodKey 없음 → 직전 완료 주/월
+   * - periodKey 있음 → 해당 구간 (완료된 과거만, 진행 중/미래는 400)
    * 없거나 FAILED 면 백엔드가 비동기 생성을 트리거한다.
-   * PENDING/PROCESSING 이면 폴링으로 COMPLETED/FAILED 까지 재조회한다.
    */
-  fetchInsight: (periodType: AnalyticsInsightPeriodType) =>
+  fetchInsight: (
+    periodType: AnalyticsInsightPeriodType,
+    periodKey?: string,
+  ) =>
     apiRequest<AnalyticsInsightResponse>(
-      withQuery('/api/analytics/insights', { periodType }),
+      withQuery('/api/analytics/insights', { periodType, periodKey }),
     ),
 }
