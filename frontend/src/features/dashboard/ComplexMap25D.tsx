@@ -20,7 +20,7 @@ import { complexMapCoordinateMetadata } from './mapCoordinateMetadata'
 import type { ComplexMapProps } from './ComplexMap'
 
 const MAX_ZOOM = 2.5
-const WALL_HEIGHT_PX = 6
+const WALL_HEIGHT_PX = 8
 const BASE_HEIGHT_PX = 2
 const DEFAULT_VIEWPORT = { width: 960, height: 540 }
 
@@ -352,14 +352,27 @@ export function ComplexMap25D({
             const heading = headingOnScreen(metadata, projection, item)
             return [(
               <g className="dm25-robot" key={item.id}>
-                {patrolling && <circle className="pulse" cx={point.x} cy={point.y} r="14" />}
-                <circle className="ring" cx={point.x} cy={point.y} r="10.5" />
-                <circle className="core" cx={point.x} cy={point.y} r="5" />
+                {patrolling && <ellipse className="pulse" cx={point.x} cy={point.y + 1} rx="15" ry="6" />}
                 <g className="heading" transform={`translate(${point.x} ${point.y}) rotate(${heading})`}>
-                  <line x1="4" y1="0" x2="13" y2="0" />
-                  <path d="M14 0 L10 -3 L10 3 Z" />
+                  <line x1="7" y1="0" x2="14" y2="0" />
+                  <path d="M15 0 L11 -2.7 L11 2.7 Z" />
                 </g>
-                <DisplayLabel x={point.x} y={point.y - 22} viewportWidth={viewport.width} viewportHeight={viewport.height} text={item.name ?? item.id} className="robot" />
+                <g className="figurine" transform={`translate(${point.x} ${point.y})`}>
+                  <ellipse className="glow" cx="0" cy="2" rx="12" ry="4.5" />
+                  <ellipse className="plinth-shadow" cx="0" cy="1.6" rx="9.2" ry="3.4" />
+                  <ellipse className="plinth" cx="0" cy="0" rx="8.3" ry="3.2" />
+                  <path className="body" d="M-6.1 -11.2 L-5.6 -2.4 Q-5.2 .2 0 .8 Q5.2 .2 5.6 -2.4 L6.1 -11.2 Z" />
+                  <ellipse className="body-top" cx="0" cy="-11.1" rx="6.1" ry="2.5" />
+                  <rect className="head" x="-5.3" y="-19.5" width="10.6" height="8.7" rx="4.2" />
+                  <ellipse className="head-top" cx="0" cy="-18.2" rx="5.1" ry="2.2" />
+                  <rect className="visor" x="-4.5" y="-17.2" width="9" height="3.8" rx="1.8" />
+                  <circle className="visor-led" cx="-2.5" cy="-15.3" r=".65" />
+                  <circle className="visor-led" cx="0" cy="-15.3" r=".65" />
+                  <circle className="visor-led" cx="2.5" cy="-15.3" r=".65" />
+                  <line className="antenna" x1="0" y1="-20" x2="0" y2="-22" />
+                  <circle className="antenna-tip" cx="0" cy="-22.5" r="1" />
+                </g>
+                <DisplayLabel x={point.x} y={point.y - 31} viewportWidth={viewport.width} viewportHeight={viewport.height} text={item.name ?? item.id} className="robot" />
                 <title>{`${item.name ?? item.id} · x ${item.worldX!.toFixed(2)}, y ${item.worldY!.toFixed(2)}, heading ${item.heading ?? 0}°`}</title>
               </g>
             )]

@@ -1668,15 +1668,15 @@
   color:var(--text-1)}
 .r0ki .dm25-map{display:block;width:100%;height:100%;min-height:300px;touch-action:none;cursor:default}
 .r0ki .dm25-wrap.pan .dm25-map{cursor:grabbing}
-.r0ki .dm25-floor-shadow{fill:rgba(54,69,84,.08);filter:blur(5px)}
-.r0ki .dm25-floor-side{fill:var(--dm25-floor-side);stroke:#dce2e9;stroke-width:.65;
+.r0ki .dm25-floor-shadow{fill:rgba(54,69,84,.065);filter:blur(4px)}
+.r0ki .dm25-floor-side{fill:var(--dm25-floor-side);stroke:#dce2e9;stroke-width:.55;
   vector-effect:non-scaling-stroke}
 .r0ki .dm25-floor{fill:var(--dm25-floor);stroke:#d7dee6;stroke-width:.9;
   vector-effect:non-scaling-stroke}
 .r0ki .dm25-map-image{opacity:.095;filter:grayscale(1) contrast(.5) brightness(1.58);pointer-events:none}
 .r0ki[data-theme="nocturne"] .dm25-map-image{filter:grayscale(1) contrast(.5) brightness(1.58);opacity:.085}
-.r0ki .dm25-wall-side{opacity:.82}
-.r0ki .dm25-wall-top{opacity:.98;filter:drop-shadow(0 .65px .45px rgba(88,103,117,.26))}
+.r0ki .dm25-wall-side{opacity:.9}
+.r0ki .dm25-wall-top{opacity:1;filter:drop-shadow(0 .8px .55px rgba(88,103,117,.24))}
 .r0ki .dm25-zone .platform{fill:color-mix(in srgb,var(--patrol) 13%,transparent);stroke:none}
 .r0ki .dm25-zone .surface{fill:color-mix(in srgb,var(--patrol) 7%,transparent);
   stroke:color-mix(in srgb,var(--patrol) 38%,transparent);stroke-width:.95;vector-effect:non-scaling-stroke}
@@ -1688,13 +1688,23 @@
 .r0ki .dm25-waypoint circle{fill:#fff;stroke:var(--graphic);stroke-width:1.35;vector-effect:non-scaling-stroke;
   filter:drop-shadow(0 0 2px color-mix(in srgb,var(--graphic) 28%,transparent))}
 .r0ki .dm25-waypoint .core{fill:var(--graphic);stroke:none}
-.r0ki .dm25-robot .ring{fill:color-mix(in srgb,var(--graphic) 10%,#fff);stroke:var(--graphic);
-  stroke-width:1.7;vector-effect:non-scaling-stroke;filter:drop-shadow(0 2px 4px color-mix(in srgb,var(--graphic) 28%,transparent))}
-.r0ki .dm25-robot .core{fill:var(--graphic);stroke:#fff;stroke-width:1.1;vector-effect:non-scaling-stroke}
-.r0ki .dm25-robot .pulse{fill:none;stroke:var(--graphic);stroke-width:1.1;stroke-opacity:.3;
-  vector-effect:non-scaling-stroke}
-.r0ki .dm25-robot .heading line{stroke:var(--graphic);stroke-width:1.7;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.r0ki .dm25-robot .heading path{fill:var(--graphic);stroke:#fff;stroke-width:.7;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .pulse{fill:color-mix(in srgb,var(--graphic) 7%,transparent);stroke:var(--graphic);
+  stroke-width:1;stroke-opacity:.34;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .heading{opacity:.72}
+.r0ki .dm25-robot .heading line{stroke:var(--graphic);stroke-width:1.35;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .heading path{fill:var(--graphic);stroke:#fff;stroke-width:.6;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .figurine{filter:drop-shadow(0 2.2px 2.6px rgba(42,67,94,.22));pointer-events:none}
+.r0ki .dm25-robot .glow{fill:color-mix(in srgb,var(--graphic) 18%,transparent);filter:blur(2px)}
+.r0ki .dm25-robot .plinth-shadow{fill:rgba(51,73,96,.18)}
+.r0ki .dm25-robot .plinth{fill:#f8fbff;stroke:var(--graphic);stroke-width:1.25;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .body{fill:#eef3f7;stroke:#aebbc7;stroke-width:.72;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .body-top{fill:#fff;stroke:#bcc6d0;stroke-width:.62;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .head{fill:#f8fafc;stroke:#aeb9c4;stroke-width:.7;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .head-top{fill:#fff;stroke:#c2cad3;stroke-width:.55;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .visor{fill:#172432;stroke:#0d1823;stroke-width:.45;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .visor-led{fill:#52b8ff;stroke:#dff4ff;stroke-width:.2;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .antenna{stroke:#697887;stroke-width:.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .antenna-tip{fill:#202c38;stroke:#fff;stroke-width:.35;vector-effect:non-scaling-stroke}
 .r0ki .dm25-event{--dm25-pin:var(--urgent)}
 .r0ki .dm25-event path{fill:var(--dm25-pin);stroke:var(--page);stroke-width:1.4;vector-effect:non-scaling-stroke}
 .r0ki .dm25-event .pulse{fill:none;stroke:var(--dm25-pin);stroke-width:1.5;stroke-opacity:.5;
