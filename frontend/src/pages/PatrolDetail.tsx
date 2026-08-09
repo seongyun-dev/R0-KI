@@ -7,7 +7,7 @@ import { useToast } from '../components/ui'
 import { usePatrol } from '../features/patrol/usePatrols'
 import { useAuthStore } from '../features/auth/useAuthStore'
 import { ZoneDetail } from '../features/dashboard/ComplexMap'
-import { zoneVar } from '../features/dashboard/zoneStyle'
+import { zoneVar } from '../features/dashboard/mapStyle'
 import type { Patrol, PatrolPoint, ZoneType } from '../types/domain'
 
 /* R0-Ki 순찰 상세 — 시안 R0Kipatrol 그대로.

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useClockText } from '../../components/layout/R0KiShell'
 import { cn } from '../../lib/cn'
-import { zoneVar } from './zoneStyle'
+import { pinPath, zoneVar } from './mapStyle'
 import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneType } from '../../types/domain'
 
 /* 단지 실시간 지도 (1c) — 백엔드(IoT 스캔 맵) 데이터를 받아 그리는 순수 렌더러.
@@ -62,15 +62,6 @@ function roundedPath(pts: Pt[], r: number) {
   }
   const last = pts[pts.length - 1]
   return `${d} L${last.x} ${last.y}`
-}
-
-/** 지도 마커(물방울) — 팁이 원점, 위로 부풀어 오르는 풍선. 접선점을 계산해 꼬리를 잇는다 */
-function pinPath(r: number, h: number) {
-  const len = Math.sqrt(h * h - r * r)
-  const a = Math.asin(r / h)
-  const tx = len * Math.sin(a)
-  const ty = -len * Math.cos(a)
-  return `M0 0 L${tx.toFixed(2)} ${ty.toFixed(2)} A${r} ${r} 0 1 0 ${(-tx).toFixed(2)} ${ty.toFixed(2)} Z`
 }
 
 /** 라벨 폭 추정 — 한글은 폰트 크기만큼, 라틴·숫자는 약 0.56배. 카드 크기 계산용 */
