@@ -17,11 +17,21 @@ export type SignUpRequest = {
   password: string
   name: string
   phoneNumber: string
+  email: string
   apartment: {
     name: string
     postalCode: string
     address: string
   }
+}
+
+export type EmailVerificationSendRequest = {
+  email: string
+}
+
+export type EmailVerificationVerifyRequest = {
+  email: string
+  code: string
 }
 
 export type SignUpResponse = {
