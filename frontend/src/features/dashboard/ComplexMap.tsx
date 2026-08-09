@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useClockText } from '../../components/layout/R0KiShell'
 import { cn } from '../../lib/cn'
+import { pinPath, zoneVar } from './mapStyle'
 import type { ComplexMapData, MapCheckpoint, MapPin, MapRobot, Tone, Zone, ZoneType } from '../../types/domain'
 
 /* 단지 실시간 지도 (1c) — 백엔드(IoT 스캔 맵) 데이터를 받아 그리는 순수 렌더러.
@@ -37,15 +38,7 @@ const toneVar: Record<Tone, string> = {
   neutral: 'var(--offline)',
 }
 
-/** 구역 색 — 온보딩 StepZones 와 동일 매핑 */
-const zoneTone: Record<ZoneType, string> = {
-  주차장: 'patrol',
-  분리수거장: 'charge',
-  출입구: 'detect',
-  도착지: 'offline',
-  기타: 'offline',
-}
-const zoneVar = (type: ZoneType) => ({ '--z': `var(--${zoneTone[type]})` }) as CSSProperties
+/* 구역 색 매핑은 순찰 상세 지도와 공유한다 — zoneStyle.ts */
 
 type Pt = { x: number; y: number }
 
@@ -69,15 +62,6 @@ function roundedPath(pts: Pt[], r: number) {
   }
   const last = pts[pts.length - 1]
   return `${d} L${last.x} ${last.y}`
-}
-
-/** 지도 마커(물방울) — 팁이 원점, 위로 부풀어 오르는 풍선. 접선점을 계산해 꼬리를 잇는다 */
-function pinPath(r: number, h: number) {
-  const len = Math.sqrt(h * h - r * r)
-  const a = Math.asin(r / h)
-  const tx = len * Math.sin(a)
-  const ty = -len * Math.cos(a)
-  return `M0 0 L${tx.toFixed(2)} ${ty.toFixed(2)} A${r} ${r} 0 1 0 ${(-tx).toFixed(2)} ${ty.toFixed(2)} Z`
 }
 
 /** 라벨 폭 추정 — 한글은 폰트 크기만큼, 라틴·숫자는 약 0.56배. 카드 크기 계산용 */
@@ -130,7 +114,7 @@ function Callout({
 
 /** 구역 내부 설비 묘사 — 유형에서 유도되는 것만 그린다(없는 데이터를 지어내지 않는다).
     구역이 작으면 생략해 뭉개짐을 피한다. */
-function ZoneDetail({ type, x, y, w, h }: { type: ZoneType; x: number; y: number; w: number; h: number }) {
+export function ZoneDetail({ type, x, y, w, h }: { type: ZoneType; x: number; y: number; w: number; h: number }) {
   const inset = 7
   const ix = x + inset
   const iy = y + inset

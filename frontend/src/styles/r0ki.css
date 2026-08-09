@@ -368,8 +368,11 @@
 .r0ki .cmwrap.pan .cmview{transition:none}
 /* 백엔드 ROS 점유격자 도면 — 원본 회색이 유리 무대에서 얼룩으로 읽힌다.
    회색조로 눌러 톤을 통일하고 투명도를 낮춰 무대 색이 비치게 한다. */
-.r0ki .cmap .mapbase{filter:grayscale(1) contrast(.78) brightness(1.16);opacity:.42}
-.r0ki[data-theme="nocturne"] .cmap .mapbase{filter:grayscale(1) invert(1) contrast(.72) brightness(.9);opacity:.3}
+/* 순찰 상세 지도(.rmap)도 같은 톤으로 깐다 — 스캔 원본을 그대로 깔면 벽선이 새까매서
+   같은 도면인데 화면마다 진하기가 달라 보인다 */
+.r0ki .cmap .mapbase,.r0ki .rmap .mapbase{filter:grayscale(1) contrast(.78) brightness(1.16);opacity:.42}
+.r0ki[data-theme="nocturne"] .cmap .mapbase,
+.r0ki[data-theme="nocturne"] .rmap .mapbase{filter:grayscale(1) invert(1) contrast(.72) brightness(.9);opacity:.3}
 /* 구역 — 온보딩 편집기(.au-zone)와 같은 반투명 레시피로 색을 잇는다 */
 .r0ki .cmz rect{fill:color-mix(in srgb,var(--z) 13%,transparent);
   stroke:color-mix(in srgb,var(--z) 62%,transparent);stroke-width:1.2}
@@ -377,6 +380,36 @@
 .r0ki .cmz text{font-family:var(--sans);font-size:8.5px;font-weight:700;letter-spacing:-.01em;
   fill:var(--text-1);paint-order:stroke;stroke:var(--page);stroke-width:2.4px;stroke-linejoin:round}
 .r0ki .cmz text.mid{font-size:9.5px}
+/* 구역명 아래 보조 표기(순찰 상세의 통과 시각) — 대시보드에는 쓰이지 않는다 */
+.r0ki .cmz text.sub{font-weight:600;fill:var(--text-3)}
+/* 순찰 상세 지도의 구역 라벨.
+   ① 대시보드보다 구역이 촘촘해 글자를 한 단계 줄인다.
+      PatrolDetail 의 ZONE_FS/ZONE_FS_MID/ZONE_FS_SUB 와 같은 값이어야 겹침 판정이 맞는다.
+   ② `.rmap text` 가 파일 뒤쪽에 있어 같은 순위인 `.cmz text` 를 덮어쓴다.
+      색·헤일로·정렬을 여기서 다시 세워 대시보드와 같은 모습을 유지한다. */
+.r0ki .rmap .cmz text{font-size:7px;fill:var(--text-2);text-anchor:middle;
+  paint-order:stroke;stroke:var(--page);stroke-width:2.4px;stroke-linejoin:round}
+.r0ki .rmap .cmz text.mid{font-size:7.5px}
+.r0ki .rmap .cmz text.sub{font-size:6px;fill:var(--text-3)}
+/* 불릿형(좁은 구역)은 불릿 오른쪽에서 시작한다 — CSS 가 presentation attribute 를 이기므로 클래스로 건다 */
+.r0ki .rmap .cmz text.lft{text-anchor:start}
+/* 순찰 이동 경로 — 도면(.mapbase, 42%) 위에 얹히므로 불투명 100% 로 그으면 혼자 튄다.
+   광을 깔지 않고 점선 하나만, 투명도로만 낮춘다. */
+.r0ki .rmap .rroute{fill:none;stroke:var(--graphic);stroke-opacity:.5;stroke-width:4;
+  stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:10 9}
+/* 시작·끝 지점 — 대시보드 체크포인트(.cmwp)와 같은 레시피. 끝점은 비운 원 */
+.r0ki .rmap .rrend{fill:var(--page);stroke:var(--graphic);stroke-opacity:.65;stroke-width:3}
+.r0ki .rmap .rrend.start{fill:var(--graphic);fill-opacity:.85;stroke:#fff;stroke-opacity:.9}
+/* 이벤트 핀 색은 공용 .cmmark 을 그대로 쓴다(--graphic / 응급은 --urgent).
+   ⚠️ 상태 램프(--alert 등)를 채움색으로 쓰면 안 된다. 야간에서 --alert 가 #FFFFFF 라
+      흰 외곽선과 겹쳐 핀 전체가 하얗게 뭉개진다. 램프는 작은 상태 점 전용이다.
+   이름표는 칩(둥근 카드)으로 띄운다 — 구역명은 도면 위 평서 글씨라,
+   색만이 아니라 '카드냐 글씨냐'로 갈려서 한눈에 구분된다(대시보드 .cmcard 와 같은 결). */
+.r0ki .rmap .evlbl rect{fill:var(--focus-in);fill-opacity:.96;stroke:var(--graphic);
+  stroke-opacity:.5;stroke-width:1.6}
+.r0ki .rmap .evlbl text{font-size:12px;font-weight:800;fill:var(--text-1);stroke:none}
+.r0ki .rmap .evlbl.urg rect{stroke:var(--urgent);stroke-opacity:.85}
+.r0ki .rmap .evlbl.urg text{fill:var(--urgent-text)}
 /* 구역 설비 묘사 — 구역 색의 옅은 선/면. 라벨보다 뒤로 물러나야 한다 */
 .r0ki .cmfx line,.r0ki .cmfx rect,.r0ki .cmfx path{fill:none;stroke:var(--z);stroke-opacity:.3;stroke-width:0.9}
 .r0ki .cmfx .fill{fill:var(--z);fill-opacity:.16;stroke-opacity:.24}
