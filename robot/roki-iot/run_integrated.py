@@ -529,7 +529,42 @@ def _active_map_environment() -> dict[str, str]:
     return values
 
 
-def _prepare_patrol_localization(mapping_runtime: Any) -> tuple[bool, str]:
+def _patrol_start_anchor(route: Any) -> tuple[float, float, float, str] | None:
+    """Return waypoint 1 and its route-facing yaw in map coordinates."""
+
+    waypoints = tuple(getattr(route, "waypoints", ()) or ())
+    if not waypoints:
+        return None
+    first = waypoints[0]
+    explicit_yaw = getattr(first, "yaw_deg", None)
+    if explicit_yaw is not None:
+        return (
+            float(first.x),
+            float(first.y),
+            math.radians(float(explicit_yaw)),
+            "WAYPOINT_YAW",
+        )
+    if len(waypoints) < 2:
+        return None
+    second = waypoints[1]
+    delta_x = float(second.x) - float(first.x)
+    delta_y = float(second.y) - float(first.y)
+    if math.hypot(delta_x, delta_y) <= 1e-6:
+        return None
+    return (
+        float(first.x),
+        float(first.y),
+        math.atan2(delta_y, delta_x),
+        "ROUTE_GEOMETRY",
+    )
+
+
+def _prepare_patrol_localization(
+    mapping_runtime: Any,
+    route: Any | None = None,
+    *,
+    require_start_anchor: bool = False,
+) -> tuple[bool, str]:
     """포즈그래프를 적재하고 위치추정이 실제로 붙을 때까지 기다린다.
 
     예전에는 여기서 스캔을 끊었다 다시 이었다. 그 게이팅은 걷어냈다 --
@@ -555,12 +590,48 @@ def _prepare_patrol_localization(mapping_runtime: Any) -> tuple[bool, str]:
 
     try:
         timeout_sec = float(os.getenv("AIOT_PATROL_LOCALIZATION_TIMEOUT_SEC", "30"))
+        deadline = time.monotonic() + timeout_sec
         if not slam.wait_for_localization_ready(marker, timeout_sec=timeout_sec):
             return False, "LOCALIZATION_NOT_READY"
     except Exception as exc:
         print(f"[SLAM] patrol localization wait failed type={type(exc).__name__}")
         return False, "LOCALIZATION_NOT_READY"
-    return True, reason
+
+    if not require_start_anchor:
+        return True, reason
+
+    anchor = _patrol_start_anchor(route)
+    if anchor is None:
+        return False, "START_ANCHOR_INVALID"
+    anchor_x, anchor_y, anchor_yaw, yaw_source = anchor
+    remaining = deadline - time.monotonic()
+    initialpose_timeout = min(
+        remaining,
+        float(os.getenv("AIOT_INITIALPOSE_TIMEOUT_SEC", "10")),
+    )
+    if initialpose_timeout <= 0:
+        return False, "INITIALPOSE_TIMEOUT"
+    print(
+        "[INITIALPOSE] start anchor "
+        f"x={anchor_x:.3f} y={anchor_y:.3f} "
+        f"yawDeg={math.degrees(anchor_yaw):.1f} source={yaw_source}"
+    )
+    try:
+        return slam.relocalize(
+            x=anchor_x,
+            y=anchor_y,
+            yaw_rad=anchor_yaw,
+            timeout_sec=initialpose_timeout,
+            position_tolerance_m=float(
+                os.getenv("AIOT_INITIALPOSE_POSITION_TOLERANCE_M", "0.25")
+            ),
+            yaw_tolerance_rad=math.radians(
+                float(os.getenv("AIOT_INITIALPOSE_YAW_TOLERANCE_DEG", "30"))
+            ),
+        )
+    except Exception as exc:
+        print(f"[INITIALPOSE] failed type={type(exc).__name__}")
+        return False, "INITIALPOSE_FAILED"
 
 
 def _no_active_map() -> bool:
@@ -1158,7 +1229,11 @@ def create_integrated_application(
         current-map.env 에만 있고 이 프로세스의 os.environ 에는 없다.
         """
 
-        return _prepare_patrol_localization(mapping_runtime)
+        return _prepare_patrol_localization(
+            mapping_runtime,
+            runtime_service.navigation_route,
+            require_start_anchor=navigation_driver is not None,
+        )
 
     command_handler = PatrolCommandHandler(
         settings=settings,

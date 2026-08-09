@@ -269,6 +269,14 @@ class FinalRuntimeService:
 
         return self._runtime_lifecycle_marker()
 
+    @property
+    def navigation_route(self) -> Any | None:
+        """Return the route refreshed by ``prepare_patrol`` for localization."""
+
+        with self._lifecycle_lock:
+            navigation = self._navigation_service
+            return None if navigation is None else getattr(navigation, "route", None)
+
     def readiness(self) -> tuple[bool, str]:
         """Return the physical/navigation gate without issuing a command."""
 

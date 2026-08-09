@@ -14,6 +14,7 @@ import contextlib
 import io
 import math
 import unittest
+from types import SimpleNamespace
 
 from integration.slam_session_control import (
     FreshMapTracker,
@@ -325,6 +326,97 @@ class YawFromQuaternionTest(unittest.TestCase):
                     degrees,
                     places=6,
                 )
+
+
+class _InitialPoseMessage:
+    def __init__(self) -> None:
+        self.header = SimpleNamespace(frame_id="", stamp=None)
+        self.pose = SimpleNamespace(
+            pose=SimpleNamespace(
+                position=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
+            ),
+            covariance=[0.0] * 36,
+        )
+
+
+class _InitialPosePublisher:
+    def __init__(self, control: RosSlamSessionControl, response: object) -> None:
+        self.control = control
+        self.response = response
+        self.messages: list[object] = []
+
+    def get_subscription_count(self) -> int:
+        return 1
+
+    def publish(self, message: object) -> None:
+        self.messages.append(message)
+        self.control._on_localization_pose(self.response)
+
+
+class InitialPoseConfirmationTest(unittest.TestCase):
+    def configured_control(self, response: object) -> tuple[RosSlamSessionControl, object]:
+        control = RosSlamSessionControl()
+        publisher = _InitialPosePublisher(control, response)
+        ros_now = SimpleNamespace(to_msg=lambda: _Stamp(9_000_000_000))
+        control._node = SimpleNamespace(
+            get_clock=lambda: SimpleNamespace(now=lambda: ros_now)
+        )
+        control._initialpose_type = _InitialPoseMessage
+        control._initialpose_publisher = publisher
+        return control, publisher
+
+    def test_matching_new_pose_confirms_initialpose(self) -> None:
+        control, publisher = self.configured_control(
+            _pose_message(1.02, 1.98, 179.0, [0.0] * 36, frame_id="map")
+        )
+
+        ready, reason = control.relocalize(
+            x=1.0,
+            y=2.0,
+            yaw_rad=math.radians(-179.0),
+            timeout_sec=0.2,
+            position_tolerance_m=0.25,
+            yaw_tolerance_rad=math.radians(5.0),
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(reason, "START_POSE_CONFIRMED")
+        self.assertEqual(len(publisher.messages), 1)
+        message = publisher.messages[0]
+        self.assertEqual(message.header.frame_id, "map")
+        self.assertAlmostEqual(message.pose.pose.position.x, 1.0)
+        self.assertGreater(message.pose.covariance[0], 0.0)
+
+    def test_mismatched_pose_is_rejected_after_waiting_for_confirmation(self) -> None:
+        control, _publisher = self.configured_control(
+            _pose_message(0.0, 0.0, 90.0, [0.0] * 36, frame_id="map")
+        )
+
+        ready, reason = control.relocalize(
+            x=1.0,
+            y=2.0,
+            yaw_rad=0.0,
+            timeout_sec=0.03,
+            position_tolerance_m=0.25,
+            yaw_tolerance_rad=math.radians(30.0),
+        )
+
+        self.assertFalse(ready)
+        self.assertEqual(reason, "START_POSE_MISMATCH")
+
+    def test_pose_observation_keeps_frame_and_coordinates(self) -> None:
+        control = RosSlamSessionControl()
+        control._on_localization_pose(
+            _pose_message(0.4, -0.2, 30.0, [0.0] * 36, frame_id="map")
+        )
+
+        observation = control._last_localization_pose
+        self.assertIsNotNone(observation)
+        self.assertEqual(observation.sequence, 1)
+        self.assertEqual(observation.frame_id, "map")
+        self.assertAlmostEqual(observation.x, 0.4)
+        self.assertAlmostEqual(math.degrees(observation.yaw_rad), 30.0)
 
 
 if __name__ == "__main__":

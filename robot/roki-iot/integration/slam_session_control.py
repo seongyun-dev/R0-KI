@@ -29,6 +29,22 @@ class _Observation:
     arrival: float
 
 
+@dataclass(frozen=True)
+class LocalizationPoseObservation:
+    """One pose produced by slam_toolbox after localization processing."""
+
+    sequence: int
+    stamp_ns: int
+    arrival: float
+    frame_id: str
+    x: float
+    y: float
+    yaw_rad: float
+    covariance_x: float
+    covariance_y: float
+    covariance_yaw: float
+
+
 class FreshMapTracker:
     """리셋 이후 첫 스캔의 산물인 지도만 새것으로 센다."""
 
@@ -134,12 +150,16 @@ class RosSlamSessionControl:
         self._owns_rclpy_context = False
         self._reset_client: Any = None
         self._reset_type: Any = None
+        self._initialpose_publisher: Any = None
+        self._initialpose_type: Any = None
         self._tf_buffer: Any = None
         self._tf_listener: Any = None
         self._time_type: Any = None
         self._duration_type: Any = None
         self._last_localization_pose_at: float | None = None
         self._last_localization_stamp_ns: int = 0
+        self._localization_pose_sequence = 0
+        self._last_localization_pose: LocalizationPoseObservation | None = None
 
     def start(self) -> None:
         with self._lock:
@@ -170,6 +190,12 @@ class RosSlamSessionControl:
                 rclpy.init(args=None)
             self._node = rclpy.create_node(self._node_name)
             self._reset_client = self._node.create_client(Reset, self._reset_service)
+            self._initialpose_type = PoseWithCovarianceStamped
+            self._initialpose_publisher = self._node.create_publisher(
+                PoseWithCovarianceStamped,
+                "/initialpose",
+                10,
+            )
             self._node.create_subscription(
                 LaserScan,
                 self._scan_topic,
@@ -221,6 +247,8 @@ class RosSlamSessionControl:
             self._executor = None
             self._thread = None
             self._reset_client = None
+            self._initialpose_publisher = None
+            self._initialpose_type = None
             self._tf_listener = None
             self._tf_buffer = None
 
@@ -268,6 +296,114 @@ class RosSlamSessionControl:
                     return False
                 self._condition.wait(min(remaining, 0.2))
         return self._wait_for_transform(deadline)
+
+    def relocalize(
+        self,
+        *,
+        x: float,
+        y: float,
+        yaw_rad: float,
+        timeout_sec: float,
+        position_tolerance_m: float,
+        yaw_tolerance_rad: float,
+    ) -> tuple[bool, str]:
+        """Seed slam_toolbox and accept only a new matching localization pose.
+
+        Waiting for a subscriber avoids the discovery race of a short-lived
+        ``ros2 topic pub --once`` process. Publishing is not considered an ACK;
+        only a subsequently observed matching ``/pose`` confirms localization.
+        """
+
+        publisher = self._initialpose_publisher
+        message_type = self._initialpose_type
+        node = self._node
+        if publisher is None or message_type is None or node is None:
+            return False, "INITIALPOSE_TRANSPORT_NOT_READY"
+        if timeout_sec <= 0:
+            return False, "INITIALPOSE_TIMEOUT"
+
+        deadline = self._clock() + float(timeout_sec)
+        while self._clock() < deadline:
+            try:
+                if int(publisher.get_subscription_count()) > 0:
+                    break
+            except (AttributeError, TypeError, ValueError):
+                return False, "INITIALPOSE_TRANSPORT_NOT_READY"
+            time.sleep(0.05)
+        else:
+            return False, "INITIALPOSE_SUBSCRIBER_MISSING"
+
+        with self._condition:
+            marker = self._localization_pose_sequence
+
+        message = message_type()
+        message.header.frame_id = self._map_frame
+        message.header.stamp = node.get_clock().now().to_msg()
+        message.pose.pose.position.x = float(x)
+        message.pose.pose.position.y = float(y)
+        message.pose.pose.position.z = 0.0
+        message.pose.pose.orientation.x = 0.0
+        message.pose.pose.orientation.y = 0.0
+        message.pose.pose.orientation.z = math.sin(float(yaw_rad) / 2.0)
+        message.pose.pose.orientation.w = math.cos(float(yaw_rad) / 2.0)
+        # A useful search prior without pretending centimeter-level certainty.
+        message.pose.covariance[0] = 0.25**2
+        message.pose.covariance[7] = 0.25**2
+        message.pose.covariance[35] = math.radians(15.0) ** 2
+
+        published_at = self._clock()
+        publisher.publish(message)
+        print(
+            "[INITIALPOSE] published "
+            f"x={x:.3f} y={y:.3f} yawDeg={math.degrees(yaw_rad):.1f}"
+        )
+
+        last_observation: LocalizationPoseObservation | None = None
+        observed_sequence = marker
+        with self._condition:
+            while self._clock() < deadline:
+                observation = self._last_localization_pose
+                if (
+                    observation is not None
+                    and observation.sequence > observed_sequence
+                    and observation.arrival >= published_at
+                ):
+                    observed_sequence = observation.sequence
+                    last_observation = observation
+                    if self._localization_pose_matches(
+                        observation,
+                        x=float(x),
+                        y=float(y),
+                        yaw_rad=float(yaw_rad),
+                        position_tolerance_m=float(position_tolerance_m),
+                        yaw_tolerance_rad=float(yaw_tolerance_rad),
+                    ):
+                        print(
+                            "[INITIALPOSE] confirmed "
+                            f"x={observation.x:.3f} y={observation.y:.3f} "
+                            f"yawDeg={math.degrees(observation.yaw_rad):.1f}"
+                        )
+                        return True, "START_POSE_CONFIRMED"
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    break
+                self._condition.wait(min(remaining, 0.2))
+
+        if last_observation is None:
+            return False, "INITIALPOSE_POSE_TIMEOUT"
+        distance = math.hypot(
+            last_observation.x - float(x),
+            last_observation.y - float(y),
+        )
+        yaw_error = abs(
+            self._angle_difference(last_observation.yaw_rad, float(yaw_rad))
+        )
+        print(
+            "[INITIALPOSE] rejected "
+            f"frame={last_observation.frame_id or '?'} "
+            f"distance={distance:.3f}m yawErrorDeg={math.degrees(yaw_error):.1f}"
+        )
+        return False, "START_POSE_MISMATCH"
 
     def _invoke(self, client: Any, request: Any, description: str) -> Any:
         if client is None:
@@ -326,13 +462,28 @@ class RosSlamSessionControl:
             return
         arrival = self._clock()
         stamp_ns = self._stamp_ns(message)
+        covariance = getattr(getattr(message, "pose", None), "covariance", None)
+        yaw = self._yaw_from_quaternion(pose.orientation)
+        frame = getattr(getattr(message, "header", None), "frame_id", "") or ""
         with self._condition:
             previous_arrival = self._last_localization_pose_at
             previous_stamp = self._last_localization_stamp_ns
             self._last_localization_pose_at = arrival
             self._last_localization_stamp_ns = stamp_ns
-        covariance = getattr(getattr(message, "pose", None), "covariance", None)
-        yaw = self._yaw_from_quaternion(pose.orientation)
+            self._localization_pose_sequence += 1
+            self._last_localization_pose = LocalizationPoseObservation(
+                sequence=self._localization_pose_sequence,
+                stamp_ns=stamp_ns,
+                arrival=arrival,
+                frame_id=frame,
+                x=float(pose.position.x),
+                y=float(pose.position.y),
+                yaw_rad=float(yaw),
+                covariance_x=self._covariance_at(covariance, 0),
+                covariance_y=self._covariance_at(covariance, 7),
+                covariance_yaw=self._covariance_at(covariance, 35),
+            )
+            self._condition.notify_all()
         # 도착 간격과 발행 간격을 따로 적는다. executor 가 밀리면 오래된
         # 메시지가 몰려 도착해 도착 간격만 짧아진다. slam 이 언제 처리했는지는
         # 스탬프로만 안다.
@@ -346,10 +497,9 @@ class RosSlamSessionControl:
             if not previous_stamp or not stamp_ns
             else f"{(stamp_ns - previous_stamp) / 1_000_000_000:.2f}"
         )
-        frame = getattr(getattr(message, "header", None), "frame_id", "") or "?"
         print(
             "[SLAM POSE] "
-            f"frame={frame} "
+            f"frame={frame or '?'} "
             f"x={pose.position.x:.3f} y={pose.position.y:.3f} "
             f"yawDeg={math.degrees(yaw):.1f} "
             f"covXX={self._covariance_at(covariance, 0):.4f} "
@@ -378,6 +528,29 @@ class RosSlamSessionControl:
             2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
             1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z),
         )
+
+    def _localization_pose_matches(
+        self,
+        observation: LocalizationPoseObservation,
+        *,
+        x: float,
+        y: float,
+        yaw_rad: float,
+        position_tolerance_m: float,
+        yaw_tolerance_rad: float,
+    ) -> bool:
+        if observation.frame_id != self._map_frame:
+            return False
+        if math.hypot(observation.x - x, observation.y - y) > position_tolerance_m:
+            return False
+        return (
+            abs(self._angle_difference(observation.yaw_rad, yaw_rad))
+            <= yaw_tolerance_rad
+        )
+
+    @staticmethod
+    def _angle_difference(actual: float, expected: float) -> float:
+        return math.atan2(math.sin(actual - expected), math.cos(actual - expected))
 
     @staticmethod
     def _stamp_ns(message: Any) -> int:
