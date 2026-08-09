@@ -457,5 +457,92 @@ class MappingRuntimeTest(unittest.TestCase):
         self.assertEqual(runtime.start(12, "command-12"), (False, "LIDAR_NOT_READY"))
 
 
+class HandoverPoseTest(unittest.TestCase):
+    """매핑 인계가 로봇의 **실제 자리**를 위치추정 시작점으로 넘기는가.
+
+    slam 은 LOCALIZE_AT_POSE 를 받으면 첫 스캔 자세를 그 값으로 강제하고
+    그 근처 노드에 대해서만 매칭한다. 전역 재위치추정이 없으므로 seed 가
+    틀리면 스스로 회복하지 못한다. 2026-08-09 09:22 실측: 매핑으로 1.408 m
+    이동한 뒤 (0,0,0) 을 seed 로 잡아 순찰이 "Starting point in lethal
+    space" 로 4회 연속 계획 실패했다.
+    """
+
+    def build(self, slam_session: object) -> tuple:
+        localization = SimpleNamespace(calls=[])
+
+        def enter_patrol(path, pose=None):
+            localization.calls.append((path, pose))
+            return True, "READY"
+
+        localization.enter_patrol = enter_patrol
+        runtime = ManualMappingRuntime(
+            runtime_service=SimpleNamespace(mapping_readiness=lambda: (True, "READY")),
+            state_store=SimpleNamespace(),
+            drive_controller=SimpleNamespace(),
+            gamepad_input=SimpleNamespace(),
+            map_exporter=SimpleNamespace(),
+            map_activator=SimpleNamespace(),
+            settings=MappingRuntimeSettings(
+                backend_base_url="http://backend",
+                backend_token_file=Path("/tmp/token"),
+            ),
+            localization=localization,
+            slam_session=slam_session,
+        )
+        return runtime, localization
+
+    def activated(self) -> object:
+        return SimpleNamespace(yaml_path="/var/lib/aiot/maps/active/map-1-v9/map.yaml")
+
+    def test_live_map_pose_is_used_as_the_seed(self) -> None:
+        runtime, localization = self.build(
+            SimpleNamespace(current_map_pose=lambda: (1.25, -0.40, 0.75))
+        )
+
+        runtime._enter_patrol_localization(self.activated())
+
+        (_, pose), = localization.calls
+        self.assertIsNotNone(pose, "실제 자리를 넘겨야 한다")
+        self.assertAlmostEqual(pose.x, 1.25)
+        self.assertAlmostEqual(pose.y, -0.40)
+        self.assertAlmostEqual(pose.theta, 0.75)
+
+    def test_unreadable_pose_falls_back_to_the_dock(self) -> None:
+        """읽지 못했다고 인계를 실패시키지 않는다. 지도는 이미 저장됐다."""
+
+        runtime, localization = self.build(
+            SimpleNamespace(current_map_pose=lambda: None)
+        )
+
+        runtime._enter_patrol_localization(self.activated())
+
+        (_, pose), = localization.calls
+        self.assertIsNone(pose, "None 이면 enter_patrol 이 도킹 지점을 쓴다")
+
+    def test_pose_read_failure_falls_back_to_the_dock(self) -> None:
+        def boom():
+            raise RuntimeError("tf buffer empty")
+
+        runtime, localization = self.build(
+            SimpleNamespace(current_map_pose=boom)
+        )
+
+        runtime._enter_patrol_localization(self.activated())
+
+        (_, pose), = localization.calls
+        self.assertIsNone(pose)
+
+    def test_runtime_without_slam_session_still_hands_over(self) -> None:
+        """slam_session 이 없는 구성(기존 테스트)에서 동작이 바뀌면 안 된다."""
+
+        runtime, localization = self.build(None)
+
+        runtime._enter_patrol_localization(self.activated())
+
+        (path, pose), = localization.calls
+        self.assertTrue(path.endswith("posegraph"))
+        self.assertIsNone(pose)
+
+
 if __name__ == "__main__":
     unittest.main()

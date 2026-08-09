@@ -213,6 +213,46 @@ class ManualMappingRuntime:
             return False, str(exc)
         return True, "READY"
 
+    def _handover_pose(self) -> Any | None:
+        """매핑이 끝난 **지금 그 자리**를 위치추정 시작점으로 넘긴다.
+
+        넘기지 않으면 도킹 지점(0,0,0)이 쓰인다. 그런데 매핑을 마친 로봇은
+        도킹 지점에 없다 -- 탐사하느라 움직였기 때문이다. 2026-08-09 09:22
+        실측: 매핑 순변위 1.408 m 였는데 인계가 (0,0,0) 을 못 박았고, 순찰이
+        엉뚱한 자리에서 출발해 ``Starting point in lethal space`` 로 계획이
+        4회 연속 실패했다.
+
+        slam 은 ``LOCALIZE_AT_POSE`` 를 받으면 첫 스캔의 자세를 그 값으로
+        **강제**하고(``SetOdometricPose``) 그 **근처 노드에 대해서만**
+        매칭한다(``ProcessAgainstNodesNearBy``). 전역 재위치추정은 없다.
+        그러니 seed 가 틀리면 스캔매칭이 스스로 회복하지 못한다.
+
+        좌표계가 맞는 이유: 지금 적재할 포즈그래프는 **방금 이 세션이 만든
+        것**이고, 라이브 map->base_link 도 같은 지도의 좌표다. 재부팅 뒤
+        예전 지도를 적재하는 경로(``ensure_patrol``)에서는 이 값이 무관한
+        임시 지도의 좌표라서 쓰면 안 된다 -- 그쪽은 도킹 지점 그대로 둔다.
+
+        읽지 못하면 None 을 돌려 기존 동작(도킹 지점)으로 떨어진다. 인계를
+        실패시키지 않는다 -- 지도는 이미 저장·업로드됐다.
+        """
+
+        reader = getattr(self._slam_session, "current_map_pose", None)
+        if not callable(reader):
+            return None
+        try:
+            pose = reader()
+        except Exception as exc:
+            print(f"[MAPPING] handover pose read failed type={type(exc).__name__}")
+            return None
+        if pose is None:
+            print("[MAPPING] handover pose unavailable; seeding at dock")
+            return None
+        x, y, yaw = pose
+        print(f"[MAPPING] handover pose x={x:.3f} y={y:.3f} yaw={yaw:.3f}")
+        from integration.localization_mode import DockPose
+
+        return DockPose(x=x, y=y, theta=yaw)
+
     def _enter_patrol_localization(self, activated: Any) -> None:
         """방금 활성화한 지도의 포즈그래프로 위치추정을 켠다.
 
@@ -225,7 +265,9 @@ class ManualMappingRuntime:
         if self._localization is None:
             return
         posegraph = Path(activated.yaml_path).parent / "posegraph"
-        ready, reason = self._localization.enter_patrol(str(posegraph))
+        ready, reason = self._localization.enter_patrol(
+            str(posegraph), self._handover_pose()
+        )
         if not ready:
             # 지도는 이미 저장·업로드됐다. 순찰 시작 시 다시 시도하면 되므로
             # 매핑 세션을 실패로 되돌리지 않는다.

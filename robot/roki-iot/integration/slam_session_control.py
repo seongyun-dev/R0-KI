@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import deque
@@ -282,6 +283,42 @@ class RosSlamSessionControl:
         return int(getattr(stamp, "sec", 0)) * 1_000_000_000 + int(
             getattr(stamp, "nanosec", 0)
         )
+
+    def current_map_pose(self) -> tuple[float, float, float] | None:
+        """지금 slam 이 믿고 있는 지도 좌표계 자세 ``(x, y, yaw)``.
+
+        **호출자가 좌표계를 책임진다.** 이 값은 slam 이 *현재* 들고 있는 지도의
+        좌표계에 있다. 매핑 직후라면 방금 저장한 포즈그래프와 같은 좌표계이므로
+        그 그래프를 적재할 때 seed 로 쓸 수 있다. 반대로 재부팅 뒤 예전 지도를
+        적재하는 경우에는 무관한 임시 지도의 좌표라서 쓰면 안 된다 -- 그때는
+        도킹 지점이 맞다.
+
+        신선하지 않으면 None 을 준다. 얼어붙은 TF 로 seed 를 잡으면 로봇이
+        과거 위치에서 위치추정을 시작한다.
+        """
+
+        if self._tf_buffer is None:
+            return None
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self._map_frame,
+                "base_link",
+                self._time_type(),
+                timeout=self._duration_type(seconds=0.5),
+            )
+        except Exception as exc:
+            print(f"[SLAM] map pose read failed type={type(exc).__name__}")
+            return None
+        if not self._transform_is_fresh(transform):
+            return None
+        translation = transform.transform.translation
+        rotation = transform.transform.rotation
+        # 평면 주행이라 yaw 만 쓴다. z/x/y 회전 성분은 무시한다.
+        yaw = math.atan2(
+            2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+            1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z),
+        )
+        return float(translation.x), float(translation.y), float(yaw)
 
     def _wait_for_transform(self, deadline: float) -> bool:
         """map->odom 이 **최근에** 발행됐는지 본다. 존재만으로는 부족하다.
