@@ -10,6 +10,9 @@ ROS 전송 계층은 여기서 다루지 않는다 -- 그쪽은 여전히 무커
 
 from __future__ import annotations
 
+import contextlib
+import io
+import math
 import unittest
 
 from integration.slam_session_control import (
@@ -182,6 +185,114 @@ class TransformFreshnessTest(unittest.TestCase):
         control = self.control(now_ns=1_000_000_000_000)
 
         self.assertFalse(control._transform_is_fresh(_Transform(0)))
+
+
+def _pose_message(x: float, y: float, yaw_deg: float, covariance: object) -> object:
+    """PoseWithCovarianceStamped 의 최소 형태."""
+
+    yaw = math.radians(yaw_deg)
+    pose = type("P", (), {})()
+    pose.position = type("Pt", (), {"x": x, "y": y, "z": 0.0})()
+    pose.orientation = type(
+        "Q",
+        (),
+        {"x": 0.0, "y": 0.0, "z": math.sin(yaw / 2.0), "w": math.cos(yaw / 2.0)},
+    )()
+    inner = type("PC", (), {})()
+    inner.pose = pose
+    inner.covariance = covariance
+    message = type("M", (), {})()
+    message.pose = inner
+    return message
+
+
+class LocalizationPoseObservationTest(unittest.TestCase):
+    """/pose 관측이 실제로 관측하는가.
+
+    이 토픽 한 건이 "slam 이 스캔을 처리했다"는 유일한 직접 증거다. 그래서
+    스텁이 아니라 실물 핸들러를 부른다 -- _transform_is_fresh 가 상수 False
+    인 채로 522개 테스트를 통과하고 현장까지 간 이유가 스텁이었다.
+    """
+
+    def observe(self, control, message) -> str:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            control._on_localization_pose(message)
+        return buffer.getvalue()
+
+    def test_pose_and_covariance_are_reported(self) -> None:
+        control = RosSlamSessionControl()
+        covariance = [0.0] * 36
+        covariance[0] = 0.0123
+        covariance[7] = 0.0456
+        covariance[35] = 0.0789
+
+        line = self.observe(control, _pose_message(1.644, -0.368, 90.0, covariance))
+
+        self.assertIn("x=1.644", line)
+        self.assertIn("y=-0.368", line)
+        self.assertIn("yawDeg=90.0", line)
+        self.assertIn("covXX=0.0123", line)
+        self.assertIn("covYY=0.0456", line)
+        self.assertIn("covYaw=0.0789", line)
+
+    def test_first_pose_has_no_previous_interval(self) -> None:
+        control = RosSlamSessionControl()
+
+        line = self.observe(control, _pose_message(0.0, 0.0, 0.0, [0.0] * 36))
+
+        self.assertIn("sinceLastSec=-", line)
+
+    def test_interval_since_the_previous_pose_is_reported(self) -> None:
+        """정지 중 침묵과 주행 중 연속 발행을 구분할 유일한 값이다."""
+
+        now = 100.0
+        control = RosSlamSessionControl(clock=lambda: now)
+        self.observe(control, _pose_message(0.0, 0.0, 0.0, [0.0] * 36))
+        now = 100.4
+
+        line = self.observe(control, _pose_message(0.1, 0.0, 0.0, [0.0] * 36))
+
+        self.assertIn("sinceLastSec=0.40", line)
+
+    def test_missing_covariance_does_not_raise(self) -> None:
+        """콜백에서 예외가 나가면 executor spin 이 죽고 구독 전체를 잃는다."""
+
+        control = RosSlamSessionControl()
+
+        line = self.observe(control, _pose_message(0.0, 0.0, 0.0, None))
+
+        self.assertIn("covXX=nan", line)
+
+    def test_message_without_a_pose_is_ignored(self) -> None:
+        control = RosSlamSessionControl()
+
+        self.assertEqual(self.observe(control, type("M", (), {"pose": None})()), "")
+
+
+class YawFromQuaternionTest(unittest.TestCase):
+    """current_map_pose 와 /pose 관측이 같은 변환을 쓴다."""
+
+    def test_known_angles(self) -> None:
+        for degrees in (0.0, 45.0, 90.0, -90.0, 179.0):
+            with self.subTest(degrees=degrees):
+                yaw = math.radians(degrees)
+                rotation = type(
+                    "Q",
+                    (),
+                    {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": math.sin(yaw / 2.0),
+                        "w": math.cos(yaw / 2.0),
+                    },
+                )()
+
+                self.assertAlmostEqual(
+                    math.degrees(RosSlamSessionControl._yaw_from_quaternion(rotation)),
+                    degrees,
+                    places=6,
+                )
 
 
 if __name__ == "__main__":

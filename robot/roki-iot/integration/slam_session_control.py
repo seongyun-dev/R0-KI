@@ -99,6 +99,11 @@ class RosSlamSessionControl:
         reset_service: str = "/slam_toolbox/reset",
         scan_topic: str = "/scan",
         map_topic: str = "/map",
+        # slam_toolbox 의 pose 발행은 **네임스페이스** 기준으로 풀린다.
+        # 서비스만 이름에 "slam_toolbox/" 접두사가 박혀 있고(serialize_map 등)
+        # pose_pub_ 는 그냥 "pose" 라서 `/slam_toolbox/pose` 가 아니라 `/pose` 다.
+        # /map, /scan 과 같은 자리다. 실기 확인: Publisher count 1.
+        pose_topic: str = "/pose",
         map_frame: str = "map",
         odom_frame: str = "odom",
         discovery_timeout_sec: float = 15.0,
@@ -113,6 +118,7 @@ class RosSlamSessionControl:
         self._reset_service = reset_service
         self._scan_topic = scan_topic
         self._map_topic = map_topic
+        self._pose_topic = pose_topic
         self._map_frame = map_frame
         self._odom_frame = odom_frame
         self._discovery_timeout_sec = discovery_timeout_sec
@@ -132,12 +138,14 @@ class RosSlamSessionControl:
         self._tf_listener: Any = None
         self._time_type: Any = None
         self._duration_type: Any = None
+        self._last_localization_pose_at: float | None = None
 
     def start(self) -> None:
         with self._lock:
             if self._node is not None:
                 return
             import rclpy
+            from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import OccupancyGrid
             from rclpy.duration import Duration
             from rclpy.executors import SingleThreadedExecutor
@@ -175,6 +183,12 @@ class RosSlamSessionControl:
             )
             self._node.create_subscription(
                 OccupancyGrid, self._map_topic, self._on_map, map_qos
+            )
+            self._node.create_subscription(
+                PoseWithCovarianceStamped,
+                self._pose_topic,
+                self._on_localization_pose,
+                10,
             )
             self._tf_buffer = Buffer()
             self._tf_listener = TransformListener(
@@ -275,6 +289,67 @@ class RosSlamSessionControl:
             self._tracker.note_map(self._stamp_ns(message))
             self._condition.notify_all()
 
+    def _on_localization_pose(self, message: Any) -> None:
+        """slam 이 스캔을 **실제로 처리했을 때만** 오는 메시지.
+
+        slam_toolbox 는 ``processed`` 가 참일 때에만 ``setTransformFromPoses`` 와
+        ``publishPose`` 를 부른다(slam_toolbox_localization.cpp:194-203). 그래서
+        이 한 건이 "위치추정이 실행됐다"는 직접 증거다. ``map->odom`` 은 값이
+        바뀌지 않아도 ``transform_publish_period`` 마다(50Hz) 재발행되므로
+        그쪽 신선도로는 실행 여부를 알 수 없다 -- 어제 얼어붙은 TF 에 당한
+        지점이 정확히 그것이다.
+
+        **정지 중에는 오지 않는다.** ``ProcessLocalization`` 이 ``HasMovedEnough``
+        로 막힌다(minimum_travel_distance 0.10m, minimum_travel_heading 0.10rad
+        = 5.7도). 강제 매칭(``ProcessAgainstNodesNearBy``)만 그 게이트를 우회한다.
+        그래서 "몇 초 동안 안정되는지"는 정지 상태에서 판정할 수 없다.
+
+        지금은 **관측만 한다.** covariance 임계값을 지금 추측으로 정하면
+        근거 없는 상수가 하나 더 생길 뿐이다. 배치를 바꿔가며 실측한 분포가
+        나온 뒤에 판정을 붙인다.
+        """
+
+        pose = getattr(getattr(message, "pose", None), "pose", None)
+        if pose is None:
+            return
+        arrival = self._clock()
+        with self._condition:
+            previous = self._last_localization_pose_at
+            self._last_localization_pose_at = arrival
+        covariance = getattr(getattr(message, "pose", None), "covariance", None)
+        yaw = self._yaw_from_quaternion(pose.orientation)
+        gap = "-" if previous is None else f"{arrival - previous:.2f}"
+        print(
+            "[SLAM POSE] "
+            f"x={pose.position.x:.3f} y={pose.position.y:.3f} "
+            f"yawDeg={math.degrees(yaw):.1f} "
+            f"covXX={self._covariance_at(covariance, 0):.4f} "
+            f"covYY={self._covariance_at(covariance, 7):.4f} "
+            f"covYaw={self._covariance_at(covariance, 35):.4f} "
+            f"sinceLastSec={gap}"
+        )
+
+    @staticmethod
+    def _covariance_at(covariance: Any, index: int) -> float:
+        """36칸 공분산에서 대각 성분 하나. 못 읽으면 nan.
+
+        rclpy 콜백에서 예외가 나가면 executor spin 이 죽는다. 로그 한 줄 때문에
+        구독 전체를 잃을 수는 없다.
+        """
+
+        try:
+            return float(covariance[index])
+        except (TypeError, IndexError, ValueError, KeyError):
+            return float("nan")
+
+    @staticmethod
+    def _yaw_from_quaternion(rotation: Any) -> float:
+        # 평면 주행이라 yaw 만 쓴다. z/x/y 회전 성분은 무시한다.
+        return math.atan2(
+            2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+            1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z),
+        )
+
     @staticmethod
     def _stamp_ns(message: Any) -> int:
         stamp = getattr(getattr(message, "header", None), "stamp", None)
@@ -312,12 +387,7 @@ class RosSlamSessionControl:
         if not self._transform_is_fresh(transform):
             return None
         translation = transform.transform.translation
-        rotation = transform.transform.rotation
-        # 평면 주행이라 yaw 만 쓴다. z/x/y 회전 성분은 무시한다.
-        yaw = math.atan2(
-            2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
-            1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z),
-        )
+        yaw = self._yaw_from_quaternion(transform.transform.rotation)
         return float(translation.x), float(translation.y), float(yaw)
 
     def _wait_for_transform(self, deadline: float) -> bool:
