@@ -7,7 +7,7 @@ import { useToast } from '../components/ui'
 import { usePatrol } from '../features/patrol/usePatrols'
 import { useAuthStore } from '../features/auth/useAuthStore'
 import { ZoneDetail } from '../features/dashboard/ComplexMap'
-import { zoneVar } from '../features/dashboard/mapStyle'
+import { pinPath, zoneVar } from '../features/dashboard/mapStyle'
 import type { Patrol, PatrolPoint, ZoneType } from '../types/domain'
 
 /* R0-Ki 순찰 상세 — 시안 R0Kipatrol 그대로.
@@ -68,6 +68,33 @@ const ZONE_TYPE: Record<string, ZoneType> = {
   DESTINATION: '도착지',
 }
 const zoneTypeOf = (code: string): ZoneType => ZONE_TYPE[code] ?? '기타'
+
+/* 라벨 글자 크기 — r0ki.css 의 `.rmap .cmz` / `.rmap text` 와 반드시 같은 값이어야 한다.
+   겹침 판정을 여기서 계산하므로 한쪽만 바꾸면 판정이 어긋난다. */
+const ZONE_FS = 7 // .cmz text (불릿형 구역명)
+const ZONE_FS_MID = 7.5 // .cmz text.mid (넓은 구역명)
+const ZONE_FS_SUB = 6 // .cmz text.sub (통과 시각)
+const EVENT_FS = 12 // .rmap .evlbl text (이벤트명)
+
+/* 이벤트 핀 — 대시보드 .cmmark 과 같은 치수(대시보드 좌표계 기준). scale(ZONE_S) 로 얹는다 */
+const PIN_R = 6.2
+const PIN_H = 15
+/* 이벤트 이름표 칩 안쪽 여백 */
+const CHIP_PAD_X = 8
+const CHIP_PAD_Y = 5
+/** 베이스라인이 글자 시각 중심에서 아래로 떨어진 비율 (대문자/한글 높이의 절반) */
+const BASELINE_MID = 0.35
+
+/** 라벨 폭 추정 — 한글은 폰트 크기만큼, 라틴·숫자는 약 0.56배 */
+const textWidth = (s: string, size: number) =>
+  [...s].reduce((w, ch) => w + (ch.charCodeAt(0) < 128 ? size * 0.56 : size * 1.02), 0)
+
+type LabelBox = { x1: number; y1: number; x2: number; y2: number }
+const box = (x: number, y: number, w: number, h: number): LabelBox => ({
+  x1: x, y1: y, x2: x + w, y2: y + h,
+})
+const overlaps = (a: LabelBox, b: LabelBox) =>
+  a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1
 
 /* 좌표 없는 단지용 도식 — 구역을 균등 간격 지그재그로 늘어놓는다 */
 function SchematicRouteSvg({
@@ -281,6 +308,68 @@ function RouteMapSvg({
   const gridCols = 12
   const gridRows = 6
 
+  /* ── 라벨 자리 잡기 ──
+     이벤트는 구역 안에서 탐지되므로 구역명과 이벤트명은 그냥 두면 서로 겹친다.
+     구역명을 먼저 놓고, 이벤트명은 그 자리를 피해 위/아래로 밀어낸다.
+     구역 라벨은 scale(ZONE_S) 안에서 그려지므로 판정 좌표에 배율을 곱해 맞춘다. */
+  const placed: LabelBox[] = []
+
+  const zoneItems = checkpointZones.map((zone) => {
+    const topLeft = toScreenPoint(Number(zone.minX), Number(zone.maxY))
+    const bottomRight = toScreenPoint(Number(zone.maxX), Number(zone.minY))
+    const type = zoneTypeOf(zone.type)
+    const x = topLeft.x / ZONE_S
+    const y = topLeft.y / ZONE_S
+    const w = Math.max(4, bottomRight.x - topLeft.x) / ZONE_S
+    const h = Math.max(4, bottomRight.y - topLeft.y) / ZONE_S
+    const time = zoneTime(zone.name)
+    // 대시보드와 같은 판정 — 셀(30px) 넓이 6칸 이상이면 상자 안 가운데, 아니면 불릿 + 옆
+    const big = (w / CMAP_CELL) * (h / CMAP_CELL) >= 6
+    const nameY = big ? (type === '기타' ? y + h / 2 + 3.4 : y + 15) : y + 14.5
+    const fs = big ? ZONE_FS_MID : ZONE_FS
+    const nameW = textWidth(zone.name, fs)
+    const nameX = big ? x + w / 2 - nameW / 2 : x + 16
+    placed.push(box(nameX * ZONE_S, (nameY - fs) * ZONE_S, nameW * ZONE_S, (fs + 3) * ZONE_S))
+    const timeY = nameY + 9
+    if (time) {
+      const timeW = textWidth(time, ZONE_FS_SUB)
+      const timeX = big ? x + w / 2 - timeW / 2 : x + 16
+      placed.push(
+        box(timeX * ZONE_S, (timeY - ZONE_FS_SUB) * ZONE_S, timeW * ZONE_S, (ZONE_FS_SUB + 3) * ZONE_S),
+      )
+    }
+    return { zone, type, x, y, w, h, time, big, nameY, timeY }
+  })
+
+  /* 이벤트 — 물방울 핀(대시보드 .cmmark 과 같은 마커). 팁이 발생 좌표에 꽂힌다.
+     핀 몸통도 자리로 잡아 둬야 라벨이 다른 핀 위에 얹히지 않는다. */
+  const pinR = PIN_R * ZONE_S
+  const pinH = PIN_H * ZONE_S
+  const eventMarks = eventPoints.map((point) => ({
+    point,
+    position: toScreenPoint(point.x!, point.y!),
+    urgent: point.type === '응급상황',
+  }))
+  eventMarks.forEach(({ position }) => {
+    placed.push(box(position.x - pinR, position.y - pinH - pinR, pinR * 2, pinH + pinR))
+  })
+
+  /* 이름표는 칩(둥근 카드)으로 띄운다 — 구역명은 도면 위 평서 글씨라 구조부터 달라진다.
+     핀 머리 위가 기본, 겹치면 아래·더 위·더 아래 순으로 비켜난다 */
+  const eventDy = [-(pinH + pinR + 10), 34, -(pinH + pinR + 32), 56, -(pinH + pinR + 54), 78]
+  const eventItems = eventMarks.map((mark) => {
+    const { position } = mark
+    const chipW = textWidth(mark.point.type, EVENT_FS) + CHIP_PAD_X * 2
+    const chipH = EVENT_FS + CHIP_PAD_Y * 2
+    /* 글자를 칩 정중앙에 놓는다 — 베이스라인은 글자 시각 중심보다 약 0.35em 아래라
+       그만큼 올려 잡아야 아래로 쏠려 보이지 않는다 */
+    const chipTop = (dy: number) => dy - EVENT_FS * BASELINE_MID - chipH / 2
+    const at = (dy: number) => box(position.x - chipW / 2, position.y + chipTop(dy), chipW, chipH)
+    const dy = eventDy.find((candidate) => !placed.some((p) => overlaps(p, at(candidate)))) ?? eventDy[0]
+    placed.push(at(dy))
+    return { ...mark, dy, chipW, chipH, chipTop: chipTop(dy) }
+  })
+
   return (
     <svg
       viewBox={`0 0 ${viewW} ${viewH}`}
@@ -289,6 +378,7 @@ function RouteMapSvg({
     >
       {mapImageUrl && (
         <image
+          className="mapbase"
           href={mapImageUrl}
           x={MAP_PAD}
           y={MAP_PAD}
@@ -320,102 +410,67 @@ function RouteMapSvg({
       {/* 구역 — 대시보드 ComplexMap 과 같은 디자인(.cmz + ZoneDetail).
           .cmz CSS 는 대시보드 좌표계(셀 30px) 기준 크기라, 여기 좌표를 배율로
           나눠 그린 뒤 그룹을 scale(ZONE_S) 해서 같은 비율로 보이게 한다. */}
-      {checkpointZones.map((zone) => {
-        const topLeft = toScreenPoint(Number(zone.minX), Number(zone.maxY))
-        const bottomRight = toScreenPoint(Number(zone.maxX), Number(zone.minY))
-        const type = zoneTypeOf(zone.type)
-        const x = topLeft.x / ZONE_S
-        const y = topLeft.y / ZONE_S
-        const w = Math.max(4, bottomRight.x - topLeft.x) / ZONE_S
-        const h = Math.max(4, bottomRight.y - topLeft.y) / ZONE_S
-        const time = zoneTime(zone.name)
-        // 대시보드와 같은 판정 — 셀(30px) 넓이 6칸 이상이면 상자 안 가운데, 아니면 불릿 + 옆
-        const big = (w / CMAP_CELL) * (h / CMAP_CELL) >= 6
-        return (
-          <g key={String(zone.zoneId)} className="cmz" style={zoneVar(type)} transform={`scale(${ZONE_S})`}>
-            <rect x={x + 2} y={y + 2} width={w - 4} height={h - 4} rx="7" />
-            <ZoneDetail type={type} x={x + 2} y={y + 2} w={w - 4} h={h - 4} />
-            {big ? (
-              <>
-                <text
-                  className="mid"
-                  x={x + w / 2}
-                  y={type === '기타' ? y + h / 2 + 3.4 : y + 15}
-                  textAnchor="middle"
-                >
-                  {zone.name}
-                </text>
-                {time && (
-                  <text
-                    className="sub"
-                    x={x + w / 2}
-                    y={(type === '기타' ? y + h / 2 + 3.4 : y + 15) + 9}
-                    textAnchor="middle"
-                  >
-                    {time}
-                  </text>
-                )}
-              </>
-            ) : (
-              <>
-                <rect
-                  className="bul"
-                  x={x + 8}
-                  y={y + 9}
-                  width="4"
-                  height="4"
-                  transform={`rotate(45 ${x + 10} ${y + 11})`}
-                />
-                <text x={x + 16} y={y + 14.5}>{zone.name}</text>
-                {time && <text className="sub" x={x + 16} y={y + 23.5}>{time}</text>}
-              </>
-            )}
-          </g>
-        )
-      })}
+      {zoneItems.map(({ zone, type, x, y, w, h, time, big, nameY, timeY }) => (
+        <g key={String(zone.zoneId)} className="cmz" style={zoneVar(type)} transform={`scale(${ZONE_S})`}>
+          <rect x={x + 2} y={y + 2} width={w - 4} height={h - 4} rx="7" />
+          <ZoneDetail type={type} x={x + 2} y={y + 2} w={w - 4} h={h - 4} />
+          {big ? (
+            <>
+              <text className="mid" x={x + w / 2} y={nameY} textAnchor="middle">{zone.name}</text>
+              {time && (
+                <text className="sub" x={x + w / 2} y={timeY} textAnchor="middle">{time}</text>
+              )}
+            </>
+          ) : (
+            <>
+              <rect
+                className="bul"
+                x={x + 8}
+                y={y + 9}
+                width="4"
+                height="4"
+                transform={`rotate(45 ${x + 10} ${y + 11})`}
+              />
+              <text className="lft" x={x + 16} y={nameY}>{zone.name}</text>
+              {time && <text className="sub lft" x={x + 16} y={timeY}>{time}</text>}
+            </>
+          )}
+        </g>
+      ))}
       {actualPoints.length >= 2 && (
         <>
-          <path
-            d={actualPath}
-            fill="none"
-            stroke="var(--graphic)"
-            strokeWidth="5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray="10 8"
-          />
-          <circle cx={actualPoints[0].x} cy={actualPoints[0].y} r="8" fill="var(--patrol)" />
+          <path className="rroute" d={actualPath} />
+          <circle className="rrend start" cx={actualPoints[0].x} cy={actualPoints[0].y} r="8" />
           <circle
+            className="rrend"
             cx={actualPoints[actualPoints.length - 1].x}
             cy={actualPoints[actualPoints.length - 1].y}
             r="8"
-            fill="var(--detect)"
           />
         </>
       )}
-      {eventPoints.map((point) => {
-        const position = toScreenPoint(point.x!, point.y!)
-        return (
-          <g key={`event-${point.eventId}`}>
-            <circle
-              cx={position.x}
-              cy={position.y}
-              r="13"
-              fill="none"
-              stroke="var(--detect)"
-              strokeWidth="4"
-            />
-            <text
-              x={position.x}
-              y={position.y - 22}
-              style={{ fill: 'var(--detect)', fontWeight: 800 }}
-            >
-              {point.type}
-            </text>
-            <title>{`${point.time} · ${point.type} · ${point.location}`}</title>
+      {eventItems.map(({ point, position, dy, urgent, chipW, chipH, chipTop }) => (
+        <g key={`event-${point.eventId}`}>
+          <g
+            className={urgent ? 'cmmark urg' : 'cmmark'}
+            transform={`translate(${position.x},${position.y}) scale(${ZONE_S})`}
+          >
+            <path d={pinPath(PIN_R, PIN_H)} />
+            <circle className="core" cy={-PIN_H} r="2.4" />
           </g>
-        )
-      })}
+          <g className={urgent ? 'evlbl urg' : 'evlbl'}>
+            <rect
+              x={position.x - chipW / 2}
+              y={position.y + chipTop}
+              width={chipW}
+              height={chipH}
+              rx={chipH / 2}
+            />
+            <text x={position.x} y={position.y + dy}>{point.type}</text>
+          </g>
+          <title>{`${point.time} · ${point.type} · ${point.location}`}</title>
+        </g>
+      ))}
     </svg>
   )
 }
