@@ -38,7 +38,7 @@ export function HourlyTypeChart({
     <div className="st-chart">
       <ResponsiveContainer width="100%" height="100%">
         {/* 8칸 기준: 막대 간격만 소폭 조정(높이·패널 크기는 CSS 그대로) */}
-        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 8, left: -26 }} barCategoryGap="18%">
+        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 8, left: 0 }} barCategoryGap="18%">
           <CartesianGrid vertical={false} stroke="var(--hair)" strokeDasharray="4 4" />
           <XAxis
             dataKey="slot"

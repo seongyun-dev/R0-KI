@@ -27,7 +27,7 @@ export function EventTrendChart({
   return (
     <div className="st-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 16, right: 16, bottom: 8, left: -22 }}>
+        <AreaChart data={data} margin={{ top: 16, right: 16, bottom: 8, left: 0 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--graphic)" stopOpacity={0.26} />
