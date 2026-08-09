@@ -32,6 +32,10 @@ public class Member extends BaseEntity {
     @Column(name = "phone_number", nullable = false, length = 20)
     private String phoneNumber;
 
+    // 기존 회원에는 값이 없으므로 nullable 이다. 신규 가입은 인증된 이메일이 반드시 들어온다.
+    @Column(unique = true, length = 255)
+    private String email;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "member_status", nullable = false, length = 20)
     private MemberStatus status = MemberStatus.ACTIVE;
@@ -41,12 +45,14 @@ public class Member extends BaseEntity {
             String username,
             String encodedPassword,
             String name,
-            String phoneNumber) {
+            String phoneNumber,
+            String email) {
         this.apartmentComplex = apartmentComplex;
         this.username = username;
         this.password = encodedPassword;
         this.name = name;
         this.phoneNumber = phoneNumber;
+        this.email = email;
     }
 
     public static Member create(
@@ -55,9 +61,15 @@ public class Member extends BaseEntity {
             String rawPassword,
             String name,
             String phoneNumber,
+            String email,
             PasswordEncoder passwordEncoder) {
         return new Member(
-                apartmentComplex, username, passwordEncoder.encode(rawPassword), name, phoneNumber);
+                apartmentComplex,
+                username,
+                passwordEncoder.encode(rawPassword),
+                name,
+                phoneNumber,
+                email);
     }
 
     public void changePassword(String rawPassword, PasswordEncoder passwordEncoder) {
