@@ -35,7 +35,21 @@ public class AnalyticsInsightService {
     @Transactional
     public AnalyticsInsightResponse getInsight(
             Long apartmentComplexId, AnalyticsInsightPeriodType periodType) {
-        ResolvedPeriod period = periodResolver.resolve(periodType);
+        return getInsight(apartmentComplexId, periodType, null);
+    }
+
+    /**
+     * AI 인사이트 조회.
+     *
+     * @param periodKey 선택. 없으면 직전 완료 주/월. 있으면 해당 키 구간
+     *     (완료된 과거 구간만 허용, 포맷/진행중/미래는 INVALID_INPUT)
+     */
+    @Transactional
+    public AnalyticsInsightResponse getInsight(
+            Long apartmentComplexId,
+            AnalyticsInsightPeriodType periodType,
+            String periodKey) {
+        ResolvedPeriod period = periodResolver.resolve(periodType, periodKey);
         AnalyticsAiInsight insight = findOrCreatePending(apartmentComplexId, period);
         requestGenerationIfNeeded(insight);
         return toResponse(insight, period);
