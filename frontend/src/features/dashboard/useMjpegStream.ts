@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, apiRequest, apiUrl } from '../../api/client'
 
-export type MjpegStreamState = 'idle' | 'connecting' | 'retrying' | 'live' | 'failed'
+export type MjpegStreamState =
+  | 'idle'
+  | 'connecting'
+  | 'waiting'
+  | 'retrying'
+  | 'live'
+  | 'failed'
+
+export type MjpegStreamOptions = {
+  endpoint?: string
+  enabled?: boolean
+  lifecycleKey?: string | number
+}
 
 const MAX_BUFFER_BYTES = 2 * 1024 * 1024
 const FIRST_FRAME_TIMEOUT_MS = 12_000
@@ -28,9 +40,14 @@ type StreamSession = {
   expiresAt: string
 }
 
-export function useMjpegStream(robotId?: string | number) {
+export function useMjpegStream(
+  robotId?: string | number,
+  { endpoint, enabled = true, lifecycleKey }: MjpegStreamOptions = {},
+) {
   const [frameUrl, setFrameUrl] = useState<string>()
-  const [state, setState] = useState<MjpegStreamState>(robotId == null ? 'idle' : 'connecting')
+  const [state, setState] = useState<MjpegStreamState>(
+    robotId == null || !enabled ? 'idle' : 'connecting',
+  )
   const [restartNonce, setRestartNonce] = useState(0)
   const imageRetryCount = useRef(0)
   const imageRetryTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -43,7 +60,7 @@ export function useMjpegStream(robotId?: string | number) {
   }, [])
 
   const handleFrameError = useCallback(() => {
-    if (robotId == null || imageRetryTimer.current) return
+    if (robotId == null || !enabled || imageRetryTimer.current) return
     if (imageRetryCount.current >= MAX_RETRY_COUNT) {
       console.error('[MJPEG] image rendering failed', {
         robotId,
@@ -63,19 +80,16 @@ export function useMjpegStream(robotId?: string | number) {
       imageRetryTimer.current = undefined
       setRestartNonce((value) => value + 1)
     }, RETRY_DELAY_MS)
-  }, [robotId])
+  }, [enabled, robotId])
 
   useEffect(() => {
     if (imageRetryTimer.current) clearTimeout(imageRetryTimer.current)
     imageRetryTimer.current = undefined
     imageRetryCount.current = 0
-  }, [robotId])
+  }, [enabled, endpoint, lifecycleKey, robotId])
 
   useEffect(() => {
-    if (robotId == null) {
-      if (imageRetryTimer.current) clearTimeout(imageRetryTimer.current)
-      imageRetryTimer.current = undefined
-      imageRetryCount.current = 0
+    if (robotId == null || !enabled) {
       setState('idle')
       setFrameUrl(undefined)
       return
@@ -109,6 +123,7 @@ export function useMjpegStream(robotId?: string | number) {
       const previousUrl = currentUrl
       currentUrl = nextUrl
       setFrameUrl(nextUrl)
+      setState('live')
       if (previousUrl) URL.revokeObjectURL(previousUrl)
     }
 
@@ -139,7 +154,9 @@ export function useMjpegStream(robotId?: string | number) {
           `/api/robots/${robotId}/stream-sessions`,
           { method: 'POST', signal: attemptController.signal },
         )
-        const response = await fetch(apiUrl(`/live/robots/${robotId}/stream.mjpg?t=${Date.now()}`), {
+        const streamEndpoint = endpoint ?? `/live/robots/${robotId}/stream.mjpg`
+        const separator = streamEndpoint.includes('?') ? '&' : '?'
+        const response = await fetch(apiUrl(`${streamEndpoint}${separator}t=${Date.now()}`), {
           headers: {
             Accept: 'multipart/x-mixed-replace',
             'X-Stream-Token': session.token,
@@ -151,18 +168,14 @@ export function useMjpegStream(robotId?: string | number) {
         if (!response.ok || !response.body) {
           throw new Error(`MJPEG stream failed (${response.status})`)
         }
+        setState('waiting')
 
         const reader = response.body.getReader()
         let buffer = new Uint8Array()
         while (!attemptController.signal.aborted) {
           const { value, done } = await reader.read()
-          if (
-            lifecycleController.signal.aborted ||
-            activeAttempt !== attemptController
-          ) return
-          if (attemptController.signal.aborted) {
-            throw new Error('MJPEG frame timeout')
-          }
+          if (lifecycleController.signal.aborted || activeAttempt !== attemptController) return
+          if (attemptController.signal.aborted) throw new Error('MJPEG frame timeout')
           if (done) throw new Error('MJPEG stream closed')
           if (!value) continue
 
@@ -212,7 +225,7 @@ export function useMjpegStream(robotId?: string | number) {
       if (retryTimer) clearTimeout(retryTimer)
       if (currentUrl) URL.revokeObjectURL(currentUrl)
     }
-  }, [robotId, restartNonce])
+  }, [enabled, endpoint, lifecycleKey, restartNonce, robotId])
 
   useEffect(() => () => {
     if (imageRetryTimer.current) clearTimeout(imageRetryTimer.current)

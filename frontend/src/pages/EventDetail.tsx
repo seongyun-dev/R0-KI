@@ -17,15 +17,16 @@ const PROC_STATUSES: ProcessingStatus[] = ['탐지', '처리중', '처리완료'
 const EVIDENCE_POLL_INTERVAL_MS = 5000
 const EVIDENCE_POLL_MAX_TRIES = 12 // 5초 × 12 = 약 1분
 
-/* 상태 점 색 — 명도 램프 */
-const STATE_DOT: Record<string, string> = {
-  탐지: 'var(--detect)',
-  처리중: 'var(--charge)',
-  처리완료: 'var(--offline)',
-}
+/* 위험도 점 색 (긴급은 .st.u 로 별도 처리) */
 const RISK_DOT: Record<string, string> = {
   보통: 'var(--detect)',
   낮음: 'var(--offline)',
+}
+
+const PROC_STATUS_ATTR: Record<ProcessingStatus, string> = {
+  탐지: 'detected',
+  처리중: 'processing',
+  처리완료: 'completed',
 }
 
 export default function EventDetail() {
@@ -101,6 +102,8 @@ export default function EventDetail() {
   const changeProc = async (next: ProcessingStatus, note?: string) => {
     if (!event) return
     const previous = proc
+    const previousMemo = memo
+    const previousProcessedAt = processedAt
     setProc(next)
     if (note !== undefined) setMemo(note)
     if (next === '처리완료') {
@@ -108,15 +111,26 @@ export default function EventDetail() {
     }
     try {
       await updateStatus.mutateAsync({ eventId: event.backendId ?? event.id, status: next, note })
-      setToast(next === '처리완료' ? '처리 완료되었습니다' : `처리 상태가 ${next}(으)로 변경되었습니다`)
+      setToast(
+        previous === '처리완료' && next === '처리완료'
+          ? '처리 메모가 저장되었습니다'
+          : next === '처리완료'
+            ? '처리 완료되었습니다'
+            : `처리 상태가 ${next}(으)로 변경되었습니다`,
+      )
+      void refetch()
     } catch (reason) {
       setProc(previous)
+      setMemo(previousMemo)
+      setProcessedAt(previousProcessedAt)
       setToast(reason instanceof Error ? reason.message : '처리 상태 변경에 실패했습니다')
     }
   }
 
-  // 처리완료는 바로 바꾸지 않고 메모 모달을 먼저 연다
+  // 처리완료 확정 후에는 상태 변경 불가. 메모만 다시 열 수 있다.
+  const isCompleted = proc === '처리완료'
   const onProcClick = (next: ProcessingStatus) => {
+    if (isCompleted) return
     if (next === proc) return
     if (next === '처리완료') {
       setMemoInput(memo ?? '')
@@ -124,6 +138,11 @@ export default function EventDetail() {
       return
     }
     void changeProc(next)
+  }
+
+  const openMemoEditor = () => {
+    setMemoInput(memo ?? '')
+    setMemoModalOpen(true)
   }
 
   const confirmComplete = (e: FormEvent<HTMLFormElement>) => {
@@ -155,8 +174,8 @@ export default function EventDetail() {
                       {event.riskLevel ?? '보통'}
                     </span>
                   )}
-                  <span className="st">
-                    <i style={{ background: STATE_DOT[proc] }} />
+                  <span className="st" data-status={PROC_STATUS_ATTR[proc]}>
+                    <i />
                     {proc}
                   </span>
                 </>
@@ -233,8 +252,8 @@ export default function EventDetail() {
                   <span className="v">{event.type}{event.subType ? ` (${event.subType})` : ''}</span>
                 </div>
                 <div className="ir">
-                  <span className="k">탐지 시각</span>
-                  <span className="v num">{event.time}</span>
+                  <span className="k">탐지 날짜</span>
+                  <span className="v num">{event.occurredAtLabel ?? event.time}</span>
                 </div>
                 <div className="ir">
                   <span className="k">위치</span>
@@ -268,29 +287,45 @@ export default function EventDetail() {
                 <div className="ir">
                   <span className="k">처리 상태</span>
                   <span className="v">
-                    <span className="st"><i style={{ background: STATE_DOT[proc] }} />{proc}</span>
+                    <span className="st" data-status={PROC_STATUS_ATTR[proc]}>
+                      <i />
+                      {proc}
+                    </span>
                   </span>
                 </div>
               </div>
 
-              {/* 처리 메모 — 완료 후 표시 */}
-              {proc === '처리완료' && memo && (
+              {/* 처리 메모 — 완료 후 표시·수정 */}
+              {isCompleted && (
                 <div className="memo">
                   <span className="k">처리 메모</span>
-                  <span className="t">{memo}</span>
+                  <span className="t">{memo?.trim() ? memo : '작성된 메모가 없습니다'}</span>
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={updateStatus.isPending}
+                    onClick={openMemoEditor}
+                  >
+                    메모 수정
+                  </button>
                 </div>
               )}
 
               {/* 처리 상태 — 경비원이 직접 변경 */}
               <div className="actwrap">
-                <div className="actk">처리 상태 — 경비원이 직접 변경 (기본: 탐지)</div>
+                <div className="actk">
+                  {isCompleted
+                    ? '처리 완료된 이벤트는 상태를 변경할 수 없습니다'
+                    : '처리 상태 — 경비원이 직접 변경 (기본: 탐지)'}
+                </div>
                 <div className="acts">
                   {PROC_STATUSES.map((s) => (
                     <button
                       key={s}
                       type="button"
+                      data-status={PROC_STATUS_ATTR[s]}
                       aria-pressed={proc === s}
-                      disabled={updateStatus.isPending || proc === '처리완료'}
+                      disabled={updateStatus.isPending || isCompleted}
                       onClick={() => onProcClick(s)}
                     >
                       {s}
@@ -309,7 +344,7 @@ export default function EventDetail() {
           <div className="backdrop" onClick={() => setMemoModalOpen(false)} />
           <div className="modal glass g3" role="dialog" aria-modal="true" aria-labelledby="md-title">
             <div className="mdhead">
-              <h2 id="md-title">처리 완료</h2>
+              <h2 id="md-title">{isCompleted ? '메모 수정' : '처리 완료'}</h2>
               <button type="button" className="mdx" aria-label="닫기" onClick={() => setMemoModalOpen(false)}>
                 <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
               </button>
@@ -327,7 +362,9 @@ export default function EventDetail() {
               <p className="mdhelp">선택 입력 — 비워도 완료할 수 있습니다</p>
               <div className="mdact">
                 <button type="button" className="btn btn-s" onClick={() => setMemoModalOpen(false)}>취소</button>
-                <button type="submit" className="btn btn-p">완료 처리</button>
+                <button type="submit" className="btn btn-p">
+                  {isCompleted ? '메모 저장' : '완료 처리'}
+                </button>
               </div>
             </form>
           </div>

@@ -1,4 +1,4 @@
-import { apiBlob, apiRequest, consumeSse, jsonBody } from './client'
+import { apiBlob, apiRequest, apiRequestWithMessage, consumeSse, jsonBody } from './client'
 import type {
   AnalyticsByZoneResponse,
   AnalyticsHandlingResponse,
@@ -8,7 +8,21 @@ import type {
   AnalyticsTrendResponse,
 } from './analyticsContracts'
 import type {
+  RegisteredVehicleResponse,
+  ResidentDetailResponse,
+  ResidentFilterOptionsResponse,
+  ResidentListPageResponse,
+  ResidentListRequest,
+  ResidentNotificationUpdateRequest,
+  ResidentRegisterRequest,
+  ResidentSummaryResponse,
+  ResidentUpdateRequest,
+  VehicleRegisterRequest,
+} from './residentContracts'
+import type {
   ComplexResponse,
+  EmailVerificationSendRequest,
+  EmailVerificationVerifyRequest,
   EventBatchCreateRequest,
   EventBatchCreateResponse,
   EventDetailResponse,
@@ -81,6 +95,16 @@ export const authApi = {
     }),
   signUp: (request: SignUpRequest) =>
     apiRequest<SignUpResponse['data']>('/api/auth/signup', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  sendEmailVerification: (request: EmailVerificationSendRequest) =>
+    apiRequestWithMessage<unknown>('/api/auth/email/send', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  verifyEmail: (request: EmailVerificationVerifyRequest) =>
+    apiRequestWithMessage<unknown>('/api/auth/email/verify', {
       method: 'POST',
       body: jsonBody(request),
     }),
@@ -197,6 +221,61 @@ export const notificationsApi = {
   detail: (notificationId: number) =>
     apiRequest<NotificationDetailResponse>(
       `/api/notifications/${encodeURIComponent(String(notificationId))}`,
+    ),
+}
+
+export const residentsApi = {
+  list: (request: ResidentListRequest = {}) => {
+    const query = new URLSearchParams()
+    const { sort, keyword, buildingNumber, notificationEnabled, page, size } = request
+
+    if (keyword) query.set('keyword', keyword)
+    if (buildingNumber) query.set('buildingNumber', buildingNumber)
+    if (notificationEnabled !== undefined) {
+      query.set('notificationEnabled', String(notificationEnabled))
+    }
+    if (page !== undefined) query.set('page', String(page))
+    if (size !== undefined) query.set('size', String(size))
+    sort?.forEach((value) => query.append('sort', value))
+
+    const suffix = query.toString()
+    return apiRequest<ResidentListPageResponse>(
+      suffix ? `/api/residents?${suffix}` : '/api/residents',
+    )
+  },
+  filterOptions: () =>
+    apiRequest<ResidentFilterOptionsResponse>('/api/residents/filter-options'),
+  detail: (residentId: string | number) =>
+    apiRequest<ResidentDetailResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}`,
+    ),
+  create: (request: ResidentRegisterRequest) =>
+    apiRequest<ResidentSummaryResponse>('/api/residents', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  update: (residentId: string | number, request: ResidentUpdateRequest) =>
+    apiRequest<ResidentSummaryResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}`,
+      { method: 'PATCH', body: jsonBody(request) },
+    ),
+  changeNotification: (
+    residentId: string | number,
+    request: ResidentNotificationUpdateRequest,
+  ) =>
+    apiRequest<ResidentSummaryResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/notification`,
+      { method: 'PATCH', body: jsonBody(request) },
+    ),
+  addVehicle: (residentId: string | number, request: VehicleRegisterRequest) =>
+    apiRequest<RegisteredVehicleResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/vehicles`,
+      { method: 'POST', body: jsonBody(request) },
+    ),
+  deleteVehicle: (residentId: string | number, vehicleId: string | number) =>
+    apiRequest<RegisteredVehicleResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/vehicles/${encodeURIComponent(String(vehicleId))}`,
+      { method: 'DELETE' },
     ),
 }
 
@@ -328,11 +407,20 @@ export const robotsApi = {
 
 export const mapApi = {
   current: () => apiRequest<MapDetailResponse>('/api/map/current'),
-  startMapping: (robotId: string | number) =>
+  startMapping: (robotId: string | number, signal?: AbortSignal) =>
     apiRequest<MappingStartResponse>('/api/map/mapping-sessions', {
       method: 'POST',
       body: jsonBody({ robotId }),
+      signal,
     }),
+  stopMapping: (mappingSessionId: string | number, signal?: AbortSignal) =>
+    apiRequest<void>(
+      `/api/map/mapping-sessions/${encodeURIComponent(mappingSessionId)}/stop`,
+      {
+        method: 'POST',
+        signal,
+      },
+    ),
   subscribeMapping: (
     mappingSessionId: string | number,
     onMessage: (data: MappingStatusEventResponse) => void,
@@ -458,13 +546,17 @@ export const statsApi = {
   },
 
   /**
-   * 직전 완료 주/월 AI 인사이트 리포트 조회.
+   * AI 인사이트 리포트 조회.
    *
+   * - periodKey 없음 → 직전 완료 주/월
+   * - periodKey 있음 → 해당 구간 (완료된 과거만, 진행 중/미래는 400)
    * 없거나 FAILED 면 백엔드가 비동기 생성을 트리거한다.
-   * PENDING/PROCESSING 이면 폴링으로 COMPLETED/FAILED 까지 재조회한다.
    */
-  fetchInsight: (periodType: AnalyticsInsightPeriodType) =>
+  fetchInsight: (
+    periodType: AnalyticsInsightPeriodType,
+    periodKey?: string,
+  ) =>
     apiRequest<AnalyticsInsightResponse>(
-      withQuery('/api/analytics/insights', { periodType }),
+      withQuery('/api/analytics/insights', { periodType, periodKey }),
     ),
 }

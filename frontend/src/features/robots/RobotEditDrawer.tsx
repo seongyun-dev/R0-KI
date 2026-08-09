@@ -63,7 +63,6 @@ export function RobotEditDrawer({ open, robot, onClose, onSave, onDelete }: Robo
 
       {onDelete && (
         <div className="mt-6 border-t border-line pt-5">
-          <p className="mb-2 text-xs font-bold tracking-wider text-muted">위험 구역</p>
           {confirmDelete ? (
             <div className="flex flex-col gap-3 rounded-control bg-surface px-4 py-3">
               <p className="text-sm">

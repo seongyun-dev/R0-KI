@@ -17,11 +17,21 @@ export type SignUpRequest = {
   password: string
   name: string
   phoneNumber: string
+  email: string
   apartment: {
     name: string
     postalCode: string
     address: string
   }
+}
+
+export type EmailVerificationSendRequest = {
+  email: string
+}
+
+export type EmailVerificationVerifyRequest = {
+  email: string
+  code: string
 }
 
 export type SignUpResponse = {
@@ -492,6 +502,13 @@ export type MappingStatusCode =
   | 'FAILED'
   | 'CANCELLED'
 
+export type MappingStopCommandStatus =
+  | 'PREPARED'
+  | 'PUBLISHED'
+  | 'ACK_SUCCEEDED'
+  | 'PUBLISH_FAILED'
+  | 'FAILED'
+
 export type MappingStartResponse = {
   mappingSessionId: Id
   robotId: Id
@@ -503,6 +520,9 @@ export type MappingStatusEventResponse = {
   mappingSessionId: Id
   status: MappingStatusCode
   mapId?: Id | null
+  stopCommandId?: string | null
+  stopCommandStatus?: MappingStopCommandStatus | null
+  reason?: string | null
 }
 
 export type MapDetailResponse = {

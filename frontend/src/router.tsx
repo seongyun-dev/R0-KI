@@ -1,8 +1,8 @@
 import { Suspense, lazy } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
+import { HomeRoute } from './features/auth/HomeRoute'
 import { RequireAuth } from './features/auth/RequireAuth'
 import Dashboard from './pages/Dashboard'
-import Landing from './pages/Landing'
 import Login from './pages/Login'
 import SignupOnboarding from './pages/SignupOnboarding'
 import PatrolList from './pages/PatrolList'
@@ -14,6 +14,9 @@ import RobotList from './pages/RobotList'
 import RobotNew from './pages/RobotNew'
 import NotificationList from './pages/NotificationList'
 import NotificationDetail from './pages/NotificationDetail'
+import ResidentList from './pages/ResidentList'
+import ResidentDetail from './pages/ResidentDetail'
+import ResidentNew from './pages/ResidentNew'
 import MapFull from './pages/MapFull'
 import NotFound from './pages/NotFound'
 import RouteError from './pages/RouteError'
@@ -27,7 +30,7 @@ const TestMapSetup = lazy(() => import('./pages/TestMapSetup'))
 
 // CLAUDE.md §6 라우트 매핑
 export const router = createBrowserRouter([
-  { path: '/', element: <Landing />, errorElement: <RouteError /> },
+  { path: '/', element: <HomeRoute />, errorElement: <RouteError /> },
   { path: '/login', element: <Login />, errorElement: <RouteError /> },
   { path: '/signup/onboarding', element: <SignupOnboarding />, errorElement: <RouteError /> },
   // 지도 확대 보기 (1h) — 지도 전용 풀스크린이라 /app 하위에 두지 않는다
@@ -135,6 +138,31 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <RobotDetail />
+          </RequireAuth>
+        ),
+      },
+      // 입주민 관리 (목록 → 등록 → 상세) — 불법주차 문자 발송 대상이 되는 세대·차량을 관리한다
+      {
+        path: 'residents',
+        element: (
+          <RequireAuth>
+            <ResidentList />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'residents/new',
+        element: (
+          <RequireAuth>
+            <ResidentNew />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'residents/:id',
+        element: (
+          <RequireAuth>
+            <ResidentDetail />
           </RequireAuth>
         ),
       },

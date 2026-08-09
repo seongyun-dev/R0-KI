@@ -1,22 +1,13 @@
-import { useState } from 'react'
-import type { AnalyticsInsightPeriodType } from '../../api/analyticsContracts'
-import { R0KiDropdown } from '../../components/ui/R0KiDropdown'
+import type { AnalyticsInsightPeriodType, AnalyticsInsightResponse } from '../../api/analyticsContracts'
 import { parseInsightMarkdown } from './parseInsightMarkdown'
-import { useAnalyticsInsight } from './useAnalyticsInsight'
+import type { InsightPeriod } from './resolveInsightPeriod'
 
-const REPORT_PERIOD_OPTIONS = [{ value: 'month', label: '월간 리포트' }]
-
-function toPeriodType(period: string): AnalyticsInsightPeriodType {
-  return period === 'month' ? 'MONTH' : 'WEEK'
-}
-
-function formatPeriodRange(from: string, to: string) {
+export function formatInsightPeriodRange(from: string, to: string) {
   const start = new Date(from)
   const end = new Date(to)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ''
 
-  const fmt = (date: Date) =>
-    `${date.getMonth() + 1}/${date.getDate()}`
+  const fmt = (date: Date) => `${date.getMonth() + 1}/${date.getDate()}`
   return `${fmt(start)}~${fmt(end)}`
 }
 
@@ -30,26 +21,38 @@ function statusMessage(
   if (status === 'PENDING') return '리포트 생성을 준비하고 있습니다.'
   if (status === 'PROCESSING' || isPolling) {
     return periodType === 'WEEK'
-      ? '지난 주 데이터를 분석 중입니다. 잠시만 기다려 주세요.'
-      : '지난 달 데이터를 분석 중입니다. 잠시만 기다려 주세요.'
+      ? '해당 주 데이터를 분석 중입니다. 잠시만 기다려 주세요.'
+      : '해당 달 데이터를 분석 중입니다. 잠시만 기다려 주세요.'
   }
   if (status === 'FAILED') return '리포트 생성에 실패했습니다.'
   if (status === 'COMPLETED') return '리포트 내용을 표시할 수 없습니다.'
   return '표시할 리포트가 없습니다.'
 }
 
+export type InsightReportPanelProps = {
+  insightPeriod: InsightPeriod | null
+  data?: AnalyticsInsightResponse
+  isLoading?: boolean
+  isPolling?: boolean
+  isError?: boolean
+  error?: Error | null
+  onRetry?: () => void
+}
+
 /**
  * 통계 페이지 하단 AI 리포트 패널.
- *
- * - head(st-head) 레이아웃은 Stats 시안 그대로 유지
- * - 주/월 전환은 R0KiDropdown 사용
- * - 본문은 insightContent 마크다운 → st-in 카드로 렌더
+ * 조회는 부모(Stats)가 담당하고, 여기서는 표시만 한다.
  */
-export function InsightReportPanel() {
-  const [period, setPeriod] = useState('')
-  const periodType = toPeriodType(period)
-  const { data, isLoading, isPolling, isError, error, refetch } =
-    useAnalyticsInsight(periodType)
+export function InsightReportPanel({
+  insightPeriod,
+  data,
+  isLoading = false,
+  isPolling = false,
+  isError = false,
+  error = null,
+  onRetry,
+}: InsightReportPanelProps) {
+  const periodType = insightPeriod?.periodType ?? 'WEEK'
 
   const sections =
     data?.generationStatus === 'COMPLETED' && data.insightContent
@@ -57,33 +60,54 @@ export function InsightReportPanel() {
       : []
 
   const showReport = data?.generationStatus === 'COMPLETED' && sections.length > 0
-  const showStatus =
-    !showReport ||
-    (data?.generationStatus === 'COMPLETED' && sections.length === 0)
+  const showStatus = !showReport
 
   return (
     <div className="glass g2 st-ai">
       <div className="st-head">
         <span className="bul" />
         <span className="ttl">AI 리포트</span>
-        <R0KiDropdown
-          allLabel="주간 리포트"
-          options={REPORT_PERIOD_OPTIONS}
-          value={period}
-          onChange={setPeriod}
-        />
+        <span className="sub">
+          {insightPeriod
+            ? insightPeriod.periodType === 'WEEK'
+              ? '주간'
+              : '월간'
+            : '주/월만'}
+        </span>
         <span className="meta">
-          {data ? (
+          {insightPeriod ? (
             <>
-              <b>{data.periodKey}</b> {formatPeriodRange(data.periodFrom, data.periodTo)}
+              <b>{insightPeriod.periodKey}</b> {insightPeriod.label}
+              {data ? ` · ${formatInsightPeriodRange(data.periodFrom, data.periodTo)}` : ''}
             </>
           ) : (
-            '지난 완료 기간'
+            '주·월 단위에서만 제공'
           )}
         </span>
       </div>
 
-      {showStatus && (
+      {!insightPeriod ? (
+        <div className="st-ins" style={{ gridTemplateColumns: '1fr' }}>
+          <article className="st-in">
+            <div className="hd">
+              <span className="tt">분기·연 단위에는 AI 리포트가 없습니다</span>
+            </div>
+            <p className="bd">주 단위 또는 월 단위로 전환해 주세요.</p>
+          </article>
+        </div>
+      ) : !insightPeriod.isComplete ? (
+        <div className="st-ins" style={{ gridTemplateColumns: '1fr' }}>
+          <article className="st-in">
+            <div className="hd">
+              <span className="tt">기간이 끝난 뒤 리포트가 제공됩니다</span>
+            </div>
+            <p className="bd">
+              진행 중인 {insightPeriod.periodType === 'WEEK' ? '주' : '달'}에는 AI 리포트를
+              생성하지 않습니다. 화살표로 지난 완료 기간을 선택해 주세요.
+            </p>
+          </article>
+        </div>
+      ) : showStatus ? (
         <div className="st-ins" style={{ gridTemplateColumns: '1fr' }}>
           <article className="st-in">
             <div className="hd">
@@ -94,19 +118,21 @@ export function InsightReportPanel() {
             {isError && (
               <>
                 <p className="bd">{error?.message ?? '리포트를 불러오지 못했습니다.'}</p>
-                <button type="button" className="btn btn-s" onClick={refetch}>
-                  다시 시도
-                </button>
+                {onRetry && (
+                  <button type="button" className="btn btn-s" onClick={onRetry}>
+                    다시 시도
+                  </button>
+                )}
               </>
             )}
-            {data?.generationStatus === 'FAILED' && !isError && (
-              <button type="button" className="btn btn-s" onClick={refetch}>
+            {data?.generationStatus === 'FAILED' && !isError && onRetry && (
+              <button type="button" className="btn btn-s" onClick={onRetry}>
                 다시 시도
               </button>
             )}
           </article>
         </div>
-      )}
+      ) : null}
 
       {showReport && (
         <div className="st-ins">

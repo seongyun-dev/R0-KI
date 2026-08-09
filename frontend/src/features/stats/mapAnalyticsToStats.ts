@@ -71,12 +71,21 @@ function formatRateDelta(delta: AnalyticsIntDelta | null | undefined, suffix = '
   return `이전 대비 ${sign}${rate}${suffix}`
 }
 
+/** 분 → 표시 문구. 60분 미만은 `N분`, 이상이면 `N시간 M분` */
+export function formatHandleMinutes(minutes: number) {
+  const total = Math.max(0, Math.round(num(minutes)))
+  if (total < 60) return `${total}분`
+  const hours = Math.floor(total / 60)
+  const mins = total % 60
+  return `${hours}시간 ${mins}분`
+}
+
 /** 평균 처리시간 증감 — 분 단위 diff를 문구로 */
 function formatHandleDelta(delta: AnalyticsDecimalDelta | null | undefined) {
   if (!delta || delta.diff == null) return undefined
   const diff = num(delta.diff)
-  const sign = diff > 0 ? '+' : ''
-  return `이전 대비 ${sign}${diff}분`
+  const sign = diff > 0 ? '+' : diff < 0 ? '-' : ''
+  return `이전 대비 ${sign}${formatHandleMinutes(Math.abs(diff))}`
 }
 
 /** LocalDateTime 문자열 → 추이 차트 X축 라벨 */

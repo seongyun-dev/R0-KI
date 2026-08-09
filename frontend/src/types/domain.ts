@@ -177,6 +177,7 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   id: string;                       // E-3312
   backendId?: string | number;
   patrolId?: string;
+  date?: string;                    // 07/15 (목록 탐지 날짜)
   time: string;                     // 14:20
   type: EventType;
   location: string;                 // 101동 앞
@@ -187,6 +188,7 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   assignee?: string;                // 담당자 (처리중/처리완료 시) — 백엔드 제공
   processedAt?: string;             // 처리 완료 시각 (처리완료 시 표시)
   occurredAt?: string;
+  occurredAtLabel?: string;         // 2026년 8월 7일 14:30 (상세 탐지 날짜)
   mapId?: string | number | null;
   x?: number;
   y?: number;

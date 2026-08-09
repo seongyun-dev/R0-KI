@@ -65,6 +65,29 @@ function dateParts(value?: string | null) {
   }
 }
 
+function formatOccurredAtDetail(value?: string | null) {
+  if (!value) return '—'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    const [datePart = '', timePart = ''] = value.split('T')
+    const [y, m, d] = datePart.split('-')
+    if (y && m) {
+      const hm = timePart.slice(0, 5)
+      return d ? `${y}년 ${Number(m)}월 ${Number(d)}일 ${hm}` : `${y}년 ${Number(m)}월 ${hm}`
+    }
+    return value
+  }
+  const y = parsed.getFullYear()
+  const m = parsed.getMonth() + 1
+  const d = parsed.getDate()
+  const hm = new Intl.DateTimeFormat('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed)
+  return `${y}년 ${m}월 ${d}일 ${hm}`
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '-'
   const parsed = new Date(value)
@@ -119,10 +142,12 @@ export function complexResponseToDomain(value: ComplexResponse): Complex {
 /** 목록 항목(EventListResponse) → 도메인 (1f) */
 export function eventListItemToDomain(value: EventListItemResponse): PatrolEvent {
   const processing = processingStatus(value.status)
+  const { date, time } = dateParts(value.occurredAt)
   return {
     id: String(value.eventId),
     backendId: value.eventId,
-    time: dateParts(value.occurredAt).time,
+    date,
+    time,
     occurredAt: value.occurredAt,
     type: eventType(value.type),
     location: value.location ?? '위치 미확인',
@@ -162,6 +187,7 @@ export function eventDetailToDomain(value: EventDetailResponse): PatrolEvent {
     backendId: value.eventId,
     time: dateParts(value.occurredAt).time,
     occurredAt: value.occurredAt,
+    occurredAtLabel: formatOccurredAtDetail(value.occurredAt),
     type: eventType(value.type),
     location: value.location ?? '위치 미확인',
     robotId: value.robotName, // 표시용(백엔드는 이름 제공)
