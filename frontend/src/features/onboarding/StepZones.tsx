@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import type {
   Id,
   MapDetailResponse,
@@ -12,11 +12,27 @@ import type { Zone, ZoneType } from '../../types/domain'
 import {
   assertSupportedMapCoordinates,
   gridRectToWorldBounds,
+  mapPixelToWorld,
+  numericMapMetadata,
   worldBoundsToGridRect,
+  worldBoundsFromPoints,
+  worldBoundsOverlap,
   zoneBounds,
   type GridRect,
+  type MapPoint,
   type WorldBounds,
 } from './mapCoordinates'
+import {
+  clientToSvgPoint,
+  createIsometricProjection,
+  invertViewTransform,
+  isometricToMapPixel,
+  mapPixelToIsometric,
+  pointsAttribute,
+  worldBoundsToIsometricPolygon,
+  type IsometricPoint,
+  type ViewTransform,
+} from './mapProjection25d'
 import { StepWaypoints } from './StepWaypoints'
 
 export type StepZonesProps = {
@@ -62,9 +78,8 @@ type DraftZone = {
   zoneId?: Id
   type: ZoneType
   label: string
-  rect: Rect
-  /** 서버에서 불러온 구역은 다시 저장할 때 정수 그리드로 양자화하지 않는다. */
-  bounds?: WorldBounds
+  /** 화면 좌표가 아닌 Backend 계약과 동일한 ROS world bounds가 진실원천이다. */
+  bounds: WorldBounds
 }
 
 const toRect = (a: { c: number; r: number }, b: { c: number; r: number }): Rect => ({
@@ -73,10 +88,6 @@ const toRect = (a: { c: number; r: number }, b: { c: number; r: number }): Rect 
   w: Math.abs(a.c - b.c) + 1,
   h: Math.abs(a.r - b.r) + 1,
 })
-
-// 두 사각형이 한 칸이라도 겹치는지 (겹침 방지용)
-const overlaps = (a: Rect, b: Rect) =>
-  a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 
 // 격자 좌표 → 사람이 읽는 이름 (A1–D3 · 4×3칸)
 const rangeName = (r: Rect) =>
@@ -90,11 +101,15 @@ const rectStyle = (r: Rect) => ({
   height: `${(r.h / ROWS) * 100}%`,
 })
 
+const DEFAULT_ISO_VIEW: ViewTransform = { zoom: 1, panX: 0, panY: 0 }
+
 /** Step 3/3 — 구역 지정 (IoT 수신 맵 위 드래그) (1y). R0Kiauth 시안 pMap 상태 C */
 export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const gridRef = useRef<HTMLDivElement>(null)
+  const isoSvgRef = useRef<SVGSVGElement>(null)
   const idRef = useRef(0)
   const [editorStage, setEditorStage] = useState<'zones' | 'waypoints'>('zones')
+  const [viewMode, setViewMode] = useState<'2d' | '2.5d'>('2d')
   const [selectedType, setSelectedType] = useState<ZoneType>('주차장')
   const [zones, setZones] = useState<DraftZone[]>([])
   const [savedZones, setSavedZones] = useState<ZoneCreateResponse[]>([])
@@ -102,10 +117,14 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   // 드래그 상태는 ref가 진실원천(포인터 이벤트가 리렌더보다 빠를 수 있음), state는 프리뷰 렌더용
   const dragRef = useRef<{ start: { c: number; r: number }; cur: { c: number; r: number } } | null>(null)
   const [drag, setDrag] = useState<typeof dragRef.current>(null)
+  const isoDragRef = useRef<{ pointerId: number; start: MapPoint; cur: MapPoint } | null>(null)
+  const [isoDrag, setIsoDrag] = useState<typeof isoDragRef.current>(null)
+  const isoPanRef = useRef<{ pointerId: number; client: IsometricPoint } | null>(null)
+  const [isoView, setIsoView] = useState<ViewTransform>(DEFAULT_ISO_VIEW)
   // 구역 이름 입력/수정 모달 — 드래그로 그린 직후, 또는 기존 구역 클릭 시
   const [nameModalOpen, setNameModalOpen] = useState(false)
   const [nameInput, setNameInput] = useState('')
-  const [draftRect, setDraftRect] = useState<Rect | null>(null)
+  const [draftBounds, setDraftBounds] = useState<WorldBounds | null>(null)
   const [draftType, setDraftType] = useState<ZoneType>('주차장')
   const [editingId, setEditingId] = useState<string | number | null>(null)
   const [map, setMap] = useState<MapDetailResponse>()
@@ -114,6 +133,10 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const [saveError, setSaveError] = useState<string>()
   const [isSaving, setIsSaving] = useState(false)
   const savingRef = useRef(false)
+  const isoProjection = useMemo(
+    () => map ? createIsometricProjection(map) : undefined,
+    [map],
+  )
   // 겹침 등 경고 칩 (시안 .au-warn) — 잠시 떴다 사라진다
   const [warn, setWarn] = useState<string>()
   const warnTimer = useRef<number>()
@@ -147,7 +170,6 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
             zoneId: zone.zoneId,
             type: zoneTypeLabel[zone.type],
             label: zone.name,
-            rect: worldBoundsToGridRect(detail, bounds, COLS, ROWS),
             bounds,
           }
         }))
@@ -187,38 +209,128 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     dragRef.current = { ...dragRef.current, cur: cellAt(e) }
     setDrag(dragRef.current)
   }
-  const onPointerUp = () => {
-    const d = dragRef.current
-    if (!d) return
-    dragRef.current = null
-    setDrag(null)
-    if (savingRef.current) return
-    const rect = toRect(d.start, d.cur)
 
-    // 겹침 방지: 기존 구역과 겹치면 등록 취소
-    if (zones.some((z) => overlaps(z.rect, rect))) {
+  const beginCreateZone = (bounds: WorldBounds) => {
+    if (zones.some((zone) => worldBoundsOverlap(zone.bounds, bounds))) {
       showWarn('다른 구역과 겹칠 수 없습니다')
       return
     }
-    // 도착지는 맵당 한 곳만
-    if (selectedType === '도착지' && zones.some((z) => z.type === '도착지')) {
+    if (selectedType === '도착지' && zones.some((zone) => zone.type === '도착지')) {
       showWarn('도착지는 한 곳만 등록할 수 있습니다')
       return
     }
-
-    // 이름 지정 모달 오픈
-    const count = zones.filter((z) => z.type === selectedType).length
-    setDraftRect(rect)
+    const count = zones.filter((zone) => zone.type === selectedType).length
+    setDraftBounds(bounds)
     setDraftType(selectedType)
     setEditingId(null)
     setNameInput(`${selectedType} ${count + 1}`)
     setNameModalOpen(true)
   }
 
+  const onPointerUp = () => {
+    const d = dragRef.current
+    if (!d) return
+    dragRef.current = null
+    setDrag(null)
+    if (savingRef.current || !map) return
+    const rect = toRect(d.start, d.cur)
+    beginCreateZone(gridRectToWorldBounds(map, rect, COLS, ROWS))
+  }
+
+  const clientToIsoRoot = (client: IsometricPoint) => {
+    if (!isoSvgRef.current || !isoProjection) return null
+    return clientToSvgPoint(
+      client,
+      isoSvgRef.current.getBoundingClientRect(),
+      { x: 0, y: 0, width: isoProjection.viewWidth, height: isoProjection.viewHeight },
+    )
+  }
+
+  const clientToIsoWorld = (client: IsometricPoint, clampToMap: boolean) => {
+    if (!map || !isoProjection) return null
+    const rootPoint = clientToIsoRoot(client)
+    if (!rootPoint) return null
+    const contentPoint = invertViewTransform(rootPoint, isoView)
+    const pixel = isometricToMapPixel(isoProjection, contentPoint)
+    const { width, height } = numericMapMetadata(map)
+    if (!clampToMap && (pixel.x < 0 || pixel.x > width || pixel.y < 0 || pixel.y > height)) {
+      return null
+    }
+    return mapPixelToWorld(map, {
+      x: Math.max(0, Math.min(width, pixel.x)),
+      y: Math.max(0, Math.min(height, pixel.y)),
+    })
+  }
+
+  const onIsoPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (savingRef.current) return
+    if (event.button === 1 || event.button === 2) {
+      isoPanRef.current = {
+        pointerId: event.pointerId,
+        client: { x: event.clientX, y: event.clientY },
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      event.preventDefault()
+      return
+    }
+    if (event.button !== 0) return
+    const world = clientToIsoWorld({ x: event.clientX, y: event.clientY }, false)
+    if (!world) return
+    isoDragRef.current = { pointerId: event.pointerId, start: world, cur: world }
+    setIsoDrag(isoDragRef.current)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onIsoPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const pan = isoPanRef.current
+    if (pan?.pointerId === event.pointerId) {
+      const previous = clientToIsoRoot(pan.client)
+      const currentClient = { x: event.clientX, y: event.clientY }
+      const current = clientToIsoRoot(currentClient)
+      isoPanRef.current = { ...pan, client: currentClient }
+      if (previous && current) {
+        setIsoView((view) => ({
+          ...view,
+          panX: view.panX + current.x - previous.x,
+          panY: view.panY + current.y - previous.y,
+        }))
+      }
+      return
+    }
+    const selection = isoDragRef.current
+    if (!selection || selection.pointerId !== event.pointerId) return
+    const world = clientToIsoWorld({ x: event.clientX, y: event.clientY }, true)
+    if (!world) return
+    isoDragRef.current = { ...selection, cur: world }
+    setIsoDrag(isoDragRef.current)
+  }
+
+  const endIsoPointer = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (isoPanRef.current?.pointerId === event.pointerId) {
+      isoPanRef.current = null
+    } else if (isoDragRef.current?.pointerId === event.pointerId) {
+      const selection = isoDragRef.current
+      isoDragRef.current = null
+      setIsoDrag(null)
+      if (map && !savingRef.current) {
+        const bounds = worldBoundsFromPoints(selection.start, selection.cur)
+        const minimum = numericMapMetadata(map).resolution
+        if (bounds.maxX - bounds.minX < minimum || bounds.maxY - bounds.minY < minimum) {
+          showWarn('구역을 조금 더 크게 드래그해 주세요')
+        } else {
+          beginCreateZone(bounds)
+        }
+      }
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
   const openEdit = (z: DraftZone) => {
     if (savingRef.current) return
     setEditingId(z.id)
-    setDraftRect(z.rect)
+    setDraftBounds(z.bounds)
     setDraftType(z.type)
     setNameInput(z.label)
     setNameModalOpen(true)
@@ -226,7 +338,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
 
   const closeNameModal = () => {
     setNameModalOpen(false)
-    setDraftRect(null)
+    setDraftBounds(null)
     setEditingId(null)
     setNameInput('')
   }
@@ -246,10 +358,10 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
     const label = nameInput.trim() || draftType
     if (editingId != null) {
       setZones((zs) => zs.map((z) => (z.id === editingId ? { ...z, type: draftType, label } : z)))
-    } else if (draftRect) {
+    } else if (draftBounds) {
       setZones((zs) => [
         ...zs,
-        { id: `draft-${++idRef.current}`, type: draftType, label, rect: draftRect },
+        { id: `draft-${++idRef.current}`, type: draftType, label, bounds: draftBounds },
       ])
     }
     setIsZoneDirty(true)
@@ -268,14 +380,13 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const saveZones = async () => {
     if (!map || savingRef.current) return
     const requests: ZoneCreateRequest[] = zones.map((zone) => {
-      const bounds = zone.bounds ?? gridRectToWorldBounds(map, zone.rect, COLS, ROWS)
       return {
         name: zone.label,
         type: zoneTypeCode[zone.type],
-        startX: bounds.minX,
-        startY: bounds.minY,
-        endX: bounds.maxX,
-        endY: bounds.maxY,
+        startX: zone.bounds.minX,
+        startY: zone.bounds.minY,
+        endX: zone.bounds.maxX,
+        endY: zone.bounds.maxY,
       }
     })
 
@@ -296,7 +407,6 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
           zoneId: zone.zoneId,
           type: zoneTypeLabel[zone.type],
           label: zone.name,
-          rect: worldBoundsToGridRect(map, bounds, COLS, ROWS),
           bounds,
         }
       }))
@@ -310,7 +420,26 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   }
 
   const dragRect = drag ? toRect(drag.start, drag.cur) : null
-  const dragBad = dragRect != null && zones.some((z) => overlaps(z.rect, dragRect))
+  const dragBounds = map && dragRect
+    ? gridRectToWorldBounds(map, dragRect, COLS, ROWS)
+    : null
+  const dragBad = dragBounds != null && zones.some((zone) => worldBoundsOverlap(zone.bounds, dragBounds))
+  const isoDragBounds = isoDrag ? worldBoundsFromPoints(isoDrag.start, isoDrag.cur) : null
+  const isoDragBad = isoDragBounds != null && zones.some((zone) => worldBoundsOverlap(zone.bounds, isoDragBounds))
+  const modalRect = map && draftBounds
+    ? worldBoundsToGridRect(map, draftBounds, COLS, ROWS)
+    : null
+  const isoBasePoints = isoProjection
+    ? [
+        { x: 0, y: 0 },
+        { x: isoProjection.mapWidth, y: 0 },
+        { x: isoProjection.mapWidth, y: isoProjection.mapHeight },
+        { x: 0, y: isoProjection.mapHeight },
+      ].map((point) => mapPixelToIsometric(isoProjection, point))
+    : []
+  const isoRasterTransform = isoProjection
+    ? `matrix(${isoProjection.tileX} ${isoProjection.tileY} ${isoProjection.tileX} ${-isoProjection.tileY} ${isoProjection.offsetX - isoProjection.mapHeight * isoProjection.tileX} ${isoProjection.offsetY + isoProjection.mapHeight * isoProjection.tileY})`
+    : undefined
 
   if (editorStage === 'waypoints' && map && mapImageUrl) {
     return (
@@ -367,79 +496,198 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
             <span className="hint">구역 유형 선택 후 맵 위를 드래그하세요 (구역을 누르면 이름 수정 · ✕로 삭제)</span>
           </div>
 
-          <div className="au-canvas">
-            <div className="au-colh" style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)` }}>
-              {Array.from({ length: COLS }, (_, i) => (
-                <span key={i}>{colLabel(i)}</span>
-              ))}
-            </div>
-            <div className="au-rowh" style={{ gridTemplateRows: `repeat(${ROWS}, 1fr)` }}>
-              {Array.from({ length: ROWS }, (_, i) => (
-                <span key={i}>{i + 1}</span>
-              ))}
-            </div>
-            <div
-              ref={gridRef}
-              role="application"
-              aria-label="IoT 맵 — 드래그하여 구역 지정"
-              aria-disabled={isSaving}
-              className="au-cells"
-              style={{
-                gridTemplateColumns: `repeat(${COLS}, 1fr)`,
-                gridTemplateRows: `repeat(${ROWS}, 1fr)`,
-                aspectRatio: map ? `${map.width} / ${map.height}` : '2 / 1',
-              }}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
+          <div className="au-map-view-tools" aria-label="지도 보기 방식">
+            <button
+              type="button"
+              className="btn btn-s"
+              aria-pressed={viewMode === '2d'}
+              onClick={() => setViewMode('2d')}
+              disabled={isSaving}
             >
-              {mapImageUrl && (
-                <img src={mapImageUrl} alt={map?.mapName ?? '완성된 지도'} draggable={false} />
-              )}
-              {/* 그리드 셀 */}
-              {Array.from({ length: COLS * ROWS }, (_, i) => (
-                <div key={i} className="cell" aria-hidden />
-              ))}
+              2D
+            </button>
+            <button
+              type="button"
+              className="btn btn-s"
+              aria-pressed={viewMode === '2.5d'}
+              onClick={() => setViewMode('2.5d')}
+              disabled={isSaving || !isoProjection}
+            >
+              2.5D
+            </button>
+            {viewMode === '2.5d' && (
+              <span className="au-iso-controls">
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  aria-label="2.5D 지도 축소"
+                  onClick={() => setIsoView((view) => ({ ...view, zoom: Math.max(0.75, view.zoom / 1.2) }))}
+                >−</button>
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  aria-label="2.5D 지도 확대"
+                  onClick={() => setIsoView((view) => ({ ...view, zoom: Math.min(3, view.zoom * 1.2) }))}
+                >+</button>
+                <button
+                  type="button"
+                  className="btn btn-s"
+                  onClick={() => setIsoView(DEFAULT_ISO_VIEW)}
+                >초기화</button>
+                <span className="hint">오른쪽 버튼 드래그로 이동</span>
+              </span>
+            )}
+          </div>
 
-              {/* 등록된 구역 */}
-              {zones.map((z) => (
-                <div
-                  key={z.id}
-                  className="au-zone"
-                  style={{ ...rectStyle(z.rect), ...toneVar(z.type) }}
-                  title={`${z.label} · ${rangeName(z.rect)}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => openEdit(z)}
-                  aria-disabled={isSaving}
+          {viewMode === '2d' ? (
+            <div className="au-canvas">
+              <div className="au-colh" style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)` }}>
+                {Array.from({ length: COLS }, (_, i) => (
+                  <span key={i}>{colLabel(i)}</span>
+                ))}
+              </div>
+              <div className="au-rowh" style={{ gridTemplateRows: `repeat(${ROWS}, 1fr)` }}>
+                {Array.from({ length: ROWS }, (_, i) => (
+                  <span key={i}>{i + 1}</span>
+                ))}
+              </div>
+              <div
+                ref={gridRef}
+                role="application"
+                aria-label="IoT 맵 — 드래그하여 구역 지정"
+                aria-disabled={isSaving}
+                className="au-cells"
+                style={{
+                  gridTemplateColumns: `repeat(${COLS}, 1fr)`,
+                  gridTemplateRows: `repeat(${ROWS}, 1fr)`,
+                  aspectRatio: map ? `${map.width} / ${map.height}` : '2 / 1',
+                }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+              >
+                {mapImageUrl && (
+                  <img src={mapImageUrl} alt={map?.mapName ?? '완성된 지도'} draggable={false} />
+                )}
+                {Array.from({ length: COLS * ROWS }, (_, i) => (
+                  <div key={i} className="cell" aria-hidden />
+                ))}
+
+                {map && zones.map((zone) => {
+                  const rect = worldBoundsToGridRect(map, zone.bounds, COLS, ROWS)
+                  return (
+                    <div
+                      key={zone.id}
+                      className="au-zone"
+                      style={{ ...rectStyle(rect), ...toneVar(zone.type) }}
+                      title={`${zone.label} · ${rangeName(rect)}`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => openEdit(zone)}
+                      aria-disabled={isSaving}
+                    >
+                      <span className="zl">{zone.label}</span>
+                      <button
+                        type="button"
+                        className="zx"
+                        aria-label={`${zone.label} 삭제`}
+                        disabled={isSaving}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          if (savingRef.current) return
+                          setZones((current) => current.filter((item) => item.id !== zone.id))
+                          setIsZoneDirty(true)
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                      </button>
+                    </div>
+                  )
+                })}
+
+                {dragRect && (
+                  <div
+                    aria-hidden
+                    className={dragBad ? 'au-draft bad' : 'au-draft'}
+                    style={rectStyle(dragRect)}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="au-iso-canvas" aria-disabled={isSaving}>
+              {map && isoProjection && (
+                <svg
+                  ref={isoSvgRef}
+                  role="application"
+                  aria-label="2.5D IoT 맵 — 왼쪽 버튼으로 드래그하여 구역 지정"
+                  viewBox={`0 0 ${isoProjection.viewWidth} ${isoProjection.viewHeight}`}
+                  preserveAspectRatio="xMidYMid meet"
+                  onPointerDown={onIsoPointerDown}
+                  onPointerMove={onIsoPointerMove}
+                  onPointerUp={endIsoPointer}
+                  onPointerCancel={endIsoPointer}
+                  onContextMenu={(event) => event.preventDefault()}
                 >
-                  <span className="zl">{z.label}</span>
-                  <button
-                    type="button"
-                    className="zx"
-                    aria-label={`${z.label} 삭제`}
-                    disabled={isSaving}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (savingRef.current) return
-                      setZones((zs) => zs.filter((x) => x.id !== z.id))
-                      setIsZoneDirty(true)
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
-                  </button>
-                </div>
-              ))}
+                  <g transform={`translate(${isoView.panX} ${isoView.panY}) scale(${isoView.zoom})`}>
+                    <polygon className="au-iso-floor" points={pointsAttribute(isoBasePoints)} />
+                    {mapImageUrl && (
+                      <image
+                        href={mapImageUrl}
+                        width={isoProjection.mapWidth}
+                        height={isoProjection.mapHeight}
+                        preserveAspectRatio="none"
+                        transform={isoRasterTransform}
+                        className="au-iso-map-image"
+                      />
+                    )}
+                    <g className="au-iso-grid" aria-hidden>
+                      {Array.from({ length: COLS + 1 }, (_, index) => {
+                        const x = (index / COLS) * isoProjection.mapWidth
+                        const start = mapPixelToIsometric(isoProjection, { x, y: 0 })
+                        const end = mapPixelToIsometric(isoProjection, { x, y: isoProjection.mapHeight })
+                        return <line key={`c-${index}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
+                      })}
+                      {Array.from({ length: ROWS + 1 }, (_, index) => {
+                        const y = (index / ROWS) * isoProjection.mapHeight
+                        const start = mapPixelToIsometric(isoProjection, { x: 0, y })
+                        const end = mapPixelToIsometric(isoProjection, { x: isoProjection.mapWidth, y })
+                        return <line key={`r-${index}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
+                      })}
+                    </g>
+                    <polygon className="au-iso-hit" points={pointsAttribute(isoBasePoints)} />
 
-              {/* 드래그 프리뷰 — 겹치면 즉시 경고 색 */}
-              {dragRect && (
-                <div
-                  aria-hidden
-                  className={dragBad ? 'au-draft bad' : 'au-draft'}
-                  style={rectStyle(dragRect)}
-                />
+                    {zones.map((zone) => {
+                      const points = worldBoundsToIsometricPolygon(map, isoProjection, zone.bounds)
+                      const center = points.reduce(
+                        (sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }),
+                        { x: 0, y: 0 },
+                      )
+                      return (
+                        <g
+                          key={zone.id}
+                          className="au-iso-zone"
+                          style={toneVar(zone.type)}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={() => openEdit(zone)}
+                        >
+                          <polygon points={pointsAttribute(points)} />
+                          <text x={center.x} y={center.y}>{zone.label}</text>
+                        </g>
+                      )
+                    })}
+
+                    {isoDragBounds && (
+                      <polygon
+                        aria-hidden
+                        className={isoDragBad ? 'au-iso-draft bad' : 'au-iso-draft'}
+                        points={pointsAttribute(worldBoundsToIsometricPolygon(map, isoProjection, isoDragBounds))}
+                      />
+                    )}
+                  </g>
+                </svg>
               )}
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -503,9 +751,9 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
         title={editingId != null ? '구역 정보 수정' : '구역 이름 지정'}
       >
         <form onSubmit={confirmName}>
-          {draftRect && (
+          {modalRect && (
             <p className="mdsub">
-              선택 영역 <b>{rangeName(draftRect)}</b> · <b>{sizeName(draftRect)}</b>
+              선택 영역 <b>{rangeName(modalRect)}</b> · <b>{sizeName(modalRect)}</b>
             </p>
           )}
 
