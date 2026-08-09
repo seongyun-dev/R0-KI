@@ -223,6 +223,10 @@ class RokiPublisherApplication:
         if not force and not periodic_publish_due:
             return
 
+        if not self._has_hardware_status():
+            self._print_hardware_wait_log()
+            return
+
         status = self._state_store.get_status()
 
         self._hardware_wait_log_printed = False
@@ -364,6 +368,26 @@ class RokiPublisherApplication:
         )
 
         self._hardware_wait_log_printed = True
+
+    def _has_hardware_status(self) -> bool:
+        """현재 Serial 세대에서 실제 hardwareStatus를 받았는지 확인한다.
+
+        배터리 값은 null일 수 있고 모듈 상태도 실제로 DISCONNECTED일 수
+        있으므로 payload 필드값으로 수신 여부를 추정하지 않는다. 상태 저장소가
+        관리하는 명시적인 수신 플래그만 사용한다.
+        """
+
+        checker = getattr(
+            type(self._state_store),
+            "has_hardware_status",
+            None,
+        )
+        if callable(checker):
+            return bool(checker(self._state_store))
+
+        # 일부 격리 단위 테스트의 단순 Mock 저장소는 수신 생명주기를
+        # 구현하지 않는다. 운영 저장소 두 종류는 위 메서드를 모두 제공한다.
+        return True
 
 
 def create_application() -> RokiPublisherApplication:

@@ -130,6 +130,12 @@ class RobotStateStore:
                 safety_decision=self._safety_decision,
             )
 
+    def has_hardware_status(self) -> bool:
+        """현재 Serial 세대의 실제 hardwareStatus 수신 여부를 반환한다."""
+
+        with self._lock:
+            return self._hardware_status is not None
+
     def update_robot_state(self, state: str) -> None:
         with self._lock:
             self._set_status_if_changed(replace(self._status, state=state))

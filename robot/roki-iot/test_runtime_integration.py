@@ -1437,6 +1437,10 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
             final_runtime=runtime,
             mapping_runtime=mapping_runtime,
         )
+        # ESP32 가 장비 상태를 한 번은 보고해야 status 가 발행된다. 매핑은
+        # 시리얼 준비 없이는 시작조차 못 하므로(_preflight_readiness) 실제로
+        # 도달할 수 없는 조합이었다. 형제 테스트와 같은 준비를 붙인다.
+        runtime.state_store.update_hardware(HardwareState(80.0, "NORMAL", "NORMAL"))
         runtime.state_store.update_lidar_status("NORMAL")
         runtime.state_store.update_obstacle(
             ObstacleState(
