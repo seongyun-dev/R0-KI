@@ -71,10 +71,16 @@ public class PatrolPdfService {
                   * { box-sizing: border-box; }
                   body { margin: 0; font-family: 'Nanum Gothic'; color: #172033; font-size: 10px; line-height: 1.55; }
                   h1 { margin: 0; font-size: 23px; letter-spacing: -0.5px; }
-                  h2 { margin: 0 0 8px; font-size: 14px; color: #132a58; }
+                  h2 { margin: 0 0 8px; font-size: 14px; color: #132a58; page-break-after: avoid; }
                   .header { border-bottom: 3px solid #2563eb; padding-bottom: 12px; margin-bottom: 16px; }
                   .meta { color: #64748b; margin-top: 4px; }
-                  .section { margin-top: 16px; break-inside: avoid; }
+                  /* 표 구간은 페이지를 넘겨 이어진다 — 통째로 avoid 하면 한 장이 통으로 비어버린다.
+                     대신 h2 의 page-break-after:avoid 로 제목이 표와 떨어지지 않게 하고,
+                     tr 의 page-break-inside:avoid 로 행이 반으로 잘리지 않게 한다.
+                     ⚠️ openhtmltopdf 는 CSS2.1 기반이라 break-inside 가 아니라 page-break-inside 를 쓴다. */
+                  .section { margin-top: 16px; }
+                  /* 지도처럼 쪼개면 안 되는 구간만 따로 묶는다 */
+                  .section.keep { page-break-inside: avoid; }
                   .summary { width: 100%; border-collapse: separate; border-spacing: 8px 0; margin-left: -8px; }
                   .summary td { width: 25%; padding: 10px; background: #f1f5f9; border-radius: 5px; vertical-align: top; }
                   .label { color: #64748b; font-size: 9px; }
@@ -83,8 +89,8 @@ public class PatrolPdfService {
                   table.data thead { display: table-header-group; }
                   table.data th { padding: 7px; background: #e8eef9; color: #243b66; text-align: left; border: 1px solid #ccd6e8; }
                   table.data td { padding: 7px; border: 1px solid #dce3ee; vertical-align: top; }
-                  table.data tr { break-inside: avoid; }
-                  .ai { padding: 12px; background: #f8fafc; border-left: 4px solid #2563eb; white-space: pre-wrap; }
+                  table.data tr { page-break-inside: avoid; }
+                  .ai { padding: 12px; background: #f8fafc; border-left: 4px solid #2563eb; white-space: pre-wrap; page-break-inside: avoid; }
                   .map { width: 100%; max-height: 430px; object-fit: contain; border: 1px solid #dce3ee; }
                   .empty { color: #94a3b8; padding: 10px 0; }
                 </style></head><body>
@@ -124,7 +130,7 @@ public class PatrolPdfService {
 
     private void appendMap(StringBuilder html, String mapDataUri) {
         if (mapDataUri == null) return;
-        html.append("<div class='section'><h2>순찰 지도</h2><img class='map' src='")
+        html.append("<div class='section keep'><h2>순찰 지도</h2><img class='map' src='")
                 .append(mapDataUri)
                 .append("' /></div>");
     }
@@ -217,8 +223,13 @@ public class PatrolPdfService {
         return value == null ? "-" : value.format(DATE_TIME_FORMATTER);
     }
 
+    // 60분이 넘으면 "1시간 18분"처럼 시간 단위로 끊어 읽는다. 정각이면 분은 생략한다.
     private String duration(Integer minutes) {
-        return minutes == null ? "-" : minutes + "분";
+        if (minutes == null) return "-";
+        if (minutes < 60) return minutes + "분";
+        int hours = minutes / 60;
+        int rest = minutes % 60;
+        return rest == 0 ? hours + "시간" : hours + "시간 " + rest + "분";
     }
 
     private String batteryLevel(BigDecimal level) {
