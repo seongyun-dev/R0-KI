@@ -356,20 +356,25 @@ class RosSlamSessionControl:
         return False
 
     def _transform_is_fresh(self, transform: Any) -> bool:
-        """발행 시각이 ROS 현재 시각에서 ``_transform_max_age_sec`` 이내인가.
+        """발행 시각이 지금으로부터 ``_transform_max_age_sec`` 이내인가.
 
-        벽시계가 아니라 ROS 시계로 비교해야 한다. TF 스탬프는 ROS 시각이고,
-        젯슨은 RTC 를 유지하지 않아 부팅 초반 두 시계가 크게 어긋난다.
+        slam 은 스탬프에 ``transform_timeout_`` 를 더해 발행하므로 정상
+        운행에서 나이가 **음수**(미래)로 나온다. 실측 -0.10 ~ -0.12초.
+        그래서 상한만 보면 안 된다 -- 얼어붙은 TF 가 미래 스탬프를 달고 있으면
+        영원히 신선해 보인다. 아래로도 같은 폭만큼 막는다.
         """
 
         if self._node is None:
             return True
-        stamp_ns = self._stamp_ns(getattr(transform.header, "stamp", None))
+        # _stamp_ns 는 **메시지**를 받아 header.stamp 를 푼다. 여기서 stamp 를
+        # 미리 풀어 넘기면 Time 에 .header 가 없어 항상 0 이 나오고, 아래
+        # `if not stamp_ns` 가 항상 참이 되어 이 함수가 **상수 False** 가 된다.
+        stamp_ns = self._stamp_ns(transform)
         if not stamp_ns:
             return False
         now_ns = self._node.get_clock().now().nanoseconds
         age_sec = (now_ns - stamp_ns) / 1_000_000_000
-        if age_sec <= self._transform_max_age_sec:
+        if -self._transform_max_age_sec <= age_sec <= self._transform_max_age_sec:
             return True
         print(
             f"[SLAM] {self._map_frame}->{self._odom_frame} is stale "

@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import unittest
 
-from integration.slam_session_control import FreshMapTracker
+from integration.slam_session_control import (
+    FreshMapTracker,
+    RosSlamSessionControl,
+)
 
 
 class FreshMapReadyTest(unittest.TestCase):
@@ -106,6 +109,79 @@ class FreshMapReadyTest(unittest.TestCase):
             self.tracker.fresh_map_ready(second),
             "새 세션은 자기 리셋 이후의 지도를 따로 받아야 한다",
         )
+
+
+class _Stamp:
+    def __init__(self, ns: int) -> None:
+        self.sec = ns // 1_000_000_000
+        self.nanosec = ns % 1_000_000_000
+
+
+class _Transform:
+    """TF 메시지의 최소 형태. ``header.stamp`` 만 있으면 된다."""
+
+    def __init__(self, ns: int) -> None:
+        self.header = type("H", (), {"stamp": _Stamp(ns)})()
+
+
+class _Clock:
+    def __init__(self, ns: int) -> None:
+        self._ns = ns
+
+    def now(self):
+        return type("T", (), {"nanoseconds": self._ns})()
+
+
+class TransformFreshnessTest(unittest.TestCase):
+    """신선도 판정이 실제로 판정하는가.
+
+    2026-08-09 실기: 이 함수가 **상수 False** 였다. 호출부가 이미 푼 Time 을
+    넘기는데 _stamp_ns 는 메시지를 기대해서 항상 0 이 나왔고, 그래서
+    wait_for_fresh_map / wait_for_localization_ready / current_map_pose 가
+    전부 죽었다. START_MAPPING 이 30초를 태우고 FRESH_MAP_NOT_READY 로
+    거부됐다(08:32:27, 08:33:17, 08:37:55).
+
+    **테스트가 하나도 없어서 522개를 통과하고 현장까지 갔다.** 그래서
+    여기서는 실물 메서드를 부른다 -- 스텁하면 같은 사고가 또 난다.
+    """
+
+    def control(self, *, now_ns: int) -> RosSlamSessionControl:
+        control = RosSlamSessionControl(transform_max_age_sec=2.0)
+        control._node = type("N", (), {"get_clock": lambda self: _Clock(now_ns)})()
+        return control
+
+    def test_recent_transform_is_fresh(self) -> None:
+        now = 1_000_000_000_000
+        control = self.control(now_ns=now)
+
+        self.assertTrue(control._transform_is_fresh(_Transform(now - 500_000_000)))
+
+    def test_slam_publishes_slightly_into_the_future(self) -> None:
+        """slam 은 스탬프에 transform_timeout_ 를 더한다. 실측 -0.10초."""
+
+        now = 1_000_000_000_000
+        control = self.control(now_ns=now)
+
+        self.assertTrue(control._transform_is_fresh(_Transform(now + 120_000_000)))
+
+    def test_old_transform_is_stale(self) -> None:
+        now = 1_000_000_000_000
+        control = self.control(now_ns=now)
+
+        self.assertFalse(control._transform_is_fresh(_Transform(now - 5_000_000_000)))
+
+    def test_far_future_transform_is_stale(self) -> None:
+        """얼어붙은 TF 가 미래 스탬프를 달면 상한만으로는 영원히 통과한다."""
+
+        now = 1_000_000_000_000
+        control = self.control(now_ns=now)
+
+        self.assertFalse(control._transform_is_fresh(_Transform(now + 60_000_000_000)))
+
+    def test_missing_stamp_is_stale(self) -> None:
+        control = self.control(now_ns=1_000_000_000_000)
+
+        self.assertFalse(control._transform_is_fresh(_Transform(0)))
 
 
 if __name__ == "__main__":
