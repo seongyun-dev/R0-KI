@@ -15,6 +15,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface DetectedEventRepository extends JpaRepository<DetectedEvent, Long> {
+    boolean existsByPatrolIdAndTypeAndProcessingStatusNot(
+            Long patrolId, EventType type, ProcessingStatus processingStatus);
+
     // 특정 순찰의 감지 이벤트 목록 - 순찰 상세 타임라인에 사용
     List<DetectedEvent> findAllByPatrolIdOrderByOccurredAt(Long patrolId);
 
