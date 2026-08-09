@@ -154,6 +154,8 @@ export interface Patrol {
   date: string;                     // 07/15
   start: string;                    // 09:00
   end?: string | null;              // 09:42 (진행중이면 null)
+  startDateTime?: string;           // 25/12/14 01:30 (순찰 이력 목록 표시용)
+  endDateTime?: string | null;      // 25/12/14 01:42
   routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 지하주차장 B2, 출발지]
   routeSummary?: string;            // 상세 요약용 경로 표기 (1e: "101동→102동→103동")
   eventCount: number;               // 2

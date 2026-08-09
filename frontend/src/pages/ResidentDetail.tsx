@@ -11,6 +11,7 @@ import {
   useResident,
   useUpdateResident,
 } from '../features/residents/useResidents'
+import { maskPhone } from '../lib/formatters'
 
 /* R0-Ki 입주민 상세 — 알림/이벤트 상세와 같은 2단 유리 레이아웃.
    좌: 등록 차량 + 알림 이력 / 우: 기본 정보 수정 + 알림 수신 토글.
@@ -18,7 +19,6 @@ import {
    알림 수신을 끄면 불법주차가 잡혀도 SMS 가 안 나가므로(백엔드
    NotificationService.requestIllegalParkingNotification) 토글 옆에 그 영향을 적어 둔다. */
 
-const PHONE_PATTERN = /^[0-9-]+$/
 
 function StatusChip({ status }: { status: string }) {
   const label = notificationStatusLabel(status)
@@ -47,7 +47,6 @@ export default function ResidentDetail() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
     name: '',
-    phoneNumber: '',
     buildingNumber: '',
     unitNumber: '',
   })
@@ -66,7 +65,6 @@ export default function ResidentDetail() {
     if (!resident) return
     setForm({
       name: resident.name,
-      phoneNumber: resident.phoneNumber,
       buildingNumber: resident.buildingNumber,
       unitNumber: resident.unitNumber,
     })
@@ -88,26 +86,22 @@ export default function ResidentDetail() {
   }
 
   const onSave = async () => {
-    if (!id) return
+    if (!id || !resident) return
     const name = form.name.trim()
-    const phoneNumber = form.phoneNumber.trim()
     const buildingNumber = form.buildingNumber.trim()
     const unitNumber = form.unitNumber.trim()
 
-    if (!name || !phoneNumber || !buildingNumber || !unitNumber) {
-      setActionError('이름·연락처·동·호수는 모두 필수입니다.')
-      return
-    }
-    if (!PHONE_PATTERN.test(phoneNumber)) {
-      setActionError('연락처는 숫자와 하이픈만 입력할 수 있습니다.')
+    if (!name || !buildingNumber || !unitNumber) {
+      setActionError('이름·동·호수는 모두 필수입니다.')
       return
     }
 
+    // 연락처는 이 화면에서 수정하지 않는다 — API 계약상 필수 필드라 원래 값을 그대로 보낸다
     const ok = await runAction(
       () =>
         updateResident.mutateAsync({
           residentId: id,
-          request: { name, phoneNumber, buildingNumber, unitNumber },
+          request: { name, phoneNumber: resident.phoneNumber, buildingNumber, unitNumber },
         }),
       '입주민 정보가 수정되었습니다',
     )
@@ -226,7 +220,6 @@ export default function ResidentDetail() {
                   <thead>
                     <tr>
                       <th>차량 번호</th>
-                      <th>장애인 차량</th>
                       <th className="r" />
                     </tr>
                   </thead>
@@ -234,7 +227,6 @@ export default function ResidentDetail() {
                     {resident.vehicles.map((vehicle) => (
                       <tr key={vehicle.vehicleId}>
                         <td className="num">{vehicle.licensePlate}</td>
-                        <td>{vehicle.disabledVehicle ? '예' : <span className="dash">—</span>}</td>
                         <td className="r">
                           <button
                             type="button"
@@ -358,16 +350,6 @@ export default function ResidentDetail() {
                     />
                   </div>
                   <div className="au-row">
-                    <label className="au-lab" htmlFor="rd-phone">연락처</label>
-                    <input
-                      className="au-in num"
-                      id="rd-phone"
-                      value={form.phoneNumber}
-                      onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })}
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div className="au-row">
                     <label className="au-lab" htmlFor="rd-building">동</label>
                     <input
                       className="au-in num"
@@ -420,7 +402,7 @@ export default function ResidentDetail() {
                   </div>
                   <div className="ir">
                     <span className="k">연락처</span>
-                    <span className="v num">{resident.phoneNumber}</span>
+                    <span className="v num">{maskPhone(resident.phoneNumber)}</span>
                   </div>
                   <div className="ir">
                     <span className="k">동/호수</span>
