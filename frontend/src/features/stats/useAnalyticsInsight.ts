@@ -5,7 +5,6 @@ import type {
 } from '../../api/analyticsContracts'
 import { statsApi } from '../../api/services'
 
-
 const POLL_INTERVAL_MS = 3000
 
 export type UseAnalyticsInsightResult = {
@@ -23,26 +22,20 @@ function isGenerating(status: AnalyticsInsightResponse['generationStatus']) {
   return status === 'PENDING' || status === 'PROCESSING'
 }
 
-async function fetchInsight(
-  periodType: AnalyticsInsightPeriodType,
-): Promise<AnalyticsInsightResponse> {
-
-  return statsApi.fetchInsight(periodType)
-}
-
 /**
- * 직전 완료 주/월 AI 인사이트 조회 + 상태 폴링.
+ * 주/월 AI 인사이트 조회 + 상태 폴링.
  *
- * - periodType 변경 시 해당 기간 리포트를 다시 조회한다.
- * - PENDING/PROCESSING 이면 3초 간격으로 COMPLETED/FAILED 까지 재조회한다.
- * - UI 연결은 Step 3~4 에서 InsightReportPanel 이 담당한다.
+ * @param periodKey 있으면 해당 구간, 없으면 직전 완료 구간
+ * @param enabled false면 요청하지 않음 (진행 중 기간·분기/연 등)
  */
 export function useAnalyticsInsight(
   periodType: AnalyticsInsightPeriodType,
+  periodKey?: string,
+  enabled = true,
 ): UseAnalyticsInsightResult {
   const [version, setVersion] = useState(0)
   const [data, setData] = useState<AnalyticsInsightResponse | undefined>()
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(Boolean(enabled))
   const [isPolling, setIsPolling] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
@@ -51,6 +44,14 @@ export function useAnalyticsInsight(
   useEffect(() => {
     let disposed = false
 
+    if (!enabled) {
+      setData(undefined)
+      setIsLoading(false)
+      setIsPolling(false)
+      setError(null)
+      return
+    }
+
     const run = async () => {
       setIsLoading(true)
       setIsPolling(false)
@@ -58,7 +59,7 @@ export function useAnalyticsInsight(
 
       try {
         while (!disposed) {
-          const result = await fetchInsight(periodType)
+          const result = await statsApi.fetchInsight(periodType, periodKey)
           if (disposed) return
 
           setData(result)
@@ -89,7 +90,7 @@ export function useAnalyticsInsight(
     return () => {
       disposed = true
     }
-  }, [periodType, version])
+  }, [periodType, periodKey, enabled, version])
 
   return {
     data,

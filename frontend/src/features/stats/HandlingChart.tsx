@@ -51,7 +51,13 @@ function segLabel(data: HandlingStat[], key: 'handled' | 'pending', color: strin
   }
 }
 
-export function HandlingChart({ data }: { data: HandlingStat[] }) {
+export function HandlingChart({
+  data,
+  includeA11yTable = true,
+}: {
+  data: HandlingStat[]
+  includeA11yTable?: boolean
+}) {
   return (
     <div className="st-chart">
       <ResponsiveContainer width="100%" height="100%">
@@ -95,23 +101,25 @@ export function HandlingChart({ data }: { data: HandlingStat[] }) {
         </BarChart>
       </ResponsiveContainer>
 
-      <table className="sr-only">
-        <caption>항목별 처리/미처리 건수 및 비율</caption>
-        <thead>
-          <tr>
-            <th scope="col">항목</th><th scope="col">처리(건)</th>
-            <th scope="col">미처리(건)</th><th scope="col">처리율(%)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((d) => (
-            <tr key={d.label}>
-              <th scope="row">{d.label}</th>
-              <td>{d.handled}</td><td>{d.pending}</td><td>{d.handledPct}</td>
+      {includeA11yTable && (
+        <table className="sr-only">
+          <caption>항목별 처리/미처리 건수 및 비율</caption>
+          <thead>
+            <tr>
+              <th scope="col">항목</th><th scope="col">처리(건)</th>
+              <th scope="col">미처리(건)</th><th scope="col">처리율(%)</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((d) => (
+              <tr key={d.label}>
+                <th scope="row">{d.label}</th>
+                <td>{d.handled}</td><td>{d.pending}</td><td>{d.handledPct}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }
