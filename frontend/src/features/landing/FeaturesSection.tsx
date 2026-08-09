@@ -98,7 +98,7 @@ export function FeaturesSection() {
                   <p>{f.desc}</p>
                   <div className="tags">
                     {f.tags.map((t) => (
-                      <Tag key={t} tone="dark">{t}</Tag>
+                      <Tag key={t} tone="light">{t}</Tag>
                     ))}
                   </div>
                 </div>

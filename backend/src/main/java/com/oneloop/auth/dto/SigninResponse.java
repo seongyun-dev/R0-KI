@@ -16,4 +16,13 @@ public class SigninResponse {
             example = "eyJhbGciOiJIUzI1NiJ9...",
             requiredMode = Schema.RequiredMode.REQUIRED)
     private String accessToken;
+
+    @Schema(description = "로그인한 회원의 이름", example = "홍길동")
+    private String name;
+
+    @Schema(description = "소속 단지의 등록된 로봇 존재 여부", example = "true")
+    private boolean hasRobot;
+
+    @Schema(description = "소속 단지의 등록된 지도 존재 여부", example = "false")
+    private boolean hasMap;
 }

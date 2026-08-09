@@ -2,6 +2,7 @@ stages:
   - validate
   - test
   - build
+  - integration
   - package
   - sync
   - deploy
@@ -16,10 +17,10 @@ default:
 
 workflow:
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
-    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(front\/dev|back\/dev|iot\/dev|ai\/dev|infra\/dev|develop|master)$/'
+    - if: '$CI_COMMIT_TAG =~ /^iot-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^(front\/(dev|master)|back\/(dev|master)|iot\/(dev|master)|ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^(front\/(dev|master)|back\/(dev|master)|iot\/(dev|master)|ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(front\/(dev|master)|back\/(dev|master)|iot\/(dev|master)|ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
     - when: never
 
 runner_smoke:
@@ -45,25 +46,60 @@ infra_validate:
     - bash infra/scripts/validate-contracts.sh
     - docker compose --env-file .env.example -f infra/compose/compose.infrastructure.yaml config --quiet
     - docker compose --env-file .env.example -f infra/compose/compose.application.yaml config --quiet
+    - docker compose --env-file .env.example -f infra/compose/compose.integration.yaml config --quiet
     - docker compose -f infra/smoke/compose.smoke.yaml config --quiet
+    - python3 -m py_compile infra/scripts/release-manifest.py infra/scripts/test-release-manifest.py
+    - python3 infra/scripts/test-release-manifest.py
+    - bash infra/scripts/test-rollback.sh
+    - bash infra/scripts/test-notify-mattermost.sh
+    - bash infra/scripts/test-deploy-notification.sh
+    - python3 -c 'import json; json.load(open("infra/release/release-manifest.schema.json", encoding="utf-8"))'
 
 contract_validate:
   stage: validate
   script:
     - bash infra/scripts/validate-contracts.sh
 
-jetson_validate:
+mattermost_notification_smoke:
   stage: validate
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "infra/dev"'
+      changes:
+        - infra/scripts/notify-mattermost.sh
+        - infra/scripts/test-notify-mattermost.sh
+        - infra/scripts/deploy-with-notification.sh
+        - infra/scripts/test-deploy-notification.sh
+      when: manual
+      allow_failure: true
+    - when: never
+  script:
+    - MM_NOTIFY_STRICT=true MM_CHANGE_SUMMARY="알림 포맷 검증" bash infra/scripts/notify-mattermost.sh connection_test all "$(date +%s)"
+
+iot_ota_validate:
+  stage: validate
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^iot-v[0-9]+\.[0-9]+\.[0-9]+$/'
     - changes:
         - infra/jetson/**/*
-        - infra/scripts/package-jetson-release.sh
+        - infra/scripts/package-iot-release.sh
         - infra/scripts/validate-jetson-manifest.py
         - .gitlab-ci.yml
   script:
-    - python3 -m py_compile infra/scripts/validate-jetson-manifest.py
+    - python3 -m py_compile infra/scripts/validate-jetson-manifest.py infra/scripts/test-jetson-manifest.py infra/jetson/aiot-ai-wait-ready.py
+    - python3 infra/scripts/test-jetson-manifest.py
+    - bash infra/scripts/test-jetson-updater.sh
+    - bash infra/scripts/test-jetson-readiness.sh
     - python3 -c 'import json; json.load(open("infra/jetson/manifest.schema.json", encoding="utf-8"))'
+    - grep -Eq '^Wants=.*aiot-ai.service' infra/jetson/aiot-robot.service
+    - '! grep -q ''^After=.*aiot-update.service'' infra/jetson/aiot-ai.service infra/jetson/aiot-robot.service'
+    - grep -q 'ROS_LOCALHOST_ONLY=1' infra/jetson/aiot-ai.service
+    - grep -q 'ConditionPathExists=/opt/aiot/secrets/ros.env' infra/jetson/aiot-ros.service
+    - grep -Eq '^Wants=.*aiot-ros.service' infra/jetson/aiot-robot.service
+    - grep -q '/opt/aiot/iot/current/robot/scripts/run.sh' infra/jetson/aiot-robot.service
+    - grep -q 'OnUnitActiveSec=5min' infra/jetson/aiot-update.timer
+    - grep -q 'flock -n 8' infra/jetson/aiot-update.sh
+    - grep -q 'systemctl restart aiot-ros.service' infra/jetson/aiot-update.sh
+    - grep -q 'run_integrated.py' robot/scripts/run.sh
     - |
       ota_root="$(mktemp -d /tmp/aiot-ota-offline.XXXXXX)"
       cleanup_ota_test() {
@@ -72,17 +108,65 @@ jetson_validate:
       trap cleanup_ota_test EXIT
       output="$(AIOT_ROOT="${ota_root}" bash infra/jetson/aiot-update.sh)"
       printf '%s\n' "${output}" | grep -q 'phase=config result=missing'
+    - |
+      (
+        package_test_root="$(mktemp -d /tmp/aiot-iot-package-test.XXXXXX)"
+        cleanup_iot_package_test() {
+          find "${package_test_root}" -depth -delete
+        }
+        trap cleanup_iot_package_test EXIT
+
+        test_commit="${CI_COMMIT_SHA:-$(git rev-parse HEAD)}"
+        IOT_COMMIT="${test_commit}" \
+          IOT_ARTIFACT_URL="https://example.invalid/aiot-iot-v0.0.0.tar.gz" \
+          bash infra/scripts/package-iot-release.sh \
+            iot-v0.0.0 "${package_test_root}"
+
+        python3 - "${package_test_root}/aiot-iot-v0.0.0.tar.gz" <<'PY'
+      import pathlib
+      import sys
+      import tarfile
+
+      allowed_roots = {"robot", "scripts", "VERSION", "manifest.json", "CHECKSUMS.sha256"}
+      seen_roots = set()
+      with tarfile.open(sys.argv[1], "r:gz") as archive:
+          for member in archive.getmembers():
+              path = pathlib.PurePosixPath(member.name)
+              normalized = pathlib.PurePosixPath(*[part for part in path.parts if part != "."])
+              if (
+                  path.is_absolute()
+                  or ".." in path.parts
+                  or member.isdev()
+                  or not normalized.parts
+                  or normalized.parts[0] not in allowed_roots
+              ):
+                  raise ValueError(f"unsafe or unexpected archive member: {member.name}")
+              if normalized.name in {
+                  ".env",
+                  "route.local.yaml",
+                  "robot_service_token",
+                  "robot-service-token",
+                  "command-cache.json",
+                  "patrol-deploy.lock",
+              } or normalized.suffix in {".pem", ".key"}:
+                  raise ValueError(f"secret or local state in archive: {member.name}")
+              seen_roots.add(normalized.parts[0])
+          if seen_roots != allowed_roots:
+              missing = sorted(allowed_roots - seen_roots)
+              raise ValueError(f"missing archive roots: {missing}")
+      PY
+      )
 
 frontend_ci:
   stage: test
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - frontend/package.json
       changes:
         - frontend/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "front/dev" || $CI_COMMIT_BRANCH == "front/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - frontend/package.json
       changes:
@@ -99,7 +183,7 @@ frontend_ci:
 backend_ci:
   stage: test
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - backend/build.gradle
         - backend/build.gradle.kts
@@ -107,7 +191,7 @@ backend_ci:
       changes:
         - backend/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "back/dev" || $CI_COMMIT_BRANCH == "back/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - backend/build.gradle
         - backend/build.gradle.kts
@@ -139,14 +223,14 @@ backend_ci:
 iot_ci:
   stage: test
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_COMMIT_TAG =~ /^iot-v[0-9]+\.[0-9]+\.[0-9]+$/'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
         - robot/**/CMakeLists.txt
         - robot/pyproject.toml
         - robot/requirements.txt
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "iot/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
@@ -156,7 +240,7 @@ iot_ci:
       changes:
         - robot/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "iot/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "iot/dev" || $CI_COMMIT_BRANCH == "iot/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
@@ -168,17 +252,35 @@ iot_ci:
         - .gitlab-ci.yml
     - when: never
   script:
-    - find robot -type f -name '*.py' -print0 | xargs -0 -r python3 -m py_compile
+    - test -x robot/scripts/run.sh
+    - test -x robot/scripts/install.sh
+    - test -x robot/scripts/test.sh
+    - test -x robot/scripts/smoke-test.sh
+    - test -s robot/docs/ai-ros-contract-v1.md
+    - find robot/scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+    - |
+      docker run --rm \
+        --mount "type=bind,src=${CI_PROJECT_DIR}/robot,dst=/workspace/robot,readonly" \
+        --env PYTHONDONTWRITEBYTECODE=1 \
+        python:3.12-slim-bookworm \
+        bash -euo pipefail -c '
+          cp -a /workspace/robot /tmp/robot
+          cd /tmp
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --retries 5 \
+            --timeout 30 \
+            -r robot/requirements.txt
+          PYTHON_COMMAND=python bash robot/scripts/test.sh
+          find robot -type f -name "*.py" -print0 | \
+            xargs -0 -r python -m py_compile
+        '
 
 ai_ci:
   stage: test
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
-      exists:
-        - ai/**/*.py
-        - ai/pyproject.toml
-        - ai/requirements.txt
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "ai/master" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - ai/**/*.py
         - ai/pyproject.toml
@@ -186,7 +288,7 @@ ai_ci:
       changes:
         - ai/**/*
         - .gitlab-ci.yml
-    - if: '$CI_COMMIT_BRANCH == "ai/dev" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_COMMIT_BRANCH == "ai/dev" || $CI_COMMIT_BRANCH == "ai/master" || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
       exists:
         - ai/**/*.py
         - ai/pyproject.toml
@@ -205,7 +307,7 @@ gpu_environment:
   interruptible: false
   resource_group: ai-gpu-device3
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|infra\/dev|develop|master)$/'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH =~ /^(ai\/(dev|master)|infra\/(dev|master)|develop|master)$/'
       when: manual
       allow_failure: true
     - when: never
@@ -237,7 +339,7 @@ ai_train:
   timeout: 6h
   resource_group: ai-gpu-device3
   rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|develop|master)$/'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/(dev|master)|develop|master)$/'
       exists:
         - ai/scripts/train.sh
       when: manual
@@ -265,7 +367,7 @@ ai_convert:
     - job: ai_train
       artifacts: true
   rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/dev|develop|master)$/'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_BRANCH =~ /^(ai\/(dev|master)|develop|master)$/'
       exists:
         - ai/scripts/convert.sh
         - ai/scripts/train.sh
@@ -283,7 +385,7 @@ ai_convert:
       - ai/artifacts/converted/
     expire_in: 14 days
 
-platform_smoke:
+infra_fixture_smoke:
   stage: build
   rules:
     - changes:
@@ -322,6 +424,12 @@ platform_smoke:
 frontend_image:
   stage: build
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/master"'
+      exists:
+        - frontend/package.json
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "front/master"'
+      exists:
+        - frontend/package.json
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - frontend/package.json
@@ -340,11 +448,17 @@ frontend_image:
   script:
     - test -f frontend/package.json
     - test -f frontend/package-lock.json
-    - docker build --pull -t "aiot-frontend:${CI_COMMIT_SHA:0:12}" frontend
+    - docker build --pull -f infra/docker/frontend.Dockerfile --build-arg VITE_API_BASE_URL= --build-arg VITE_USE_MOCKS=false -t "aiot-frontend:front-${CI_COMMIT_SHA:0:12}" frontend
 
 backend_image:
   stage: build
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/master"'
+      exists:
+        - backend/gradlew
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "back/master"'
+      exists:
+        - backend/gradlew
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/dev" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master")'
       exists:
         - backend/gradlew
@@ -362,71 +476,170 @@ backend_image:
     - when: never
   script:
     - test -f backend/gradlew
-    - docker build --pull -t "aiot-backend:${CI_COMMIT_SHA:0:12}" backend
+    - docker build --pull -t "aiot-backend:back-${CI_COMMIT_SHA:0:12}" backend
 
-jetson_package:
+frontend_candidate_integration:
+  stage: integration
+  interruptible: false
+  needs:
+    - frontend_image
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "front/master"'
+      exists:
+        - frontend/package.json
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "front/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - frontend/package.json
+    - when: never
+  script:
+    - test -r /srv/aiot/deploy/current.env
+    - source /srv/aiot/deploy/current.env
+    - test "${BACKEND_ENABLED:-false}" = true
+    - export FRONTEND_IMAGE="aiot-frontend:front-${CI_COMMIT_SHA:0:12}"
+    - export BACKEND_IMAGE
+    - export INTEGRATION_PROJECT="aiot-front-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - export INTEGRATION_PORT="$((20000 + CI_JOB_ID % 10000))"
+    - bash infra/scripts/integration-test.sh
+  after_script:
+    - |
+      if [ "${CI_JOB_STATUS}" = failed ]; then
+        started_epoch="$(date -d "${CI_JOB_STARTED_AT}" +%s 2>/dev/null || date +%s)"
+        bash infra/scripts/notify-mattermost.sh integration_failed frontend "${started_epoch}" || true
+      fi
+
+backend_candidate_integration:
+  stage: integration
+  interruptible: false
+  needs:
+    - backend_image
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "back/master"'
+      exists:
+        - backend/gradlew
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "back/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - backend/gradlew
+    - when: never
+  script:
+    - test -r /srv/aiot/deploy/current.env
+    - source /srv/aiot/deploy/current.env
+    - test "${FRONTEND_ENABLED:-false}" = true
+    - export FRONTEND_IMAGE
+    - export BACKEND_IMAGE="aiot-backend:back-${CI_COMMIT_SHA:0:12}"
+    - export INTEGRATION_PROJECT="aiot-back-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+    - export INTEGRATION_PORT="$((20000 + CI_JOB_ID % 10000))"
+    - bash infra/scripts/integration-test.sh
+  after_script:
+    - |
+      if [ "${CI_JOB_STATUS}" = failed ]; then
+        started_epoch="$(date -d "${CI_JOB_STARTED_AT}" +%s 2>/dev/null || date +%s)"
+        bash infra/scripts/notify-mattermost.sh integration_failed backend "${started_epoch}" || true
+      fi
+
+iot_package:
   stage: package
   interruptible: false
+  variables:
+    GIT_DEPTH: "0"
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_COMMIT_TAG =~ /^iot-v[0-9]+\.[0-9]+\.[0-9]+$/'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
         - robot/**/CMakeLists.txt
-        - ai/**/*.py
-        - ai/pyproject.toml
-        - ai/requirements.txt
+        - robot/pyproject.toml
+        - robot/requirements.txt
     - when: never
   script:
-    - export JETSON_ARCHIVE="aiot-${CI_COMMIT_TAG}.tar.gz"
-    - export JETSON_ARTIFACT_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-jetson/${CI_COMMIT_TAG}/${JETSON_ARCHIVE}"
-    - export ROBOT_COMMIT="${CI_COMMIT_SHA}"
-    - export AI_COMMIT="${CI_COMMIT_SHA}"
-    - bash infra/scripts/package-jetson-release.sh "${CI_COMMIT_TAG}" build/jetson
+    - git fetch origin '+refs/heads/iot/master:refs/remotes/origin/iot/master'
+    - git merge-base --is-ancestor "${CI_COMMIT_SHA}" refs/remotes/origin/iot/master
+    - export IOT_ARCHIVE="aiot-${CI_COMMIT_TAG}.tar.gz"
+    - export IOT_ARTIFACT_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-iot/${CI_COMMIT_TAG}/${IOT_ARCHIVE}"
+    - export IOT_COMMIT="${CI_COMMIT_SHA}"
+    - bash infra/scripts/package-iot-release.sh "${CI_COMMIT_TAG}" build/iot
   artifacts:
     name: "${CI_COMMIT_TAG}"
     paths:
-      - build/jetson/*.tar.gz
-      - build/jetson/*.manifest.json
+      - build/iot/*.tar.gz
+      - build/iot/*.manifest.json
     expire_in: 14 days
 
-jetson_publish:
+iot_publish:
   stage: deploy
   interruptible: false
-  resource_group: aiot-jetson-stable
+  resource_group: aiot-iot-stable
   needs:
-    - job: jetson_package
+    - job: iot_package
       artifacts: true
   rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^jetson-v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^iot-v[0-9]+\.[0-9]+\.[0-9]+$/'
       exists:
         - robot/**/*.py
         - robot/**/package.xml
         - robot/**/CMakeLists.txt
-        - ai/**/*.py
-        - ai/pyproject.toml
-        - ai/requirements.txt
+        - robot/pyproject.toml
+        - robot/requirements.txt
       when: manual
       allow_failure: false
     - when: never
   script:
-    - export JETSON_ARCHIVE="build/jetson/aiot-${CI_COMMIT_TAG}.tar.gz"
-    - export JETSON_MANIFEST="${JETSON_ARCHIVE}.manifest.json"
-    - export JETSON_PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-jetson/${CI_COMMIT_TAG}/aiot-${CI_COMMIT_TAG}.tar.gz"
-    - test -s "${JETSON_ARCHIVE}"
-    - test -s "${JETSON_MANIFEST}"
-    - python3 infra/scripts/validate-jetson-manifest.py "${JETSON_MANIFEST}" infra/jetson/manifest.schema.json
-    - curl --fail --silent --show-error --header "JOB-TOKEN:${CI_JOB_TOKEN}" --upload-file "${JETSON_ARCHIVE}" "${JETSON_PACKAGE_URL}"
-    - test -d /srv/aiot/releases/jetson/stable
-    - export STABLE_TMP="/srv/aiot/releases/jetson/stable/.manifest.${CI_PIPELINE_ID}.${CI_JOB_ID}.tmp"
-    - install -m 0644 "${JETSON_MANIFEST}" "${STABLE_TMP}"
-    - mv -f "${STABLE_TMP}" /srv/aiot/releases/jetson/stable/manifest.json
-    - python3 infra/scripts/validate-jetson-manifest.py /srv/aiot/releases/jetson/stable/manifest.json infra/jetson/manifest.schema.json
+    - export MM_JOB_STARTED_EPOCH="$(date +%s)"
+    - export IOT_ARCHIVE="build/iot/aiot-${CI_COMMIT_TAG}.tar.gz"
+    - export IOT_MANIFEST="${IOT_ARCHIVE}.manifest.json"
+    - export IOT_PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/aiot-iot/${CI_COMMIT_TAG}/aiot-${CI_COMMIT_TAG}.tar.gz"
+    - test -s "${IOT_ARCHIVE}"
+    - test -s "${IOT_MANIFEST}"
+    - python3 infra/scripts/validate-jetson-manifest.py "${IOT_MANIFEST}" infra/jetson/manifest.schema.json
+    - curl --fail --silent --show-error --header "JOB-TOKEN:${CI_JOB_TOKEN}" --upload-file "${IOT_ARCHIVE}" "${IOT_PACKAGE_URL}"
+    - test -d /srv/aiot/releases/jetson/iot/stable
+    - export STABLE_TMP="/srv/aiot/releases/jetson/iot/stable/.manifest.${CI_PIPELINE_ID}.${CI_JOB_ID}.tmp"
+    - install -m 0644 "${IOT_MANIFEST}" "${STABLE_TMP}"
+    - mv -f "${STABLE_TMP}" /srv/aiot/releases/jetson/iot/stable/manifest.json
+    - python3 infra/scripts/validate-jetson-manifest.py /srv/aiot/releases/jetson/iot/stable/manifest.json infra/jetson/manifest.schema.json
+    - bash infra/scripts/notify-mattermost.sh jetson_published jetson "${MM_JOB_STARTED_EPOCH}" || true
   environment:
-    name: jetson-stable
-    url: https://i15e103.p.ssafy.io/jetson/releases/stable/manifest.json
+    name: jetson-iot-stable
+    url: https://i15e103.p.ssafy.io/jetson/releases/iot/stable/manifest.json
 
-deploy_master:
+deploy_frontend_master:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  timeout: 20m
+  needs:
+    - frontend_image
+    - frontend_candidate_integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "front/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - frontend/package.json
+    - when: never
+  script:
+    - INTEGRATION_STATUS=passed bash infra/scripts/deploy-with-notification.sh front/master "$CI_COMMIT_SHA" frontend
+  environment:
+    name: production/frontend
+    url: https://i15e103.p.ssafy.io
+
+deploy_backend_master:
+  stage: deploy
+  interruptible: false
+  resource_group: aiot-ec2-deploy
+  timeout: 20m
+  needs:
+    - backend_image
+    - backend_candidate_integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "back/master" && $DEPLOY_FREEZE != "true"'
+      exists:
+        - backend/gradlew
+    - when: never
+  script:
+    - INTEGRATION_STATUS=passed bash infra/scripts/deploy-with-notification.sh back/master "$CI_COMMIT_SHA" backend
+  environment:
+    name: production/backend
+    url: https://i15e103.p.ssafy.io
+
+deploy_root_master:
   stage: deploy
   interruptible: false
   resource_group: aiot-ec2-deploy

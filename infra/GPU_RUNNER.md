@@ -76,6 +76,6 @@ GPU 노출 방식은 [NVIDIA CUDA environment variables](https://docs.nvidia.com
 2. 출력에 물리 Device3의 UUID·driver와 Python 환경만 남고 secret이 없는지 확인한다.
 3. AI 팀이 `ai/scripts/train.sh`와 출력 경로 `ai/artifacts/training/`을 제공한 뒤 `ai_train`을 실행한다.
 4. 변환 계약이 준비되면 `ai_convert`를 실행하고 `ai/artifacts/converted/`의 모델·manifest·checksum을 확인한다.
-5. 승인된 모델만 `jetson-vX.Y.Z` release에 포함한다.
+5. 승인된 모델은 AI 전용 수동 설치·향후 AI release로 관리하며 `iot-vX.Y.Z`에는 포함하지 않는다.
 
 Runner가 없거나 offline이면 일반 EC2 CI는 계속 동작하고 GPU manual job만 pending 상태가 된다.

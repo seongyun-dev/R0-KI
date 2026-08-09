@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 
 const FOCUSABLE =
@@ -6,6 +6,11 @@ const FOCUSABLE =
 
 /** Modal/Drawer 공통 동작 — Esc 닫기 + 포커스 트랩 + 바디 스크롤 잠금 + 포커스 복원 */
 export function useDialog(open: boolean, onClose: () => void, panelRef: RefObject<HTMLElement>) {
+  // onClose는 매 렌더 새로 생길 수 있으므로 ref로 최신값만 참조 —
+  // effect 의존성에서 빼서, 입력 중 재렌더마다 포커스가 다시 잡히는(=포커스 튕김) 문제를 막는다.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement as HTMLElement | null
@@ -16,7 +21,7 @@ export function useDialog(open: boolean, onClose: () => void, panelRef: RefObjec
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
       if (e.key === 'Tab' && panel) {
@@ -42,7 +47,8 @@ export function useDialog(open: boolean, onClose: () => void, panelRef: RefObjec
       document.body.style.overflow = ''
       prev?.focus()
     }
-  }, [open, onClose, panelRef])
+    // open/panelRef만 의존 — onClose 변경으로는 재실행하지 않는다
+  }, [open, panelRef])
 }
 
 /** 마운트 직후 한 프레임 뒤 true — 진입 트랜지션용 */

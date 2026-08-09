@@ -13,6 +13,7 @@ runtime_scripts=(
   initialize-secrets.sh
   install-nginx.sh
   monitor-health.sh
+  release-manifest.py
   rollback.sh
   sync-certificates.sh
   sync-runtime.sh

@@ -9,87 +9,103 @@ import {
   YAxis,
 } from 'recharts'
 import type { HourlyEventStat } from '../../types/domain'
-import { ChartFrame } from './ChartFrame'
+import { AXIS_TICK, AXIS_TICK_NUM, RAMP } from './chartTheme'
 import { ChartTooltip } from './ChartTooltip'
 
-/* 유형 → 차트 카테고리 색. 상태색(success/warning/danger)은 "상태"를 뜻하므로
-   카테고리 구분에는 쓰지 않는다. 누적 순서는 인접 색이 가장 잘 구분되도록
-   쓰레기(틸) → 주차(블루) → 위험구역(오렌지). 범례는 와이어프레임 순서 유지. */
-const SERIES = [
-  { key: '쓰레기', color: 'var(--chart-2)' },
-  { key: '주차', color: 'var(--chart-1)' },
-  { key: '위험구역', color: 'var(--chart-3)' },
+/* 시간대별 이벤트 발생(유형별 누적) — 시안 R0Ki-stats cHour 레이아웃 유지.
+   데이터만 백엔드 trend?bucket=hour3 (3시간×8칸) + 주차/쓰레기 묶음에 맞춤.
+   --graphic 단일 계열 명도 램프 — 램프 순서 = 주의도(진할수록 주의).
+   아래(진함)→위(옅음) 누적, 스택 꼭대기에 합계 라벨.
+   위험(EMERGENCY) 유형은 시안과 같이 이 차트에서 제외. */
+export const HOURLY_SERIES = [
+  { key: '주차', opacity: RAMP[1] },
+  { key: '쓰레기', opacity: RAMP[2] },
 ] as const
 
-const LEGEND = [
-  { label: '주차', color: 'var(--chart-1)' },
-  { label: '쓰레기', color: 'var(--chart-2)' },
-  { label: '위험구역', color: 'var(--chart-3)' },
-]
+/** 시리즈명 → 명도 (툴팁 마커 공유용) */
+export const HOURLY_OPACITIES = Object.fromEntries(HOURLY_SERIES.map((s) => [s.key, s.opacity]))
 
-/** 시간대별 이벤트 발생(유형별) (1m) — 누적 막대 */
-export function HourlyTypeChart({ data }: { data: HourlyEventStat[] }) {
-  const withTotal = data.map((d) => ({ ...d, total: d.주차 + d.쓰레기 + d.위험구역 }))
-  const peak = withTotal.reduce((a, b) => (b.total > a.total ? b : a), withTotal[0])
+export function HourlyTypeChart({
+  data,
+  includeA11yTable = true,
+}: {
+  data: HourlyEventStat[]
+  includeA11yTable?: boolean
+}) {
+  const withTotal = data.map((d) => ({ ...d, total: d.주차 + d.쓰레기 }))
 
   return (
-    <ChartFrame
-      title="시간대별 이벤트 발생 (유형별)"
-      caption={peak ? `${peak.slot} ${peak.total}건` : undefined}
-      legend={LEGEND}
-      table={{
-        caption: '시간대별 유형별 이벤트 발생 건수',
-        head: ['시간대', '주차', '쓰레기', '위험구역', '합계'],
-        rows: withTotal.map((d) => [d.slot, d.주차, d.쓰레기, d.위험구역, d.total]),
-      }}
-    >
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={withTotal} margin={{ top: 20, right: 12, bottom: 0, left: -18 }} barCategoryGap="22%">
-            <CartesianGrid vertical={false} stroke="var(--line)" />
-            <XAxis
-              dataKey="slot"
-              tick={{ fill: 'var(--muted)', fontSize: 10.5 }}
-              interval={0}
-              tickLine={false}
-              axisLine={{ stroke: 'var(--line)' }}
-            />
-            <YAxis
-              tick={{ fill: 'var(--muted)', fontSize: 11 }}
-              tickLine={false}
-              axisLine={false}
-              allowDecimals={false}
-              width={40}
-            />
-            <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--surface)' }} />
-            {SERIES.map((s, i) => (
-              <Bar
-                key={s.key}
-                dataKey={s.key}
-                name={s.key}
-                stackId="hour"
-                fill={s.color}
-                /* 세그먼트 사이 2px 표면 간격 */
-                stroke="var(--bg)"
-                strokeWidth={2}
-                isAnimationActive={false}
-                radius={i === SERIES.length - 1 ? [4, 4, 0, 0] : undefined}
-              >
-                {i === SERIES.length - 1 && (
-                  <LabelList
-                    dataKey="total"
-                    position="top"
-                    offset={8}
-                    fill="var(--fg)"
-                    fontSize={11}
-                    fontWeight={700}
-                  />
-                )}
-              </Bar>
+    <div className="st-chart">
+      <ResponsiveContainer width="100%" height="100%">
+        {/* 8칸 기준: 막대 간격만 소폭 조정(높이·패널 크기는 CSS 그대로) */}
+        <BarChart data={withTotal} margin={{ top: 22, right: 12, bottom: 8, left: 0 }} barCategoryGap="18%">
+          <CartesianGrid vertical={false} stroke="var(--hair)" strokeDasharray="4 4" />
+          <XAxis
+            dataKey="slot"
+            tick={AXIS_TICK}
+            interval={0}
+            tickLine={false}
+            axisLine={{ stroke: 'var(--hair)' }}
+          />
+          <YAxis
+            tick={AXIS_TICK_NUM}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+            width={40}
+          />
+          <Tooltip
+            content={<ChartTooltip opacities={HOURLY_OPACITIES} />}
+            cursor={{ fill: 'var(--graphic)', fillOpacity: 0.07 }}
+          />
+          {HOURLY_SERIES.map((s, i) => (
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              name={s.key}
+              stackId="hour"
+              maxBarSize={34}
+              fill="var(--graphic)"
+              fillOpacity={s.opacity}
+              isAnimationActive={false}
+              radius={i === HOURLY_SERIES.length - 1 ? [6, 6, 0, 0] : undefined}
+            >
+              {/* 스택 꼭대기(마지막 시리즈) 위에 합계 */}
+              {i === HOURLY_SERIES.length - 1 && (
+                <LabelList
+                  dataKey="total"
+                  position="top"
+                  offset={7}
+                  fill="var(--text-1)"
+                  fontFamily="var(--mono)"
+                  fontSize={12.5}
+                  fontWeight={700}
+                />
+              )}
+            </Bar>
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+
+      {includeA11yTable && (
+        <table className="sr-only">
+          <caption>시간대별 유형별 이벤트 발생 건수</caption>
+          <thead>
+            <tr>
+              <th scope="col">시간대</th>
+              <th scope="col">주차</th><th scope="col">쓰레기</th><th scope="col">합계</th>
+            </tr>
+          </thead>
+          <tbody>
+            {withTotal.map((d) => (
+              <tr key={d.slot}>
+                <th scope="row">{d.slot}</th>
+                <td>{d.주차}</td><td>{d.쓰레기}</td><td>{d.total}</td>
+              </tr>
             ))}
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </ChartFrame>
+          </tbody>
+        </table>
+      )}
+    </div>
   )
 }

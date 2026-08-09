@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangleIcon } from '../../components/icons'
 import { Button } from '../../components/ui'
 
 export type HeroProps = {
@@ -15,18 +14,8 @@ export function Hero({ hintHidden }: HeroProps) {
     <section id="home">
       <div className="hero-vignette" />
 
-      <div className="robot-chip robot-chip--status">
-        <span className="live" />
-        <span>가동중 · 3대</span>
-      </div>
-      <div className="robot-chip robot-chip--event">
-        <span className="k"><AlertTriangleIcon style={{ fontSize: '.9rem' }} /></span>
-        <span>
-          <span className="t">불법주차 · A동</span>
-          <br />
-          <span className="s">2분 전 감지</span>
-        </span>
-      </div>
+
+
       <div className="robot-hint" style={{ opacity: hintHidden ? 0 : 1 }}>
         커서를 움직이면 로봇이 따라 순찰해요
       </div>
@@ -51,7 +40,7 @@ export function Hero({ hintHidden }: HeroProps) {
             <div className="hero-stat"><div className="n"><b>자동</b></div><div className="l">순찰 기록 관리</div></div>
           </div>
           <div className="cta-row" data-reveal="up" data-gate="ready" data-delay="750" style={{ '--ry': '10px' } as React.CSSProperties}>
-            <Button variant="accent" withArrow="right" onClick={() => navigate('/signup/onboarding')}>회원가입하기</Button>
+            <Button variant="accent" withArrow="right" onClick={() => navigate('/signup/onboarding?new=1')}>회원가입하기</Button>
             <Button variant="outline" onClick={() => navigate('/login')}>관리자 로그인 →</Button>
           </div>
         </div>

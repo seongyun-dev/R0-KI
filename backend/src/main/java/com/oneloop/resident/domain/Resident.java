@@ -31,8 +31,8 @@ public class Resident extends BaseEntity {
     @Column(name = "unit_number", nullable = false, length = 20)
     private String unitNumber;
 
-    @Column(name = "kakao_notification_enabled", nullable = false)
-    private boolean kakaoNotificationEnabled = true;
+    @Column(name = "notification_enabled", nullable = false)
+    private boolean notificationEnabled = true;
 
     public Resident(
             ApartmentComplex apartmentComplex,
@@ -47,7 +47,15 @@ public class Resident extends BaseEntity {
         this.unitNumber = unitNumber;
     }
 
-    public void changeKakaoNotification(boolean enabled) {
-        this.kakaoNotificationEnabled = enabled;
+    public void changeNotificationEnabled(boolean enabled) {
+        this.notificationEnabled = enabled;
+    }
+
+    public void changeInfo(
+            String name, String phoneNumber, String buildingNumber, String unitNumber) {
+        this.name = name;
+        this.phoneNumber = phoneNumber;
+        this.buildingNumber = buildingNumber;
+        this.unitNumber = unitNumber;
     }
 }

@@ -1,5 +1,19 @@
 # AIoT operations runbook
 
+> **Jetson Robot runtime update (2026-08-03):** the device checks the stable
+> Robot-only manifest at boot and every five minutes. Activation and patrol use
+> one advisory lock, so neither can start while the other is active. The AI
+> model remains under `/home/e103/yolo-pipeline`; the active IoT release supplies
+> the ROS adapter and integrated Robot process. Use
+> [jetson/README.md](jetson/README.md) and
+> [../robot/docs/integrated-runtime-operations.md](../robot/docs/integrated-runtime-operations.md)
+> for device operations.
+
+> The EC2 runtime in this runbook is installed. The part-master pipeline, real
+> candidate integration tests, JSON release manifest, and component rollback
+> are active. Follow [CICD_V2_OPERATIONS.md](CICD_V2_OPERATIONS.md) for the
+> release process. `develop` no longer deploys production.
+
 ## Deployed topology
 
 ```text
@@ -9,7 +23,7 @@ Internet / Jetson
   └─ MQTT TLS 8883 -> aiot-mosquitto
 
 Docker network: aiot-network
-  ├─ aiot-mysql:3306       (not published to the host)
+  ├─ aiot-mysql:3306       (host loopback 127.0.0.1:3306 only)
   ├─ aiot-mosquitto:1883   (backend-only listener)
   ├─ aiot-mosquitto:8883   (published for Jetson)
   ├─ aiot-backend          (added when its Dockerfile exists)
@@ -29,27 +43,28 @@ Gerrit on 8988/29418 and Apache on 8989 are unrelated services. Do not modify th
 | `/srv/aiot/secrets` | Runtime credentials; never commit or print |
 | `/srv/aiot/deploy` | Root-installed deployment scripts and state |
 | `/srv/aiot/backups/runtime` | Daily local backups |
-| `/srv/aiot/releases/jetson/stable` | Public stable manifest only; artifacts remain private in GitLab |
+| `/srv/aiot/releases/jetson/iot/stable` | Public Robot stable manifest only; artifacts remain private in GitLab |
 
 The Jetson connection file is `/srv/aiot/secrets/robot-mqtt.env`. Transfer it only through an authenticated channel after the Jetson address and account are confirmed.
 
 ## CI/CD flow
 
-Part branches run validation and tests. Integration deployment comes only from `develop`; `master` deployment is manual.
+Part dev branches run CI only. Each part master deploys only its own component.
+`develop` records a verified multi-part combination without deploying it, and
+root `master` remains a manually approved final milestone.
 
 ```text
-front/dev ─┐
-back/dev  ─┼─> develop --automatic--> EC2
-iot/dev   ─┤       └──> master --manual--> EC2
-ai/dev    ─┤
-infra/dev ─┘
+front/dev -> front/master --automatic Front only--> EC2
+back/dev  -> back/master  --automatic Back only----> EC2
+verified part releases -> develop --no deployment--> root master --manual
 ```
 
-Jetson release publishing is intentionally separate from merge deployment. A
-`jetson-vX.Y.Z` tag creates a versioned Robot/AI bundle, and the protected
-manual `jetson_publish` job uploads it to the Generic Package Registry and
-atomically updates the public stable manifest. The device pulls and validates
-the release at boot. See [jetson/](jetson/) and [HANDOFF.md](HANDOFF.md).
+Jetson release publishing is intentionally separate from merge deployment. An
+`iot-vX.Y.Z` tag on a commit contained in `iot/master` creates a versioned
+Robot-only bundle. The protected manual `iot_publish` job uploads it to the
+Generic Package Registry and atomically updates the public IoT manifest. The
+device pulls and validates the release at boot. `aiot-ai.service` manages the
+existing AI baseline separately. See [jetson/README.md](jetson/README.md).
 
 The project runner uses the `aiot-ec2` tag, Shell executor, one concurrent job, and a 30-minute maximum job timeout. Because Docker group access is equivalent to host root access, keep the runner locked to this project, keep untagged jobs disabled, protect release branches, and require infrastructure review for `.gitlab-ci.yml` and `infra/**`.
 
@@ -86,6 +101,26 @@ atomic `latest` symlink. Backups older than seven days are listed but never
 deleted automatically. They remain on the same EC2 disk, so an external
 encrypted destination is still required for instance or volume failure.
 
+## MySQL access through an SSH tunnel
+
+MySQL is published only on the EC2 loopback interface. Do not add an AWS
+Security Group or UFW rule for port 3306. Operators can use MySQL Workbench with
+`Standard TCP/IP over SSH` and the following connection:
+
+| Setting | Value |
+| --- | --- |
+| SSH hostname | `i15e103.p.ssafy.io:22` |
+| SSH username | `ubuntu` |
+| SSH key | Operator-local `I15E103T.pem` path |
+| MySQL hostname | `127.0.0.1` |
+| MySQL port | `3306` |
+| MySQL username | `root` |
+
+Read `MYSQL_ROOT_PASSWORD` from `/srv/aiot/secrets/runtime.env` through an
+approved secret-sharing channel. Never commit, print, or send it to a team chat.
+The root account can modify and delete every table, so use this connection only
+for authorized operational inspection.
+
 ## Application activation
 
 Each component can be activated independently after its source contract is complete.
@@ -104,19 +139,22 @@ environment detection are documented in [GPU_RUNNER.md](GPU_RUNNER.md).
 
 Jetson release procedure:
 
-1. Merge compatible AI and Robot code with their install/run/smoke contracts.
-2. Create a protected `jetson-vX.Y.Z` tag.
-3. Verify `jetson_package`, then manually approve `jetson_publish`.
+1. Merge Robot code with its install/run/test/smoke contracts into `iot/master`.
+2. Create a protected `iot-vX.Y.Z` tag on a commit contained in `iot/master`.
+3. Verify `iot_package`, then manually approve `iot_publish`.
 4. Create a read-only Package Registry Deploy Token for the Jetson.
 5. On the Jetson, create `/opt/aiot/secrets/package-read.env` and run
    `sudo bash infra/jetson/install.sh` from an authenticated source checkout.
-6. Start `aiot-update.service`, verify `current`, `previous`, and `state/VERSION`,
-   then start `aiot-robot.service`.
+6. Start `aiot-update.service`, then verify `/opt/aiot/iot/current`, `previous`,
+   and `state/VERSION`.
+7. Start `aiot-ai.service`, verify `/run/aiot/ai-ready.json`, then start
+   `aiot-robot.service`. Enable `aiot-update.timer` after this first validation.
 
-Do not install the updater until the device runtime entrypoint and its backup
-have been confirmed. A missing network, invalid manifest, incompatible
-JetPack/architecture, checksum failure, or smoke failure must leave the last
-healthy release active.
+`aiot-robot.service` only Wants/After AI, so an AI failure leaves Robot alive in
+limited mode. A missing network, invalid manifest, incompatible AI contract,
+JetPack/architecture, checksum failure, or stationary smoke failure must leave
+the last healthy Robot release active. IoT OTA must not modify the AI venv,
+models, engines, logs, or evidence.
 
 ## MQTT migration
 

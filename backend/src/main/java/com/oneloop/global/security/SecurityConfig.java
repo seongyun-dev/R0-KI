@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -23,16 +24,25 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 public class SecurityConfig {
 
     private static final String[] PUBLIC_ENDPOINTS = {
-        "/api/auth/signin", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html"
+        "/api/auth/signup",
+        "/api/auth/signin",
+        "/api/internal/stream-sessions/validate",
+        "/v3/api-docs/**",
+        "/swagger-ui/**",
+        "/swagger-ui.html",
+        "/api/uploads/**"
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final RobotTokenAuthenticationFilter robotTokenAuthenticationFilter;
     private final HandlerExceptionResolver handlerExceptionResolver;
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            RobotTokenAuthenticationFilter robotTokenAuthenticationFilter,
             HandlerExceptionResolver handlerExceptionResolver) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.robotTokenAuthenticationFilter = robotTokenAuthenticationFilter;
         this.handlerExceptionResolver = handlerExceptionResolver;
     }
 
@@ -49,10 +59,26 @@ public class SecurityConfig {
                                 authorize
                                         .requestMatchers(HttpMethod.OPTIONS, "/**")
                                         .permitAll()
+                                        .requestMatchers(
+                                                HttpMethod.POST, "/api/map/mapping-sessions/*/map")
+                                        .hasRole("ROBOT")
+                                        .requestMatchers("/api/robot/**")
+                                        .hasRole("ROBOT")
+                                        .requestMatchers(HttpMethod.POST, "/api/events/*/evidence")
+                                        .hasRole("ROBOT")
                                         .requestMatchers(PUBLIC_ENDPOINTS)
                                         .permitAll()
                                         .anyRequest()
-                                        .authenticated())
+                                        .access(
+                                                (authentication, context) -> {
+                                                    var current = authentication.get();
+                                                    return new AuthorizationDecision(
+                                                            current != null
+                                                                    && current.isAuthenticated()
+                                                                    && current.getPrincipal()
+                                                                            instanceof
+                                                                            CustomUserDetails);
+                                                }))
                 .exceptionHandling(
                         exception ->
                                 exception
@@ -72,8 +98,10 @@ public class SecurityConfig {
                                                                 null,
                                                                 new BusinessException(
                                                                         ErrorCode.ACCESS_DENIED))))
-                .addFilterBefore(
-                        jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // 로봇 토큰 필터를 JWT 필터보다 먼저 실행 - 로봇 토큰이면 여기서 먼저 인증되고,
+                // JwtAuthenticationFilter는 이미 인증된 요청이라 판단해 스킵함(JwtAuthenticationFilter 참고)
+                .addFilterBefore(robotTokenAuthenticationFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

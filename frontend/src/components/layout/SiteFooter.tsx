@@ -24,7 +24,7 @@ export function SiteFooter() {
         {open ? (
           <div ref={choicesRef} className="footer-cta__choices" role="group" aria-label="시작 방법 선택">
             {/* 밝은 배경이라 두 번째 버튼은 outline이 또렷하다 */}
-            <Button variant="accent" size="lg" withArrow="up-right" to="/signup/onboarding">
+            <Button variant="accent" size="lg" withArrow="up-right" to="/signup/onboarding?new=1">
               회원가입하기
             </Button>
             <Button variant="outline" size="lg" to="/login">

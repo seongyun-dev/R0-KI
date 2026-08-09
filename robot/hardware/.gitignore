@@ -1,0 +1,10 @@
+.venv/
+arduino-data/
+build/
+backups/
+logs/
+__pycache__/
+*.py[cod]
+*.bin
+*.elf
+*.map

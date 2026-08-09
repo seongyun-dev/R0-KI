@@ -1,14 +1,22 @@
 package com.oneloop.auth.service;
 
+import com.oneloop.apartment.domain.ApartmentComplex;
+import com.oneloop.apartment.repository.ApartmentComplexRepository;
+import com.oneloop.auth.dto.ApartmentRequest;
 import com.oneloop.auth.dto.CurrentMemberResponse;
 import com.oneloop.auth.dto.SigninRequest;
 import com.oneloop.auth.dto.SigninResponse;
+import com.oneloop.auth.dto.SignupRequest;
+import com.oneloop.auth.dto.SignupResponse;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.security.JwtTokenProvider;
+import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.member.domain.Member;
 import com.oneloop.member.domain.MemberStatus;
 import com.oneloop.member.repository.MemberRepository;
+import com.oneloop.robot.domain.RobotStatus;
+import com.oneloop.robot.repository.RobotRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,8 +29,52 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthService {
 
     private final MemberRepository memberRepository;
+    private final ApartmentComplexRepository apartmentComplexRepository;
+    private final RobotRepository robotRepository;
+    private final PatrolMapRepository patrolMapRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+
+    @Transactional
+    public SignupResponse signup(SignupRequest request) {
+        if (memberRepository.existsByUsername(request.getUsername())) {
+            throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
+        }
+
+        ApartmentRequest apartmentRequest = request.getApartment();
+        ApartmentComplex apartmentComplex =
+                apartmentComplexRepository
+                        .findByNameAndPostalCodeAndAddress(
+                                apartmentRequest.getName(),
+                                apartmentRequest.getPostalCode(),
+                                apartmentRequest.getAddress())
+                        .orElse(null);
+
+        boolean isNewApartment = apartmentComplex == null;
+        if (isNewApartment) {
+            apartmentComplex =
+                    apartmentComplexRepository.save(
+                            new ApartmentComplex(
+                                    apartmentRequest.getName(),
+                                    apartmentRequest.getAddress(),
+                                    apartmentRequest.getPostalCode()));
+        }
+
+        Member member =
+                Member.create(
+                        apartmentComplex,
+                        request.getUsername(),
+                        request.getPassword(),
+                        request.getName(),
+                        request.getPhoneNumber(),
+                        passwordEncoder);
+        memberRepository.save(member);
+
+        String accessToken =
+                jwtTokenProvider.createAccessToken(
+                        member.getId().toString(), apartmentComplex.getId(), List.of());
+        return new SignupResponse(isNewApartment, accessToken);
+    }
 
     /**
      * 아이디와 비밀번호로 사용자를 인증하고, 사용자 식별자를 subject로 갖는 Access Token을 발급한다.
@@ -35,8 +87,7 @@ public class AuthService {
         Member member =
                 memberRepository
                         .findByUsername(request.getUsername())
-                        .orElseThrow(
-                                () -> new BusinessException(ErrorCode.INVALID_CREDENTIALS));
+                        .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_CREDENTIALS));
 
         if (!passwordEncoder.matches(request.getPassword(), member.getPassword())) {
             throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
@@ -45,9 +96,16 @@ public class AuthService {
             throw new BusinessException(ErrorCode.MEMBER_NOT_ACTIVE);
         }
 
+        Long apartmentComplexId = member.getApartmentComplex().getId();
         String accessToken =
-                jwtTokenProvider.createAccessToken(member.getId().toString(), List.of());
-        return new SigninResponse(accessToken);
+                jwtTokenProvider.createAccessToken(
+                        member.getId().toString(), apartmentComplexId, List.of());
+        boolean hasRobot =
+                robotRepository.countByApartmentComplexIdAndStatusNot(
+                                apartmentComplexId, RobotStatus.DELETED)
+                        > 0;
+        boolean hasMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId).isPresent();
+        return new SigninResponse(accessToken, member.getName(), hasRobot, hasMap);
     }
 
     /**

@@ -36,7 +36,8 @@ install -d -m 2770 -o root -g aiot \
 install -d -m 2775 -o root -g aiot \
   /srv/aiot/releases \
   /srv/aiot/releases/jetson \
-  /srv/aiot/releases/jetson/stable
+  /srv/aiot/releases/jetson/iot \
+  /srv/aiot/releases/jetson/iot/stable
 
 install -d -m 0750 -o 1883 -g 1883 /srv/aiot/certs/mqtt
 

@@ -22,7 +22,6 @@ repositories {
 spotless {
 	java {
 		googleJavaFormat().aosp()
-		formatAnnotations()
 		removeUnusedImports()
 		trimTrailingWhitespace()
 		endWithNewline()
@@ -43,7 +42,10 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3'
+	implementation 'com.openhtmltopdf:openhtmltopdf-pdfbox:1.0.10'
 	implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+	implementation 'com.solapi:sdk:1.0.3'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'

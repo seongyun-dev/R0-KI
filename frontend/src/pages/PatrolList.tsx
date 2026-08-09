@@ -1,103 +1,168 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { PageHeader } from '../components/layout/PageHeader'
-import {
-  Button,
-  Card,
-  DataTable,
-  Select,
-  QueryErrorState,
-  type Column,
-} from '../components/ui'
-import { useRobot } from '../features/robots/useRobot'
+import { Link, useNavigate } from 'react-router-dom'
+import { R0KiShell } from '../components/layout/R0KiShell'
 import { usePatrols } from '../features/patrol/usePatrols'
-import type { Patrol } from '../types/domain'
-import { env } from '../config/env'
+import { useRobots } from '../features/robots/useRobot'
 import { useAuthStore } from '../features/auth/useAuthStore'
+import { env } from '../config/env'
+import type { Patrol } from '../types/domain'
 
-const columns: Column<Patrol>[] = [
-  { key: 'id', header: '순찰ID', render: (p) => <span className="font-mono font-bold tabular">{p.id}</span> },
-  { key: 'start', header: '시작', render: (p) => <span className="font-mono tabular">{p.date} {p.start}</span> },
-  { key: 'end', header: '종료', render: (p) => <span className="font-mono tabular">{p.end ?? '-'}</span> },
-  { key: 'route', header: '순찰 경로 (구역 순서)', render: (p) => <span className="text-muted">{p.routeZones.join(' → ')}</span> },
-  { key: 'events', header: '이벤트', render: (p) => <span className="font-mono tabular">{p.eventCount}</span>, align: 'right' },
-  {
-    key: 'detail',
-    header: '',
-    align: 'right',
-    render: (p) => (
-      <Link to={`/app/patrol/${p.id}`} className="font-semibold text-accent underline-offset-4 hover:underline">
-        상세 →
-      </Link>
-    ),
-  },
-]
+/* R0-Ki 순찰 이력 (목록) — 시안 R0Kipatrol 그대로.
+   유리 테이블: 순찰 ID · 로봇 · 시작 · 종료 · 경로(구역 순서) · 이벤트 건수.
+   데이터는 기존 usePatrols 그대로 (완료 순찰만 기록/표시). */
 
-/** 순찰 관리 목록 (1d) — 순찰 이력 R-01 */
+const PERIOD_LABEL: Record<string, string> = {
+  all: '기간 전체',
+  today: '오늘',
+  '7d': '최근 7일',
+  '30d': '최근 30일',
+}
+
 export default function PatrolList() {
+  const navigate = useNavigate()
   const sessionRobotId = useAuthStore((state) => state.robotId)
-  const selectedRobotId = env.useMocks ? 'R-01' : sessionRobotId ?? env.defaultRobotId
-  const { data: robot } = useRobot(selectedRobotId)
+  const selectedRobotId = sessionRobotId ?? env.defaultRobotId
+  const { data: robots } = useRobots()
   const [period, setPeriod] = useState('all')
-  const [status, setStatus] = useState('all')
-  const [applied, setApplied] = useState({ period: 'all', status: 'all' })
-  const { data: patrols, isLoading, error, refetch } = usePatrols({
+  const [page, setPage] = useState(0)
+  const {
+    data: patrols,
+    isLoading,
+    error,
+    refetch,
+    totalElements,
+    totalPages,
+    first,
+    last,
+  } = usePatrols({
     robotId: selectedRobotId,
-    period: applied.period,
-    status: applied.status,
+    period,
+    status: 'COMPLETED',
+    page,
+    size: 10,
+    sort: ['startedAt,DESC'],
   })
 
-  const rows = patrols ?? []
+  // 완료된 순찰만 기록/표시 (진행중 등 제외)
+  const rows = (patrols ?? []).filter((p) => p.status === '완료')
+  // 로봇 이름 — 서버 응답의 robotName 우선, 없으면 목록에서 조회
+  const nameById = new Map((robots ?? []).map((r) => [r.id, r.name]))
+  const robotLabel = (p: Patrol) => p.robotName ?? nameById.get(p.robotId) ?? p.robotId
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        breadcrumb={[{ label: 'Dashboard', to: '/app' }, { label: '순찰관리' }]}
-        title={`순찰 이력 — ${robot?.name ?? selectedRobotId ?? '로봇'}`}
-        aside={
-          robot && (
-            <span className="inline-flex items-center gap-1.5 rounded-pill bg-success-soft px-3 py-1 text-xs font-semibold text-success">
-              [ {robot.status} · 배터리 <span className="font-mono tabular">{robot.battery}%</span> ]
-            </span>
-          )
-        }
-      />
+    <R0KiShell active="patrol">
+      <div className="pcol">
+        <div className="pagehead">
+          <div>
+            <div className="crumb">
+              <Link to="/app">대시보드</Link><i>›</i><b>순찰 관리</b>
+            </div>
+            <div className="ptitle">순찰 이력</div>
+          </div>
+          <div className="headtools">
+            <select
+              className="sel"
+              aria-label="기간 선택"
+              value={period}
+              onChange={(e) => {
+                setPeriod(e.target.value)
+                setPage(0)
+              }}
+            >
+              <option value="all">기간 전체</option>
+              <option value="today">오늘</option>
+              <option value="7d">최근 7일</option>
+              <option value="30d">최근 30일</option>
+            </select>
+          </div>
+        </div>
 
-      <Card className="p-5 sm:p-6">
-        {/* 필터바 */}
-        <form
-          className="mb-4 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            setApplied({ period, status })
-          }}
-        >
-          <Select aria-label="기간 선택" value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40">
-            <option value="all">기간 전체</option>
-            <option value="today">오늘</option>
-            <option value="7d">최근 7일</option>
-            <option value="30d">최근 30일</option>
-          </Select>
-          <Select aria-label="상태" value={status} onChange={(e) => setStatus(e.target.value)} className="w-32">
-            <option value="all">상태 전체</option>
-            <option value="완료">완료</option>
-            <option value="진행중">진행중</option>
-          </Select>
-          <Button type="submit" variant="dark" size="sm">검색</Button>
-        </form>
-
-        {error ? (
-          <QueryErrorState error={error} onRetry={refetch} />
-        ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            rowKey={(p) => p.id}
-            loading={isLoading}
-            emptyMessage="조건에 맞는 순찰 이력이 없습니다"
-          />
-        )}
-      </Card>
-    </div>
+        {/* 유리 껍데기와 스크롤러를 나눈다 — .g2 의 안쪽 링/면광은 absolute 라
+            스크롤 컨테이너와 같은 엘리먼트에 두면 목록 중간에 가로선으로 딸려 온다 */}
+        <div className="glass g2 tblshell">
+          <div className="tblwrap">
+            {error ? (
+              <div className="tfoot" style={{ paddingTop: 'var(--s5)' }}>
+                <span>순찰 이력을 불러오지 못했습니다</span>
+                <button type="button" className="btn btn-s" onClick={refetch}>다시 시도</button>
+              </div>
+            ) : (
+              <>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>순찰 ID</th>
+                      <th>로봇</th>
+                      <th>시작</th>
+                      <th>종료</th>
+                      <th>순찰 경로 (구역 순서)</th>
+                      <th className="r">이벤트</th>
+                      <th className="r" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((p) => (
+                      <tr key={p.id} onClick={() => navigate(`/app/patrol/${p.id}`)}>
+                        <td className="id">{p.id}</td>
+                        <td className="bot">{robotLabel(p)}</td>
+                        <td className="tm">{p.date}<b>{p.start}</b></td>
+                        <td className="tm"><b>{p.end ?? '-'}</b></td>
+                        <td>
+                          <span className="route">
+                            {p.routeZones.map((zone, i) => (
+                              <span key={`${zone}-${i}`}>
+                                {i > 0 && <i>→ </i>}
+                                {zone}
+                              </span>
+                            ))}
+                          </span>
+                        </td>
+                        <td className="r"><span className="cnt">{p.eventCount}</span></td>
+                        <td className="r">
+                          <button type="button" className="golink">
+                            상세
+                            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="tfoot">
+                  {/* 지금 보이는 페이지 기준 — 아래 '전체 N건'(totalElements)과 구분한다 */}
+                  <span>{isLoading ? '불러오는 중…' : rows.length === 0 ? '조건에 맞는 순찰 이력이 없습니다' : `이 페이지 ${rows.length}건`}</span>
+                  <span>{PERIOD_LABEL[period] ?? '기간 전체'}</span>
+                </div>
+                <div
+                  className="tfoot"
+                  style={{ justifyContent: 'flex-end', gap: 'var(--s2)' }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={first || isLoading}
+                    onClick={() => setPage((current) => Math.max(0, current - 1))}
+                  >
+                    이전
+                  </button>
+                  <span>
+                    {totalPages === 0 ? 0 : page + 1} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-s"
+                    disabled={last || isLoading}
+                    onClick={() => setPage((current) => current + 1)}
+                  >
+                    다음
+                  </button>
+                  <span>전체 {totalElements}건</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </R0KiShell>
   )
 }

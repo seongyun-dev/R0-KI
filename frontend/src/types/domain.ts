@@ -4,6 +4,7 @@
 export type StatusLabel =
   | '완료' | '이상무' | '정상' | '순찰중' | '온라인' | '활성'
   | '진행중' | '수신됨'
+  | '종료 요청중'
   | '점검필요' | '주의'
   | '긴급' | '응급상황' | '침입'
   // 이벤트 처리 상태 — 경비원 관리 3단계 (와이어프레임 v15)
@@ -14,20 +15,20 @@ export type StatusLabel =
   | '중단' | '실패';
 
 export type RobotStatus = '대기' | '순찰중' | '충전중' | '오류' | '오프라인';
-export type PatrolStatus = '진행중' | '완료' | '중단' | '실패';
+export type PatrolStatus = '진행중' | '종료 요청중' | '완료' | '중단' | '실패';
 export type ProcessingStatus = '탐지' | '처리중' | '처리완료';
 export type RiskLevel = '낮음' | '보통' | '긴급';
 
 export type Tone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
 
-export type EventType = '불법주차' | '쓰레기' | '위험구역' | '응급상황' | '화재 의심' | '침입' | '정기 점검';
-export type ZoneType = '주차장' | '분리수거장' | '위험구역' | '출입구' | '기타';
+export type EventType = '불법주차' | '미등록 차량' | '쓰레기' | '응급상황' | '화재 의심' | '침입' | '정기 점검';
+export type ZoneType = '주차장' | '분리수거장' | '출입구' | '도착지' | '기타';
 
 export interface Complex {          // 아파트단지
   id: string;
   name: string;                     // 예: 가온아파트
-  roadAddress: string;
   zipcode?: string;
+  roadAddress: string;
 }
 
 export interface Zone {
@@ -47,19 +48,33 @@ export interface ComplexMapData {
   zones: Zone[];
   mapId?: string;
   mapUrl?: string;
+  mapImageUrl?: string;
+  /** 격자 1칸의 실제 거리(m) — 축척 표기용. 백엔드 resolution×width 에서 환산 */
+  metersPerCell?: number;
+  resolution?: number;
+  originX?: number;
+  originY?: number;
+  pixelWidth?: number;
+  pixelHeight?: number;
 }
 
 export interface MapRobot {         // 실시간 로봇 위치 (그리드 좌표, 소수 허용)
   id: string;                       // R-01
+  /** 지도에 띄우는 표시 이름 (R0-Ki 1호기). 없으면 id 를 쓴다 */
+  name?: string;
   x: number;
   y: number;
+  heading?: number;
   battery?: number;
   updatedAt?: string;
+  routePoints?: PatrolRoutePoint[];
 }
 
 export interface MapPin {           // 지도 위 이벤트 핀
   id: string;                       // 이벤트 ID (E-3312)
   label: string;                    // "불법주차 · 101동 앞"
+  /** 지도 콜아웃 둘째 줄 — "02:14 감지 · 지하주차장 진입로". 없으면 카드에 제목만 */
+  detail?: string;
   x: number;
   y: number;
   tone: Tone;
@@ -71,6 +86,17 @@ export interface MapCheckpoint {    // 순찰 체크포인트 (1h LIVE MAP)
   label: string;                    // 출발지, 분리수거장, 주차장 A…
   x: number;
   y: number;
+  /** 통과 기록 등 부가 설명 — "02:03 통과 · 최근 지점".
+      값이 있는 지점만 지도에서 물방울 마커 + 콜아웃 카드로 강조된다 */
+  note?: string;
+}
+
+export interface RobotRecentPatrol {
+  patrolId: number
+  patrolStatus: string
+  startedAt: string
+  endedAt: string | null
+  detectedEventCount: number
 }
 
 export interface Robot {
@@ -79,16 +105,18 @@ export interface Robot {
   name: string;                     // R-01
   registrationNo: string;           // RB-2024-01
   serialNo?: string;                // SN-2026-0001
-  model: string;                    // PATROL-X1
   introducedAt: string;             // 2026/03/12
   zone: string;                     // 담당 구역 (전체 / 101~103동)
   status: StatusLabel;              // 순찰중 등
-  battery: number;                  // 78 (%)
+  battery?: number;                 // 78 (%), null이면 --%
   location?: string;                // 현재 위치 — 지하주차장 B2 / 충전 스테이션 (1i 목록)
   lastPatrol?: string;              // 최근 순찰 — 09:00–09:42 (1i 목록)
   parts: { name: string; status: StatusLabel }[]; // 카메라/라이다/휠모터/구동부
   odometerKm?: number;              // 12.4 — x,y 위치 로그 기반 이동거리 합산
   weeklyUptime?: number;            // 94 (%) — 가동/정지/전체 시간 비율
+  recentPatrols?: RobotRecentPatrol[]
+  /** 대시보드에서 순찰 종료 API를 호출할 때 사용하는 현재 순찰 ID */
+  activePatrolId?: number
 }
 
 export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)
@@ -98,16 +126,25 @@ export interface PatrolPoint {      // 순찰 지점 기록 (상세 1e)
   status: StatusLabel;              // 이상무 / 탐지 / 처리완료
   note?: string;                    // 미등록 차량 1대 감지 · 신뢰도 92%
   eventId?: string;                 // 이상 지점 → 이벤트 상세(1g) 링크. 상태 변경은 이벤트 상세에서
+  x?: number;
+  y?: number;
+}
+
+export interface PatrolRoutePoint {
+  x: number;
+  y: number;
+  recordedAt: string;
 }
 
 export interface Patrol {
   id: string;                       // P-1042
   backendId?: string | number;
   robotId: string;                  // R-01
+  robotName?: string;               // 로봇 이름 (사용자 지정) — 서버 응답에 포함, 없으면 로봇 목록에서 조회
   date: string;                     // 07/15
   start: string;                    // 09:00
   end?: string | null;              // 09:42 (진행중이면 null)
-  routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 위험구역(B2), 출발지]
+  routeZones: string[];             // [출발지, 주차장 A, 분리수거장, 지하주차장 B2, 출발지]
   routeSummary?: string;            // 상세 요약용 경로 표기 (1e: "101동→102동→103동")
   eventCount: number;               // 2
   status: StatusLabel;              // 완료 / 진행중
@@ -115,6 +152,8 @@ export interface Patrol {
   batteryTo?: number;               // 82
   report?: PatrolReport;
   points?: PatrolPoint[];
+  mapUrl?: string;
+  routePoints?: PatrolRoutePoint[];
 }
 
 export interface PatrolReport {     // PATROL REPORT (1e)
@@ -128,14 +167,19 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   id: string;                       // E-3312
   backendId?: string | number;
   patrolId?: string;
+  date?: string;                    // 07/15 (목록 탐지 날짜)
   time: string;                     // 14:20
   type: EventType;
   location: string;                 // 101동 앞
   robotId: string;                  // R-01
-  status: StatusLabel;              // 긴급 / 탐지 / 처리중 / 처리완료
-  riskLevel?: RiskLevel;
+  status: StatusLabel;              // 탐지 / 처리중 / 처리완료 (긴급은 riskLevel로 분리)
+  riskLevel?: RiskLevel;            // 긴급 / 보통 / 낮음
   processingStatus?: ProcessingStatus;
+  assignee?: string;                // 담당자 (처리중/처리완료 시) — 백엔드 제공
+  processedAt?: string;             // 처리 완료 시각 (처리완료 시 표시)
   occurredAt?: string;
+  occurredAtLabel?: string;         // 2026년 8월 7일 14:30 (상세 탐지 날짜)
+  mapId?: string | number | null;
   x?: number;
   y?: number;
   confidence?: number;              // 92 (%)
@@ -143,6 +187,31 @@ export interface PatrolEvent {      // 이벤트 (1f/1g)
   memo?: string;
   subType?: string;                 // 긴급 세부 — "쓰러짐 의심" (1c+/1o)
   emergencyReason?: string;         // 긴급 판단 사유 (1o)
+}
+
+// ---- 알림 기록 (입주민 발송 내역) ----
+export type NotificationSendStatus = '발송완료' | '발송대기' | '발송실패';
+
+export interface NotificationRecord { // 알림 목록 항목
+  id: string;                       // 알림 ID
+  backendId: number;
+  eventId: string;                  // 연결된 이벤트 ID
+  eventType: EventType;
+  recipientName: string;            // 수신자 (입주민)
+  address: string;                  // 101동 1502호
+  status: NotificationSendStatus;
+  sentAt?: string;                  // 원본 ISO — 최신순 정렬용
+  sentAtLabel: string;              // 07/30 14:20 (미발송이면 —)
+}
+
+export interface NotificationDetailRecord extends NotificationRecord {
+  title: string;                    // 알림 제목
+  content: string;                  // 발송 본문
+  recipientPhone: string;           // 010-1234-5678
+  occurredAt?: string;
+  occurredAtLabel: string;          // 이벤트 발생 시각
+  location: string;                 // 지하주차장 B2
+  licensePlate?: string;            // 12가 3456 (차량 이벤트만)
 }
 
 export interface StatSummary {      // 통계 KPI (1m)
@@ -158,16 +227,16 @@ export interface DailyEventStat {   // 일자별 이벤트 추이 (1m 라인 차
   count: number;                    // 6
 }
 
-// 시간대별 이벤트 발생(유형별 누적 막대, 1m). 유형 키는 와이어프레임 표기 그대로.
+// 시간대별 이벤트(유형별 누적). slot = 3시간 단위 8칸 (0-3시 … 21-24시).
+// 백엔드 GET /trend?bucket=hour3 + mapTrendToHourly 와 연결.
 export interface HourlyEventStat {
-  slot: string;                     // 9-12시
+  slot: string;                     // 예: '9-12시'
   주차: number;
   쓰레기: number;
-  위험구역: number;
 }
 
 export interface HandlingStat {     // 처리 현황 100% 기준 (1m)
-  label: string;                    // 전체 / 주차 / 쓰레기 / 위험구역
+  label: string;                    // 전체 / 주차 / 쓰레기 
   handled: number;                  // 59 (건)
   pending: number;                  // 24 (건)
   handledPct: number;               // 71 (%)
@@ -178,6 +247,13 @@ export interface ZoneShareStat {    // 구역별 이벤트 비율 파이차트 (
   zone: string;                     // 지하주차장 B2
   count: number;                    // 9 (건)
   pct: number;                      // 42 (%)
+}
+
+// AI 인사이트 리포트 소견 (1m) — 서버가 문자열만 주면 body로 정규화해 표시
+export interface AiInsight {
+  title: string;                    // 불법주차 증가 추세
+  body: string;                     // 서술형 본문
+  action?: string;                  // 권장 조치 — B2 구역 순찰 빈도 상향
 }
 
 export interface User {
