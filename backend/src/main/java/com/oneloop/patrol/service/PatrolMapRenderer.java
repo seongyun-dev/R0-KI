@@ -5,17 +5,22 @@ import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.patrol.dto.response.PatrolRoutePointResponse;
 import com.oneloop.patrol.dto.response.PatrolTimelineResponse;
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
+import java.awt.Composite;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.color.ColorSpace;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.ColorConvertOp;
+import java.awt.image.RescaleOp;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -42,6 +47,18 @@ public class PatrolMapRenderer {
 
     /** 인쇄 선명도를 위한 확대 배율. 원본 도면이 보통 800px 안팎이라 그대로 쓰면 글자가 뭉갠다. */
     private static final int SCALE = 2;
+
+    /**
+     * 화면(순찰 상세)과 같은 가로비. 거기서는 뷰박스를 900x450 으로 잡고 도면을 늘여 채우므로
+     * (preserveAspectRatio="none"), 원본 비율 그대로 실으면 PDF 만 가로가 짧아 보인다.
+     */
+    private static final double TARGET_ASPECT = 900.0 / 450.0;
+
+    /* 도면을 눌러 까는 값 — 화면의 .mapbase(grayscale(1) contrast(.78) brightness(1.16), opacity .42)와 같다.
+       CSS contrast/brightness 를 1차식으로 합치면 out = in*0.78*1.16 + (0.5 - 0.5*0.78)*1.16 이다. */
+    private static final float BASE_SCALE = 0.78f * 1.16f;
+    private static final float BASE_OFFSET = (0.5f - 0.5f * 0.78f) * 1.16f * 255f;
+    private static final float BASE_OPACITY = 0.42f;
 
     private static final String FONT_RESOURCE = "/fonts/NanumGothic-Regular.ttf";
 
@@ -79,8 +96,9 @@ public class PatrolMapRenderer {
             if (base == null) {
                 return mapPng;
             }
+            // 화면과 같은 가로비로 늘여 채운다. 세로는 그만큼 눌리므로 좌표도 X/Y 따로 환산한다.
             int width = base.getWidth() * SCALE;
-            int height = base.getHeight() * SCALE;
+            int height = (int) Math.round(width / TARGET_ASPECT);
 
             BufferedImage canvas = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
             Graphics2D g = canvas.createGraphics();
@@ -92,16 +110,22 @@ public class PatrolMapRenderer {
 
             g.setColor(Color.WHITE);
             g.fillRect(0, 0, width, height);
-            g.drawImage(base, 0, 0, width, height, null);
+            Composite original = g.getComposite();
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, BASE_OPACITY));
+            g.drawImage(dim(base), 0, 0, width, height, null);
+            g.setComposite(original);
 
             /* 라벨 크기는 캔버스 폭에 비례시킨다 — PDF 안에서 지도가 축소돼 실리므로
                고정 pt 로 두면 도면 크기에 따라 글자가 읽을 수 없게 작아진다. */
             float labelSize = Math.max(16f, width * 0.020f);
 
-            Projector projector = new Projector(patrolMap, base.getHeight());
-            drawZones(g, projector, zones, labelSize);
+            /* 이벤트는 구역 안에서 탐지되므로 구역명과 이름표가 그냥 두면 겹친다.
+               구역명을 먼저 놓아 자리를 기록하고, 이벤트 이름표가 그 자리를 피하게 한다. */
+            List<Rectangle2D> placed = new ArrayList<>();
+            Projector projector = new Projector(patrolMap, base, width, height);
+            drawZones(g, projector, zones, labelSize, placed);
             drawRoute(g, projector, routePoints);
-            drawEvents(g, projector, timeline, eventLabeler, labelSize);
+            drawEvents(g, projector, timeline, eventLabeler, labelSize, placed);
             g.dispose();
 
             ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -121,31 +145,56 @@ public class PatrolMapRenderer {
                 && patrolMap.getOriginY() != null;
     }
 
-    /** 월드 좌표(m) → 합성 캔버스 픽셀 */
+    /** 도면을 화면(.mapbase)과 같은 톤으로 눌러 회색조로 만든다 */
+    private BufferedImage dim(BufferedImage source) {
+        BufferedImage gray =
+                new BufferedImage(
+                        source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_RGB);
+        new ColorConvertOp(ColorSpace.getInstance(ColorSpace.CS_GRAY), null)
+                .filter(source, gray);
+        BufferedImage toned =
+                new BufferedImage(gray.getWidth(), gray.getHeight(), BufferedImage.TYPE_INT_RGB);
+        new RescaleOp(BASE_SCALE, BASE_OFFSET, null).filter(gray, toned);
+        return toned;
+    }
+
+    /**
+     * 월드 좌표(m) → 합성 캔버스 픽셀.
+     *
+     * <p>도면을 가로로 늘여 채우므로 X와 Y의 배율이 다르다. 하나로 묶으면 구역·경로가 도면과 어긋난다.
+     */
     private static final class Projector {
         private final double resolution;
         private final double originX;
         private final double originY;
         private final int imageHeight;
+        private final double scaleX;
+        private final double scaleY;
 
-        private Projector(PatrolMap patrolMap, int imageHeight) {
+        private Projector(PatrolMap patrolMap, BufferedImage base, int canvasW, int canvasH) {
             this.resolution = patrolMap.getResolution().doubleValue();
             this.originX = patrolMap.getOriginX().doubleValue();
             this.originY = patrolMap.getOriginY().doubleValue();
-            this.imageHeight = imageHeight;
+            this.imageHeight = base.getHeight();
+            this.scaleX = (double) canvasW / base.getWidth();
+            this.scaleY = (double) canvasH / base.getHeight();
         }
 
         private double x(BigDecimal worldX) {
-            return ((worldX.doubleValue() - originX) / resolution) * SCALE;
+            return ((worldX.doubleValue() - originX) / resolution) * scaleX;
         }
 
         private double y(BigDecimal worldY) {
-            return (imageHeight - (worldY.doubleValue() - originY) / resolution) * SCALE;
+            return (imageHeight - (worldY.doubleValue() - originY) / resolution) * scaleY;
         }
     }
 
     private void drawZones(
-            Graphics2D g, Projector projector, List<Checkpoint> zones, float labelSize) {
+            Graphics2D g,
+            Projector projector,
+            List<Checkpoint> zones,
+            float labelSize,
+            List<Rectangle2D> placed) {
         if (zones == null || zones.isEmpty()) return;
 
         Font font = font(labelSize);
@@ -182,6 +231,7 @@ public class PatrolMapRenderer {
             if (textW + 12 * SCALE > w || metrics.getHeight() + 10 * SCALE > h) {
                 textY = (float) (top - 4 * SCALE);
             }
+            placed.add(labelBounds(metrics, textX, textY, textW));
             drawChip(g, metrics, name, textX, textY, LABEL_TEXT, null);
         }
     }
@@ -235,13 +285,13 @@ public class PatrolMapRenderer {
             Projector projector,
             List<PatrolTimelineResponse> timeline,
             Function<EventType, String> eventLabeler,
-            float labelSize) {
+            float labelSize,
+            List<Rectangle2D> placed) {
         if (timeline == null || timeline.isEmpty()) return;
 
         Font font = font(labelSize);
         g.setFont(font);
         FontMetrics metrics = g.getFontMetrics();
-        List<Rectangle2D> placed = new ArrayList<>();
 
         for (PatrolTimelineResponse event : timeline) {
             if (event.getEventId() == null
@@ -273,14 +323,19 @@ public class PatrolMapRenderer {
             String label = eventLabeler.apply(event.getEventType());
             int textW = metrics.stringWidth(label);
             float labelX = (float) (px - textW / 2.0);
-            float above = (float) (py - tail - r * 2 - 4 * SCALE);
-            float below = (float) (py + metrics.getAscent() + 6 * SCALE);
-            float labelY = above;
+            float top = (float) (py - tail - r * 2 - 4 * SCALE);
+            float bottom = (float) (py + metrics.getAscent() + 6 * SCALE);
+            float step = metrics.getHeight() + 4 * SCALE;
+            float[] candidates = {
+                top, bottom, top - step, bottom + step, top - step * 2, bottom + step * 2
+            };
+            float labelY = candidates[0];
             Rectangle2D candidate = labelBounds(metrics, labelX, labelY, textW);
-            for (Rectangle2D other : placed) {
-                if (other.intersects(candidate)) {
-                    labelY = below;
-                    candidate = labelBounds(metrics, labelX, labelY, textW);
+            for (float option : candidates) {
+                Rectangle2D box = labelBounds(metrics, labelX, option, textW);
+                if (placed.stream().noneMatch(other -> other.intersects(box))) {
+                    labelY = option;
+                    candidate = box;
                     break;
                 }
             }
