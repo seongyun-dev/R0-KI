@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangleIcon } from '../../components/icons'
 import { Button } from '../../components/ui'
 
 export type HeroProps = {
