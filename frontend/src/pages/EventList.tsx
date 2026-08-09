@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { R0KiShell } from '../components/layout/R0KiShell'
 import { R0KiDropdown } from '../components/ui/R0KiDropdown'
 import { useEvents } from '../features/events/useEvents'
+import { eventStatusCode } from '../features/events/eventStatus'
 import type {
   EventPeriodCode,
   EventTypeCode,
@@ -205,18 +206,7 @@ export default function EventList() {
                           )}
                         </td>
                         <td>
-                          <span
-                            className="st"
-                            data-status={
-                              e.status === '탐지'
-                                ? 'detected'
-                                : e.status === '처리중'
-                                  ? 'processing'
-                                  : e.status === '처리완료'
-                                    ? 'completed'
-                                    : undefined
-                            }
-                          >
+                          <span className="st" data-status={eventStatusCode(e.status)}>
                             <i />
                             {e.status}
                           </span>

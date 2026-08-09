@@ -8,6 +8,7 @@ import { usePatrol } from '../features/patrol/usePatrols'
 import { useAuthStore } from '../features/auth/useAuthStore'
 import { ZoneDetail } from '../features/dashboard/ComplexMap'
 import { pinPath, zoneVar } from '../features/dashboard/mapStyle'
+import { eventStatusCode, eventStatusColor } from '../features/events/eventStatus'
 import type { Patrol, PatrolPoint, ZoneType } from '../types/domain'
 
 /* R0-Ki 순찰 상세 — 시안 R0Kipatrol 그대로.
@@ -22,14 +23,11 @@ const PATROL_ST: Record<string, string> = {
   실패: 'var(--alert)',
 }
 
-/* 타임라인 점·배지 색 — 명도 램프 (시안 매핑) */
-const POINT_ST: Record<string, string> = {
-  이상무: 'var(--patrol)',
-  처리완료: 'var(--charge)',
-  탐지: 'var(--detect)',
-  처리중: 'var(--detect)',
-}
-const pointColor = (s: string) => POINT_ST[s] ?? 'var(--patrol)'
+/* 타임라인 점 색 — 이벤트 상태는 이벤트 관리와 같은 상태 팔레트를 쓴다.
+   이벤트가 아닌 기록(이상무 등)만 여기서 명도 램프로 처리한다.
+   ⚠️ 예전에는 이 파일이 자체 매핑을 들고 있어 '탐지'와 '처리중'이 --detect 로
+      같은 색이었다. 상태 매핑은 eventStatus.ts 한 곳에만 둔다. */
+const pointColor = (status: string) => eventStatusColor(status) ?? 'var(--patrol)'
 
 /** "09:12" → 분 (정렬용) */
 function timeMin(t: string) {
@@ -478,6 +476,7 @@ function RouteMapSvg({
 /* ── 타임라인 행 ── */
 function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void }) {
   const color = pointColor(point.status)
+  const statusCode = eventStatusCode(point.status)
   const content = (
     <>
       <span className="d" style={{ background: color }} />
@@ -490,7 +489,11 @@ function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void })
         {point.note && <span className="m">{point.note}</span>}
       </span>
       <span className="a">
-        <span className="st"><i style={{ background: color }} />{point.status}</span>
+        {/* 이벤트 관리 목록과 같은 배지 — data-status 가 있으면 점 색은 CSS 가 흰색으로 세운다 */}
+        <span className="st" data-status={statusCode}>
+          <i style={statusCode ? undefined : { background: color }} />
+          {point.status}
+        </span>
       </span>
     </>
   )
