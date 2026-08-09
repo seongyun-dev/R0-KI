@@ -2,19 +2,33 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { type ProjectedAnchor, layoutLeader } from '../components/robot/rokiLeaders'
 import { R0KiShell } from '../components/layout/R0KiShell'
+import { PatrolStartModal } from '../features/dashboard/PatrolStartModal'
+import { PatrolStopModal } from '../features/dashboard/PatrolStopModal'
+import { useComplexMap } from '../features/dashboard/useComplexMap'
+import { useRobotLocations } from '../features/dashboard/useRobotLocations'
 import { RobotEditDrawer } from '../features/robots/RobotEditDrawer'
 import { useDeleteRobot, useRobot, useUpdateRobot } from '../features/robots/useRobot'
-import type { Robot } from '../types/domain'
+import { robotStatusLabel } from '../api/mappers'
 import { patrolsApi } from '../api/services'
+import type { Robot } from '../types/domain'
 
 /* R0-Ki 로봇 상세 — 시안 R0Ki-robots-detail 무대형(rd-*) 그대로.
    중앙 로봇 히어로 + 타원 광원 받침 + 부위 콜아웃(지시선) + 궤도 카드.
-   한 화면 고정. 데이터/뮤테이션은 기존 훅 그대로. */
+   한 화면 고정. 순찰 시작/종료·상태 반영은 대시보드와 같은 SSE·ACK 흐름. */
 
 // three.js 청크 분리 — 상세 진입 시 지연 로드 (기존 3D 로봇 모델 재사용)
 const RobotDiagnosticView = lazy(() =>
   import('../components/robot/RobotDiagnosticView').then((m) => ({ default: m.RobotDiagnosticView })),
 )
+
+const PATROL_START_CONFIRM_TIMEOUT_MS = 16_000
+
+type PendingPatrolStart = {
+  patrolId: number
+  robotId: string
+  robotName: string
+  requestedAt: number
+}
 
 /* 상태 점 색 — 명도 램프 */
 const STATUS_DOT: Record<string, string> = {
@@ -23,10 +37,12 @@ const STATUS_DOT: Record<string, string> = {
   충전중: 'var(--charge)',
   오류: 'var(--alert)',
   오프라인: 'var(--offline)',
+  중단: 'var(--alert)',
   정상: 'var(--patrol)',
   점검필요: 'var(--detect)',
   완료: 'var(--offline)',
   진행중: 'var(--patrol)',
+  실패: 'var(--alert)',
 }
 const dot = (label: string) => STATUS_DOT[label] ?? 'var(--detect)'
 
@@ -58,15 +74,21 @@ export default function RobotDetail() {
   const navigate = useNavigate()
   const robotId = id ?? 'R-01'
   const { data: loaded, isLoading, error, refetch } = useRobot(robotId)
+  const { data: mapData } = useComplexMap()
+  const { statuses: liveRobotStatuses } = useRobotLocations(mapData?.map)
   const updateRobot = useUpdateRobot()
   const deleteRobot = useDeleteRobot()
   const [drawerOpen, setDrawerOpen] = useState(false)
   // 수정 드로어 저장 결과(목업 — 서버 연동 시 mutation으로 교체)
   const [patch, setPatch] = useState<Partial<Robot> | null>(null)
-  // 토스트
   const [toast, setToast] = useState<string>()
-  const [isStartingPatrol, setIsStartingPatrol] = useState(false)
-  const [patrolStarted, setPatrolStarted] = useState(false)
+  const [startModalOpen, setStartModalOpen] = useState(false)
+  const [startingPatrol, setStartingPatrol] = useState(false)
+  const [patrolError, setPatrolError] = useState<string>()
+  const [pendingPatrolStart, setPendingPatrolStart] = useState<PendingPatrolStart>()
+  const [stopModalOpen, setStopModalOpen] = useState(false)
+  const [stoppingPatrol, setStoppingPatrol] = useState(false)
+  const [stopError, setStopError] = useState<string>()
 
   // 지시선 — 3D 뷰가 넘겨준 부위 좌표로 매 프레임 SVG를 직접 갱신한다.
   // 상태로 두면 초당 30번 리렌더가 돌아 무대 전체가 다시 그려진다.
@@ -88,43 +110,186 @@ export default function RobotDetail() {
 
       const l = layoutLeader(a, fr, cr, box.getBoundingClientRect())
       const line = g.firstElementChild as SVGLineElement | null
-      const dot = g.lastElementChild as SVGCircleElement | null
+      const dotEl = g.lastElementChild as SVGCircleElement | null
       line?.setAttribute('x1', String(l.x1))
       line?.setAttribute('y1', String(l.y1))
       line?.setAttribute('x2', String(l.x2))
       line?.setAttribute('y2', String(l.y2))
-      dot?.setAttribute('cx', String(l.x2))
-      dot?.setAttribute('cy', String(l.y2))
+      dotEl?.setAttribute('cx', String(l.x2))
+      dotEl?.setAttribute('cy', String(l.y2))
       g.style.opacity = String(l.opacity)
     })
   }, [])
 
+  // 결과 알림 — 대시보드와 같이 고령 사용자 기준으로 길게 띄운다
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => setToast(undefined), 2600)
+    const t = setTimeout(() => setToast(undefined), 4200)
     return () => clearTimeout(t)
   }, [toast])
 
-  const robot: Robot | undefined = loaded ? { ...loaded, ...patch } : undefined
-  const isPatrolling = robot?.status === '순찰중' || patrolStarted
+  const baseRobot: Robot | undefined = loaded ? { ...loaded, ...patch } : undefined
+  const robotKey = baseRobot ? String(baseRobot.backendId ?? baseRobot.id) : undefined
+  const liveStatus = robotKey ? liveRobotStatuses[robotKey] : undefined
+  const robot: Robot | undefined = baseRobot
+    ? liveStatus
+      ? { ...baseRobot, status: robotStatusLabel(liveStatus) }
+      : baseRobot
+    : undefined
+
   const parsedRobotId = Number(robot?.backendId ?? robot?.id)
   const patrolRobotId = Number.isFinite(parsedRobotId) ? parsedRobotId : undefined
   const recent = robot?.recentPatrols?.slice(0, 3) ?? []
+  const inProgressPatrolId = robot?.recentPatrols?.find(
+    (patrol) => patrol.patrolStatus === 'IN_PROGRESS',
+  )?.patrolId
+  const pendingPatrolId =
+    pendingPatrolStart && robotKey && pendingPatrolStart.robotId === robotKey
+      ? pendingPatrolStart.patrolId
+      : undefined
+  const effectiveActivePatrolId =
+    robot?.activePatrolId ?? pendingPatrolId ?? inProgressPatrolId
+  const hasLivePatrolStatus =
+    liveStatus === 'PATROLLING' || liveStatus === 'OBSTACLE_STOP'
+  const isPatrolling =
+    hasLivePatrolStatus
+    || robot?.status === '순찰중'
+    || robot?.status === '중단'
+    || pendingPatrolStart != null
+  const canStop = hasLivePatrolStatus || effectiveActivePatrolId != null
+  const canStart =
+    robot != null
+    && patrolRobotId != null
+    && !canStop
+    && robot.status === '대기'
+    && !pendingPatrolStart
+    && !startingPatrol
 
-  const handlePatrolStart = async (robotId: number) => {
-    if (isStartingPatrol || isPatrolling) return
+  useEffect(() => {
+    if (liveStatus !== 'IDLE' && liveStatus !== 'OFFLINE' && liveStatus !== 'ERROR') return
+    void refetch()
+  }, [liveStatus, refetch])
 
-    setIsStartingPatrol(true)
-    try {
-      await patrolsApi.start({ robotId })
-      setPatrolStarted(true)
-      setToast('순찰을 시작했습니다.')
+  const pendingPatrolStatus = pendingPatrolStart
+    ? liveRobotStatuses[pendingPatrolStart.robotId]
+    : undefined
+
+  useEffect(() => {
+    if (!pendingPatrolStart) return
+
+    if (pendingPatrolStatus === 'PATROLLING' || pendingPatrolStatus === 'OBSTACLE_STOP') {
+      setToast(`${pendingPatrolStart.robotName} 순찰 시작을 확인했습니다.`)
+      setPendingPatrolStart(undefined)
       void refetch()
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : '순찰 시작에 실패했습니다.')
-    } finally {
-      setIsStartingPatrol(false)
+      return
     }
+
+    if (pendingPatrolStatus === 'OFFLINE' || pendingPatrolStatus === 'ERROR') {
+      setToast(`${pendingPatrolStart.robotName} 시작을 확인하지 못했습니다. 로봇 상태를 확인해 주세요.`)
+      setPendingPatrolStart(undefined)
+      void refetch()
+      return
+    }
+
+    let cancelled = false
+    const remaining = Math.max(
+      0,
+      pendingPatrolStart.requestedAt + PATROL_START_CONFIRM_TIMEOUT_MS - Date.now(),
+    )
+    const timer = window.setTimeout(() => {
+      void patrolsApi.detail(pendingPatrolStart.patrolId)
+        .then((detail) => {
+          if (cancelled) return
+          setToast(
+            detail.patrolStatus === 'FAILED'
+              ? `${pendingPatrolStart.robotName} 순찰 시작에 실패했습니다. 장비 상태를 확인해 주세요.`
+              : `${pendingPatrolStart.robotName} 시작 응답을 확인하지 못했습니다. 안전 상태를 확인해 주세요.`,
+          )
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setToast(`${pendingPatrolStart.robotName} 시작 결과를 확인하지 못했습니다. 안전 상태를 확인해 주세요.`)
+          }
+        })
+        .finally(() => {
+          if (cancelled) return
+          setPendingPatrolStart(undefined)
+          void refetch()
+        })
+    }, remaining)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [pendingPatrolStart, pendingPatrolStatus, refetch])
+
+  const startPatrol = async () => {
+    if (!robot || startingPatrol || pendingPatrolStart) return
+    if (patrolRobotId == null) {
+      setPatrolError('로봇 번호를 확인할 수 없어 순찰을 시작하지 못했습니다.')
+      return
+    }
+
+    setStartingPatrol(true)
+    setPatrolError(undefined)
+    try {
+      const targetName = robot.name
+      const response = await patrolsApi.start({ robotId: patrolRobotId })
+      setPendingPatrolStart({
+        patrolId: response.patrolId,
+        robotId: String(response.robotId),
+        robotName: targetName,
+        requestedAt: Date.now(),
+      })
+      setToast(`${targetName} 순찰 시작 요청을 접수했습니다. 로봇 응답을 기다립니다.`)
+      setStartModalOpen(false)
+      void refetch()
+    } catch (reason) {
+      setPatrolError(reason instanceof Error ? reason.message : '순찰 시작에 실패했습니다.')
+    } finally {
+      setStartingPatrol(false)
+    }
+  }
+
+  const stopPatrol = async () => {
+    if (!robot || stoppingPatrol) return
+    if (effectiveActivePatrolId == null) {
+      setStopError('진행 중인 순찰 번호를 확인할 수 없습니다. 로봇 정보를 새로고침해 주세요.')
+      return
+    }
+
+    setStoppingPatrol(true)
+    setStopError(undefined)
+    try {
+      await patrolsApi.stop(effectiveActivePatrolId)
+      setToast(`${robot.name} 순찰 종료를 요청했습니다.`)
+      if (pendingPatrolStart?.patrolId === effectiveActivePatrolId) {
+        setPendingPatrolStart(undefined)
+      }
+      setStopModalOpen(false)
+      void refetch()
+    } catch (reason) {
+      setStopError(reason instanceof Error ? reason.message : '순찰 종료 요청에 실패했습니다.')
+    } finally {
+      setStoppingPatrol(false)
+    }
+  }
+
+  const openStartModal = () => {
+    if (!canStart) return
+    setPatrolError(undefined)
+    setStartModalOpen(true)
+  }
+
+  const openStopModal = () => {
+    if (!robot || !canStop) return
+    setStopError(
+      effectiveActivePatrolId == null
+        ? '진행 중인 순찰 번호를 확인할 수 없습니다. 백엔드 연결과 순찰 기록을 확인해 주세요.'
+        : undefined,
+    )
+    setStopModalOpen(true)
   }
 
   return (
@@ -154,17 +319,31 @@ export default function RobotDetail() {
             {robot && (
               <button type="button" className="btn btn-s" onClick={() => setDrawerOpen(true)}>수정</button>
             )}
-            <button
-              type="button"
-              className="btn btn-p btn-add"
-              disabled={patrolRobotId == null || isStartingPatrol || isPatrolling}
-              onClick={() => {
-                if (patrolRobotId != null) void handlePatrolStart(patrolRobotId)
-              }}
-            >
-              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
-              {isStartingPatrol ? '시작 중…' : isPatrolling ? '순찰 중' : '순찰 시작'}
-            </button>
+            {canStop ? (
+              <button
+                type="button"
+                className="btn btn-p btn-add"
+                disabled={stoppingPatrol}
+                onClick={openStopModal}
+              >
+                <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+                {stoppingPatrol ? '종료 요청 중…' : '순찰 종료'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-p btn-add"
+                disabled={!canStart || startingPatrol || pendingPatrolStart != null}
+                onClick={openStartModal}
+              >
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+                {startingPatrol || pendingPatrolStart
+                  ? '시작 중…'
+                  : isPatrolling
+                    ? '순찰 중'
+                    : '순찰 시작'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -387,6 +566,34 @@ export default function RobotDetail() {
               throw reason
             }
           }}
+        />
+      )}
+
+      {robot && startModalOpen && (
+        <PatrolStartModal
+          robot={robot}
+          starting={startingPatrol}
+          error={patrolError}
+          onCancel={() => {
+            if (startingPatrol) return
+            setStartModalOpen(false)
+            setPatrolError(undefined)
+          }}
+          onConfirm={() => void startPatrol()}
+        />
+      )}
+
+      {robot && stopModalOpen && (
+        <PatrolStopModal
+          robot={robot}
+          stopping={stoppingPatrol}
+          error={stopError}
+          onCancel={() => {
+            if (stoppingPatrol) return
+            setStopModalOpen(false)
+            setStopError(undefined)
+          }}
+          onConfirm={() => void stopPatrol()}
         />
       )}
 
