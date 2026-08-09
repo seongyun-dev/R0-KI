@@ -6,6 +6,8 @@ import static org.mockito.Mockito.when;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.patrol.domain.PatrolStatus;
+import com.oneloop.map.repository.CheckpointRepository;
+import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.service.MapFileStorage;
 import com.oneloop.patrol.dto.response.PatrolAiSummaryResponse;
 import com.oneloop.patrol.dto.response.PatrolBatteryResponse;
@@ -32,6 +34,9 @@ class PatrolPdfServiceTest {
 
     @Mock private PatrolService patrolService;
     @Mock private MapFileStorage mapFileStorage;
+    @Mock private PatrolMapRepository patrolMapRepository;
+    @Mock private CheckpointRepository checkpointRepository;
+    @Mock private PatrolMapRenderer patrolMapRenderer;
 
     @Test
     void generatesKoreanPatrolReport() throws Exception {
@@ -76,7 +81,12 @@ class PatrolPdfServiceTest {
         when(patrolService.findDetail(apartmentComplexId, patrolId)).thenReturn(detail);
 
         byte[] pdf =
-                new PatrolPdfService(patrolService, mapFileStorage)
+                new PatrolPdfService(
+                                patrolService,
+                                mapFileStorage,
+                                patrolMapRepository,
+                                checkpointRepository,
+                                patrolMapRenderer)
                         .generate(apartmentComplexId, patrolId);
 
         assertThat(pdf).startsWith("%PDF".getBytes());
