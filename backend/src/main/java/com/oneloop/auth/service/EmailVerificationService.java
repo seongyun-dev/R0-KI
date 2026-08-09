@@ -24,6 +24,15 @@ public class EmailVerificationService {
     private final EmailVerificationStore verificationStore;
     private final JavaMailSender mailSender;
 
+    /**
+     * 가입 시 이메일 인증 여부를 확인할지. 기본은 켜짐이다.
+     *
+     * <p>메일 서버가 없는 통합 테스트 환경에서만 끈다 — 거기서는 인증번호를 받을 방법이 없어 회원가입을 통과시킬 수 없다. 운영에서는 절대 끄면 안 된다. 끄면
+     * 아무 이메일로나 가입할 수 있다.
+     */
+    @Value("${app.email-verification.enabled:true}")
+    private boolean enabled;
+
     @Value("${app.email-verification.code-length:6}")
     private int codeLength;
 
@@ -66,6 +75,10 @@ public class EmailVerificationService {
      * @throws BusinessException 인증 전이면 EMAIL_NOT_VERIFIED
      */
     public void assertVerified(String email) {
+        if (!enabled) {
+            log.warn("[EMAIL] 이메일 인증 확인이 꺼져 있어 건너뜁니다. email={}", email);
+            return;
+        }
         if (!verificationStore.isVerified(normalize(email))) {
             throw new BusinessException(ErrorCode.EMAIL_NOT_VERIFIED);
         }
@@ -103,7 +116,6 @@ public class EmailVerificationService {
                 인증번호: %s
 
                 인증번호는 발송 시각으로부터 %d분간 유효합니다.
-                본인이 요청하지 않았다면 이 메일은 무시하셔도 됩니다.
                 """
                         .formatted(code, ttlMinutes));
         try {

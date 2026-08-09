@@ -68,6 +68,9 @@ gms:
   insight-max-completion-tokens: ${GMS_INSIGHT_MAX_COMPLETION_TOKENS:16384}
 
 app.email-verification:
+  # 가입 시 인증 여부 확인. 메일 서버가 없는 통합 테스트에서만 false 로 끈다.
+  # 운영에서는 절대 끄지 않는다 — 끄면 아무 이메일로나 가입할 수 있다.
+  enabled: ${APP_EMAIL_VERIFICATION_ENABLED:true}
   # 인증번호 자릿수와 유효시간. 요구사항은 6자리 / 5분이다.
   code-length: ${EMAIL_VERIFICATION_CODE_LENGTH:6}
   ttl-minutes: ${EMAIL_VERIFICATION_TTL_MINUTES:5}
