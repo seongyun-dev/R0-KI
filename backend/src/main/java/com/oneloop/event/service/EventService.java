@@ -52,6 +52,7 @@ public class EventService {
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
     private final MemberRepository memberRepository;
+    private final EmergencyPatrolResumeService emergencyPatrolResumeService;
 
     /**
      * 로그인한 관리자의 소속 단지 이벤트를 유형·상태·기간으로 필터링하여 조회한다. 페이지에 포함된 모든 이벤트의 담당자는 한 번의 IN 쿼리로
@@ -129,6 +130,10 @@ public class EventService {
                                 memberRepository.getReferenceById(memberId),
                                 request.getProcessingStatus(),
                                 request.getProcessingNote()));
+
+        if (request.getProcessingStatus() == ProcessingStatus.COMPLETED) {
+            emergencyPatrolResumeService.resumeIfEligible(event);
+        }
 
         return EventStatusChangeResponse.of(event, history.getChangedAt());
     }
