@@ -1,0 +1,28 @@
+serial:
+  # ESP32와 LiDAR의 CP2102가 같은 serial 0001을 사용하므로 by-id는
+  # 충돌한다. Jetson 물리 USB 위치로 만든 udev 별칭을 사용한다.
+  port: "/dev/roki_esp32"
+
+  # Jetson과 ESP32가 동일한 통신 속도를 사용해야 한다.
+  baudrate: 115200
+
+  # read()가 데이터를 기다리는 최대 시간이다.
+  timeout_sec: 0.05
+
+  # 연결이 끊긴 경우 재연결을 시도하는 간격이다.
+  reconnect_interval_sec: 2.0
+
+  # ESP32 운영 펌웨어 값과 같아야 한다.
+  telemetry_interval_ms: 100
+  command_timeout_ms: 400
+
+device:
+  # 특정 USB 장치만 선택해야 할 때 VID/PID를 지정한다.
+  # ESP32 실물이 없으므로 현재는 null로 유지한다.
+  preferred_vid: null
+  preferred_pid: null
+
+  # 자동 탐색 시 허용할 Linux 시리얼 포트 접두사이다.
+  allowed_port_prefixes:
+    - "/dev/ttyUSB"
+    - "/dev/ttyACM"

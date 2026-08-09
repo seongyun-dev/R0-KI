@@ -27,7 +27,7 @@ case "${component}" in
   jetson)
     component_label=Jetson
     component_path=
-    default_service_url=https://i15e103.p.ssafy.io/jetson/releases/stable/manifest.json
+    default_service_url=https://i15e103.p.ssafy.io/jetson/releases/iot/stable/manifest.json
     ;;
   all)
     component_label=전체
@@ -141,9 +141,9 @@ case "${event}" in
     service_url="${CI_JOB_URL:-${service_url}}"
     ;;
   jetson_published)
-    heading=":small_blue_circle: Jetson 릴리스 게시 완료"
+    heading=":small_blue_circle: Jetson IoT 릴리스 게시 완료"
     time_label=완료
-    description="Jetson이 다음 부팅 또는 갱신 주기에 이 버전을 확인합니다."
+    description="Jetson이 다음 부팅 시 이 Robot 버전을 확인합니다. AI baseline은 변경하지 않습니다."
     mention=
     link_label="Manifest 열기"
     ;;

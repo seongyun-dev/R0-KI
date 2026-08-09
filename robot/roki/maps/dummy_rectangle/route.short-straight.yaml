@@ -1,0 +1,27 @@
+schema_version: 1
+map_id: dummy-rectangle
+map_version: 1
+route_id: dummy-short-straight-v1
+frame_id: map
+waypoints:
+- sequence: 1
+  name: CHECKPOINT_20CM
+  x: 1.2
+  y: 2.5
+  yaw_deg: 0.0
+  acceptance_radius_m: 0.04
+  action: PASS
+- sequence: 2
+  name: SCAN_POINT_40CM
+  x: 1.4
+  y: 2.5
+  yaw_deg: 0.0
+  acceptance_radius_m: 0.04
+  action: SCAN
+- sequence: 3
+  name: DESTINATION_60CM
+  x: 1.6
+  y: 2.5
+  yaw_deg: 0.0
+  acceptance_radius_m: 0.04
+  action: DESTINATION

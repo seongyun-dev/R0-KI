@@ -1,0 +1,447 @@
+package com.oneloop.mapping.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.oneloop.apartment.domain.ApartmentComplex;
+import com.oneloop.apartment.repository.ApartmentComplexRepository;
+import com.oneloop.global.exception.BusinessException;
+import com.oneloop.global.exception.ErrorCode;
+import com.oneloop.mapping.domain.MappingSession;
+import com.oneloop.mapping.domain.MappingStatus;
+import com.oneloop.mapping.domain.MappingStopCommandStatus;
+import com.oneloop.mapping.dto.mqtt.StartMappingCommand;
+import com.oneloop.mapping.dto.mqtt.StopMappingCommand;
+import com.oneloop.mapping.dto.request.MappingStartRequest;
+import com.oneloop.mapping.dto.response.MappingStartResponse;
+import com.oneloop.mapping.repository.MappingSessionRepository;
+import com.oneloop.mqtt.MqttPublisher;
+import com.oneloop.mqtt.dto.CommandAck;
+import com.oneloop.robot.domain.PatrolRobot;
+import com.oneloop.robot.repository.RobotRepository;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
+
+@ActiveProfiles("test")
+@SpringBootTest
+@Import(MappingSessionTransactionIntegrationTest.TestConfig.class)
+class MappingSessionTransactionIntegrationTest {
+
+    @Autowired private MappingSessionService mappingSessionService;
+    @Autowired private ApartmentComplexRepository apartmentComplexRepository;
+    @Autowired private RobotRepository robotRepository;
+    @Autowired private MappingSessionRepository mappingSessionRepository;
+    @Autowired private ControllableMappingPublisher mappingPublisher;
+
+    @BeforeEach
+    void acknowledgeMappingStartImmediately() {
+        mappingPublisher.acknowledgeImmediately();
+    }
+
+    @Test
+    void immediateAckFromAnotherTransactionReadsCommittedMappingSession() {
+        Fixture fixture = createFixture();
+        MappingStartResponse[] response = new MappingStartResponse[1];
+
+        assertThatCode(
+                        () ->
+                                response[0] =
+                                        mappingSessionService.start(
+                                                fixture.complex().getId(),
+                                                new MappingStartRequest(fixture.robot().getId())))
+                .doesNotThrowAnyException();
+
+        assertThat(mappingSessionRepository.findById(response[0].getMappingSessionId()))
+                .get()
+                .satisfies(
+                        session -> {
+                            assertThat(session.getStatus()).isEqualTo(MappingStatus.MAPPING);
+                            assertThat(session.getStartedAt()).isNotNull();
+                        });
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = MappingStatus.class,
+            names = {"COMPLETED", "FAILED", "CANCELLED"})
+    void terminalSessionDoesNotBlockRemapping(MappingStatus terminalStatus) {
+        Fixture fixture = createFixture();
+        MappingSession previous = persistSession(fixture, terminalStatus);
+        String previousCommandId = previous.getCommandId();
+        long sessionCount = mappingSessionRepository.count();
+
+        MappingStartResponse response =
+                mappingSessionService.start(
+                        fixture.complex().getId(),
+                        new MappingStartRequest(fixture.robot().getId()));
+
+        assertThat(response.getMappingSessionId()).isEqualTo(previous.getId());
+        assertThat(mappingSessionRepository.count()).isEqualTo(sessionCount);
+        assertThat(mappingSessionRepository.findById(response.getMappingSessionId()))
+                .get()
+                .satisfies(
+                        session -> {
+                            assertThat(session.getStatus()).isEqualTo(MappingStatus.MAPPING);
+                            assertThat(session.getCommandId()).isNotEqualTo(previousCommandId);
+                            assertThat(session.getStartedAt()).isNotNull();
+                            assertThat(session.getFinishedAt()).isNull();
+                        });
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MappingStatus.class, names = {"REQUESTED", "MAPPING"})
+    void activeSessionBlocksAnotherMappingStart(MappingStatus activeStatus) {
+        Fixture fixture = createFixture();
+        persistSession(fixture, activeStatus);
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.start(
+                                        fixture.complex().getId(),
+                                        new MappingStartRequest(fixture.robot().getId())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAPPING_SESSION_ALREADY_ACTIVE));
+    }
+
+    @Test
+    void publishFailureCompensatesRequestedSessionToFailed() {
+        Fixture fixture = createFixture();
+        mappingPublisher.failPublish();
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.start(
+                                        fixture.complex().getId(),
+                                        new MappingStartRequest(fixture.robot().getId())))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(mappingSessionRepository.findById(mappingPublisher.lastMappingSessionId()))
+                .get()
+                .extracting(MappingSession::getStatus)
+                .isEqualTo(MappingStatus.FAILED);
+    }
+
+    @Test
+    void activeSessionPublishesOneStopMappingCommandAndDuplicateIsIdempotent() {
+        Fixture fixture = createFixture();
+        MappingStartResponse started =
+                mappingSessionService.start(
+                        fixture.complex().getId(),
+                        new MappingStartRequest(fixture.robot().getId()));
+        mappingPublisher.resetStopCount();
+
+        var first =
+                mappingSessionService.stop(
+                        fixture.complex().getId(), started.getMappingSessionId());
+        var second =
+                mappingSessionService.stop(
+                        fixture.complex().getId(), started.getMappingSessionId());
+
+        assertThat(mappingPublisher.stopPublishCount()).isEqualTo(1);
+        assertThat(mappingPublisher.lastStopCommand().mappingSessionId())
+                .isEqualTo(started.getMappingSessionId());
+        assertThat(mappingPublisher.lastStopCommand().commandId()).isEqualTo(first.getCommandId());
+        assertThat(second.getCommandId()).isEqualTo(first.getCommandId());
+        assertThat(second.getMappingSessionId()).isEqualTo(first.getMappingSessionId());
+    }
+
+    @Test
+    void stopMappingUsesSameJsonEnvelopeAsStartMapping() throws Exception {
+        ObjectMapper objectMapper =
+                new ObjectMapper()
+                        .findAndRegisterModules()
+                        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        JsonNode start =
+                objectMapper.readTree(
+                        objectMapper.writeValueAsString(
+                                StartMappingCommand.of("start-command", 1L)));
+        JsonNode stop =
+                objectMapper.readTree(
+                        objectMapper.writeValueAsString(
+                                StopMappingCommand.of("stop-command", 1L)));
+
+        List<String> startFields = new ArrayList<>();
+        List<String> stopFields = new ArrayList<>();
+        start.fieldNames().forEachRemaining(startFields::add);
+        stop.fieldNames().forEachRemaining(stopFields::add);
+        assertThat(stopFields).containsExactlyElementsOf(startFields);
+        assertThat(stop.get("schemaVersion").asInt()).isEqualTo(1);
+        assertThat(stop.get("mappingSessionId").asLong()).isEqualTo(1L);
+        assertThat(stop.get("commandId").asText()).isEqualTo("stop-command");
+        assertThat(stop.get("command").asText()).isEqualTo("STOP_MAPPING");
+        assertThat(stop.has("requestedAt")).isFalse();
+        OffsetDateTime issuedAt = OffsetDateTime.parse(stop.get("issuedAt").asText());
+        OffsetDateTime expiresAt = OffsetDateTime.parse(stop.get("expiresAt").asText());
+        assertThat(issuedAt.getOffset()).isEqualTo(ZoneOffset.ofHours(9));
+        assertThat(expiresAt).isEqualTo(issuedAt.plusSeconds(10));
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = MappingStatus.class,
+            names = {"COMPLETED", "FAILED", "CANCELLED"})
+    void terminalSessionRejectsStopWithoutPublishing(MappingStatus status) {
+        Fixture fixture = createFixture();
+        MappingSession session = persistSession(fixture, status);
+        mappingPublisher.resetStopCount();
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.stop(
+                                        fixture.complex().getId(), session.getId()))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAPPING_SESSION_INVALID_STATE));
+        assertThat(mappingPublisher.stopPublishCount()).isZero();
+    }
+
+    @Test
+    void missingSessionRejectsStopWithoutPublishing() {
+        Fixture fixture = createFixture();
+        mappingPublisher.resetStopCount();
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.stop(
+                                        fixture.complex().getId(), Long.MAX_VALUE))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAPPING_SESSION_NOT_FOUND));
+        assertThat(mappingPublisher.stopPublishCount()).isZero();
+    }
+
+    @Test
+    void anotherApartmentCannotStopMappingSession() {
+        Fixture owner = createFixture();
+        Fixture other = createFixture();
+        MappingStartResponse started =
+                mappingSessionService.start(
+                        owner.complex().getId(), new MappingStartRequest(owner.robot().getId()));
+        mappingPublisher.resetStopCount();
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.stop(
+                                        other.complex().getId(), started.getMappingSessionId()))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAPPING_SESSION_NOT_FOUND));
+        assertThat(mappingPublisher.stopPublishCount()).isZero();
+    }
+
+    @Test
+    void stopPublishFailureRetriesWithSameCommandId() {
+        Fixture fixture = createFixture();
+        MappingStartResponse started =
+                mappingSessionService.start(
+                        fixture.complex().getId(),
+                        new MappingStartRequest(fixture.robot().getId()));
+        mappingPublisher.failStopPublish();
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.stop(
+                                        fixture.complex().getId(), started.getMappingSessionId()))
+                .isInstanceOf(BusinessException.class);
+        String failedCommandId = mappingPublisher.lastStopCommand().commandId();
+        assertThat(mappingSessionRepository.findById(started.getMappingSessionId()))
+                .get()
+                .satisfies(
+                        session -> {
+                            assertThat(session.getStatus()).isEqualTo(MappingStatus.MAPPING);
+                            assertThat(session.getStopCommandStatus())
+                                    .isEqualTo(MappingStopCommandStatus.PUBLISH_FAILED);
+                            assertThat(session.getStopFailureReason())
+                                    .isEqualTo("STOP_MAPPING_PUBLISH_FAILED");
+                        });
+
+        mappingPublisher.allowStopPublish();
+        var retried =
+                mappingSessionService.stop(
+                        fixture.complex().getId(), started.getMappingSessionId());
+
+        assertThat(retried.getCommandId()).isEqualTo(failedCommandId);
+        assertThat(mappingPublisher.stopPublishCount()).isEqualTo(2);
+    }
+
+    @Test
+    void terminalSessionOwnedByAnotherRobotIsRejected() {
+        Fixture fixture = createFixture();
+        PatrolRobot otherRobot =
+                robotRepository.saveAndFlush(
+                        new PatrolRobot(
+                                fixture.complex(),
+                                "other-mapping-robot",
+                                "other-mapping-" + UUID.randomUUID()));
+        persistSession(new Fixture(fixture.complex(), otherRobot), MappingStatus.COMPLETED);
+
+        assertThatThrownBy(
+                        () ->
+                                mappingSessionService.start(
+                                        fixture.complex().getId(),
+                                        new MappingStartRequest(fixture.robot().getId())))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAPPING_SESSION_ALREADY_EXISTS));
+    }
+
+    private Fixture createFixture() {
+        ApartmentComplex complex =
+                apartmentComplexRepository.saveAndFlush(
+                        new ApartmentComplex(
+                                "mapping-transaction-" + UUID.randomUUID(),
+                                "integration-test-address",
+                                "00000"));
+        PatrolRobot robot =
+                robotRepository.saveAndFlush(
+                        new PatrolRobot(
+                                complex,
+                                "mapping-transaction-robot",
+                                "mapping-transaction-" + UUID.randomUUID()));
+        return new Fixture(complex, robot);
+    }
+
+    private MappingSession persistSession(Fixture fixture, MappingStatus status) {
+        MappingSession session =
+                new MappingSession(
+                        fixture.complex(), fixture.robot(), UUID.randomUUID().toString());
+        ReflectionTestUtils.setField(session, "status", status);
+        if (status != MappingStatus.REQUESTED) {
+            ReflectionTestUtils.setField(
+                    session, "startedAt", LocalDateTime.now().minusMinutes(2));
+        }
+        if (status != MappingStatus.REQUESTED && status != MappingStatus.MAPPING) {
+            ReflectionTestUtils.setField(
+                    session, "finishedAt", LocalDateTime.now().minusMinutes(1));
+        }
+        return mappingSessionRepository.saveAndFlush(session);
+    }
+
+    private record Fixture(ApartmentComplex complex, PatrolRobot robot) {}
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestConfig {
+
+        @Bean
+        @Primary
+        ControllableMappingPublisher mappingPublisher(MappingCommandAckService ackService) {
+            return new ControllableMappingPublisher(ackService);
+        }
+    }
+
+    static final class ControllableMappingPublisher extends MqttPublisher {
+
+        private final MappingCommandAckService ackService;
+        private volatile boolean shouldFail;
+        private volatile Long lastMappingSessionId;
+        private volatile int stopPublishCount;
+        private volatile StopMappingCommand lastStopCommand;
+        private volatile boolean shouldFailStop;
+
+        private ControllableMappingPublisher(MappingCommandAckService ackService) {
+            super(null);
+            this.ackService = ackService;
+        }
+
+        void acknowledgeImmediately() {
+            shouldFail = false;
+            lastMappingSessionId = null;
+        }
+
+        void failPublish() {
+            shouldFail = true;
+            lastMappingSessionId = null;
+        }
+
+        Long lastMappingSessionId() {
+            return lastMappingSessionId;
+        }
+
+        void resetStopCount() {
+            stopPublishCount = 0;
+            lastStopCommand = null;
+        }
+
+        int stopPublishCount() {
+            return stopPublishCount;
+        }
+
+        StopMappingCommand lastStopCommand() {
+            return lastStopCommand;
+        }
+
+        void failStopPublish() {
+            shouldFailStop = true;
+            resetStopCount();
+        }
+
+        void allowStopPublish() {
+            shouldFailStop = false;
+        }
+
+        @Override
+        public void publishCommand(String robotKey, Object command) {
+            if (command instanceof StopMappingCommand stopCommand) {
+                stopPublishCount++;
+                lastStopCommand = stopCommand;
+                if (shouldFailStop) {
+                    throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+                }
+                return;
+            }
+            if (!(command instanceof StartMappingCommand startCommand)) {
+                return;
+            }
+            lastMappingSessionId = startCommand.mappingSessionId();
+            if (shouldFail) {
+                throw new BusinessException(ErrorCode.INTERNAL_SERVER_ERROR);
+            }
+
+            CompletableFuture.runAsync(
+                            () ->
+                                    ackService.handle(
+                                            robotKey,
+                                            new CommandAck(
+                                                    1,
+                                                    startCommand.commandId(),
+                                                    startCommand.command(),
+                                                    CommandAck.AckStatus.SUCCEEDED,
+                                                    OffsetDateTime.now())))
+                    .orTimeout(5, TimeUnit.SECONDS)
+                    .join();
+        }
+    }
+}
