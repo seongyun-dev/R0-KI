@@ -123,13 +123,7 @@ export function R0KiShell({ active, statusChip, children }: R0KiShellProps) {
             {statusChip}
             {/* 입주민 발송 내역으로 간다. 배지는 두지 않는다 —
                 긴급 이벤트 건수를 달고 있었는데 이 페이지 내용과 맞지 않았다. */}
-            <Link
-              to="/app/notifications"
-              className="alarmbtn"
-              aria-current={active === 'notifications' ? 'page' : undefined}
-            >
-              알림
-            </Link>
+
             <div className="clock num">
               {clock}<small>한국시간</small>
             </div>
