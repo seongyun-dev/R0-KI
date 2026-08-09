@@ -1,4 +1,4 @@
-import { apiBlob, apiRequest, consumeSse, jsonBody } from './client'
+import { apiBlob, apiRequest, apiRequestWithMessage, consumeSse, jsonBody } from './client'
 import type {
   AnalyticsByZoneResponse,
   AnalyticsHandlingResponse,
@@ -21,6 +21,8 @@ import type {
 } from './residentContracts'
 import type {
   ComplexResponse,
+  EmailVerificationSendRequest,
+  EmailVerificationVerifyRequest,
   EventBatchCreateRequest,
   EventBatchCreateResponse,
   EventDetailResponse,
@@ -93,6 +95,16 @@ export const authApi = {
     }),
   signUp: (request: SignUpRequest) =>
     apiRequest<SignUpResponse['data']>('/api/auth/signup', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  sendEmailVerification: (request: EmailVerificationSendRequest) =>
+    apiRequestWithMessage<unknown>('/api/auth/email/send', {
+      method: 'POST',
+      body: jsonBody(request),
+    }),
+  verifyEmail: (request: EmailVerificationVerifyRequest) =>
+    apiRequestWithMessage<unknown>('/api/auth/email/verify', {
       method: 'POST',
       body: jsonBody(request),
     }),

@@ -1417,7 +1417,11 @@
 /* ── 폼 ── */
 .r0ki .au-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 var(--s5)}
 .r0ki .au-grid .full{grid-column:1/-1}
-@media(max-width:760px){.r0ki .au-grid{grid-template-columns:1fr}}
+.r0ki .au-email-code{grid-column:2}
+@media(max-width:760px){
+  .r0ki .au-grid{grid-template-columns:1fr}
+  .r0ki .au-email-code{grid-column:1}
+}
 .r0ki .au-row{margin-bottom:var(--s5)}
 .r0ki .au-lab{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.01em;color:var(--text-2);margin-bottom:var(--s2)}
 /* 필수 표시 — --urgent 는 응급 전용이라 쓰지 않는다(시안 각주) */
