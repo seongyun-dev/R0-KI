@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from navigation.route import RouteValidationError
 from run_integrated import (
     _build_navigation_service,
     _navigation_mode,
+    _patrol_start_anchor,
     _validate_backend_map_metadata_against_local,
 )
 from aiot_robot.navigation_config import NavigationConfigError
@@ -95,6 +97,34 @@ waypoints:
             with self.subTest(mode=mode):
                 with self.assertRaisesRegex(RuntimeError, "DEMO_NAV2_REQUIRED"):
                     _navigation_mode(SimpleNamespace(navigation_mode=mode))
+
+    def test_start_anchor_derives_heading_toward_waypoint_two(self) -> None:
+        route = SimpleNamespace(
+            waypoints=(
+                SimpleNamespace(x=-0.076, y=-0.052, yaw_deg=None),
+                SimpleNamespace(x=0.067, y=-0.740, yaw_deg=None),
+            )
+        )
+
+        x, y, yaw_rad, source = _patrol_start_anchor(route)
+
+        self.assertAlmostEqual(x, -0.076)
+        self.assertAlmostEqual(y, -0.052)
+        self.assertAlmostEqual(math.degrees(yaw_rad), -78.258, places=3)
+        self.assertEqual(source, "ROUTE_GEOMETRY")
+
+    def test_explicit_start_yaw_takes_precedence(self) -> None:
+        route = SimpleNamespace(
+            waypoints=(
+                SimpleNamespace(x=1.0, y=2.0, yaw_deg=45.0),
+                SimpleNamespace(x=3.0, y=2.0, yaw_deg=None),
+            )
+        )
+
+        _x, _y, yaw_rad, source = _patrol_start_anchor(route)
+
+        self.assertAlmostEqual(math.degrees(yaw_rad), 45.0)
+        self.assertEqual(source, "WAYPOINT_YAW")
 
     def test_nav2_requires_complete_fixed_dock_configuration(self) -> None:
         environment = self.nav2_environment()
