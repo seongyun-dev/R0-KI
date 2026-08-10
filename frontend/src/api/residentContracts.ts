@@ -43,6 +43,17 @@ export type ResidentNotificationHistoryResponse = {
   createdAt: string
 }
 
+/** GET /api/residents/{id}/notifications — 전체 알림 이력 페이지 조회 */
+export type ResidentNotificationPageResponse = {
+  content: ResidentNotificationHistoryResponse[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
+  first: boolean
+  last: boolean
+}
+
 export type ResidentDetailResponse = {
   residentId: number
   name: string
