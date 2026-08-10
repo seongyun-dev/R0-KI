@@ -115,6 +115,9 @@ class FinalRuntimeService:
         self._runtime_fault_generation = 0
         self._active_patrol_id: int | None = None
         self._paused = False
+        self._pause_reason: str | None = None
+        # 인터락 STOP 을 이미 전달했는가. 아래 _apply_motion_command_locked 참고.
+        self._interlock_stop_delivered = False
         self._fault_listener: Any | None = None
         self._scan_context_listener: Any | None = None
         if navigation_service is not None:
@@ -204,6 +207,11 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             return self._paused
 
+    @property
+    def pause_reason(self) -> str | None:
+        with self._lifecycle_lock:
+            return self._pause_reason
+
     def set_destination_listener(self, listener: Any) -> None:
         self._destination_listener = listener
 
@@ -267,9 +275,38 @@ class FinalRuntimeService:
 
         return self._runtime_lifecycle_marker()
 
+    @property
+    def navigation_route(self) -> Any | None:
+        """Return the route refreshed by ``prepare_patrol`` for localization."""
+
+        with self._lifecycle_lock:
+            navigation = self._navigation_service
+            return None if navigation is None else getattr(navigation, "route", None)
+
     def readiness(self) -> tuple[bool, str]:
         """Return the physical/navigation gate without issuing a command."""
 
+        return self._readiness(require_localization=True)
+
+    def patrol_preflight_readiness(self) -> tuple[bool, str]:
+        """위치추정 인계 **전에** 이미 알 수 있는 것만 본다.
+
+        지도 좌표 pose 와 Nav2 준비는 slam_toolbox 가 위치추정 모드로 바뀌고
+        포즈그래프가 올라온 뒤에야 성립한다. 그 인계를 하는 것이 START_PATROL
+        의 세 번째 단계(command_handler 의 localization_preparer)인데, 첫
+        readiness 가 그 결과물을 요구하고 있었다. 재시작 뒤 매핑을 한 번도
+        안 한 부팅에서는 스캔 게이트가 닫혀 있어 pose 가 없고, 그래서 첫
+        게이트에서 MAP_POSE_NOT_READY 로 잘려 인계 단계에 도달하지 못했다
+        -- 순찰이 영원히 시작되지 않는다(2026-08-09 00:35:35 실측).
+
+        그래서 여기서는 인계 전에 판정 가능한 것만 본다. pose 와 Nav2 는
+        인계 직후의 재확인(같은 함수의 ``readiness``)이 그대로 맡는다.
+        약해지는 것이 아니라, 아직 알 수 없는 것을 묻지 않는 것뿐이다.
+        """
+
+        return self._readiness(require_localization=False)
+
+    def _readiness(self, *, require_localization: bool) -> tuple[bool, str]:
         if not self.is_running():
             return False, "SERIAL_RUNTIME_NOT_RUNNING"
         if (
@@ -293,7 +330,7 @@ class FinalRuntimeService:
         safety = getattr(snapshot, "safety_decision", None)
         if safety is None or not getattr(safety, "allowed", False):
             return False, str(getattr(safety, "fault", "SAFETY_NOT_READY"))
-        if self._navigation_driver is not None:
+        if require_localization and self._navigation_driver is not None:
             get_pose = getattr(self._runtime.state_store, "get_pose", None)
             if not callable(get_pose) or get_pose() is None:
                 return False, "MAP_POSE_NOT_READY"
@@ -349,6 +386,7 @@ class FinalRuntimeService:
                         self._manual_controller.activate(patrol_id)
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
+                        self._pause_reason = None
                     elif self._navigation_service is not None:
                         if self._navigation_driver is not None:
                             self._start_nav2_patrol(
@@ -366,6 +404,7 @@ class FinalRuntimeService:
                         self._ensure_start_not_expired(expires_at)
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
+                        self._pause_reason = None
                         self._runtime.mission.start_patrol(
                             speed=self._patrol_drive_speed_pwm,
                             steering_deg=self._patrol_steering_degrees,
@@ -383,6 +422,18 @@ class FinalRuntimeService:
                 return
             if command == "STOP_PATROL":
                 self._stop_patrol_from_command()
+                return
+            if command == "RESUME_PATROL":
+                patrol_id = parameters.get("patrolId")
+                if (
+                    isinstance(patrol_id, bool)
+                    or not isinstance(patrol_id, int)
+                    or patrol_id <= 0
+                ):
+                    raise ValueError("patrolId must be a positive integer")
+                resumed, reason = self.resume_emergency_patrol(patrol_id)
+                if not resumed:
+                    raise RuntimeError(reason)
                 return
             raise ValueError(
                 f"unsupported Final RobotRuntime command: {command}"
@@ -432,6 +483,7 @@ class FinalRuntimeService:
         self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
+        self._pause_reason = None
         self._ensure_start_not_expired(expires_at)
         self._runtime.mission.start_patrol(
             speed=self._patrol_drive_speed_pwm,
@@ -453,6 +505,7 @@ class FinalRuntimeService:
         event = self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
+        self._pause_reason = None
         self._ensure_start_not_expired(expires_at)
         self._navigation_driver.start_patrol(
             route=self._navigation_service.route,
@@ -500,8 +553,28 @@ class FinalRuntimeService:
 
     def _apply_motion_command_locked(self, command: Any) -> None:
         if self._active_patrol_id is None or self._paused:
-            self._best_effort_stop_runtime_patrol("MOTION_INTERLOCK")
+            # 전달된 STOP 을 매 cmd_vel 마다 다시 보내지 않는다.
+            #
+            # Nav2 velocity smoother 는 순찰이 끝난 뒤에도 램프다운하며 계속
+            # 발행하고, 그 명령은 전부 이 가지로 떨어진다. 2026-08-09 실측:
+            # 세션 종료마다 20Hz 로 수십 건(오늘 88건), 그 중 55건이 살아 있는
+            # 시리얼에 실제 STOP 프레임을 썼다. mapping_motion_sink._stop 이
+            # 같은 이유로 이미 같은 가드를 두고 있고, 그 주석이 대가를 적어뒀다
+            # -- "floods the serial link at the smoother's rate, which is enough
+            # to reset the ESP32 link and drop motion authorization".
+            #
+            # 한 번 전달된 STOP 이면 충분하다. 런타임은 이미 멈춰 있고, 펌웨어
+            # 워치독(DRIVE_WATCHDOG_MS=400)이 섀시를 잡고 있다. 전달에 실패하면
+            # 플래그를 세우지 않으므로 다음 명령이 다시 시도한다.
+            if self._interlock_stop_delivered:
+                return
+            if self._best_effort_stop_runtime_patrol("MOTION_INTERLOCK"):
+                self._interlock_stop_delivered = True
             return
+        # 여기 도달했다는 것은 주행이 다시 인가됐다는 뜻이다. 다음 인터락은
+        # 새 STOP 을 받아야 한다. 상태 전환 지점이 11곳이라 그쪽에 플래그를
+        # 흩뿌리는 대신, 실제로 명령이 받아들여지는 이 한 곳에서 되돌린다.
+        self._interlock_stop_delivered = False
         if int(command.speed_pwm) == 0:
             self._best_effort_stop_runtime_patrol(
                 command.stop_reason or "NAV2_STOP"
@@ -517,9 +590,23 @@ class FinalRuntimeService:
             return self._pause_patrol_locked(reason)
 
     def _pause_patrol_locked(self, reason: str) -> bool:
-        if self._active_patrol_id is None or self._paused:
+        if self._active_patrol_id is None:
             return False
+        if self._paused:
+            if reason != "AI_EMERGENCY" or self._pause_reason == reason:
+                return False
+            # A confirmed emergency outranks an existing obstacle/health hold.
+            # Keep Nav2 paused and refresh the physical STOP, but never resume
+            # this patrol through a later LiDAR CLEAR transition.
+            self._pause_reason = reason
+            stop_confirmed = self._best_effort_stop_runtime_patrol(reason)
+            if not stop_confirmed:
+                self._fail_patrol_locked(f"{reason}_PAUSE_FAILED")
+                return False
+            print("[AI EMERGENCY] existing pause promoted to terminal hold")
+            return True
         self._paused = True
+        self._pause_reason = reason
         self._publish_scan_context_locked(None)
         component_failure: Exception | None = None
         try:
@@ -541,8 +628,27 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             return self._resume_patrol_locked()
 
-    def _resume_patrol_locked(self) -> bool:
+    def resume_emergency_patrol(self, patrol_id: int) -> tuple[bool, str]:
+        """Resume only the active patrol held by an AI emergency."""
+
+        with self._lifecycle_lock:
+            if self._active_patrol_id != int(patrol_id):
+                return False, "ACTIVE_PATROL_MISMATCH"
+            if not self._paused:
+                return False, "PATROL_NOT_PAUSED"
+            if self._pause_reason != "AI_EMERGENCY":
+                return False, "PATROL_NOT_EMERGENCY_PAUSED"
+            ready, reason = self.readiness()
+            if not ready:
+                return False, reason
+            if not self._resume_patrol_locked(allow_emergency=True):
+                return False, "EMERGENCY_RESUME_FAILED"
+            return True, "RESUMED"
+
+    def _resume_patrol_locked(self, *, allow_emergency: bool = False) -> bool:
         if self._active_patrol_id is None or not self._paused:
+            return False
+        if self._pause_reason == "AI_EMERGENCY" and not allow_emergency:
             return False
         try:
             if self._manual_controller is not None:
@@ -563,6 +669,7 @@ class FinalRuntimeService:
             )
             return False
         self._paused = False
+        self._pause_reason = None
         return True
 
     def fail_patrol(self, reason: str) -> None:
@@ -584,6 +691,7 @@ class FinalRuntimeService:
             cleanup_failure = self._cleanup_patrol_components()
             self._active_patrol_id = None
             self._paused = False
+            self._pause_reason = None
             try:
                 self._release_patrol_lease()
             except Exception as exc:
@@ -789,6 +897,7 @@ class FinalRuntimeService:
         # stale cmd_vel callback then takes MOTION_INTERLOCK instead of rearming.
         self._active_patrol_id = None
         self._paused = False
+        self._pause_reason = None
         cleanup_failure = self._cleanup_patrol_components()
         try:
             self._release_patrol_lease()
@@ -864,6 +973,7 @@ class FinalRuntimeService:
         cleanup_failure = self._cleanup_patrol_components()
         self._active_patrol_id = None
         self._paused = False
+        self._pause_reason = None
         try:
             self._release_patrol_lease()
         except Exception as exc:
@@ -897,6 +1007,7 @@ class FinalRuntimeService:
                     )
         self._active_patrol_id = None
         self._paused = False
+        self._pause_reason = None
         try:
             self._release_patrol_lease()
         except Exception as exc:
@@ -931,6 +1042,7 @@ class FinalRuntimeService:
                 )
             self._active_patrol_id = None
             self._paused = False
+            self._pause_reason = None
             try:
                 self._release_patrol_lease()
             except Exception as exc:
@@ -1007,6 +1119,7 @@ class FinalRuntimeService:
                 self._navigation_driver.stop_patrol()
             self._active_patrol_id = None
             self._paused = False
+            self._pause_reason = None
             self._release_patrol_lease()
             self._update_runtime_state("IDLE" if stop_confirmed else "ERROR")
             if callable(self._destination_listener):

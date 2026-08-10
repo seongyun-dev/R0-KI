@@ -43,15 +43,22 @@ class OperatingProtocolTest(unittest.TestCase):
         self.assertEqual(json.loads(build_hello_command(8))["protocol"], 1)
 
     def test_control_rejects_invalid_values(self) -> None:
+        # Steering bounds follow the 2026-08-06 linkage measurement (servo
+        # 30..130 reaches 30 deg road-wheel); only outside that is rejected.
         invalid_commands = (
             (-256, 80, 0),
             (256, 80, 0),
-            (0, 59, 0),
-            (0, 101, 0),
+            (0, 39, 0),
+            (0, 121, 0),
         )
         for values in invalid_commands:
             with self.assertRaises(ValueError):
                 build_control_command(*values, self.settings)
+
+    def test_control_accepts_the_calibrated_steering_limits(self) -> None:
+        for steering in (40, 80, 120):
+            payload = json.loads(build_control_command(0, steering, 0, self.settings))
+            self.assertEqual(payload["steering"], steering)
 
     def test_odometry_contract(self) -> None:
         payload = {

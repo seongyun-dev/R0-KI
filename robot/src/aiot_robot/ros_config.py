@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import math
 import os
@@ -14,12 +15,20 @@ from typing import Mapping
 FIELD_VARIABLES = (
     "ROKI_WHEELBASE_M",
     "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG",
-    "ROKI_ROBOT_RADIUS_M",
     "ROKI_INITIAL_POSE_X_M",
     "ROKI_INITIAL_POSE_Y_M",
     "ROKI_INITIAL_POSE_YAW_RAD",
 )
 DEFAULT_NAV2_XY_GOAL_TOLERANCE_M = 0.20
+
+# 실측에서 정한 값이지 반지름에서 유도한 값이 아니다.
+#
+# 예전에는 ROKI_ROBOT_RADIUS_M(0.23) + 0.15 = 0.38 로 계산했다. 그런데 그
+# 0.23 원형 근사가 바로 순찰이 벽 0.23 m 안에서 자기 셀을 치명으로 표시하던
+# 원인이었고, 그래서 사각 footprint 로 교체했다. 계산의 전제가 사라졌는데
+# 계산만 남아 있었다 -- 렌더된 0.38 은 곧바로 0.25 로 덮어써져 한 번도 쓰인
+# 적이 없다. 유도를 지우고 실측값을 그대로 둔다.
+MEASURED_INFLATION_RADIUS_M = 0.25
 
 
 def missing_field_variables(environment: Mapping[str, str]) -> list[str]:
@@ -37,7 +46,6 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
     )
     if steering_angle >= 60:
         raise ValueError("ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG must be below 60")
-    robot_radius = _positive_float(environment, "ROKI_ROBOT_RADIUS_M")
     initial_pose_x = _finite_float(environment, "ROKI_INITIAL_POSE_X_M")
     initial_pose_y = _finite_float(environment, "ROKI_INITIAL_POSE_Y_M")
     initial_pose_yaw = _finite_float(
@@ -89,8 +97,7 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
             else native_path.as_posix()
         )
     return {
-        "ROBOT_RADIUS_M": _number(robot_radius),
-        "INFLATION_RADIUS_M": _number(robot_radius + 0.15),
+        "INFLATION_RADIUS_M": _number(MEASURED_INFLATION_RADIUS_M),
         "MINIMUM_TURNING_RADIUS_M": _number(minimum_turning_radius),
         "ANALYTIC_EXPANSION_MAX_LENGTH_M": _number(
             max(3.0, minimum_turning_radius * 5.0)
@@ -120,6 +127,247 @@ def nav2_xy_goal_tolerance(environment: Mapping[str, str]) -> float:
     return value
 
 
+# 운행마다 실제로 달라야 하는 파라미터. 나머지는 전부 공통이다.
+#
+# 예전에는 매핑용과 순찰용 설정 파일을 따로 렌더하고 모드를 바꿀 때 aiot-ros 를
+# 재시작해 갈아 끼웠다. 두 모드가 서로 다른 노드 집합을 쓰던 시절의 구조다.
+# 이제는 slam_toolbox 하나가 두 역할을 다 하므로 노드 집합이 같고, 코스트맵
+# 모양도 같다(둘 다 slam_toolbox 의 /map 을 본다). 남은 차이가 이 넷뿐이라
+# 파일을 두 벌 둘 이유가 없어졌다.
+#
+# 이 값들은 실행 중 SetParameters 로 주입한다. 렌더된 파일은 매핑 값을 담는다 --
+# 스택은 매핑 모드로 뜨고, 생애주기 관리자가 복구할 때 되돌아갈 자리도 여기다.
+MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
+    "mapping": {
+        "/planner_server": {
+            # 탐사는 아직 지도에 없는 공간을 헤쳐야 하는 유일한 운행이다.
+            # Dubin 경로는 전진으로만 휘므로 회전반경 0.34 m 로는 0.3~0.4 m
+            # 옆 벽을 비켜 갈 전진 호가 없다. Reeds-Shepp 이 후진 구간을 준다.
+            "GridBased.motion_model_for_search": "REEDS_SHEPP",
+            # 후진은 허용하되 불필요한 전후진 전환은 기본 수준으로 억제한다.
+            # 순찰용 DUBIN 프로필과는 독립적인 매핑 전용 값이다.
+            "GridBased.reverse_penalty": 2.0,
+            # 재계획 사이에 장애물 확장을 재사용하는 최적화다. SLAM 이 지도를
+            # 키우는 동안은 그 전제가 매초 깨지므로, 낡은 휴리스틱으로
+            # 도달 가능한 목표를 포기한다.
+            "GridBased.cache_obstacle_heuristic": False,
+        },
+        "/controller_server": {
+            # explore_lite 는 모든 프론티어 목표에 단위 쿼터니언을 찍는다
+            # (explore.cpp: goal.pose.pose.orientation.w = 1) -- "0 rad 를 보고
+            # 도착하라". 차동 로봇은 제자리에서 돌면 되지만 이 섀시는 Dubin
+            # 경로를 비틀어야 하고, 그 곡률이 선속을 0 으로 조이면서 각속만
+            # 남겨 Ackermann 어댑터가 거부해야 하는 제자리 회전을 만든다.
+            # 탐사에서 도착 방위는 의미가 없으므로 풀어준다.
+            "general_goal_checker.yaw_goal_tolerance": 3.15,
+        },
+    },
+    "patrol": {
+        "/planner_server": {
+            # 순찰은 운전자가 그린 경로를 따라 이미 주행 가능한 공간을 간다.
+            # 여기서 후진하면 보내진 웨이포인트에서 멀어진다.
+            "GridBased.motion_model_for_search": "DUBIN",
+            "GridBased.reverse_penalty": 2.1,
+            # 지도가 고정되므로 확장 재사용이 성립한다.
+            "GridBased.cache_obstacle_heuristic": True,
+        },
+        "/controller_server": {
+            # 순찰은 도착 방위가 의미를 갖는다. 다음 구간의 시작 자세다.
+            "general_goal_checker.yaw_goal_tolerance": 0.35,
+        },
+    },
+}
+
+
+PLANNER_PROFILE_IDS = {
+    "mapping": "MappingGridBased",
+    "patrol": "PatrolGridBased",
+}
+GOAL_CHECKER_PROFILE_IDS = {
+    "mapping": "mapping_goal_checker",
+    "patrol": "patrol_goal_checker",
+}
+
+
+def _parameter_tail(dotted: str, expected_head: str) -> str:
+    head, separator, tail = dotted.partition(".")
+    if not separator or head != expected_head:
+        raise ValueError(
+            f"profile parameter {dotted!r} must start with {expected_head}."
+        )
+    return tail
+
+
+def _preload_nav2_mode_plugins(config: dict[str, object]) -> None:
+    """Register both mode profiles without changing the current BT selection.
+
+    The existing trees still request ``GridBased`` and ``general_goal_checker``.
+    Keep those mapping-baseline instances and add independent mapping/patrol
+    instances beside them. No active parameter mutation is performed here;
+    this only shapes the startup parameter file.
+    """
+
+    planner = config["planner_server"]["ros__parameters"]
+    legacy_planner = planner["GridBased"]
+    planner["planner_plugins"] = ["GridBased", *PLANNER_PROFILE_IDS.values()]
+    for mode, plugin_id in PLANNER_PROFILE_IDS.items():
+        plugin = deepcopy(legacy_planner)
+        for dotted, value in MODE_PROFILES[mode]["/planner_server"].items():
+            plugin[_parameter_tail(dotted, "GridBased")] = value
+        planner[plugin_id] = plugin
+
+    controller = config["controller_server"]["ros__parameters"]
+    legacy_checker = controller["general_goal_checker"]
+    controller["goal_checker_plugins"] = [
+        "general_goal_checker",
+        *GOAL_CHECKER_PROFILE_IDS.values(),
+    ]
+    for mode, plugin_id in GOAL_CHECKER_PROFILE_IDS.items():
+        checker = deepcopy(legacy_checker)
+        for dotted, value in MODE_PROFILES[mode]["/controller_server"].items():
+            checker[_parameter_tail(dotted, "general_goal_checker")] = value
+        controller[plugin_id] = checker
+
+
+def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
+    """두 운행이 공유하는 형태로 다듬는다.
+
+    코스트맵과 섀시 물리는 모드에 따라 달라질 이유가 없다. 두 모드 모두
+    slam_toolbox 가 발행하는 ``/map`` 을 보고, 회전반경과 PWM 하한은 하드웨어
+    사실이다. 운행마다 달라야 하는 넷은 ``MODE_PROFILES`` 에 있다.
+    """
+
+    import yaml
+
+    config = yaml.safe_load(rendered)
+    # Nav2 설정이 아니면 다듬을 것이 없다. 토큰 치환만 확인하는 축소 템플릿이
+    # 그런 경우다. 진짜 템플릿이 이 분기로 새면 아래 코스트맵/프로필 테스트가
+    # 즉시 잡는다.
+    if not isinstance(config, dict) or "global_costmap" not in config:
+        return rendered
+
+    global_costmap = config["global_costmap"]["global_costmap"]["ros__parameters"]
+    # SLAM publishes /map continuously; follow it instead of a one-shot load.
+    #
+    # Static plus inflation only, which is what upstream Nav2 uses alongside SLAM.
+    # A live obstacle_layer here was tried and removed: /map already encodes these
+    # same scans with proper probabilistic ray-tracing, and on a non-rolling costmap
+    # that grows with the map, a mark is only cleared when something re-observes it
+    # inside raytrace_max_range. Everything the robot drove past kept its marks, so
+    # exploration progressively walled itself in.
+    global_costmap["plugins"] = ["static_layer", "inflation_layer"]
+    global_costmap["static_layer"] = {
+        "plugin": "nav2_costmap_2d::StaticLayer",
+        "map_subscribe_transient_local": True,
+        "subscribe_to_updates": True,
+    }
+    global_costmap.pop("obstacle_layer", None)
+    # Unknown space must stay distinguishable so the explorer can still see where
+    # the frontiers are. The planner is deliberately left free to route through it
+    # (the template's allow_unknown stays true): during exploration the map is a
+    # thin band of observed free space, and a car-like Dubin path needs roughly
+    # twice the 0.34 m turning radius of clearance to curve at all. Forbidding
+    # unknown cells makes every candidate path leave known space and fail, which
+    # is what "GridBased: failed to create plan" was. Clearance is enforced where
+    # it can actually be measured -- the local costmap and the LiDAR interlock.
+    global_costmap["track_unknown_space"] = True
+    global_costmap["rolling_window"] = False
+    for key in ("width", "height"):
+        global_costmap.pop(key, None)
+
+    # 이 건물의 복도는 약 1.1 m 다. 스커트가 양쪽에서 0.38 m 씩 들어오면
+    # 가운데 약 0.3 m 만 남는데, 그건 실측 회전반경 0.341 m 보다 좁다.
+    # 축에서 벗어난 목표로 향하는 호가 들어갈 자리가 없어져 계획이 거부된다.
+    #
+    # 치명성은 이 값과 무관하다. Nav2 는 footprint 의 내접원(사각 차체
+    # 0.35x0.25 에서 0.125 m)을 치명 반경으로 쓰고, inflation 은 그 바깥의
+    # 비용 기울기일 뿐이다. 라이다 인터락도 그대로 살아 있다.
+    #
+    # ⚠️ 이 값은 매핑 디버깅에서 도출했고 순찰로는 아직 검증하지 않았다.
+    # 회전반경과 복도 폭은 두 운행이 공유하는 물리 사실이라 같은 값이 맞다고
+    # 보지만, 근거는 매핑 쪽에만 있다. 순찰 첫 완주 때 확인할 것.
+    #
+    # 값 자체는 템플릿이 MEASURED_INFLATION_RADIUS_M 로 이미 받는다. 여기서
+    # 다시 쓰지 않는다 -- 같은 값을 두 곳에서 정하면 언젠가 어긋난다.
+
+    # 기동 시점의 모드는 매핑이다. 렌더된 파일이 그 값을 담아야, 생애주기
+    # 관리자가 bond 끊김으로 스택을 복구하며 파일을 다시 읽을 때도 매핑이
+    # 매핑으로 남는다. 순찰 값은 전환 시 주입되고 reassert 가 다시 밀어넣는다.
+    for node, overrides in MODE_PROFILES["mapping"].items():
+        section = (
+            config["planner_server"]["ros__parameters"]
+            if node == "/planner_server"
+            else config["controller_server"]["ros__parameters"]
+        )
+        for dotted, value in overrides.items():
+            head, _, tail = dotted.partition(".")
+            section[head][tail] = value
+
+    # P0-2 preloads both profiles while legacy IDs continue serving the
+    # protected Production Mapping BT.
+    _preload_nav2_mode_plugins(config)
+
+    # The template forbids negative linear velocity, which is right for a DUBIN
+    # route that must never retreat from the waypoint it was sent to. It silently
+    # defeated the whole reverse setup. /cmd_vel is published by the
+    # velocity smoother, not the controller, so a reverse command from the controller
+    # arrived as linear.x clamped to 0 with angular.z intact -- which the Ackermann
+    # adapter must refuse as an in-place rotation. Every IN_PLACE_ROTATION_REJECTED
+    # was a reverse being flattened here.
+    smoother = config["velocity_smoother"]["ros__parameters"]
+    maximum_reverse = -float(smoother["max_velocity"][0])
+    smoother["min_velocity"] = [maximum_reverse, 0.0, smoother["min_velocity"][2]]
+    # A REEDS_SHEPP path alternates forward and reverse, and every reversal
+    # walks linear.x through zero while the steering command is still live.
+    # The Ackermann adapter must refuse that pair as an in-place rotation, so
+    # the gate closed and the ramp restarted roughly every two seconds -- the
+    # chassis oscillated in place instead of driving (measured 2026-08-07:
+    # gate open +45, -45, +45 ... with IN_PLACE_ROTATION_REJECTED between
+    # each). Collapsing near-zero linear to exactly zero removes the pair:
+    # the adapter reads a clean STOP, the reversal completes, and the next
+    # segment starts from a real speed. The threshold sits just under the
+    # controller's own floor (regulated_linear_scaling_min_speed 0.05) so it
+    # only catches the ramp crossing, never a legitimate cruise command.
+    deadband = smoother.get("deadband_velocity") or [0.0, 0.0, 0.0]
+    smoother["deadband_velocity"] = [0.049, deadband[1], deadband[2]]
+
+    controller = config["controller_server"]["ros__parameters"]
+    follow_path = controller["FollowPath"]
+    # Measured floor, not a preference: the drive PWM cannot go below 45 without
+    # stalling, and PWM 45 moves this chassis at 0.094 m/s (tape-measured 0.23 m
+    # over 2.02 s, agreeing with TF to 2.6% and the encoders at 1470 ticks/m).
+    # Letting the controller scale below that makes it believe it slowed down when
+    # nothing changed, so it keeps adding steering instead -- which is how a tight
+    # curve turns into a full-lock veer.
+    # The floor the chassis can actually hold. Measured from rest, 1 s per step:
+    # PWM 44 -> 0.074 m/s, 42 -> 0.059, 41 -> ~0.05, 40 -> 0.039, 38 -> 0.024,
+    # 36 -> stalls. Below PWM 41 the two rear motors also diverge sharply (16% of
+    # each other at 40, 58% at 38), so a slower floor would buy regulation range at
+    # the cost of veering every time the controller slowed down. Asking for less
+    # than this makes the controller believe it slowed when it did not, and it
+    # answers by steering harder instead.
+    follow_path["regulated_linear_scaling_min_speed"] = 0.05
+    # Pure pursuit oscillates once the lookahead falls under the turning radius:
+    # the carrot sits inside the tightest arc the chassis can draw, so it can never
+    # be reached and the controller answers by steering harder. 0.34 m is the
+    # measured radius, so keep the lookahead comfortably outside it.
+    follow_path["min_lookahead_dist"] = 0.45
+    follow_path["lookahead_dist"] = 0.50
+    # Without this the controller drives forward along a reverse segment instead
+    # of backing along it, so the Reeds-Shepp plan above would be worse than no
+    # plan. Safe to pair only because use_rotate_to_heading is false; Nav2 rejects
+    # the two together. The adapter already signs the drive PWM from linear.x, so
+    # a negative command reaches the chassis as reverse.
+    follow_path["allow_reversing"] = True
+
+    bt = config["bt_navigator"]["ros__parameters"]
+    mapping_bt = environment.get("ROKI_NAV2_MAPPING_BT_XML", "").strip()
+    if mapping_bt:
+        bt["default_nav_to_pose_bt_xml"] = mapping_bt
+
+    return yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
+
+
 def render_nav2_config(
     template_path: Path,
     output_path: Path,
@@ -127,7 +375,7 @@ def render_nav2_config(
 ) -> dict[str, str]:
     values = build_nav2_values(environment)
     template = Template(template_path.read_text(encoding="utf-8"))
-    rendered = template.substitute(values)
+    rendered = apply_slam_shape(template.substitute(values), environment)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
     try:

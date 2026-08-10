@@ -1,9 +1,0 @@
-[Unit]
-Description=Activate the accepted AIoT map in Nav2
-After=aiot-ros.service aiot-robot.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/aiot/bin/aiot-map-activate
-Restart=on-failure
-RestartSec=10s
