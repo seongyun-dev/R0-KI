@@ -326,6 +326,13 @@ export type PatrolRouteCheckpointResponse = {
   checkpointId?: Id
   checkpointName: string
   sequence: number
+  /* 순찰 "당시" 구역의 유형·사각형 좌표. 방문 기록이 참조하는 체크포인트 행에서
+     내려오므로 이후 구역을 다시 등록해도 값이 변하지 않는다. */
+  checkpointType?: ZoneTypeCode
+  minX?: number | string
+  minY?: number | string
+  maxX?: number | string
+  maxY?: number | string
 }
 
 // GET /api/patrols (목록)

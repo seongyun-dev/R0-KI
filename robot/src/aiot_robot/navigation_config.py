@@ -51,12 +51,15 @@ class BackendNavigationConfigProvider:
         *,
         backend_factory: BackendFactory,
         navigation_factory: NavigationFactory,
-        identity: NavigationConfigIdentity,
+        # 값 또는 "지금 활성인 지도"를 돌려주는 호출가능. 후자여야 매핑 직후에
+        # 그 지도로 순찰할 수 있다 -- 값으로 고정하면 부팅 시점 버전에 묶인다.
+        identity: NavigationConfigIdentity | Callable[[], NavigationConfigIdentity],
         default_acceptance_radius_m: float = 0.30,
         wall_clock: Callable[[], datetime] | None = None,
         map_metadata_validator: MapMetadataValidator | None = None,
     ) -> None:
-        if not identity.map_id.strip() or identity.map_version <= 0:
+        probe = identity() if callable(identity) else identity
+        if not probe.map_id.strip() or probe.map_version <= 0:
             raise ValueError("a positive fixed-map identity is required")
         if not 0.20 <= default_acceptance_radius_m <= 1.0:
             raise ValueError("default acceptance radius must be within 0.20..1.0")
@@ -131,9 +134,16 @@ class BackendNavigationConfigProvider:
         map_version = _positive_integer(
             map_config.get("mapVersion"), "map.mapVersion"
         )
+        # 부팅 시점의 값이 아니라 지금 활성인 지도와 비교한다.
+        #
+        # 2026-08-08 14:00 실기: START_PATROL 이 NAVIGATION_MAP_MISMATCH 로
+        # 거부됐다. 런타임 identity 는 부팅 env 의 v32 였고 백엔드 경로는
+        # 방금 만든 v34 를 가리켰다. 매핑을 끝낸 직후에 그 지도로 순찰하는 것이
+        # 시연 흐름 전체이므로, 그 자리에서 반드시 어긋난다.
+        current = self._identity() if callable(self._identity) else self._identity
         if (
-            map_id != self._identity.map_id
-            or map_version != self._identity.map_version
+            map_id != current.map_id
+            or map_version != current.map_version
         ):
             raise NavigationConfigError("NAVIGATION_MAP_MISMATCH")
         _validate_map_metadata(map_config)

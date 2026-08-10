@@ -1,4 +1,4 @@
-# GPU Device3 GitLab Runner
+# GPU Device3 GitLab Runner 운영 가이드
 
 GPU 서버 `70.12.130.103`, 계정 `i15e103`, 할당 장치 `Device3`에 프로젝트 전용 Shell Runner를 두기 위한 절차다. HTTP URL만 확인된 상태이므로 SSH·sudo 접근이 확보되기 전에는 서버 변경을 시도하지 않는다. Runner 인증 토큰은 문서, 명령 기록, Git에 남기지 않는다.
 

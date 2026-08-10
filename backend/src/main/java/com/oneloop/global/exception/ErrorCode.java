@@ -41,7 +41,14 @@ public enum ErrorCode {
     RESIDENT_NOT_FOUND(HttpStatus.NOT_FOUND, "RESIDENT_001", "존재하지 않는 입주민입니다."),
     RESIDENT_ALREADY_EXISTS(HttpStatus.CONFLICT, "RESIDENT_002", "같은 동·호수·연락처로 등록된 입주민이 이미 있습니다."),
     RESIDENT_VEHICLE_NOT_FOUND(HttpStatus.NOT_FOUND, "RESIDENT_003", "존재하지 않는 등록 차량입니다."),
-    RESIDENT_VEHICLE_DUPLICATE(HttpStatus.CONFLICT, "RESIDENT_004", "이미 등록된 차량 번호입니다.");
+    RESIDENT_VEHICLE_DUPLICATE(HttpStatus.CONFLICT, "RESIDENT_004", "이미 등록된 차량 번호입니다."),
+    // 이메일 인증 — 코드 문자열은 프런트와 맞춘 명세값을 그대로 쓴다(AUTH_00x 형식이 아니다).
+    EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."),
+    INVALID_EMAIL_VERIFICATION_CODE(
+            HttpStatus.BAD_REQUEST, "INVALID_EMAIL_VERIFICATION_CODE", "인증번호가 올바르지 않거나 만료되었습니다."),
+    EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "EMAIL_NOT_VERIFIED", "이메일 인증이 완료되지 않았습니다."),
+    EMAIL_SEND_FAILED(
+            HttpStatus.INTERNAL_SERVER_ERROR, "EMAIL_SEND_FAILED", "인증번호 발송에 실패했습니다.");
 
     private final HttpStatus status;
     private final String code;

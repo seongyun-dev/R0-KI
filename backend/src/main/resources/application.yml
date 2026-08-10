@@ -7,6 +7,20 @@ spring:
       max-request-size: 210MB
   config:
     import: optional:classpath:application-secret.yml
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+        transport:
+          protocol: smtp
   jpa:
     open-in-view: false
     hibernate:
@@ -52,6 +66,15 @@ gms:
   # gpt-5-nano: 추론+본문 합산 예산. 너무 낮으면 content 빈 응답 → 충분히 크게.
   summary-max-completion-tokens: ${GMS_SUMMARY_MAX_COMPLETION_TOKENS:4096}
   insight-max-completion-tokens: ${GMS_INSIGHT_MAX_COMPLETION_TOKENS:16384}
+
+app.email-verification:
+  # 가입 시 인증 여부 확인. 메일 서버가 없는 통합 테스트에서만 false 로 끈다.
+  # 운영에서는 절대 끄지 않는다 — 끄면 아무 이메일로나 가입할 수 있다.
+  enabled: ${APP_EMAIL_VERIFICATION_ENABLED:true}
+  # 인증번호 자릿수와 유효시간. 요구사항은 6자리 / 5분이다.
+  code-length: ${EMAIL_VERIFICATION_CODE_LENGTH:6}
+  ttl-minutes: ${EMAIL_VERIFICATION_TTL_MINUTES:5}
+  from: ${MAIL_FROM:${MAIL_USERNAME:no-reply@oneloop.local}}
 
 solapi:
   api-key: ${SOLAPI_API_KEY:}

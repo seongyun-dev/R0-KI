@@ -1,5 +1,8 @@
 package com.oneloop.patrol.service;
 
+import com.oneloop.event.domain.EventType;
+import com.oneloop.event.domain.ProcessingStatus;
+import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.map.domain.NavigationWaypoint;
@@ -50,6 +53,7 @@ public class PatrolCommandStateService {
     private final RobotRepository robotRepository;
     private final PatrolMapRepository patrolMapRepository;
     private final NavigationWaypointService navigationWaypointService;
+    private final DetectedEventRepository detectedEventRepository;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PreparedStart prepareStart(Long apartmentComplexId, PatrolStartRequest request) {
@@ -133,6 +137,13 @@ public class PatrolCommandStateService {
                             StopPatrolCommand.of(patrol.getCommandId())));
         }
         if (patrol.getStatus() != PatrolStatus.IN_PROGRESS) {
+            return Optional.empty();
+        }
+        if (detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
+                patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED)) {
+            log.info(
+                    "[MQTT] 미처리 응급 이벤트가 있어 도착지 자동 완료를 보류합니다. patrolId={}",
+                    patrol.getId());
             return Optional.empty();
         }
 

@@ -12,6 +12,22 @@ public interface PatrolCheckpointVisitRepository
 
     List<PatrolCheckpointVisit> findAllByPatrolIdOrderByVisitSequence(Long patrolId);
 
+    /**
+     * 방문 + 체크포인트를 한 번에 가져온다.
+     *
+     * <p>트랜잭션 밖(PDF 생성 등)에서 checkpoint 를 읽어야 할 때는 반드시 이 메서드를 쓴다. 위의 파생 메서드는 checkpoint 가 LAZY 라
+     * 세션이 닫힌 뒤 좌표를 읽는 순간 LazyInitializationException 이 난다 (open-in-view 가 꺼져 있다).
+     */
+    @Query(
+            """
+            SELECT visit
+            FROM PatrolCheckpointVisit visit
+            JOIN FETCH visit.checkpoint
+            WHERE visit.patrol.id = :patrolId
+            ORDER BY visit.visitSequence
+            """)
+    List<PatrolCheckpointVisit> findAllWithCheckpointByPatrolId(@Param("patrolId") Long patrolId);
+
     @Query(
             """
             SELECT visit

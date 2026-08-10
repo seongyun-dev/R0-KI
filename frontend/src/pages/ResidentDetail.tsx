@@ -11,6 +11,9 @@ import {
   useResident,
   useUpdateResident,
 } from '../features/residents/useResidents'
+import { maskPhone } from '../lib/formatters'
+import { residentsApi } from '../api/services'
+import type { ResidentNotificationHistoryResponse } from '../api/residentContracts'
 
 /* R0-Ki 입주민 상세 — 알림/이벤트 상세와 같은 2단 유리 레이아웃.
    좌: 등록 차량 + 알림 이력 / 우: 기본 정보 수정 + 알림 수신 토글.
@@ -18,7 +21,6 @@ import {
    알림 수신을 끄면 불법주차가 잡혀도 SMS 가 안 나가므로(백엔드
    NotificationService.requestIllegalParkingNotification) 토글 옆에 그 영향을 적어 둔다. */
 
-const PHONE_PATTERN = /^[0-9-]+$/
 
 function StatusChip({ status }: { status: string }) {
   const label = notificationStatusLabel(status)
@@ -47,12 +49,44 @@ export default function ResidentDetail() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
     name: '',
-    phoneNumber: '',
     buildingNumber: '',
     unitNumber: '',
   })
   // 차량은 번호만 입력받는다 — disabledVehicle 은 이 화면에서 다루지 않으므로 항상 false 로 보낸다
   const [newPlate, setNewPlate] = useState('')
+
+  /* ── 알림 이력 더 보기 ──
+     상세 응답은 최근 5건만 담는다(백엔드 RECENT_NOTIFICATION_SIZE).
+     '더 보기'를 누르면 전체 이력 API 를 페이지 단위로 이어 붙인다.
+     history 가 null 이면 아직 미리보기(5건)만 보는 상태다. */
+  const [history, setHistory] = useState<ResidentNotificationHistoryResponse[] | null>(null)
+  const [historyPage, setHistoryPage] = useState(0)
+  const [historyLast, setHistoryLast] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+
+  // 다른 입주민으로 이동하면 펼친 이력을 접는다
+  useEffect(() => {
+    setHistory(null)
+    setHistoryPage(0)
+    setHistoryLast(false)
+  }, [id])
+
+  const loadMoreHistory = async () => {
+    if (!id || historyLoading) return
+    setHistoryLoading(true)
+    try {
+      const nextPage = history === null ? 0 : historyPage + 1
+      const result = await residentsApi.notifications(id, nextPage)
+      // 첫 로드는 미리보기를 페이지 결과로 교체한다 — 페이지 0 이 최근 5건을 포함하므로 겹치지 않는다
+      setHistory((current) => (current === null ? result.content : [...current, ...result.content]))
+      setHistoryPage(nextPage)
+      setHistoryLast(result.last)
+    } catch {
+      setActionError('알림 이력을 더 불러오지 못했습니다')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
@@ -66,7 +100,6 @@ export default function ResidentDetail() {
     if (!resident) return
     setForm({
       name: resident.name,
-      phoneNumber: resident.phoneNumber,
       buildingNumber: resident.buildingNumber,
       unitNumber: resident.unitNumber,
     })
@@ -88,26 +121,22 @@ export default function ResidentDetail() {
   }
 
   const onSave = async () => {
-    if (!id) return
+    if (!id || !resident) return
     const name = form.name.trim()
-    const phoneNumber = form.phoneNumber.trim()
     const buildingNumber = form.buildingNumber.trim()
     const unitNumber = form.unitNumber.trim()
 
-    if (!name || !phoneNumber || !buildingNumber || !unitNumber) {
-      setActionError('이름·연락처·동·호수는 모두 필수입니다.')
-      return
-    }
-    if (!PHONE_PATTERN.test(phoneNumber)) {
-      setActionError('연락처는 숫자와 하이픈만 입력할 수 있습니다.')
+    if (!name || !buildingNumber || !unitNumber) {
+      setActionError('이름·동·호수는 모두 필수입니다.')
       return
     }
 
+    // 연락처는 이 화면에서 수정하지 않는다 — API 계약상 필수 필드라 원래 값을 그대로 보낸다
     const ok = await runAction(
       () =>
         updateResident.mutateAsync({
           residentId: id,
-          request: { name, phoneNumber, buildingNumber, unitNumber },
+          request: { name, phoneNumber: resident.phoneNumber, buildingNumber, unitNumber },
         }),
       '입주민 정보가 수정되었습니다',
     )
@@ -226,7 +255,6 @@ export default function ResidentDetail() {
                   <thead>
                     <tr>
                       <th>차량 번호</th>
-                      <th>장애인 차량</th>
                       <th className="r" />
                     </tr>
                   </thead>
@@ -234,7 +262,6 @@ export default function ResidentDetail() {
                     {resident.vehicles.map((vehicle) => (
                       <tr key={vehicle.vehicleId}>
                         <td className="num">{vehicle.licensePlate}</td>
-                        <td>{vehicle.disabledVehicle ? '예' : <span className="dash">—</span>}</td>
                         <td className="r">
                           <button
                             type="button"
@@ -287,7 +314,9 @@ export default function ResidentDetail() {
               <div className="zh2" style={{ marginTop: 'var(--s5)' }}>
                 <span className="zn">알림 이력</span>
                 <span className="zsub">
-                  최근 {resident.recentNotifications.length}건 · 전체 {resident.notificationCount}건
+                  {history === null
+                    ? `최근 ${resident.recentNotifications.length}건 · 전체 ${resident.notificationCount}건`
+                    : `${history.length}건 표시 · 전체 ${resident.notificationCount}건`}
                 </span>
               </div>
 
@@ -300,38 +329,61 @@ export default function ResidentDetail() {
                   <span>발송된 알림이 없습니다</span>
                 </div>
               ) : (
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>알림 ID</th>
-                      <th>이벤트 유형</th>
-                      <th>발송 시각</th>
-                      <th>상태</th>
-                      <th className="r" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resident.recentNotifications.map((notification) => (
-                      <tr key={notification.notificationId}>
-                        <td className="id">{notification.notificationId}</td>
-                        <td className="ty">{eventTypeLabel(notification.eventType)}</td>
-                        <td className="tm">
-                          {formatDateTimeLabel(notification.sentAt ?? notification.createdAt)}
-                        </td>
-                        <td><StatusChip status={notification.status} /></td>
-                        <td className="r">
-                          <Link
-                            to={`/app/notifications/${notification.notificationId}`}
-                            className="golink"
-                          >
-                            상세
-                            <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
-                          </Link>
-                        </td>
+                /* 스크롤은 유리 패널(.glass)이 아니라 이 안쪽 래퍼에 건다 —
+                   패널에 직접 걸면 .g2 의 안쪽 링이 콘텐츠와 함께 스크롤된다 */
+                <div className="ntlwrap">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>알림 ID</th>
+                        <th>이벤트 유형</th>
+                        <th>발송 시각</th>
+                        <th>상태</th>
+                        <th className="r" />
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {(history ?? resident.recentNotifications).map((notification) => (
+                        <tr key={notification.notificationId}>
+                          <td className="id">{notification.notificationId}</td>
+                          <td className="ty">{eventTypeLabel(notification.eventType)}</td>
+                          <td className="tm">
+                            {formatDateTimeLabel(notification.sentAt ?? notification.createdAt)}
+                          </td>
+                          <td><StatusChip status={notification.status} /></td>
+                          <td className="r">
+                            <Link
+                              to={`/app/notifications/${notification.notificationId}`}
+                              className="golink"
+                            >
+                              상세
+                              <svg viewBox="0 0 24 24"><path d="M5 12h13M12 5l7 7-7 7" /></svg>
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {/* 더 보기 — 미리보기(5건) 상태에서 전체 건수가 더 많거나, 펼친 뒤 다음 페이지가 남았을 때 */}
+                  {(history === null
+                    ? resident.notificationCount > resident.recentNotifications.length
+                    : !historyLast) && (
+                    <div className="tfoot" style={{ justifyContent: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-s"
+                        disabled={historyLoading}
+                        onClick={loadMoreHistory}
+                      >
+                        {historyLoading
+                          ? '불러오는 중…'
+                          : history === null
+                            ? `전체 이력 보기 (${resident.notificationCount}건)`
+                            : '더 보기'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -355,16 +407,6 @@ export default function ResidentDetail() {
                       id="rd-name"
                       value={form.name}
                       onChange={(event) => setForm({ ...form, name: event.target.value })}
-                    />
-                  </div>
-                  <div className="au-row">
-                    <label className="au-lab" htmlFor="rd-phone">연락처</label>
-                    <input
-                      className="au-in num"
-                      id="rd-phone"
-                      value={form.phoneNumber}
-                      onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })}
-                      autoComplete="off"
                     />
                   </div>
                   <div className="au-row">
@@ -420,7 +462,7 @@ export default function ResidentDetail() {
                   </div>
                   <div className="ir">
                     <span className="k">연락처</span>
-                    <span className="v num">{resident.phoneNumber}</span>
+                    <span className="v num">{maskPhone(resident.phoneNumber)}</span>
                   </div>
                   <div className="ir">
                     <span className="k">동/호수</span>

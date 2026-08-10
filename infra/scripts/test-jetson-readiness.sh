@@ -10,6 +10,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Some long-lived Jetson unit/env files are stored with CRLF while shell
+# scripts are LF.  Match semantic lines after removing CR instead of making
+# readiness depend on the checkout platform's line-ending policy.
+assert_line() {
+  local pattern="$1"
+  local path="$2"
+  tr -d '\r' <"${path}" | grep -qE "${pattern}"
+}
+
 grep -q 'SYMLINK+="roki_camera_left"' \
   "${repository_root}/infra/jetson/99-roki-cameras.rules"
 grep -q 'SYMLINK+="roki_camera_right"' \
@@ -18,32 +27,34 @@ grep -q 'ATTR{index}=="0"' \
   "${repository_root}/infra/jetson/99-roki-cameras.rules"
 grep -q 'ConditionPathExists=/opt/aiot/secrets/ros.env' \
   "${repository_root}/infra/jetson/aiot-ros.service"
-grep -q '^RuntimeDirectoryPreserve=yes$' \
+assert_line '^RuntimeDirectoryPreserve=yes$' \
   "${repository_root}/infra/jetson/aiot-ros.service"
-grep -q '^RuntimeDirectoryPreserve=yes$' \
+assert_line '^RuntimeDirectoryPreserve=yes$' \
   "${repository_root}/infra/jetson/aiot-ai.service"
-grep -q '^StartLimitIntervalSec=0$' \
+assert_line '^StartLimitIntervalSec=0$' \
   "${repository_root}/infra/jetson/aiot-ai.service"
 grep -Eq '^Wants=.*aiot-ros.service' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q '^User=e103$' \
+assert_line '^User=e103$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -Eq '^SupplementaryGroups=.*aiot' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q '^EnvironmentFile=/opt/aiot/secrets/ros.env$' \
+assert_line '^EnvironmentFile=/opt/aiot/secrets/ros.env$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
+assert_line '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q '^Environment=PYTHONUNBUFFERED=1$' \
+assert_line '^Environment=PYTHONUNBUFFERED=1$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q 'fixed_resolution: false' \
+grep -q 'fixed_resolution: true' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'frequency: 10.0' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
-grep -q -- '-r __node:=rf2o_laser_odometry' \
+! grep -q -- '-r __node:=rf2o_laser_odometry' \
   "${repository_root}/robot/scripts/run-ros.sh"
+assert_line '^/\*\*:$' \
+  "${repository_root}/robot/config/ros/rf2o.yaml"
 grep -q 'use_rotate_to_heading: false' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
 grep -q 'motion_model_for_search: DUBIN' \
@@ -56,23 +67,25 @@ grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/ros-preflight.sh"
 grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/mqtt-e2e-check.sh"
-! grep -qE 'ROKI_(WHEELBASE_M|ROBOT_RADIUS_M)=[0-9]' \
+assert_line '^ROKI_WHEELBASE_M=0.124$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_INITIAL_POSE_X_M=$' \
+assert_line '^ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG=8.6$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_INITIAL_POSE_Y_M=$' \
+assert_line '^ROKI_INITIAL_POSE_X_M=$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_INITIAL_POSE_YAW_RAD=$' \
+assert_line '^ROKI_INITIAL_POSE_Y_M=$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_MAP_ID=$' \
+assert_line '^ROKI_INITIAL_POSE_YAW_RAD=$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_MAP_VERSION=$' \
+assert_line '^ROKI_MAP_ID=$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_MAP_SHA256=$' \
+assert_line '^ROKI_MAP_VERSION=$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_ROUTE_SHA256=$' \
+assert_line '^ROKI_MAP_SHA256=$' \
   "${repository_root}/infra/jetson/ros.env.example"
-grep -q '^ROKI_NAV2_XY_GOAL_TOLERANCE_M=0.20$' \
+assert_line '^ROKI_ROUTE_SHA256=$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+assert_line '^ROKI_NAV2_XY_GOAL_TOLERANCE_M=0.20$' \
   "${repository_root}/infra/jetson/ros.env.example"
 
 install -d "${test_root}/bin" "${test_root}/ai/yolo_pipeline" "${test_root}/current"

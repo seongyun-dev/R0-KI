@@ -54,14 +54,6 @@ install -d -m 0750 "${stage_dir}/robot" "${stage_dir}/scripts"
 tar -C "${robot_source}" \
   --exclude='./.venv' \
   --exclude='./.env' \
-  --exclude='*/.env' \
-  --exclude='*/route.local.yaml' \
-  --exclude='*/robot_service_token' \
-  --exclude='*/robot-service-token' \
-  --exclude='*/command-cache.json' \
-  --exclude='*/patrol-deploy.lock' \
-  --exclude='*.pem' \
-  --exclude='*.key' \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   -cf - . | tar -C "${stage_dir}/robot" -xf -
@@ -101,15 +93,6 @@ if [ -e "${stage_dir}/ai" ]; then
   echo "IoT release must not contain ai/" >&2
   exit 1
 fi
-if find "${stage_dir}" -type f \
-  \( -name '.env' -o -name 'route.local.yaml' -o \
-     -name 'robot_service_token' -o -name 'robot-service-token' -o \
-     -name 'command-cache.json' -o -name 'patrol-deploy.lock' -o \
-     -name '*.pem' -o -name '*.key' \) \
-  -print -quit | grep -q .; then
-  echo "IoT release contains a local configuration or secret file" >&2
-  exit 1
-fi
 
 (
   cd "${stage_dir}"
@@ -123,6 +106,16 @@ archive_path="${output_dir}/${archive_name}"
 manifest_path="${archive_path}.manifest.json"
 tar -C "${stage_dir}" -czf "${archive_path}" \
   robot scripts VERSION manifest.json CHECKSUMS.sha256
+
+while IFS= read -r archive_entry; do
+  case "${archive_entry}" in
+    robot|robot/*|scripts|scripts/*|VERSION|manifest.json|CHECKSUMS.sha256) ;;
+    *)
+      echo "IoT release archive contains an unexpected path: ${archive_entry}" >&2
+      exit 1
+      ;;
+  esac
+done < <(tar -tzf "${archive_path}")
 
 artifact_sha256="$(sha256sum "${archive_path}" | awk '{print $1}')"
 artifact_size_bytes="$(stat -c '%s' "${archive_path}")"
