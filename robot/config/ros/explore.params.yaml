@@ -1,0 +1,67 @@
+# Frontier exploration (explore_lite) tuned for the RO-KI Ackermann chassis.
+#
+# The upstream defaults assume a differential-drive robot that can pivot toward
+# any frontier. This chassis cannot: minimum turning radius is
+# wheelbase / tan(max road-wheel angle) = 0.124 / tan(20 deg) = 0.34 m, reverse
+# is not enabled, and the mapped space is only a few metres across. The values
+# below therefore bias frontier choice toward whatever lies ahead and give the
+# slow drive enough time to reach it.
+/**:
+  ros__parameters:
+    robot_base_frame: base_link
+
+    # SLAM Toolbox publishes the growing map on these topics; explore_lite reads
+    # them directly rather than owning a costmap of its own.
+    costmap_topic: map
+    costmap_updates_topic: map_updates
+
+    # Off deliberately. The start pose is behind the robot once exploration has
+    # moved on, and a Dubin-only chassis needs a wide arc to face backwards -- a
+    # goal that fails far more often than it succeeds and that no part of the demo
+    # depends on, since the mapping session is ended by the operator's save.
+    return_to_init: false
+
+    # Publishes frontier markers for RViz. Cheap and worth keeping while tuning.
+    visualize: true
+
+    # Frontier goals are reselected at this rate. The chassis moves at roughly
+    # 0.08 m/s, so choosing more often than this only causes goal thrashing.
+    planner_frequency: 0.15
+
+    # Upstream 30 s assumes a faster robot. At 0.08 m/s that is barely 2.4 m, so
+    # a legitimately slow approach would be blacklisted as "no progress".
+    progress_timeout: 90.0
+
+    # These two are the ONLY terms in this package's frontier cost:
+    #   cost = potential_scale * min_distance * res  -  gain_scale * size * res
+    # (frontier_search.cpp:192). There is no heading term at all -- see the note on
+    # orientation_scale below.
+    #
+    # So the only way to stop picking goals this chassis cannot reach is to stop
+    # rewarding closeness. A high potential_scale elects the nearest frontier, and
+    # the nearest one is routinely a small pocket beside or behind the robot: the
+    # space ahead is already scanned, so it is no longer a frontier. Observed live
+    # twice -- goals 0.93 m at 121 deg and 1.10 m at 76 deg off-axis, both needing
+    # an arc that sweeps into a wall about 1.1 m away, both correctly refused by the
+    # planner while the front lay open 2.3-4.2 m.
+    #
+    # Weighting size instead favours the large open regions, which are further away
+    # and therefore approached along a much straighter line.
+    potential_scale: 0.5
+    gain_scale: 3.0
+
+    # DEAD PARAMETER -- setting it does nothing. Verified in the built source on
+    # 2026-08-07: explore.cpp:69 declares it and :78 reads it into
+    # orientation_scale_, but frontier_search.cpp never mentions orientation and
+    # frontierCost() has no heading term. It is not passed to FrontierSearch at all.
+    #
+    # Kept at the upstream default purely so the file matches what the node reads.
+    # A chassis that cannot pivot really does need a heading term; supplying one
+    # means patching frontier_search.cpp, not editing this file.
+    orientation_scale: 0.0
+
+    # Upstream 0.75 m is larger than several openings in a room this size, so
+    # real frontiers would be discarded and exploration would stop early.
+    min_frontier_size: 0.35
+
+    transform_tolerance: 0.3

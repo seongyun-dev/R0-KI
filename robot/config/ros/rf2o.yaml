@@ -1,4 +1,21 @@
-rf2o_laser_odometry:
+# 노드 이름 대신 와일드카드를 쓴다.
+#
+# 예전에는 최상위 키가 `rf2o_laser_odometry` 였고, 그 키가 먹게 하려고
+# run-ros.sh 가 `-r __node:=rf2o_laser_odometry` 리맵을 줬다(0af5701).
+# 그런데 rf2o 바이너리는 노드를 하나 더 만들고, 리맵이 그 둘을 같은 이름으로
+# 뭉개서 그래프에 같은 이름이 두 번 등록됐다.
+#
+# 2026-08-08 실측: `ros2 node list` 가 /rf2o_laser_odometry 2개와 함께
+# "nodes in the graph that share an exact name" 경고를 냈다. 같은 시각
+# /planner_server 는 서비스가 존재하는데도 lifecycle 조회에 "Node not found",
+# /roki_nav2_bridge 는 node list 에 없는데 /cmd_vel 구독자로는 보였다.
+# 리맵을 주는 구성요소는 rf2o 하나뿐이고, 래퍼가 있는 ydlidar 와
+# static_transform_publisher 는 중복이 없다 -- 남는 차이가 이 리맵이다.
+#
+# `/**` 는 어떤 노드 이름에도 적용되므로 리맵이 필요 없어지고, 내부 노드들이
+# 각자의 기본 이름을 되찾는다. 이 파일은 rf2o 에만 --params-file 로 주어지므로
+# 와일드카드의 범위가 넓어지는 부작용이 없다. 공유하게 되면 그때 좁혀야 한다.
+/**:
   ros__parameters:
     laser_scan_topic: /scan
     odom_topic: /odom

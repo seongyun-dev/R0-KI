@@ -478,6 +478,151 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         guard.release.assert_called_once_with()
         self.assertEqual(runtime.state_store.get_status().state, "ERROR")
 
+    def test_preflight_readiness_skips_the_localization_products(self) -> None:
+        """pose 는 인계 뒤에야 생긴다. 인계 전 게이트가 그것을 물으면 안 된다.
+
+        깊은 판정은 그대로 막아야 한다 -- 얕은 게이트는 순서를 고치는 것이지
+        검사를 없애는 것이 아니다.
+        """
+
+        runtime = FakeRuntime()
+        # readiness 는 snapshot 이 없으면 조기에 READY 를 돌려주므로, pose 가지에
+        # 도달하려면 스냅샷을 갖춘 상태여야 한다. 실기의 상태 저장소가 그렇다.
+        runtime.state_store.snapshot = lambda: SimpleNamespace(
+            motion_state=SimpleNamespace(
+                left_distance_m=0.0, right_distance_m=0.0
+            ),
+            safety_decision=SimpleNamespace(allowed=True, fault="NONE"),
+        )
+        driver = Mock()
+        driver.is_ready.return_value = True
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=Mock(),
+            navigation_driver=driver,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+        # 오도메트리는 살아 있지만 지도 좌표 pose 는 아직 없는 상태.
+        self.assertIsNone(runtime.state_store.get_pose())
+
+        self.assertEqual(service.readiness(), (False, "MAP_POSE_NOT_READY"))
+        ready, reason = service.patrol_preflight_readiness()
+        self.assertTrue(ready, f"얕은 게이트가 막았다: {reason}")
+
+    def test_preflight_readiness_still_enforces_serial_and_odometry(self) -> None:
+        runtime = FakeRuntime()
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=Mock(),
+            navigation_driver=Mock(),
+        )
+
+        # 런타임이 아예 안 돌고 있으면 얕은 게이트도 막아야 한다.
+        self.assertEqual(
+            service.patrol_preflight_readiness(),
+            (False, "SERIAL_RUNTIME_NOT_RUNNING"),
+        )
+
+        # 오도메트리가 아직 없으면 -- pose 와 달리 인계가 만들어주지 않는다 --
+        # 얕은 게이트도 막아야 한다.
+        runtime.state_store.snapshot = lambda: SimpleNamespace(
+            motion_state=None,
+            safety_decision=SimpleNamespace(allowed=True, fault="NONE"),
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+
+        self.assertEqual(
+            service.patrol_preflight_readiness(),
+            (False, "ODOMETRY_NOT_READY"),
+        )
+
+    def _interlocked_service(self) -> tuple:
+        """순찰이 끝난 직후 -- 그런데 cmd_vel 은 아직 날아오는 상태를 만든다."""
+
+        runtime = FakeRuntime()
+        navigation = Mock()
+        driver = Mock()
+        guard = Mock()
+        guard.acquire.return_value = (True, "READY")
+        service = FinalRuntimeService(
+            runtime,
+            navigation_service=navigation,
+            navigation_driver=driver,
+            deployment_guard=guard,
+        )
+        service.start()
+        self.addCleanup(service.stop)
+        runtime.simulate_connection()
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=95)
+        motion = SimpleNamespace(speed_pwm=45, steering_deg=80, stop_reason=None)
+        service.apply_motion_command(motion)
+        # 순찰을 무효화한다. 이후 cmd_vel 은 전부 인터락으로 떨어진다.
+        runtime.simulate_connection()
+        return service, runtime, motion
+
+    def test_interlocked_cmd_vel_flood_delivers_one_stop(self) -> None:
+        """램프다운 cmd_vel 마다 STOP 을 다시 쓰면 시리얼이 그 속도로 잠긴다.
+
+        2026-08-09 실측: 세션 종료마다 20Hz 로 수십 건(88건), 그 중 55건이
+        살아 있는 링크에 실제 STOP 프레임을 썼다. mapping_motion_sink._stop 은
+        같은 이유로 이미 같은 가드를 둔다 -- 그쪽 주석이 대가를 적어뒀다.
+        """
+
+        service, runtime, motion = self._interlocked_service()
+        runtime.stop_reasons.clear()
+
+        for _ in range(20):
+            service.apply_motion_command(motion)
+
+        self.assertEqual(
+            runtime.stop_reasons.count("MOTION_INTERLOCK"),
+            1,
+            "인터락 STOP 은 램프다운 한 번에 한 번만 나가야 한다",
+        )
+
+    def test_interlock_stop_is_retried_until_it_lands(self) -> None:
+        """실패한 STOP 을 전달됐다고 기억하면 섀시가 명령 없이 남는다."""
+
+        service, runtime, motion = self._interlocked_service()
+        runtime.stop_reasons.clear()
+        runtime.stop_error = RuntimeError("serial closed")
+
+        service.apply_motion_command(motion)
+        service.apply_motion_command(motion)
+        runtime.stop_error = None
+        service.apply_motion_command(motion)
+        service.apply_motion_command(motion)
+
+        # 실패 2회는 기록하지 않으므로 계속 재시도하고, 세 번째에 전달된다.
+        # 네 번째는 이미 전달됐으므로 다시 쓰지 않는다.
+        self.assertEqual(runtime.stop_reasons.count("MOTION_INTERLOCK"), 3)
+
+    def test_reauthorized_motion_rearms_the_interlock_stop(self) -> None:
+        """다음 순찰이 끝날 때는 STOP 이 다시 나가야 한다.
+
+        플래그를 한 번 세우고 두면 두 번째 순찰의 램프다운은 STOP 없이 지나간다.
+        """
+
+        service, runtime, motion = self._interlocked_service()
+        service.apply_motion_command(motion)
+
+        # 다시 순찰을 인가하고 명령을 하나 받아들인다.
+        self.assertEqual(service.prepare_patrol(), (True, "READY"))
+        service.send_command("START_PATROL", patrolId=96)
+        service.apply_motion_command(motion)
+        runtime.simulate_connection()
+        runtime.stop_reasons.clear()
+
+        service.apply_motion_command(motion)
+        service.apply_motion_command(motion)
+
+        self.assertEqual(runtime.stop_reasons.count("MOTION_INTERLOCK"), 1)
+
     def test_runtime_safety_fault_cleans_nav_lease_and_notifies_ai_owner(
         self,
     ) -> None:
@@ -1281,6 +1426,53 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         self.assertEqual(payload["lidar"], "NORMAL")
         self.assertEqual(payload["motor"], "NORMAL")
         self.assertEqual(payload["lineSensor"], "NORMAL")
+
+    def test_mapping_suppresses_only_backend_obstacle_alert_fields(self) -> None:
+        from run_integrated import create_integrated_application
+
+        runtime = FakeRuntime()
+        mapping_runtime = Mock()
+        mapping_runtime.active = True
+        application = create_integrated_application(
+            final_runtime=runtime,
+            mapping_runtime=mapping_runtime,
+        )
+        # ESP32 가 장비 상태를 한 번은 보고해야 status 가 발행된다. 매핑은
+        # 시리얼 준비 없이는 시작조차 못 하므로(ManualMappingRuntime.readiness
+        # -> FinalRuntimeService.mapping_readiness) 실제로 도달할 수 없는
+        # 조합이었다. 형제 테스트와 같은 준비를 붙인다.
+        runtime.state_store.update_hardware(HardwareState(80.0, "NORMAL", "NORMAL"))
+        runtime.state_store.update_lidar_status("NORMAL")
+        runtime.state_store.update_obstacle(
+            ObstacleState(
+                status="STOP",
+                direction="FRONT",
+                reason_message="front obstacle",
+            )
+        )
+        application._mqtt_client.publish = Mock()
+
+        application._publish_status_if_needed(100.0)
+
+        payload = application._mqtt_client.publish.call_args.kwargs["payload"]
+        self.assertEqual(
+            payload["obstacle"],
+            {
+                "status": "CLEAR",
+                "direction": "NONE",
+                "reasonMessage": None,
+            },
+        )
+        self.assertEqual(payload["lidar"], "NORMAL")
+        self.assertEqual(
+            runtime.state_store.get_status().obstacle.status,
+            "STOP",
+        )
+
+        mapping_runtime.active = False
+        application._publish_status_if_needed(101.0, force=True)
+        payload = application._mqtt_client.publish.call_args.kwargs["payload"]
+        self.assertEqual(payload["obstacle"]["status"], "STOP")
 
     def test_pose_publisher_keeps_one_second_interval(self) -> None:
         from backend_mqtt.publisher import RokiPublisherApplication

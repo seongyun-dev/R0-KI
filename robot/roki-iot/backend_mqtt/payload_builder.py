@@ -62,6 +62,7 @@ def build_status_payload(
     schema_version: int,
     robot_key: str,
     status: RobotStatusState,
+    obstacle_alert_enabled: bool = True,
 ) -> dict[str, Any]:
     """
     내부 RobotStatusState를
@@ -69,6 +70,19 @@ def build_status_payload(
 
     팀 명세에 없는 필드는 절대 추가하지 않는다.
     """
+
+    obstacle = status.obstacle
+    if obstacle_alert_enabled:
+        obstacle_status = obstacle.status
+        obstacle_direction = obstacle.direction
+        obstacle_reason_message = obstacle.reason_message
+    else:
+        # Keep the real scan and obstacle state inside Jetson/Nav2.  Only the
+        # Backend-facing alert fields are cleared while autonomous mapping is
+        # active, so mapped walls do not create patrol danger alerts.
+        obstacle_status = "CLEAR"
+        obstacle_direction = "NONE"
+        obstacle_reason_message = None
 
     return {
         "schemaVersion": schema_version,
@@ -80,11 +94,9 @@ def build_status_payload(
         "lidar": status.lidar,
         "lineSensor": status.line_sensor,
         "obstacle": {
-            "status": status.obstacle.status,
-            "direction": status.obstacle.direction,
-            "reasonMessage": (
-                status.obstacle.reason_message
-            ),
+            "status": obstacle_status,
+            "direction": obstacle_direction,
+            "reasonMessage": obstacle_reason_message,
         },
         "timestamp": create_timestamp(),
     }

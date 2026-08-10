@@ -1,0 +1,10 @@
+base_commit=8293d21fe5c816d0405e0cc1f3eb46c70659c267
+branch=backport/reset-2.6.10
+status:
+ M CMakeLists.txt
+ M include/slam_toolbox/slam_toolbox_common.hpp
+ M include/slam_toolbox/slam_toolbox_sync.hpp
+ M include/slam_toolbox/toolbox_msgs.hpp
+ M src/slam_toolbox_common.cpp
+ M src/slam_toolbox_sync.cpp
+?? srv/Reset.srv

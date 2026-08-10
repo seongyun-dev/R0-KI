@@ -8,7 +8,9 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import time
 import zlib
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -38,10 +40,21 @@ class MapExportSettings:
     timeout_seconds: float = 30.0
     serialize_pose_graph: bool = True
     require_zero_origin_yaw: bool = True
+    # SLAM Toolbox sizes the grid to every ray endpoint, so a small room ends up
+    # as a tiny island inside a mostly-unknown canvas, and a single-channel
+    # LiDAR leaves isolated hits behind. Refining the saved grid keeps the same
+    # PGM/YAML contract while making the map match the space that was mapped.
+    refine_saved_grid: bool = True
+    crop_margin_cells: int = 4
+    unknown_island_max_cells: int = 8
 
     def __post_init__(self) -> None:
         if self.timeout_seconds <= 0:
             raise ValueError("map export timeout must be positive")
+        if self.crop_margin_cells < 0:
+            raise ValueError("crop margin must not be negative")
+        if self.unknown_island_max_cells < 0:
+            raise ValueError("unknown island limit must not be negative")
 
 
 CommandRunner = Callable[[Sequence[str], float], Any]
@@ -85,27 +98,32 @@ class SlamMapExporter:
                 pass
         except OSError:
             return False, "MAP_OUTPUT_NOT_WRITABLE"
-        try:
-            result = self._runner(
-                (
-                    self._ros2_command,
-                    "service",
-                    "list",
-                    "-t",
-                    "--no-daemon",
-                ),
-                min(self._settings.timeout_seconds, 5.0),
-            )
-        except (OSError, subprocess.SubprocessError):
-            return False, "SLAM_TOOLBOX_NOT_READY"
-        service_graph = str(getattr(result, "stdout", ""))
         expected_service = (
             "/slam_toolbox/serialize_map "
             "[slam_toolbox/srv/SerializePoseGraph]"
         )
-        if expected_service not in service_graph:
-            return False, "SLAM_TOOLBOX_NOT_READY"
-        return True, "READY"
+        command = (
+            self._ros2_command,
+            "service",
+            "list",
+            "-t",
+            "--no-daemon",
+            "--spin-time",
+            "2.0",
+        )
+        deadline = time.monotonic() + min(self._settings.timeout_seconds, 8.0)
+        for _attempt in range(2):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                result = self._runner(command, remaining)
+            except (OSError, subprocess.SubprocessError):
+                return False, "SLAM_TOOLBOX_NOT_READY"
+            service_graph = str(getattr(result, "stdout", ""))
+            if expected_service in service_graph:
+                return True, "READY"
+        return False, "SLAM_TOOLBOX_NOT_READY"
 
     def export(self, mapping_session_id: int) -> MapArtifact:
         if isinstance(mapping_session_id, bool) or mapping_session_id <= 0:
@@ -148,6 +166,11 @@ class SlamMapExporter:
         if not yaml_path.is_file() or not pgm_path.is_file():
             raise MapExportError("map saver did not create map.yaml and map.pgm")
         _normalize_map_thresholds(yaml_path)
+        if self._settings.refine_saved_grid:
+            # Must run before the PNG is rendered and before the metadata is
+            # read: the backend derives width/height from the uploaded PNG, and
+            # the returned artifact must carry the post-crop origin.
+            refine_saved_map(pgm_path, yaml_path, self._settings)
         metadata = _load_metadata(yaml_path)
         origin_x, origin_y, origin_yaw = metadata["origin"]
         if self._settings.require_zero_origin_yaw and not math.isclose(
@@ -244,6 +267,281 @@ def _normalize_map_thresholds(path: Path) -> None:
         raise MapExportError("map thresholds could not be normalized") from exc
     finally:
         temporary.unlink(missing_ok=True)
+
+
+_OCCUPIED, _FREE, _UNKNOWN = 0, 1, 2
+# Canonical ROS trinary shades, written only for cells this pass changes.
+_SHADE = {_OCCUPIED: 0, _FREE: 254, _UNKNOWN: 205}
+_NEIGHBOURS_8 = (
+    (-1, -1), (0, -1), (1, -1),
+    (-1, 0), (1, 0),
+    (-1, 1), (0, 1), (1, 1),
+)
+
+
+def _read_pgm_grid(path: Path) -> tuple[int, int, int, bytearray]:
+    try:
+        raw = path.read_bytes()
+        magic, cursor = _pgm_token(raw, 0)
+        width_raw, cursor = _pgm_token(raw, cursor)
+        height_raw, cursor = _pgm_token(raw, cursor)
+        maximum_raw, cursor = _pgm_token(raw, cursor)
+        width, height, maximum = (
+            int(width_raw), int(height_raw), int(maximum_raw)
+        )
+    except (OSError, ValueError) as exc:
+        raise MapExportError("saved map PGM header is invalid") from exc
+    if magic != b"P5":
+        raise MapExportError("saved map PGM must be binary P5")
+    if width <= 0 or height <= 0 or not 1 <= maximum <= 255:
+        raise MapExportError("saved map PGM dimensions are invalid")
+    if cursor >= len(raw) or raw[cursor] not in b" \t\r\n":
+        raise MapExportError("saved map PGM raster separator is missing")
+    cursor += 2 if raw[cursor : cursor + 2] == b"\r\n" else 1
+    pixels = bytearray(raw[cursor : cursor + width * height])
+    if len(pixels) != width * height:
+        raise MapExportError("saved map PGM raster is incomplete")
+    return width, height, maximum, pixels
+
+
+def _classify(
+    pixels: bytearray, maximum: int, occupied_thresh: float, free_thresh: float
+) -> bytearray:
+    classes = bytearray(len(pixels))
+    for index, value in enumerate(pixels):
+        occupancy = (maximum - value) / float(maximum)
+        if occupancy > occupied_thresh:
+            classes[index] = _OCCUPIED
+        elif occupancy < free_thresh:
+            classes[index] = _FREE
+        else:
+            classes[index] = _UNKNOWN
+    return classes
+
+
+def _drop_occupied_speckle(
+    width: int, height: int, classes: bytearray
+) -> list[tuple[int, int]]:
+    """Remove hits with at most one occupied neighbour.
+
+    A real wall segment always has two or more occupied neighbours, so this
+    clears single-scan LiDAR noise and people who walked past during mapping
+    without eroding genuine structure.
+    """
+
+    changed: list[tuple[int, int]] = []
+    for row in range(height):
+        for column in range(width):
+            index = row * width + column
+            if classes[index] != _OCCUPIED:
+                continue
+            occupied = free = 0
+            for dx, dy in _NEIGHBOURS_8:
+                nx, ny = column + dx, row + dy
+                if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                    continue
+                neighbour = classes[ny * width + nx]
+                if neighbour == _OCCUPIED:
+                    occupied += 1
+                elif neighbour == _FREE:
+                    free += 1
+            if occupied <= 1:
+                changed.append((index, _FREE if free >= 3 else _UNKNOWN))
+    for index, value in changed:
+        classes[index] = value
+    return changed
+
+
+def _fill_unknown_islands(
+    width: int, height: int, classes: bytearray, max_cells: int
+) -> int:
+    """Close small unobserved holes that sit inside observed free space.
+
+    Only holes bounded purely by free cells are filled: a hole touching a wall
+    may be genuinely unobserved space behind that wall, and one touching the
+    canvas border belongs to the unmapped outside.
+    """
+
+    if max_cells <= 0:
+        return 0
+    visited = bytearray(width * height)
+    filled = 0
+    for row in range(height):
+        for column in range(width):
+            start = row * width + column
+            if classes[start] != _UNKNOWN or visited[start]:
+                continue
+            visited[start] = 1
+            queue = deque(((column, row),))
+            component = [start]
+            touches_border = False
+            free_neighbours = occupied_neighbours = 0
+            while queue:
+                cx, cy = queue.popleft()
+                if cx in (0, width - 1) or cy in (0, height - 1):
+                    touches_border = True
+                for dx, dy in _NEIGHBOURS_8:
+                    nx, ny = cx + dx, cy + dy
+                    if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                        touches_border = True
+                        continue
+                    neighbour_index = ny * width + nx
+                    neighbour = classes[neighbour_index]
+                    if neighbour == _FREE:
+                        free_neighbours += 1
+                    elif neighbour == _OCCUPIED:
+                        occupied_neighbours += 1
+                    elif not visited[neighbour_index]:
+                        visited[neighbour_index] = 1
+                        queue.append((nx, ny))
+                        component.append(neighbour_index)
+            if touches_border or len(component) > max_cells:
+                continue
+            if free_neighbours == 0 or occupied_neighbours > 0:
+                continue
+            for index in component:
+                classes[index] = _FREE
+            filled += len(component)
+    return filled
+
+
+def _observed_bounds(
+    width: int, height: int, classes: bytearray, margin: int
+) -> tuple[int, int, int, int] | None:
+    columns = [index % width for index, value in enumerate(classes)
+               if value != _UNKNOWN]
+    if not columns:
+        return None
+    rows = [index // width for index, value in enumerate(classes)
+            if value != _UNKNOWN]
+    first_column = max(0, min(columns) - margin)
+    last_column = min(width - 1, max(columns) + margin)
+    first_row = max(0, min(rows) - margin)
+    last_row = min(height - 1, max(rows) + margin)
+    if last_column <= first_column or last_row <= first_row:
+        return None
+    return first_column, last_column, first_row, last_row
+
+
+def _write_pgm(path: Path, width: int, height: int, pixels: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.refine.tmp")
+    try:
+        header = b"P5\n%d %d\n255\n" % (width, height)
+        temporary.write_bytes(header + pixels)
+        temporary.replace(path)
+    except OSError as exc:
+        raise MapExportError("refined map PGM could not be written") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _shift_map_origin(path: Path, delta_x: float, delta_y: float) -> None:
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise MapExportError("map YAML is unreadable") from exc
+    if not isinstance(raw, Mapping):
+        raise MapExportError("map YAML root must be an object")
+    origin = raw.get("origin")
+    if not isinstance(origin, list) or len(origin) != 3:
+        raise MapExportError("map origin must contain x, y and yaw")
+    updated = dict(raw)
+    updated["origin"] = [
+        round(_finite(origin[0], "origin[0]") + delta_x, 6),
+        round(_finite(origin[1], "origin[1]") + delta_y, 6),
+        _finite(origin[2], "origin[2]"),
+    ]
+    temporary = path.with_name(f".{path.name}.origin.tmp")
+    try:
+        temporary.write_text(
+            yaml.safe_dump(updated, sort_keys=False), encoding="utf-8"
+        )
+        temporary.replace(path)
+    except OSError as exc:
+        raise MapExportError("map origin could not be updated") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def refine_saved_map(
+    pgm_path: Path, yaml_path: Path, settings: MapExportSettings
+) -> None:
+    """Despeckle the saved grid and crop it to the space that was mapped.
+
+    The PGM stays binary P5 with the canonical trinary shades and the YAML keeps
+    every key, so hashing, upload, activation and the frontend's
+    origin/resolution coordinate conversion all keep working unchanged. Cropping
+    shifts ``origin`` by exactly the removed offset, which leaves every world
+    coordinate -- and therefore every stored waypoint and zone -- where it was.
+
+    The stored map is localization evidence for AMCL; obstacle avoidance runs
+    off the live LiDAR costmap, so clearing isolated hits does not weaken the
+    obstacle interlock.
+    """
+
+    metadata = _load_metadata(yaml_path)
+    resolution = metadata["resolution"]
+    thresholds = _load_thresholds(yaml_path)
+    width, height, maximum, pixels = _read_pgm_grid(pgm_path)
+    classes = _classify(pixels, maximum, *thresholds)
+
+    speckle = _drop_occupied_speckle(width, height, classes)
+    for index, value in speckle:
+        pixels[index] = _SHADE[value]
+    filled = _fill_unknown_islands(
+        width, height, classes, settings.unknown_island_max_cells
+    )
+    if filled:
+        for index, value in enumerate(classes):
+            if value == _FREE and pixels[index] == _SHADE[_UNKNOWN]:
+                pixels[index] = _SHADE[_FREE]
+
+    bounds = _observed_bounds(width, height, classes, settings.crop_margin_cells)
+    if bounds is None:
+        # Nothing observed, or the observed span is degenerate: keep the canvas
+        # rather than emitting a map the runtime cannot localize against.
+        _write_pgm(pgm_path, width, height, bytes(pixels))
+        print(
+            "[MAPPING] map refined speckle=%d holes=%d crop=skipped"
+            % (len(speckle), filled)
+        )
+        return
+
+    first_column, last_column, first_row, last_row = bounds
+    new_width = last_column - first_column + 1
+    new_height = last_row - first_row + 1
+    cropped = bytearray(new_width * new_height)
+    for row in range(new_height):
+        source = (first_row + row) * width + first_column
+        cropped[row * new_width : (row + 1) * new_width] = pixels[
+            source : source + new_width
+        ]
+    _write_pgm(pgm_path, new_width, new_height, bytes(cropped))
+    # PGM row 0 is the top row while the map origin is the bottom-left corner,
+    # so the vertical shift is measured from the bottom-most retained row.
+    _shift_map_origin(
+        yaml_path,
+        first_column * resolution,
+        (height - 1 - last_row) * resolution,
+    )
+    print(
+        "[MAPPING] map refined speckle=%d holes=%d crop=%dx%d->%dx%d"
+        % (len(speckle), filled, width, height, new_width, new_height)
+    )
+
+
+def _load_thresholds(path: Path) -> tuple[float, float]:
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise MapExportError("map YAML is unreadable") from exc
+    if not isinstance(raw, Mapping):
+        raise MapExportError("map YAML root must be an object")
+    occupied = _finite(raw.get("occupied_thresh", 0.65), "occupied_thresh")
+    free = _finite(raw.get("free_thresh", 0.15), "free_thresh")
+    if not 0.0 <= free < occupied <= 1.0:
+        raise MapExportError("map thresholds must satisfy 0 <= free < occupied <= 1")
+    return occupied, free
 
 
 def _finite(value: Any, field: str) -> float:

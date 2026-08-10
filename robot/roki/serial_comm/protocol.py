@@ -42,8 +42,8 @@ class LineSensorStatus(str, Enum):
 class ProtocolSettings:
     speed_min: int = -255
     speed_max: int = 255
-    steering_min_deg: int = 60
-    steering_max_deg: int = 100
+    steering_min_deg: int = 40
+    steering_max_deg: int = 120
     steering_center_deg: int = 80
 
 

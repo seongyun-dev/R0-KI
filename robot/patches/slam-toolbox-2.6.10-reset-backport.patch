@@ -1,0 +1,146 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b0e2bbe..e4a2574 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -97,6 +97,7 @@ add_definitions(${EIGEN3_DEFINITIONS})
+ 
+ rosidl_generate_interfaces(${PROJECT_NAME}
+   srv/Pause.srv
++  srv/Reset.srv
+   srv/ClearQueue.srv
+   srv/ToggleInteractive.srv
+   srv/Clear.srv
+diff --git a/include/slam_toolbox/slam_toolbox_common.hpp b/include/slam_toolbox/slam_toolbox_common.hpp
+index 4e3a5b8..1355692 100644
+--- a/include/slam_toolbox/slam_toolbox_common.hpp
++++ b/include/slam_toolbox/slam_toolbox_common.hpp
+@@ -89,6 +89,10 @@ protected:
+     const std::shared_ptr<rmw_request_id_t> request_header,
+     const std::shared_ptr<slam_toolbox::srv::DeserializePoseGraph::Request> req,
+     std::shared_ptr<slam_toolbox::srv::DeserializePoseGraph::Response> resp);
++  virtual bool resetCallback(
++    const std::shared_ptr<rmw_request_id_t> request_header,
++    const std::shared_ptr<slam_toolbox::srv::Reset::Request> req,
++    std::shared_ptr<slam_toolbox::srv::Reset::Response> resp);
+ 
+   // Loaders
+   void loadSerializedPoseGraph(std::unique_ptr<karto::Mapper> &, std::unique_ptr<karto::Dataset> &);
+@@ -139,6 +143,7 @@ protected:
+   std::shared_ptr<rclcpp::Service<slam_toolbox::srv::Pause>> ssPauseMeasurements_;
+   std::shared_ptr<rclcpp::Service<slam_toolbox::srv::SerializePoseGraph>> ssSerialize_;
+   std::shared_ptr<rclcpp::Service<slam_toolbox::srv::DeserializePoseGraph>> ssDesserialize_;
++  std::shared_ptr<rclcpp::Service<slam_toolbox::srv::Reset>> ssReset_;
+ 
+   // Storage for ROS parameters
+   std::string odom_frame_, map_frame_, base_frame_, map_name_, scan_topic_;
+diff --git a/include/slam_toolbox/slam_toolbox_sync.hpp b/include/slam_toolbox/slam_toolbox_sync.hpp
+index d30329a..41cff4f 100644
+--- a/include/slam_toolbox/slam_toolbox_sync.hpp
++++ b/include/slam_toolbox/slam_toolbox_sync.hpp
+@@ -44,6 +44,10 @@ protected:
+     const std::shared_ptr<rmw_request_id_t> request_header,
+     const std::shared_ptr<slam_toolbox::srv::DeserializePoseGraph::Request> req,
+     std::shared_ptr<slam_toolbox::srv::DeserializePoseGraph::Response> resp) override;
++  bool resetCallback(
++    const std::shared_ptr<rmw_request_id_t> request_header,
++    const std::shared_ptr<slam_toolbox::srv::Reset::Request> req,
++    std::shared_ptr<slam_toolbox::srv::Reset::Response> resp) override;
+ 
+   std::queue<PosedScan> q_;
+   std::shared_ptr<rclcpp::Service<slam_toolbox::srv::ClearQueue>> ssClear_;
+diff --git a/include/slam_toolbox/toolbox_msgs.hpp b/include/slam_toolbox/toolbox_msgs.hpp
+index 1300962..c8886da 100644
+--- a/include/slam_toolbox/toolbox_msgs.hpp
++++ b/include/slam_toolbox/toolbox_msgs.hpp
+@@ -30,6 +30,7 @@
+ #include "visualization_msgs/msg/interactive_marker_feedback.hpp"
+ 
+ #include "slam_toolbox/srv/pause.hpp"
++#include "slam_toolbox/srv/reset.hpp"
+ #include "slam_toolbox/srv/clear_queue.hpp"
+ #include "slam_toolbox/srv/toggle_interactive.hpp"
+ #include "slam_toolbox/srv/clear.hpp"
+diff --git a/src/slam_toolbox_common.cpp b/src/slam_toolbox_common.cpp
+index 77ac6b1..6971fc7 100644
+--- a/src/slam_toolbox_common.cpp
++++ b/src/slam_toolbox_common.cpp
+@@ -229,6 +229,10 @@ void SlamToolbox::setROSInterfaces()
+     "slam_toolbox/deserialize_map",
+     std::bind(&SlamToolbox::deserializePoseGraphCallback, this,
+     std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
++  ssReset_ = this->create_service<slam_toolbox::srv::Reset>(
++    "slam_toolbox/reset",
++    std::bind(&SlamToolbox::resetCallback, this,
++    std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+ 
+   scan_filter_sub_ =
+     std::make_unique<message_filters::Subscriber<sensor_msgs::msg::LaserScan>>(
+@@ -840,4 +844,27 @@ bool SlamToolbox::deserializePoseGraphCallback(
+   return true;
+ }
+ 
++/*****************************************************************************/
++bool SlamToolbox::resetCallback(
++  const std::shared_ptr<rmw_request_id_t> request_header,
++  const std::shared_ptr<slam_toolbox::srv::Reset::Request> req,
++  std::shared_ptr<slam_toolbox::srv::Reset::Response> resp)
++/*****************************************************************************/
++{
++  boost::mutex::scoped_lock lock(smapper_mutex_);
++  smapper_->Reset();
++  smapper_->getMapper()->getScanSolver()->Reset();
++  first_measurement_ = true;
++
++  if (req->pause_new_measurements) {
++    state_.set(NEW_MEASUREMENTS, true);
++    this->set_parameter({"paused_new_measurements", true});
++    RCLCPP_INFO(get_logger(),
++      "SlamToolbox: Toggled to pause taking new measurements after reset.");
++  }
++
++  resp->result = resp->RESULT_SUCCESS;
++  return true;
++}
++
+ }  // namespace slam_toolbox
+diff --git a/src/slam_toolbox_sync.cpp b/src/slam_toolbox_sync.cpp
+index 3e21886..fd25755 100644
+--- a/src/slam_toolbox_sync.cpp
++++ b/src/slam_toolbox_sync.cpp
+@@ -130,6 +130,22 @@ bool SynchronousSlamToolbox::deserializePoseGraphCallback(
+   return SlamToolbox::deserializePoseGraphCallback(request_header, req, resp);
+ }
+ 
++/*****************************************************************************/
++bool SynchronousSlamToolbox::resetCallback(
++  const std::shared_ptr<rmw_request_id_t> request_header,
++  const std::shared_ptr<slam_toolbox::srv::Reset::Request> req,
++  std::shared_ptr<slam_toolbox::srv::Reset::Response> resp)
++/*****************************************************************************/
++{
++  {
++    boost::mutex::scoped_lock lock(q_mutex_);
++    while (!q_.empty()) {
++      q_.pop();
++    }
++  }
++  return SlamToolbox::resetCallback(request_header, req, resp);
++}
++
+ }  // namespace slam_toolbox
+ 
+ #include "rclcpp_components/register_node_macro.hpp"
+diff --git a/srv/Reset.srv b/srv/Reset.srv
+new file mode 100644
+index 0000000..fd6c748
+--- /dev/null
++++ b/srv/Reset.srv
+@@ -0,0 +1,8 @@
++# Set this to 'true' to pause new measurements immediately after reset.
++# This is a set behaviour, not the toggle behaviour used by Pause.srv.
++bool pause_new_measurements false
++---
++# Result code definitions
++uint8 RESULT_SUCCESS=0
++
++uint8 result

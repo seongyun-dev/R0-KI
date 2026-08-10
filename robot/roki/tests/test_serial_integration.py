@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import unittest
 
 from control.motion_controller import MotionController, MotionControllerSettings
@@ -31,6 +32,10 @@ class MockSerialBridge:
         return self._connected
 
     def read_line(self) -> str | None:
+        # The production runtime dispatches observers on a separate thread.
+        # Yield here so this zero-I/O fake cannot starve that thread and turn
+        # the integration test into a scheduler race.
+        time.sleep(0.001)
         return self._incoming.pop(0) if self._incoming else None
 
     def write_line(self, line: str) -> bool:

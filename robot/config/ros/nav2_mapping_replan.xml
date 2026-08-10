@@ -1,0 +1,42 @@
+<!--
+  Exploration behaviour tree for the Ackermann chassis.
+
+  Frontier goals sit at the edge of a map that is still growing, so unlike the
+  fixed patrol route a goal can become stale or briefly unreachable. This tree
+  therefore replans instead of following one path to the end, and recovers by
+  clearing the costmaps.
+
+  It deliberately contains no Spin or BackUp: this chassis cannot rotate in place
+  and reverse is not enabled, so those behaviours would either fail or move the
+  robot in a way the operator did not expect. Recovery here is limited to
+  discarding stale costmap data and asking the planner again; a goal that stays
+  unreachable is reported as failed so the explorer can blacklist it and pick
+  another frontier.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="4" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="0.5">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context"
+                                service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"
+                      goal_checker_id="general_goal_checker"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context"
+                              service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <Sequence name="ClearBothCostmaps">
+        <ClearEntireCostmap name="ClearLocalCostmap-Recovery"
+                            service_name="local_costmap/clear_entirely_local_costmap"/>
+        <ClearEntireCostmap name="ClearGlobalCostmap-Recovery"
+                            service_name="global_costmap/clear_entirely_global_costmap"/>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
