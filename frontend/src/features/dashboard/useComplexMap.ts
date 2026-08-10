@@ -12,7 +12,11 @@ import { env } from '../../config/env'
 import { useApiQuery } from '../../lib/useApiQuery'
 import type { ZoneType } from '../../types/domain'
 import { useAuthStore } from '../auth/useAuthStore'
-import { worldToMapRatios } from '../onboarding/mapCoordinates'
+import {
+  worldBoundsToGridRect,
+  worldToMapRatios,
+  zoneBounds,
+} from '../onboarding/mapCoordinates'
 import { useRegisteredMap } from '../onboarding/useRegisteredMap'
 
 const GRID_COLS = 14
@@ -44,31 +48,6 @@ const waypointIcon: Record<WaypointActionCode, string> = {
   DESTINATION: '🏁',
 }
 
-function coordinateToGrid(
-  detail: MapDetailResponse,
-  zone: ZoneCreateResponse,
-) {
-  const resolution = Number(detail.resolution)
-  const originX = Number(detail.originX)
-  const originY = Number(detail.originY)
-  const minX = Number(zone.minX)
-  const maxX = Number(zone.maxX)
-  const minY = Number(zone.minY)
-  const maxY = Number(zone.maxY)
-
-  const left = ((minX - originX) / resolution / detail.width) * GRID_COLS
-  const right = ((maxX - originX) / resolution / detail.width) * GRID_COLS
-  const top = ((detail.height - (maxY - originY) / resolution) / detail.height) * GRID_ROWS
-  const bottom = ((detail.height - (minY - originY) / resolution) / detail.height) * GRID_ROWS
-
-  return {
-    x: Math.max(0, Math.min(GRID_COLS, left)),
-    y: Math.max(0, Math.min(GRID_ROWS, top)),
-    w: Math.max(0.2, Math.min(GRID_COLS, right) - Math.max(0, left)),
-    h: Math.max(0.2, Math.min(GRID_ROWS, bottom) - Math.max(0, top)),
-  }
-}
-
 function registeredMapToView(
   detail: MapDetailResponse,
   zones: ZoneCreateResponse[],
@@ -77,13 +56,15 @@ function registeredMapToView(
   robotId: string | number,
 ): MapViewData {
   const converted = zones.map((zone) => {
-    const rect = coordinateToGrid(detail, zone)
+    const bounds = zoneBounds(zone)
+    const rect = worldBoundsToGridRect(detail, bounds, GRID_COLS, GRID_ROWS)
     return {
       zone: {
         id: String(zone.zoneId),
         type: zoneTypeLabel[zone.type],
         label: zone.name,
         rect,
+        worldBounds: bounds,
       },
       checkpoint: {
         id: String(zone.zoneId),
@@ -118,6 +99,8 @@ function registeredMapToView(
         label: linkedZone ? `${actionLabel} · ${linkedZone}` : actionLabel,
         x: Math.max(0, Math.min(GRID_COLS, ratios.xRatio * GRID_COLS)),
         y: Math.max(0, Math.min(GRID_ROWS, ratios.yRatio * GRID_ROWS)),
+        worldX: Number(waypoint.x),
+        worldY: Number(waypoint.y),
       }
     })
 
@@ -133,6 +116,7 @@ function registeredMapToView(
       resolution,
       originX: Number(detail.originX),
       originY: Number(detail.originY),
+      originYaw: Number(detail.originYaw),
       pixelWidth: detail.width,
       pixelHeight: detail.height,
     },

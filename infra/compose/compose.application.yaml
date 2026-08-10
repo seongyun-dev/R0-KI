@@ -19,6 +19,9 @@ services:
     image: ${BACKEND_IMAGE:-aiot-backend:pending}
     container_name: aiot-backend
     restart: unless-stopped
+    environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Seoul
     env_file:
       - path: /srv/aiot/secrets/backend.env
         required: false

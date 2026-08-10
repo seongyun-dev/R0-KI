@@ -6,6 +6,7 @@ import type {
 } from '../../api/contracts'
 import { robotsApi } from '../../api/services'
 import type { ComplexMapData, MapRobot } from '../../types/domain'
+import { worldToDashboardGrid } from './mapCoordinateMetadata'
 
 const RECONNECT_DELAY_MS = 2_000
 const STATUS_TTL_MS = 15_000
@@ -25,16 +26,13 @@ export function toMapRobot(
     return undefined
   }
 
-  const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value))
   const toGridPoint = (x: number | string, y: number | string) => {
-    const pixelX = (Number(x) - originX) / resolution
-    const pixelY = height - (Number(y) - originY) / resolution
-    return {
-      x: clamp((pixelX / width) * map.cols, map.cols),
-      y: clamp((pixelY / height) * map.rows, map.rows),
-    }
+    const worldX = Number(x)
+    const worldY = Number(y)
+    return worldToDashboardGrid(map, { x: worldX, y: worldY })
   }
   const point = toGridPoint(location.x, location.y)
+  if (!point) return undefined
 
   return {
     id: String(location.robotId),
@@ -44,10 +42,15 @@ export function toMapRobot(
     updatedAt: location.locationUpdatedAt ?? undefined,
     ...('routePoints' in location
       ? {
-          routePoints: location.routePoints.map((routePoint) => ({
-            ...toGridPoint(routePoint.xCoordinate, routePoint.yCoordinate),
-            recordedAt: routePoint.recordedAt,
-          })),
+          routePoints: location.routePoints.flatMap((routePoint) => {
+            const routePointPosition = toGridPoint(
+              routePoint.xCoordinate,
+              routePoint.yCoordinate,
+            )
+            return routePointPosition
+              ? [{ ...routePointPosition, recordedAt: routePoint.recordedAt }]
+              : []
+          }),
         }
       : {}),
   }

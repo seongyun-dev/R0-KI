@@ -14,6 +14,7 @@ import type {
   RobotDetailResponse,
   RobotListResponse,
   RobotLocationEvent,
+  ZoneCreateResponse,
   ZoneResponse,
 } from './contracts'
 import type {
@@ -63,6 +64,22 @@ function dateParts(value?: string | null) {
       hour12: false,
     }).format(parsed),
   }
+}
+
+// 순찰 이력 목록의 시작/종료 칸용 — "25/12/14 01:30" (연도 생략 없이 표시)
+function fullTimestamp(value?: string | null) {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  const yy = String(parsed.getFullYear()).slice(2)
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0')
+  const dd = String(parsed.getDate()).padStart(2, '0')
+  const hm = new Intl.DateTimeFormat('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed)
+  return `${yy}/${mm}/${dd} ${hm}`
 }
 
 function formatOccurredAtDetail(value?: string | null) {
@@ -306,6 +323,33 @@ function routeZoneNames(route: PatrolRouteCheckpointResponse[] = []): string[] {
     .filter((name, index, names) => index === 0 || name !== names[index - 1])
 }
 
+/** 방문 구역 → 상세 지도용 구역 사각형.
+    좌표가 없는 옛 응답(필드 확장 전 백엔드)은 제외한다 — 그 경우 화면이 활성 구역으로 폴백한다. */
+function visitedZonesFromRoute(route: PatrolRouteCheckpointResponse[] = []): ZoneCreateResponse[] {
+  const seen = new Set<string>()
+  return route
+    .filter(
+      (visit) =>
+        visit.minX != null && visit.minY != null && visit.maxX != null && visit.maxY != null,
+    )
+    .filter((visit) => {
+      // 같은 구역을 여러 번 방문해도 상자는 한 번만 그린다
+      const key = `${visit.checkpointName}:${visit.minX}:${visit.minY}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .map((visit, index) => ({
+      zoneId: visit.checkpointId ?? `visit-${index}`,
+      name: visit.checkpointName,
+      type: visit.checkpointType ?? 'START',
+      minX: visit.minX!,
+      minY: visit.minY!,
+      maxX: visit.maxX!,
+      maxY: visit.maxY!,
+    }))
+}
+
 function timelinePoint(value: PatrolTimelineResponse): PatrolPoint {
   const { time } = dateParts(value.recordedAt)
   return {
@@ -332,6 +376,8 @@ export function patrolListItemToDomain(value: PatrolListResponse): Patrol {
     date: started.date,
     start: started.time,
     end: value.endedAt ? ended.time : null,
+    startDateTime: fullTimestamp(value.startedAt) ?? '',
+    endDateTime: fullTimestamp(value.endedAt),
     routeZones: zones.length > 0 ? zones : ['경로 정보 없음'],
     routeSummary: zones.length > 0 ? zones.join('→') : undefined,
     eventCount: value.detectedEventCount,
@@ -356,6 +402,7 @@ export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): P
     end: value.endedAt ? ended.time : null,
     routeZones: zones.length > 0 ? zones : ['경로 정보 없음'],
     routeSummary: zones.length > 0 ? zones.join('→') : undefined,
+    visitedZones: visitedZonesFromRoute(value.route),
     eventCount: timeline.filter((point) => point.eventId != null).length,
     status: patrolStatus(value.patrolStatus),
     batteryFrom: value.battery?.startLevel == null ? undefined : toNumber(value.battery.startLevel),

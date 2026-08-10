@@ -1,14 +1,24 @@
-import type { MapDetailResponse, ZoneCreateResponse } from '../../api/contracts'
+import type { ZoneCreateResponse } from '../../api/contracts'
+
+export type MapCoordinateMetadata = {
+  resolution: number | string
+  originX: number | string
+  originY: number | string
+  originYaw: number | string
+  width: number
+  height: number
+}
 
 export type GridRect = { x: number; y: number; w: number; h: number }
 export type MapPoint = { x: number; y: number }
+export type MapPixel = { x: number; y: number }
 export type MapRatios = { xRatio: number; yRatio: number }
 export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number }
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value))
 
-function numericMetadata(map: MapDetailResponse) {
+export function numericMapMetadata(map: MapCoordinateMetadata) {
   const resolution = Number(map.resolution)
   const originX = Number(map.originX)
   const originY = Number(map.originY)
@@ -22,72 +32,118 @@ function numericMetadata(map: MapDetailResponse) {
   ) {
     throw new Error('지도 좌표 메타데이터가 올바르지 않습니다.')
   }
-  if (Math.abs(originYaw) > 1e-6) {
-    throw new Error('회전된 지도(originYaw)는 현재 경로 편집에서 지원하지 않습니다. originYaw=0 지도를 사용해 주세요.')
-  }
-  return { resolution, originX, originY, width: map.width, height: map.height }
+  return { resolution, originX, originY, originYaw, width: map.width, height: map.height }
 }
 
 /** 좌표 편집 진입 전에 현재 지원 범위를 명시적으로 확인한다. */
-export function assertSupportedMapCoordinates(map: MapDetailResponse) {
-  numericMetadata(map)
+export function assertSupportedMapCoordinates(map: MapCoordinateMetadata) {
+  numericMapMetadata(map)
+}
+
+/** OccupancyGrid 이미지 좌표(왼쪽 위 원점)를 map metadata가 정의한 ROS world 좌표로 바꾼다. */
+export function mapPixelToWorld(map: MapCoordinateMetadata, point: MapPixel): MapPoint {
+  const { resolution, originX, originY, originYaw, height } = numericMapMetadata(map)
+  const localX = point.x * resolution
+  const localY = (height - point.y) * resolution
+  const cosYaw = Math.cos(originYaw)
+  const sinYaw = Math.sin(originYaw)
+  return {
+    x: originX + cosYaw * localX - sinYaw * localY,
+    y: originY + sinYaw * localX + cosYaw * localY,
+  }
+}
+
+/** ROS world 좌표를 OccupancyGrid 이미지 좌표(왼쪽 위 원점)로 역변환한다. */
+export function worldToMapPixel(map: MapCoordinateMetadata, point: MapPoint): MapPixel {
+  const { resolution, originX, originY, originYaw, height } = numericMapMetadata(map)
+  const dx = point.x - originX
+  const dy = point.y - originY
+  const cosYaw = Math.cos(originYaw)
+  const sinYaw = Math.sin(originYaw)
+  const localX = cosYaw * dx + sinYaw * dy
+  const localY = -sinYaw * dx + cosYaw * dy
+  return {
+    x: localX / resolution,
+    y: height - localY / resolution,
+  }
 }
 
 /** 지도 이미지 안의 비율 좌표(왼쪽 위가 0,0)를 SLAM map 좌표로 바꾼다. */
-export function mapRatiosToWorld(map: MapDetailResponse, point: MapRatios): MapPoint {
-  const { resolution, originX, originY, width, height } = numericMetadata(map)
+export function mapRatiosToWorld(map: MapCoordinateMetadata, point: MapRatios): MapPoint {
+  const { width, height } = numericMapMetadata(map)
   const xRatio = clamp(point.xRatio, 0, 1)
   const yRatio = clamp(point.yRatio, 0, 1)
-  return {
-    x: originX + xRatio * width * resolution,
-    y: originY + (height - yRatio * height) * resolution,
-  }
+  return mapPixelToWorld(map, { x: xRatio * width, y: yRatio * height })
 }
 
 /** SLAM map 좌표를 지도 이미지 비율 좌표(왼쪽 위가 0,0)로 바꾼다. */
-export function worldToMapRatios(map: MapDetailResponse, point: MapPoint): MapRatios {
-  const { resolution, originX, originY, width, height } = numericMetadata(map)
+export function worldToMapRatios(map: MapCoordinateMetadata, point: MapPoint): MapRatios {
+  const { width, height } = numericMapMetadata(map)
+  const pixel = worldToMapPixel(map, point)
   return {
-    xRatio: (point.x - originX) / resolution / width,
-    yRatio: (height - (point.y - originY) / resolution) / height,
+    xRatio: pixel.x / width,
+    yRatio: pixel.y / height,
   }
 }
 
+export function worldBoundsFromPoints(a: MapPoint, b: MapPoint): WorldBounds {
+  return {
+    minX: Math.min(a.x, b.x),
+    minY: Math.min(a.y, b.y),
+    maxX: Math.max(a.x, b.x),
+    maxY: Math.max(a.y, b.y),
+  }
+}
+
+export function worldBoundsOverlap(a: WorldBounds, b: WorldBounds) {
+  return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY
+}
+
+export function worldBoundsCorners(bounds: WorldBounds): MapPoint[] {
+  return [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+  ]
+}
+
 export function gridRectToWorldBounds(
-  map: MapDetailResponse,
+  map: MapCoordinateMetadata,
   rect: GridRect,
   columns: number,
   rows: number,
 ): WorldBounds {
-  const bottomLeft = mapRatiosToWorld(map, {
-    xRatio: rect.x / columns,
-    yRatio: (rect.y + rect.h) / rows,
-  })
-  const topRight = mapRatiosToWorld(map, {
-    xRatio: (rect.x + rect.w) / columns,
-    yRatio: rect.y / rows,
-  })
+  const corners = [
+    { xRatio: rect.x / columns, yRatio: rect.y / rows },
+    { xRatio: (rect.x + rect.w) / columns, yRatio: rect.y / rows },
+    { xRatio: (rect.x + rect.w) / columns, yRatio: (rect.y + rect.h) / rows },
+    { xRatio: rect.x / columns, yRatio: (rect.y + rect.h) / rows },
+  ].map((point) => mapRatiosToWorld(map, point))
+  const xs = corners.map((point) => point.x)
+  const ys = corners.map((point) => point.y)
   return {
-    minX: bottomLeft.x,
-    minY: bottomLeft.y,
-    maxX: topRight.x,
-    maxY: topRight.y,
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
   }
 }
 
 /** 서버 구역을 기존 정수 그리드 편집기로 되돌릴 때 원 구역 전체가 보이도록 바깥쪽 셀로 맞춘다. */
 export function worldBoundsToGridRect(
-  map: MapDetailResponse,
+  map: MapCoordinateMetadata,
   bounds: WorldBounds,
   columns: number,
   rows: number,
 ): GridRect {
-  const topLeft = worldToMapRatios(map, { x: bounds.minX, y: bounds.maxY })
-  const bottomRight = worldToMapRatios(map, { x: bounds.maxX, y: bounds.minY })
-  const left = clamp(Math.floor(topLeft.xRatio * columns), 0, columns - 1)
-  const top = clamp(Math.floor(topLeft.yRatio * rows), 0, rows - 1)
-  const right = clamp(Math.ceil(bottomRight.xRatio * columns), left + 1, columns)
-  const bottom = clamp(Math.ceil(bottomRight.yRatio * rows), top + 1, rows)
+  const ratios = worldBoundsCorners(bounds).map((point) => worldToMapRatios(map, point))
+  const xRatios = ratios.map((point) => point.xRatio)
+  const yRatios = ratios.map((point) => point.yRatio)
+  const left = clamp(Math.floor(Math.min(...xRatios) * columns), 0, columns - 1)
+  const top = clamp(Math.floor(Math.min(...yRatios) * rows), 0, rows - 1)
+  const right = clamp(Math.ceil(Math.max(...xRatios) * columns), left + 1, columns)
+  const bottom = clamp(Math.ceil(Math.max(...yRatios) * rows), top + 1, rows)
   return { x: left, y: top, w: right - left, h: bottom - top }
 }
 
@@ -107,7 +163,7 @@ export function zoneBounds(zone: ZoneCreateResponse): WorldBounds {
   return bounds
 }
 
-export function isWorldPointInMap(map: MapDetailResponse, point: MapPoint) {
+export function isWorldPointInMap(map: MapCoordinateMetadata, point: MapPoint) {
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return false
   const ratios = worldToMapRatios(map, point)
   // OccupancyGrid의 유효 셀 범위는 world x/y 상한을 포함하지 않는다.

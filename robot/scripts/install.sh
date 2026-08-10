@@ -46,23 +46,19 @@ if [ "$(id -u)" -eq 0 ]; then
     /opt/aiot/bin \
     /etc/systemd/system/aiot-ros.service.d \
     /etc/systemd/system/aiot-robot.service.d
-  install -m 0755 -o root -g root \
-    "${robot_root}/scripts/apply-map-activation.sh" \
-    /opt/aiot/bin/aiot-map-activate
   install -m 0644 -o root -g root \
     "${robot_root}/config/systemd/aiot-current-map.conf" \
     /etc/systemd/system/aiot-ros.service.d/20-current-map.conf
   install -m 0644 -o root -g root \
     "${robot_root}/config/systemd/aiot-current-map.conf" \
     /etc/systemd/system/aiot-robot.service.d/20-current-map.conf
-  install -m 0644 -o root -g root \
-    "${robot_root}/config/systemd/aiot-map-activate.service" \
-    /etc/systemd/system/aiot-map-activate.service
-  install -m 0644 -o root -g root \
-    "${robot_root}/config/systemd/aiot-map-activate.path" \
-    /etc/systemd/system/aiot-map-activate.path
+  # 지도 활성화가 더 이상 서비스를 재시작하지 않으므로 그 감시 유닛을 걷어낸다.
+  # 남겨두면 없는 마커 파일을 계속 기다리는 유닛이 활성 상태로 남는다.
+  systemctl disable --now aiot-map-activate.path 2>/dev/null || true
+  rm -f /etc/systemd/system/aiot-map-activate.path \
+        /etc/systemd/system/aiot-map-activate.service \
+        /opt/aiot/bin/aiot-map-activate
   systemctl daemon-reload
-  systemctl enable --now aiot-map-activate.path
 fi
 
 echo "Robot runtime installed without sending movement commands"

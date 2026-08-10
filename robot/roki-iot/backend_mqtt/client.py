@@ -29,6 +29,9 @@ CommandMessageHandler = Callable[[str, dict[str, Any]], None]
 CommandEnvelope = tuple[str, dict[str, Any]]
 _COMMAND_WORKER_STOP = object()
 
+# 발행 집계 주기. pose 가 초당 1 건이라 발행마다 찍으면 저널이 그걸로 찬다.
+PUBLISH_CENSUS_INTERVAL_SEC = 60.0
+
 
 class MqttClient:
     """한바퀴 Jetson MQTT 클라이언트."""
@@ -49,6 +52,8 @@ class MqttClient:
         self._command_worker: threading.Thread | None = None
         self._accepting_commands = False
         self._discard_pending_commands = False
+        self._publish_counts: dict[str, int] = {}
+        self._publish_census_at: float | None = None
 
         self._client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -380,7 +385,37 @@ class MqttClient:
                 f"topic={topic}, rc={result.rc}"
             )
 
-        print(f"[MQTT PUBLISH] topic={topic}")
+        self._count_publish(topic)
+
+    def _count_publish(self, topic: str) -> None:
+        """발행을 집계해서 주기적으로 한 줄만 남긴다.
+
+        예전에는 발행마다 한 줄을 찍었다. pose 가 초당 1 건이라 저널의 62% 가
+        이 줄이 됐고(2026-08-08 실측: 2,216 줄 중 1,379 줄), 진단 로그를 밀어냈다.
+        그날 로봇이 처음으로 움직인 주행의 기록도 이것 때문에 로테이션으로
+        사라져서, 무엇이 고쳐졌는지 확인할 수 없었다.
+
+        토픽별로 세므로 발행이 멈춘 것은 여전히 보인다 -- 줄이 안 나오거나
+        해당 토픽 항목이 사라진다.
+        """
+
+        name = topic.rsplit("/", 1)[-1] or topic
+        self._publish_counts[name] = self._publish_counts.get(name, 0) + 1
+        now = time.monotonic()
+        if self._publish_census_at is None:
+            self._publish_census_at = now
+            return
+        elapsed = now - self._publish_census_at
+        if elapsed < PUBLISH_CENSUS_INTERVAL_SEC:
+            return
+        self._publish_census_at = now
+        counts = self._publish_counts
+        self._publish_counts = {}
+        print(
+            f"[MQTT PUBLISH] {elapsed:.0f}s "
+            + " ".join(f"{k}={v}" for k, v in sorted(counts.items())),
+            flush=True,
+        )
 
     def disconnect(self) -> None:
         """MQTT 네트워크 루프와 연결을 종료한다."""

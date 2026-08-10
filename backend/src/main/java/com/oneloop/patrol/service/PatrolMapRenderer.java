@@ -54,6 +54,17 @@ public class PatrolMapRenderer {
      */
     private static final double TARGET_ASPECT = 900.0 / 450.0;
 
+    /**
+     * 합성 캔버스는 도면 크기와 무관하게 고정한다 — 화면 뷰박스(900x450)의 2배.
+     *
+     * <p>도면 크기를 따라가면(base×2) 실제 SLAM 스캔처럼 작은 도면에서 캔버스가 수십 px 로
+     * 쪼그라들고, 고정 크기인 라벨·핀·테두리가 지도를 뒤덮은 채 PDF 가 그걸 다시 확대해
+     * 흐릿한 확대본이 된다. 캔버스를 고정하면 도면 해상도와 무관하게 화면과 같은 비율로 나온다.
+     */
+    private static final int CANVAS_WIDTH = 900 * SCALE;
+
+    private static final int CANVAS_HEIGHT = (int) Math.round(CANVAS_WIDTH / TARGET_ASPECT);
+
     /* 도면을 눌러 까는 값 — 화면의 .mapbase(grayscale(1) contrast(.78) brightness(1.16), opacity .42)와 같다.
        CSS contrast/brightness 를 1차식으로 합치면 out = in*0.78*1.16 + (0.5 - 0.5*0.78)*1.16 이다. */
     private static final float BASE_SCALE = 0.78f * 1.16f;
@@ -97,8 +108,8 @@ public class PatrolMapRenderer {
                 return mapPng;
             }
             // 화면과 같은 가로비로 늘여 채운다. 세로는 그만큼 눌리므로 좌표도 X/Y 따로 환산한다.
-            int width = base.getWidth() * SCALE;
-            int height = (int) Math.round(width / TARGET_ASPECT);
+            int width = CANVAS_WIDTH;
+            int height = CANVAS_HEIGHT;
 
             BufferedImage canvas = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
             Graphics2D g = canvas.createGraphics();

@@ -137,6 +137,12 @@ export default function RobotDetail() {
       : baseRobot
     : undefined
 
+  // 오프라인이면 마지막으로 받은 센서값이 지금도 맞다고 보장할 수 없어
+  // 카메라/라이다/모터 상태도 배터리와 같은 맥락으로 "오프라인"으로 덮는다
+  const displayParts = (robot?.parts ?? []).slice(0, 4).map((part) =>
+    robot?.status === '오프라인' ? { ...part, status: '오프라인' as const } : part,
+  )
+
   const parsedRobotId = Number(robot?.backendId ?? robot?.id)
   const patrolRobotId = Number.isFinite(parsedRobotId) ? parsedRobotId : undefined
   const recent = robot?.recentPatrols?.slice(0, 3) ?? []
@@ -372,7 +378,8 @@ export default function RobotDetail() {
               <div className="rule" />
               <span className="k">배터리 잔량</span>
               <div className="rd-batt">
-                {robot.battery != null ? (
+                {/* 오프라인이면 마지막으로 받은 배터리값이 지금도 맞다고 보장할 수 없어 가린다 */}
+                {robot.battery != null && robot.status !== '오프라인' ? (
                   <>
                     <span className="v">{robot.battery}</span>
                     <span className="u">%</span>
@@ -423,7 +430,7 @@ export default function RobotDetail() {
                 {/* 지시선 — viewBox 없이 두면 SVG 사용자 단위가 CSS px과 1:1이라
                     handleAnchors 가 계산한 프레임 기준 px을 그대로 쓸 수 있다 */}
                 <svg className="rd-leads" aria-hidden="true">
-                  {robot.parts.slice(0, 4).map((part, i) => (
+                  {displayParts.map((part, i) => (
                     <g
                       key={part.name}
                       ref={(el) => {
@@ -437,7 +444,7 @@ export default function RobotDetail() {
                   ))}
                 </svg>
 
-                {robot.parts.slice(0, 4).map((part, i) => (
+                {displayParts.map((part, i) => (
                   <div
                     key={part.name}
                     className={`rd-cal ${PART_SLOTS[i]}${part.status !== '정상' ? ' warn' : ''}`}
