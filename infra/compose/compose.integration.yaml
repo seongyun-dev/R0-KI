@@ -47,7 +47,6 @@ services:
       MQTT_BROKER_URI: tcp://mosquitto:1883
       MQTT_USERNAME: integration
       MQTT_PASSWORD: integration
-      APP_EMAIL_VERIFICATION_ENABLED: "false"
       MAP_DIR: /app/data/maps
       # 통합 테스트에는 메일 서버가 없어 인증번호를 받을 수 없다.
       # 가입 시 이메일 인증 확인만 끈다 (운영 배포에는 절대 넣지 않는다).
