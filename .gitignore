@@ -15,7 +15,6 @@ __pycache__/
 *.py[cod]
 
 # AI 모델·데이터셋
-*.pt
 *.pth
 *.onnx
 *.engine
