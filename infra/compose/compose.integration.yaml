@@ -36,11 +36,13 @@ services:
   backend:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
     environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Seoul
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/aiot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
       SPRING_DATASOURCE_USERNAME: aiot_integration
       SPRING_DATASOURCE_PASSWORD: integration-only-password
       APP_JWT_SECRET: integration-only-jwt-secret-that-is-at-least-thirty-two-bytes-long
-      APP_JWT_ACCESS_TOKEN_EXPIRATION: "3600000"
+      APP_JWT_ACCESS_TOKEN_EXPIRATION: "28800000"
       APP_CORS_ALLOWED_ORIGINS: http://127.0.0.1:${INTEGRATION_PORT:-19080}
       MQTT_BROKER_URI: tcp://mosquitto:1883
       MQTT_USERNAME: integration

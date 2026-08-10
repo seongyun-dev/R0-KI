@@ -54,12 +54,32 @@ done
 
 nginx_template=infra/nginx/aiot.conf.template
 for required_route in \
+  'location = /api/internal/stream-sessions/validate {' \
+  'location = /live/robots/17/stream.mjpg {' \
+  'location = /_live_robot_stream_auth {' \
   'location = /swagger-ui.html {' \
   'location ^~ /swagger-ui/ {' \
   'location = /v3/api-docs {' \
   'location ^~ /v3/api-docs/ {'; do
   grep -Fq "${required_route}" "${nginx_template}" || \
     fail "${nginx_template} must proxy ${required_route}"
+done
+
+sse_route='location ~ ^/api/(?:robots/(?:location/events|obstacle-events)|events/subscribe/(?:emergency|general)|map/mapping-sessions/[0-9]+/events)$ {'
+for nginx_config in \
+  infra/nginx/aiot.conf.template \
+  infra/integration/nginx.conf; do
+  grep -Fq "${sse_route}" "${nginx_config}" || \
+    fail "${nginx_config} must route every latency-sensitive SSE endpoint"
+  for required_sse_directive in \
+    'proxy_buffering off;' \
+    'proxy_cache off;' \
+    'proxy_set_header Connection "";' \
+    'proxy_read_timeout 30m;' \
+    'gzip off;'; do
+    grep -Fq "${required_sse_directive}" "${nginx_config}" || \
+      fail "${nginx_config} SSE route must set ${required_sse_directive}"
+  done
 done
 
 if [ "${errors}" -ne 0 ]; then
