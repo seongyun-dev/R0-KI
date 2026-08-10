@@ -658,7 +658,12 @@ export default function PatrolDetail() {
                     patrol={patrol}
                     mapImageUrl={mapImageUrl}
                     mapDetail={mapDetail}
-                    checkpointZones={checkpointZones}
+                    checkpointZones={
+                      /* 이 순찰 당시의 방문 구역이 있으면 그걸 그린다 — 이후 구역을 다시
+                         등록해도 과거 순찰의 경로·이벤트와 구역이 어긋나지 않는다.
+                         좌표 없는 옛 응답만 현재 활성 구역으로 폴백한다. */
+                      patrol.visitedZones?.length ? patrol.visitedZones : checkpointZones
+                    }
                   />
                 </div>
               </div>

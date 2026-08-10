@@ -18,6 +18,13 @@ const PERIOD_LABEL: Record<string, string> = {
   '30d': '최근 30일',
 }
 
+// "25/12/14 01:30" → 날짜는 얇게, 시각은 <b>로 굵게 강조하기 위해 나눈다
+function splitTimestamp(value?: string | null) {
+  if (!value) return { date: '-', time: '' }
+  const [date, time] = value.split(' ')
+  return { date, time: time ?? '' }
+}
+
 export default function PatrolList() {
   const navigate = useNavigate()
   const sessionRobotId = useAuthStore((state) => state.robotId)
@@ -105,8 +112,8 @@ export default function PatrolList() {
                       <tr key={p.id} onClick={() => navigate(`/app/patrol/${p.id}`)}>
                         <td className="id">{p.id}</td>
                         <td className="bot">{robotLabel(p)}</td>
-                        <td className="tm">{p.date}<b>{p.start}</b></td>
-                        <td className="tm"><b>{p.end ?? '-'}</b></td>
+                        <td className="tm">{splitTimestamp(p.startDateTime).date}<b>{splitTimestamp(p.startDateTime).time}</b></td>
+                        <td className="tm">{splitTimestamp(p.endDateTime).date}<b>{splitTimestamp(p.endDateTime).time}</b></td>
                         <td>
                           <span className="route">
                             {p.routeZones.map((zone, i) => (

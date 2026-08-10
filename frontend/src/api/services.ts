@@ -13,6 +13,7 @@ import type {
   ResidentFilterOptionsResponse,
   ResidentListPageResponse,
   ResidentListRequest,
+  ResidentNotificationPageResponse,
   ResidentNotificationUpdateRequest,
   ResidentRegisterRequest,
   ResidentSummaryResponse,
@@ -248,6 +249,11 @@ export const residentsApi = {
   detail: (residentId: string | number) =>
     apiRequest<ResidentDetailResponse>(
       `/api/residents/${encodeURIComponent(String(residentId))}`,
+    ),
+  /** 전체 알림 이력 — 상세의 recentNotifications(최근 5건)와 달리 페이지 단위로 전부 조회 */
+  notifications: (residentId: string | number, page = 0, size = 20) =>
+    apiRequest<ResidentNotificationPageResponse>(
+      `/api/residents/${encodeURIComponent(String(residentId))}/notifications?page=${page}&size=${size}`,
     ),
   create: (request: ResidentRegisterRequest) =>
     apiRequest<ResidentSummaryResponse>('/api/residents', {

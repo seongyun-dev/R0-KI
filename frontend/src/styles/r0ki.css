@@ -732,6 +732,12 @@
 .r0ki .rmap text{font-family:var(--sans);font-size:13px;font-weight:700;fill:var(--text-2);text-anchor:middle}
 .r0ki .rmap .rt{font-size:12px;font-weight:600;fill:var(--text-3)}
 
+/* 입주민 상세 알림 이력 — 패널 안 내부 스크롤 (표가 패널보다 길어지면 잘리는 대신 스크롤) */
+.r0ki .ntlwrap{flex:1;min-height:0;overflow-y:auto;padding-right:5px}
+.r0ki .ntlwrap::-webkit-scrollbar{width:6px}
+.r0ki .ntlwrap::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .ntlwrap::-webkit-scrollbar-track{background:transparent}
+
 /* 순찰 지점 기록 (타임라인) — 내부 스크롤 */
 .r0ki .tline{position:relative;flex:1;min-height:0;overflow-y:auto;padding:0 5px 0 2px}
 .r0ki .tline::-webkit-scrollbar{width:6px}
@@ -1584,6 +1590,11 @@
 
 .r0ki .au-mhead{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s3);flex-wrap:wrap;min-height:34px}
 .r0ki .au-mhead .hint{margin-left:auto;font-size:12.5px;color:var(--text-3)}
+.r0ki .au-map-view-tools{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s3);flex-wrap:wrap}
+.r0ki .au-map-view-tools>.btn[aria-pressed="true"]{color:var(--accent-ink);border-color:transparent;
+  background:linear-gradient(180deg,var(--accent-fill-1),var(--accent-fill-2))}
+.r0ki .au-iso-controls{display:inline-flex;align-items:center;gap:var(--s2);margin-left:auto}
+.r0ki .au-iso-controls .hint{font-size:12px;color:var(--text-3)}
 .r0ki .au-warn{display:inline-flex;align-items:center;gap:9px;height:34px;padding:0 14px;border-radius:var(--r-pill);
   background:var(--urgent-bg);border:1px solid var(--urgent-edge);color:var(--urgent-text);
   font-size:13px;font-weight:700;white-space:nowrap;animation:r0ki-warnIn 200ms var(--e-glass)}
@@ -1622,8 +1633,115 @@
 .r0ki .au-draft{position:absolute;border-radius:9px;border:1.5px dashed var(--graphic);
   background:var(--accent-glow);pointer-events:none}
 .r0ki .au-draft.bad{border-color:var(--urgent);background:var(--urgent-bg)}
+.r0ki .au-iso-canvas{position:relative;overflow:hidden;border-radius:var(--r-inner);
+  background:var(--track);border:1px solid var(--edge);user-select:none}
+.r0ki .au-iso-canvas[aria-disabled="true"]::after{content:'';position:absolute;inset:0;z-index:20;
+  background:color-mix(in srgb,var(--page) 42%,transparent)}
+.r0ki .au-iso-canvas>svg{display:block;width:100%;min-height:300px;max-height:540px;touch-action:none;cursor:crosshair}
+.r0ki .au-iso-floor{fill:var(--page);stroke:var(--edge);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .au-iso-map-image{opacity:.4;pointer-events:none}
+.r0ki .au-iso-grid{pointer-events:none}
+.r0ki .au-iso-grid line{stroke:var(--hair);stroke-width:1;vector-effect:non-scaling-stroke}
+.r0ki .au-iso-hit{fill:transparent;stroke:none}
+.r0ki .au-iso-zone{cursor:pointer;color:var(--z)}
+.r0ki .au-iso-zone polygon{fill:color-mix(in srgb,var(--z) 18%,transparent);
+  stroke:color-mix(in srgb,var(--z) 70%,transparent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.r0ki .au-iso-zone:hover polygon{fill:color-mix(in srgb,var(--z) 26%,transparent)}
+.r0ki .au-iso-zone text{fill:currentColor;font-family:var(--sans);font-size:12px;font-weight:700;
+  text-anchor:middle;dominant-baseline:middle;paint-order:stroke;stroke:var(--page);stroke-width:3px;
+  stroke-linejoin:round;pointer-events:none}
+.r0ki .au-iso-draft{fill:var(--accent-glow);stroke:var(--graphic);stroke-width:1.5;
+  stroke-dasharray:5 4;vector-effect:non-scaling-stroke;pointer-events:none}
+.r0ki .au-iso-draft.bad{fill:var(--urgent-bg);stroke:var(--urgent)}
 .r0ki .au-mfoot{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s4)}
 .r0ki .au-mfoot .au-note{flex:1}
+
+/* Dashboard 2.5D polish. All geometry is display-only; world coordinates remain unchanged. */
+.r0ki .monitoring-map{position:relative;width:100%;height:100%;min-height:0}
+.r0ki .monitoring-map-modes{position:absolute;z-index:40;top:11px;left:50%;transform:translateX(-50%);
+  display:inline-flex;gap:2px;padding:3px;border-radius:var(--r-pill);
+  border:1px solid var(--edge);background:color-mix(in srgb,var(--focus-in) 92%,transparent);
+  box-shadow:0 5px 16px color-mix(in srgb,var(--graphic) 10%,transparent);backdrop-filter:blur(8px)}
+.r0ki .monitoring-map-modes button{min-width:46px;height:26px;padding:0 9px;border:0;
+  border-radius:var(--r-pill);background:transparent;color:var(--text-3);cursor:pointer;
+  font-family:var(--sans);font-size:11.5px;font-weight:700}
+.r0ki .monitoring-map-modes button[aria-pressed="true"]{background:var(--graphic);color:var(--page)}
+.r0ki .monitoring-map-modes button:disabled{opacity:.45;cursor:not-allowed}
+.r0ki .dm25-wrap{--dm25-floor:#f7f9fc;--dm25-floor-side:#e7ebf0;
+  --dm25-wall-side:#d8dfe7;--dm25-wall-top:#eef2f6;--dm25-wall-outline:#aeb8c3;
+  position:relative;width:100%;height:100%;min-height:300px;overflow:hidden;
+  background:#fbfcfe;
+  color:var(--text-1)}
+.r0ki .dm25-map{display:block;width:100%;height:100%;min-height:300px;touch-action:none;cursor:default}
+.r0ki .dm25-wrap.pan .dm25-map{cursor:grabbing}
+.r0ki .dm25-floor-shadow{fill:rgba(54,69,84,.065);filter:blur(4px)}
+.r0ki .dm25-floor-side{fill:var(--dm25-floor-side);stroke:#dce2e9;stroke-width:.55;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-floor{fill:var(--dm25-floor);stroke:#d7dee6;stroke-width:.9;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-map-image{opacity:.095;filter:grayscale(1) contrast(.5) brightness(1.58);pointer-events:none}
+.r0ki[data-theme="nocturne"] .dm25-map-image{filter:grayscale(1) contrast(.5) brightness(1.58);opacity:.085}
+.r0ki .dm25-wall-side{opacity:.9}
+.r0ki .dm25-wall-top{opacity:1;filter:drop-shadow(0 .8px .55px rgba(88,103,117,.24))}
+.r0ki .dm25-zone .platform{fill:color-mix(in srgb,var(--patrol) 13%,transparent);stroke:none}
+.r0ki .dm25-zone .surface{fill:color-mix(in srgb,var(--patrol) 7%,transparent);
+  stroke:color-mix(in srgb,var(--patrol) 38%,transparent);stroke-width:.95;vector-effect:non-scaling-stroke}
+.r0ki .dm25-route{fill:none;stroke:var(--graphic);stroke-linecap:round;stroke-linejoin:round;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-route.planned{stroke-width:1.8;stroke-dasharray:4 5;stroke-opacity:.58}
+.r0ki .dm25-route.actual{stroke-width:2.1;stroke-dasharray:7 3;stroke-opacity:.82;
+  filter:drop-shadow(0 0 2px color-mix(in srgb,var(--graphic) 24%,transparent))}
+.r0ki .dm25-waypoint circle{fill:#fff;stroke:var(--graphic);stroke-width:1.35;vector-effect:non-scaling-stroke;
+  filter:drop-shadow(0 0 2px color-mix(in srgb,var(--graphic) 28%,transparent))}
+.r0ki .dm25-waypoint .core{fill:var(--graphic);stroke:none}
+.r0ki .dm25-robot .pulse{fill:color-mix(in srgb,var(--graphic) 7%,transparent);stroke:var(--graphic);
+  stroke-width:1;stroke-opacity:.34;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .heading{opacity:.72}
+.r0ki .dm25-robot .heading line{stroke:var(--graphic);stroke-width:1.35;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .heading path{fill:var(--graphic);stroke:#fff;stroke-width:.6;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .figurine{filter:drop-shadow(0 2.2px 2.6px rgba(42,67,94,.22));pointer-events:none}
+.r0ki .dm25-robot .glow{fill:color-mix(in srgb,var(--graphic) 18%,transparent);filter:blur(2px)}
+.r0ki .dm25-robot .plinth-shadow{fill:rgba(51,73,96,.18)}
+.r0ki .dm25-robot .plinth{fill:#f8fbff;stroke:var(--graphic);stroke-width:1.25;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .body{fill:#eef3f7;stroke:#aebbc7;stroke-width:.72;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .body-top{fill:#fff;stroke:#bcc6d0;stroke-width:.62;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .head{fill:#f8fafc;stroke:#aeb9c4;stroke-width:.7;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .head-top{fill:#fff;stroke:#c2cad3;stroke-width:.55;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .visor{fill:#172432;stroke:#0d1823;stroke-width:.45;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .visor-led{fill:#52b8ff;stroke:#dff4ff;stroke-width:.2;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .antenna{stroke:#697887;stroke-width:.8;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.r0ki .dm25-robot .antenna-tip{fill:#202c38;stroke:#fff;stroke-width:.35;vector-effect:non-scaling-stroke}
+.r0ki .dm25-event{--dm25-pin:var(--urgent)}
+.r0ki .dm25-event path{fill:var(--dm25-pin);stroke:var(--page);stroke-width:1.4;vector-effect:non-scaling-stroke}
+.r0ki .dm25-event .pulse{fill:none;stroke:var(--dm25-pin);stroke-width:1.5;stroke-opacity:.5;
+  vector-effect:non-scaling-stroke}
+.r0ki .dm25-label{pointer-events:none}
+.r0ki .dm25-label rect{fill:rgba(255,255,255,.94);stroke:#dce2e9;
+  stroke-width:.7;vector-effect:non-scaling-stroke;filter:drop-shadow(0 2px 4px rgba(65,79,94,.09))}
+.r0ki .dm25-label text{fill:#46515d;font-family:var(--sans);font-size:11.5px;font-weight:560;
+  text-anchor:middle;letter-spacing:-.01em}
+.r0ki .dm25-label.zone text{font-size:11.5px;fill:var(--patrol)}
+.r0ki .dm25-label.zone rect{fill:rgba(255,255,255,.9);stroke:color-mix(in srgb,var(--patrol) 28%,#dce2e9)}
+.r0ki .dm25-label.robot text{font-size:12px;font-weight:650;fill:#27313c}
+.r0ki .dm25-label.robot rect{stroke:color-mix(in srgb,var(--graphic) 48%,var(--edge))}
+.r0ki .dm25-label.event text{fill:var(--dm25-pin);font-weight:700}
+.r0ki .dm25-label.event rect{stroke:color-mix(in srgb,var(--dm25-pin) 48%,var(--edge))}
+.r0ki .dm25-controls{position:absolute;z-index:30;top:11px;left:11px;display:inline-flex;gap:4px}
+.r0ki .dm25-controls button{width:29px;height:29px;border:1px solid var(--edge);border-radius:50%;
+  background:color-mix(in srgb,var(--focus-in) 92%,transparent);color:var(--text-1);
+  font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 12px color-mix(in srgb,var(--text-1) 10%,transparent);backdrop-filter:blur(8px)}
+.r0ki .dm25-controls button:disabled{opacity:.4;cursor:default}
+.r0ki .dm25-bottom-right{position:absolute;z-index:30;right:10px;bottom:10px;display:flex;gap:8px;align-items:center}
+@media(max-width:1440px){
+  .r0ki .dm25-label text{font-size:11.5px}
+  .r0ki .dm25-label.robot text{font-size:12.5px}
+}
+@media(max-width:680px){
+  .r0ki .monitoring-map-modes{top:8px}
+  .r0ki .dm25-controls{top:8px;left:8px}
+  .r0ki .dm25-label text{font-size:11px}
+}
 
 /* ── 맵 등록 내부 단계 · 순서형 순찰 경로 편집기 ── */
 .r0ki .au-editor-steps{display:flex;align-items:center;gap:8px;margin-bottom:var(--s4);flex-wrap:wrap}

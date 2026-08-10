@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import { R0KiShell, useClockText } from '../components/layout/R0KiShell'
 import { R0KiLiveCam } from '../features/dashboard/R0KiLiveCam'
 import { R0KiPatrolMap } from '../features/dashboard/R0KiPatrolMap'
-import { ComplexMap } from '../features/dashboard/ComplexMap'
+import { MonitoringMap } from '../features/dashboard/MonitoringMap'
+import { worldToDashboardGrid } from '../features/dashboard/mapCoordinateMetadata'
 import { robotMapPosition } from '../features/dashboard/robotMapPosition'
 import { useComplexMap } from '../features/dashboard/useComplexMap'
 import { useRobotLocations } from '../features/dashboard/useRobotLocations'
@@ -34,17 +35,7 @@ type PendingPatrolStart = {
 }
 
 function emergencyPoint(x: number, y: number, map: ComplexMapData) {
-  const { resolution, pixelWidth, pixelHeight, originX, originY } = map
-  if (!resolution || !pixelWidth || !pixelHeight || originX == null || originY == null) {
-    return undefined
-  }
-  const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value))
-  const pixelX = (x - originX) / resolution
-  const pixelY = pixelHeight - (y - originY) / resolution
-  return {
-    x: clamp((pixelX / pixelWidth) * map.cols, map.cols),
-    y: clamp((pixelY / pixelHeight) * map.rows, map.rows),
-  }
+  return worldToDashboardGrid(map, { x, y })
 }
 
 /* R0-Ki · AURA GLASS 대시보드 (리디자인 시안 그대로)
@@ -173,6 +164,8 @@ export default function Dashboard() {
           ? {
               x: selectedLiveLocation.x,
               y: selectedLiveLocation.y,
+              worldX: selectedLiveLocation.worldX,
+              worldY: selectedLiveLocation.worldY,
               ...(selectedLiveLocation.heading == null
                 ? {}
                 : { heading: selectedLiveLocation.heading }),
@@ -387,7 +380,7 @@ export default function Dashboard() {
           <div className="mapzone glass g2">
             <div className="bigmap">
               {mapData ? (
-                <ComplexMap
+                <MonitoringMap
                   map={mapData.map}
                   robot={showAllPatrolling ? undefined : mapRobot}
                   robots={showAllPatrolling ? mapRobots : undefined}
@@ -538,7 +531,6 @@ export default function Dashboard() {
                       <path d="M20 4v5h-5" />
                     </svg>
                   </button>
-                  <span className="chip"><span className="d" style={{ background: 'var(--graphic)' }} />최신순</span>
                 </span>
               </div>
 
