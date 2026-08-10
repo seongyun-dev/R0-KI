@@ -93,7 +93,19 @@ class MappingMotionSink:
             return
         speed = int(getattr(command, "speed_pwm", 0))
         if speed == 0:
-            self._stop(getattr(command, "stop_reason", None) or "MAPPING_NAV2_STOP")
+            reason = getattr(command, "stop_reason", None)
+
+            if reason == "IN_PLACE_ROTATION_REJECTED":
+                self._runtime.mission.start_patrol(
+                    speed=0,
+                    steering_deg=int(command.steering_deg),
+                )
+                with self._lock:
+                    self._driving = False
+                    self._stopped = False
+                return
+
+            self._stop(reason or "MAPPING_NAV2_STOP")
             return
         self._runtime.mission.start_patrol(
             speed=speed,

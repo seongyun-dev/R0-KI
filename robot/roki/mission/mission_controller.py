@@ -18,8 +18,11 @@ class MissionCommand:
 class MissionSnapshot:
     """One atomically observed mission state.
 
-    ``generation`` changes for every submitted, started, or stopped mission so
-    the Serial owner can reject a control command calculated from stale state.
+    ``generation`` is the motion-authorisation epoch.  It changes when a
+    mission becomes active or is invalidated, but not for speed/steering
+    updates inside the same active mission.  The Serial owner can therefore
+    refresh the last authorised command while still rejecting commands from a
+    stopped or replaced mission.
     """
 
     command: MissionCommand
@@ -92,9 +95,16 @@ class MissionController:
         speed: int = 0,
         steering_deg: int | None = None,
     ) -> None:
-        """Mission을 활성화하고 명시적으로 전달된 주행 목표를 보관한다."""
+        """Activate a mission or update the target of the active mission.
+
+        Nav2 publishes a new speed/steering target continuously.  Repeating
+        this call while already active is therefore a target update, not a new
+        lifecycle transition.  STOP/emergency still advance the generation,
+        so a later inactive-to-active call always starts a new epoch.
+        """
 
         with self._lock:
+            was_active = self._patrol_active
             target_steering = (
                 self._command.steering_deg
                 if steering_deg is None
@@ -106,7 +116,8 @@ class MissionController:
                 target_steering,
                 emergency_stop=False,
             )
-            self._generation += 1
+            if not was_active:
+                self._generation += 1
 
     def stop_patrol(self) -> None:
         """Mission을 비활성화하고 정상 정지 목표를 설정한다."""

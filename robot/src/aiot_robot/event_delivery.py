@@ -30,6 +30,7 @@ class DetectionRecorder:
         vehicle_range_source: Any | None = None,
         camera_yaw_deg: float = 0.0,
         minimum_confidence: float | None = None,
+        emergency_stop_sink: Callable[[Any], None] | None = None,
     ) -> None:
         self._outbox = outbox
         self._state_store = state_store
@@ -45,6 +46,7 @@ class DetectionRecorder:
             or not 0.0 <= self._minimum_confidence <= 1.0
         ):
             raise ValueError("minimum detection confidence must be between 0 and 1")
+        self._emergency_stop_sink = emergency_stop_sink
         self._scan_context_lock = threading.Lock()
         self._scan_context: dict[str, Any] | None = None
 
@@ -69,6 +71,19 @@ class DetectionRecorder:
                 f"threshold={self._minimum_confidence:.3f}"
             )
             return
+        if event.event_type == "EMERGENCY" and callable(
+            self._emergency_stop_sink
+        ):
+            try:
+                # Use the same accepted detection threshold as alert delivery.
+                # Stop before pose/outbox persistence so a storage failure cannot
+                # leave the chassis moving.
+                self._emergency_stop_sink(event)
+            except Exception as exc:
+                print(
+                    "[EVENT] emergency stop callback failed "
+                    f"eventId={event.event_id} type={type(exc).__name__}"
+                )
         pose = self._state_store.get_pose()
         if pose is None:
             print(f"[EVENT] detection dropped without map pose eventId={event.event_id}")
@@ -85,7 +100,11 @@ class DetectionRecorder:
         if scan_context is not None:
             context["scan"] = scan_context
         if event.event_type == "VEHICLE_DETECTED":
-            get_range = getattr(self._vehicle_range_source, "get_front_range", None)
+            get_range = getattr(
+                self._vehicle_range_source,
+                "get_front_range",
+                None,
+            )
             range_m = get_range() if callable(get_range) else None
             if range_m is None:
                 print(
@@ -107,6 +126,14 @@ class DetectionRecorder:
                 return
             context.update(
                 {"x": vehicle.x, "y": vehicle.y, "rangeM": vehicle.range_m}
+            )
+            zone_id = scan_context.get("zoneId") if scan_context else None
+            print(
+                "[VEHICLE_LOCALIZATION] "
+                f"robot=({x:.3f},{y:.3f}) heading={float(pose.heading):.2f} "
+                f"frontRange={vehicle.range_m:.3f} "
+                f"estimatedVehicle=({vehicle.x:.3f},{vehicle.y:.3f}) "
+                f"zone={zone_id or 'UNAVAILABLE'}"
             )
         self._outbox.enqueue(event, context=context)
 

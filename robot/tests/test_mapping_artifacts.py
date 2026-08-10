@@ -258,8 +258,40 @@ class MappingArtifactsTest(unittest.TestCase):
             self.assertEqual(ready_exporter.readiness(), (True, "READY"))
         self.assertEqual(
             commands,
-            [("ros2", "service", "list", "-t", "--no-daemon")],
+            [
+                (
+                    "ros2",
+                    "service",
+                    "list",
+                    "-t",
+                    "--no-daemon",
+                    "--spin-time",
+                    "2.0",
+                )
+            ],
         )
+
+    def test_readiness_retries_one_partial_discovery_within_deadline(self) -> None:
+        calls: list[tuple[tuple[str, ...], float]] = []
+
+        def runner(command, timeout):
+            calls.append((tuple(command), timeout))
+            if len(calls) == 1:
+                return SimpleNamespace(stdout="")
+            return SimpleNamespace(
+                stdout=(
+                    "/slam_toolbox/serialize_map "
+                    "[slam_toolbox/srv/SerializePoseGraph]\n"
+                )
+            )
+
+        exporter = SlamMapExporter(MapExportSettings(self.root), runner=runner)
+        with patch("aiot_robot.mapping_artifacts.shutil.which", return_value="ros2"):
+            self.assertEqual(exporter.readiness(), (True, "READY"))
+
+        self.assertEqual(len(calls), 2)
+        self.assertGreater(calls[0][1], calls[1][1])
+        self.assertLessEqual(calls[0][1], 8.0)
 
     def test_nonzero_origin_yaw_is_rejected_for_current_frontend(self) -> None:
         def runner(command, _timeout):

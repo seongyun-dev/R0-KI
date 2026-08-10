@@ -5,9 +5,10 @@ robot_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ydlidar_setup="${AIOT_YDLIDAR_SETUP_FILE:-/home/e103/ydlidar_ws/install/setup.bash}"
 rf2o_setup="${AIOT_RF2O_SETUP_FILE:-/home/e103/rf2o_ws/install/setup.bash}"
+slam_reset_setup="${AIOT_SLAM_TOOLBOX_RESET_SETUP_FILE:-/home/e103/slam-toolbox-2610-reset-backport-ws/install/setup.bash}"
 
 "${robot_root}/scripts/ros-preflight.sh"
-for setup_file in "${ros_setup}" "${ydlidar_setup}" "${rf2o_setup}"; do
+for setup_file in "${ros_setup}" "${ydlidar_setup}" "${rf2o_setup}" "${slam_reset_setup}"; do
   set +u
   # shellcheck disable=SC1090
   source "${setup_file}"
@@ -44,9 +45,11 @@ start_component ros2 run tf2_ros static_transform_publisher \
   --x "${ROKI_LIDAR_X_M}" --y "${ROKI_LIDAR_Y_M}" \
   --z "${ROKI_LIDAR_Z_M}" --yaw "${ROKI_LIDAR_YAW_RAD}" \
   --pitch 0 --roll 0 --frame-id base_link --child-frame-id laser_frame
+# __node:= 리맵을 주지 않는다. rf2o.yaml 이 `/**` 로 받으므로 필요가 없고,
+# 그 리맵이 같은 이름 노드를 둘 만들어 ROS 그래프 조회를 어긋나게 했다
+# (2026-08-08 실측, rf2o.yaml 주석 참고).
 start_component ros2 run rf2o_laser_odometry rf2o_laser_odometry_node \
-  --ros-args -r __node:=rf2o_laser_odometry \
-  --params-file "${robot_root}/config/ros/rf2o.yaml"
+  --ros-args --params-file "${robot_root}/config/ros/rf2o.yaml"
 
 # 매핑과 순찰이 같은 노드 집합으로 돈다. 예전에는 여기서 launch 파일 자체를
 # 갈아 끼웠고, 그래서 모드를 바꾸려면 이 서비스를 재시작해야 했다. 그 재시작이
@@ -88,11 +91,35 @@ child_alive() {
   [ -n "${state}" ] && [ "${state}" != "Z" ]
 }
 
+# 래퍼만 보면 안 된다.
+#
+# start_component 가 담는 PID 는 `ros2 run` / `ros2 launch` 의 파이썬 래퍼이고,
+# 실제 노드는 그 자식이다. 2026-08-08 실측: slam_toolbox 노드가 사라졌는데
+# aiot-ros 는 active, NRestarts=0, run-ros.sh 도 그대로였다 -- 래퍼가 살아 있어서
+# 앞의 검사가 "정상"이라고 답했기 때문이다. /map 도 map->odom 도 없는데 서비스는
+# 정상으로 보이는 부분 고장이 서비스 수명 내내 남았다.
+#
+# 그래서 "래퍼가 살아 있고 자식도 하나 이상 있다" 를 살아 있음으로 본다.
+# 기동 직후에는 자식이 아직 없으므로 유예를 둔다.
+component_alive() {
+  local wrapper_pid="$1" child
+  child_alive "${wrapper_pid}" || return 1
+  for child in $(pgrep -P "${wrapper_pid}" 2>/dev/null); do
+    if child_alive "${child}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 component_status=0
 dead_pid=""
+# 자식이 자리를 잡을 시간. Nav2 launch 는 노드 여덟 개를 순차로 띄운다.
+supervision_grace_sec="${AIOT_ROS_SUPERVISION_GRACE_SEC:-45}"
+sleep "${supervision_grace_sec}"
 while [ -z "${dead_pid}" ]; do
   for child_pid in "${child_pids[@]}"; do
-    if ! child_alive "${child_pid}"; then
+    if ! component_alive "${child_pid}"; then
       dead_pid="${child_pid}"
       break
     fi

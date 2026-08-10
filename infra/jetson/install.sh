@@ -31,6 +31,10 @@ else
 fi
 
 install -d -m 0755 -o root -g root /opt/aiot /opt/aiot/bin
+install -d -m 0755 -o root -g root \
+  /etc/systemd/journald.conf.d \
+  /etc/systemd/system/aiot-robot.service.d \
+  /etc/systemd/system/aiot-ros.service.d
 install -d -m 0750 -o aiot -g aiot \
   /opt/aiot/iot \
   /opt/aiot/iot/releases \
@@ -73,10 +77,20 @@ install -m 0644 -o root -g root "${source_dir}/aiot-ai.service" \
   /etc/systemd/system/aiot-ai.service
 install -m 0644 -o root -g root "${source_dir}/aiot-mjpeg-tunnel.service" \
   /etc/systemd/system/aiot-mjpeg-tunnel.service
+install -m 0644 -o root -g root "${source_dir}/aiot-mapping-mjpeg-tunnel.service" \
+  /etc/systemd/system/aiot-mapping-mjpeg-tunnel.service
 install -m 0644 -o root -g root "${source_dir}/aiot-ros.service" \
   /etc/systemd/system/aiot-ros.service
 install -m 0644 -o root -g root "${source_dir}/aiot-robot.service" \
   /etc/systemd/system/aiot-robot.service
+install -m 0644 -o root -g root "${source_dir}/aiot-runtime-recovery.conf" \
+  /etc/systemd/system/aiot-robot.service.d/90-runtime-recovery.conf
+install -m 0644 -o root -g root "${source_dir}/aiot-runtime-recovery.conf" \
+  /etc/systemd/system/aiot-ros.service.d/90-runtime-recovery.conf
+install -m 0644 -o root -g root "${source_dir}/aiot-emergency-stop.conf" \
+  /etc/systemd/system/aiot-robot.service.d/95-ai-emergency-stop.conf
+install -m 0644 -o root -g root "${source_dir}/10-aiot-persistent.conf" \
+  /etc/systemd/journald.conf.d/10-aiot-persistent.conf
 install -m 0644 -o root -g root "${source_dir}/99-roki-serial.rules" \
   /etc/udev/rules.d/99-roki-serial.rules
 install -m 0644 -o root -g root "${source_dir}/99-roki-cameras.rules" \
@@ -105,6 +119,11 @@ if [ ! -e /opt/aiot/secrets/stream.env ]; then
     /opt/aiot/secrets/stream.env.example
   echo "Provision the restricted stream tunnel key and create /opt/aiot/secrets/stream.env before enabling MJPEG relay."
 fi
+if [ ! -e /opt/aiot/secrets/mapping-stream.env ]; then
+  install -m 0640 -o root -g aiot "${source_dir}/mapping-stream.env.example" \
+    /opt/aiot/secrets/mapping-stream.env.example
+  echo "Review /opt/aiot/secrets/mapping-stream.env.example before enabling the mapping relay."
+fi
 
 systemctl daemon-reload
 if command -v systemd-analyze >/dev/null 2>&1; then
@@ -113,6 +132,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     /etc/systemd/system/aiot-update.timer
     /etc/systemd/system/aiot-ai.service
     /etc/systemd/system/aiot-mjpeg-tunnel.service
+    /etc/systemd/system/aiot-mapping-mjpeg-tunnel.service
   )
   if [ -x /opt/aiot/iot/current/robot/scripts/run-ros.sh ]; then
     verify_units+=(/etc/systemd/system/aiot-ros.service)
@@ -124,7 +144,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   systemd-analyze verify "${verify_units[@]}"
 fi
 if [ "${enable_services}" = true ]; then
-  systemctl enable aiot-update.timer aiot-ai.service aiot-mjpeg-tunnel.service aiot-ros.service aiot-robot.service
+  systemctl enable aiot-update.timer aiot-ai.service aiot-mjpeg-tunnel.service aiot-mapping-mjpeg-tunnel.service aiot-ros.service aiot-robot.service
   echo "Jetson services enabled. Start them only after environment review."
 else
   echo "Jetson units installed but not newly enabled."

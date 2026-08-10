@@ -11,6 +11,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from navigation.cmd_vel_adapter import (
@@ -18,13 +19,13 @@ from navigation.cmd_vel_adapter import (
     CmdVelCommand,
     CmdVelToEsp32Adapter,
 )
+from navigation.patrol_path import PatrolPathError, build_patrol_segment
 
 
 MotionSink = Callable[[CmdVelCommand], None]
 FailureSink = Callable[[str], None]
 ObstacleSink = Callable[[str], None]
 ScanContextSink = Callable[[Any | None], None]
-HeadingSource = Callable[[], float | None]
 TimerFactory = Callable[[float, Callable[[], None]], Any]
 LOGGER = logging.getLogger(__name__)
 
@@ -37,8 +38,12 @@ PATROL_LIFECYCLE_HOLDS = frozenset({"NAV2_PATROL_STOPPED"})
 @dataclass(frozen=True)
 class RosNav2BridgeSettings:
     ackermann: AckermannCommandSettings
+    patrol_behavior_tree_xml: str = (
+        "/opt/aiot/iot/current/robot/config/ros/"
+        "nav2_fixed_path_through_poses.xml"
+    )
     cmd_vel_topic: str = "/cmd_vel"
-    navigate_action: str = "/navigate_to_pose"
+    navigate_action: str = "/navigate_through_poses"
     map_frame: str = "map"
     scan_dwell_sec: float = 3.0
     cmd_vel_timeout_sec: float = 3.0
@@ -50,6 +55,14 @@ class RosNav2BridgeSettings:
     goal_abort_retry_limit: int = 3
 
     def __post_init__(self) -> None:
+        patrol_bt = self.patrol_behavior_tree_xml.strip()
+        if not patrol_bt or not (
+            Path(patrol_bt).is_absolute()
+            or PurePosixPath(patrol_bt).is_absolute()
+        ):
+            raise ValueError(
+                "patrol_behavior_tree_xml must be a non-empty absolute path"
+            )
         for name, value in (
             ("cmd_vel_topic", self.cmd_vel_topic),
             ("navigate_action", self.navigate_action),
@@ -91,7 +104,6 @@ class RosNav2Bridge:
         failure_sink: FailureSink | None = None,
         obstacle_sink: ObstacleSink | None = None,
         scan_context_sink: ScanContextSink | None = None,
-        heading_source: HeadingSource | None = None,
         external_motion_authority: Callable[[], bool] | None = None,
         timer_factory: TimerFactory = threading.Timer,
         clock: Callable[[], float] = time.monotonic,
@@ -103,7 +115,6 @@ class RosNav2Bridge:
         self._failure_sink = failure_sink
         self._obstacle_sink = obstacle_sink
         self._scan_context_sink = scan_context_sink
-        self._heading_source = heading_source
         self._external_motion_authority = external_motion_authority
         self._timer_factory = timer_factory
         self._clock = clock
@@ -114,6 +125,7 @@ class RosNav2Bridge:
         self._thread_started = False
         self._route: Any = None
         self._current_sequence: int | None = None
+        self._segment_end_sequence: int | None = None
         self._paused = False
         self._goal_handle: Any = None
         self._goal_generation = 0
@@ -142,7 +154,7 @@ class RosNav2Bridge:
         try:
             import rclpy
             from geometry_msgs.msg import PoseStamped, Twist
-            from nav2_msgs.action import NavigateToPose
+            from nav2_msgs.action import NavigateThroughPoses
             from rclpy.action import ActionClient
             from rclpy.executors import SingleThreadedExecutor
         except ImportError as exc:
@@ -155,12 +167,12 @@ class RosNav2Bridge:
         if self._owns_rclpy_context:
             rclpy.init(args=None)
         try:
-            self._navigate_type = NavigateToPose
+            self._navigate_type = NavigateThroughPoses
             self._pose_type = PoseStamped
             self._node = rclpy.create_node("roki_nav2_bridge")
             self._action_client = ActionClient(
                 self._node,
-                NavigateToPose,
+                NavigateThroughPoses,
                 self._settings.navigate_action,
             )
             self._subscription = self._node.create_subscription(
@@ -209,6 +221,7 @@ class RosNav2Bridge:
             self._route = route
             self._paused = False
             self._current_sequence = 1
+            self._segment_end_sequence = None
             self._last_cmd_vel_at = None
             self._patrol_failure_reported = False
             self._goal_aborts_at_sequence = 0
@@ -249,6 +262,7 @@ class RosNav2Bridge:
             handle = self._invalidate_goal_locked()
             self._route = None
             self._current_sequence = None
+            self._segment_end_sequence = None
             self._paused = False
             self._cmd_vel_hold_reason = "NAV2_PATROL_STOPPED"
             self._last_cmd_vel_at = None
@@ -284,7 +298,7 @@ class RosNav2Bridge:
         if pending_scan is not None:
             self._schedule_scan_dwell(*pending_scan)
         elif sequence is not None:
-            self._send_sequence(sequence)
+            self._send_segment(sequence)
 
     def on_navigation_event(self, event: Any) -> None:
         event_type = getattr(event.mission_event.event_type, "value", "")
@@ -301,14 +315,18 @@ class RosNav2Bridge:
         with self._lock:
             route = self._route
             paused = self._paused
+            segment_end = self._segment_end_sequence
             if route is None or next_sequence > len(route.waypoints):
                 return
             self._current_sequence = next_sequence
             # Reaching a waypoint proves the blockage cleared, so the next
             # waypoint starts with a full abort-retry budget.
             self._goal_aborts_at_sequence = 0
-        if not paused:
-            self._send_sequence(next_sequence)
+        # PASS waypoints inside the active NavigateThroughPoses action are
+        # progress events, not new Nav2 goals.  Only a segment boundary starts
+        # another action; SCAN handles that after its dwell above.
+        if not paused and (segment_end is None or next_sequence > segment_end):
+            self._send_segment(next_sequence)
 
     def _begin_scan_dwell(self, waypoint: Any) -> None:
         sequence = int(waypoint.sequence)
@@ -378,7 +396,7 @@ class RosNav2Bridge:
             self._pending_scan = None
             self._current_sequence = next_sequence
         self._publish_scan_context(None)
-        self._send_sequence(next_sequence)
+        self._send_segment(next_sequence)
 
     def _cancel_scan_dwell_locked(self, *, clear_pending: bool = True) -> Any:
         timer = self._scan_timer
@@ -391,6 +409,7 @@ class RosNav2Bridge:
     def _invalidate_goal_locked(self) -> Any:
         handle = self._goal_handle
         self._goal_handle = None
+        self._segment_end_sequence = None
         self._goal_generation += 1
         self._last_cmd_vel_at = None
         return handle
@@ -493,35 +512,57 @@ class RosNav2Bridge:
         except (TypeError, ValueError) as exc:
             self._fail(f"NAV2_CMD_VEL_INVALID:{exc}")
 
-    def _send_sequence(self, sequence: int) -> None:
+    def _send_segment(self, sequence: int) -> None:
         with self._lock:
             if self._paused or self._route is None or self._pending_scan is not None:
                 return
-            waypoint = self._route.waypoints[sequence - 1]
             route = self._route
+        try:
+            segment = build_patrol_segment(route, sequence)
+        except (PatrolPathError, TypeError, ValueError) as exc:
+            self._fail(f"NAV2_SEGMENT_GEOMETRY_INVALID:{exc}")
+            return
+        with self._lock:
+            if (
+                self._paused
+                or self._route is not route
+                or self._pending_scan is not None
+                or self._current_sequence != sequence
+            ):
+                return
             stale_handle = self._invalidate_goal_locked()
             generation = self._goal_generation
+            self._segment_end_sequence = int(segment[-1].waypoint.sequence)
             self._cmd_vel_hold_reason = "NAV2_GOAL_PENDING"
             self._last_cmd_vel_at = None
         self._cancel_goal_best_effort(stale_handle)
-        try:
-            yaw_deg = self._resolve_goal_yaw_deg(route, sequence)
-        except (TypeError, ValueError) as exc:
-            self._fail(f"NAV2_GOAL_YAW_UNRESOLVABLE:{exc}")
-            return
         assert self._navigate_type is not None
         assert self._pose_type is not None
         assert self._node is not None
         goal = self._navigate_type.Goal()
-        pose = self._pose_type()
-        pose.header.frame_id = self._settings.map_frame
-        pose.header.stamp = self._node.get_clock().now().to_msg()
-        pose.pose.position.x = float(waypoint.x)
-        pose.pose.position.y = float(waypoint.y)
-        yaw = math.radians(yaw_deg)
-        pose.pose.orientation.z = math.sin(yaw / 2.0)
-        pose.pose.orientation.w = math.cos(yaw / 2.0)
-        goal.pose = pose
+        poses = []
+        for target in segment:
+            pose = self._pose_type()
+            pose.header.frame_id = self._settings.map_frame
+            pose.header.stamp = self._node.get_clock().now().to_msg()
+            pose.pose.position.x = float(target.waypoint.x)
+            pose.pose.position.y = float(target.waypoint.y)
+            yaw = math.radians(target.yaw_deg)
+            pose.pose.orientation.z = math.sin(yaw / 2.0)
+            pose.pose.orientation.w = math.cos(yaw / 2.0)
+            poses.append(pose)
+        goal.poses = poses
+        # Mapping goals come from explore_lite and keep Nav2's mapping default.
+        # Patrol goals originate here, so select the dedicated patrol tree on
+        # every goal instead of mutating the active Nav2 parameter set.
+        goal.behavior_tree = self._settings.patrol_behavior_tree_xml
+        LOGGER.info(
+            "Nav2 patrol segment start=%s end=%s poses=%s yaws=%s",
+            sequence,
+            segment[-1].waypoint.sequence,
+            [target.waypoint.sequence for target in segment],
+            [round(target.yaw_deg, 1) for target in segment],
+        )
         try:
             future = self._action_client.send_goal_async(goal)
         except Exception as exc:
@@ -593,7 +634,7 @@ class RosNav2Bridge:
             if status == 6:  # ABORTED
                 # The controller refuses to drive into something it can see.
                 # Hold instead of ending the patrol so the obstacle-clear loop
-                # can resume this same waypoint once the path opens up.
+                # can resume the remaining segment once the path opens up.
                 self._hold_for_obstacle(f"NAV2_GOAL_STATUS_{status}")
                 return
             self._fail(f"NAV2_GOAL_STATUS_{status}")
@@ -607,7 +648,7 @@ class RosNav2Bridge:
         """Stop for a Nav2 abort while keeping the patrol resumable.
 
         Unlike :meth:`_fail` this preserves ``_route`` and ``_current_sequence``
-        so :meth:`resume_patrol` re-sends the same waypoint.  Motion is held
+        so :meth:`resume_patrol` rebuilds the remaining segment. Motion is held
         under the ``OBSTACLE`` reason, which is the same interlock the LiDAR
         obstacle stop uses, so the runtime's clear-detect loop owns the resume.
         """
@@ -636,7 +677,7 @@ class RosNav2Bridge:
         if timer is not None:
             timer.cancel()
         LOGGER.warning(
-            "Nav2 aborted waypoint %s (%s); holding for obstacle clear "
+            "Nav2 aborted segment at waypoint %s (%s); holding for obstacle clear "
             "(attempt %d/%d)",
             sequence,
             reason,
@@ -671,35 +712,6 @@ class RosNav2Bridge:
         self._publish_scan_context(None)
         if self._failure_sink is not None:
             self._failure_sink(reason)
-
-    def _resolve_goal_yaw_deg(self, route: Any, sequence: int) -> float:
-        """Preserve explicit yaw; otherwise follow route geometry/current pose."""
-
-        waypoint = route.waypoints[sequence - 1]
-        if waypoint.yaw_deg is not None:
-            return float(waypoint.yaw_deg)
-        if sequence < len(route.waypoints):
-            neighbor = route.waypoints[sequence]
-            return math.degrees(
-                math.atan2(neighbor.y - waypoint.y, neighbor.x - waypoint.x)
-            )
-        if sequence > 1:
-            neighbor = route.waypoints[sequence - 2]
-            return math.degrees(
-                math.atan2(waypoint.y - neighbor.y, waypoint.x - neighbor.x)
-            )
-        if self._heading_source is not None:
-            heading = self._heading_source()
-            if heading is not None and math.isfinite(float(heading)):
-                return float(heading)
-        raise ValueError("no route direction or current map heading")
-
-    # The bridge used to publish waypoint 1 to /initialpose on every START_PATROL
-    # ("_publish_initial_pose"). Removed: the route must not overwrite the
-    # estimate. The publisher that carried it is gone too -- AMCL was its only
-    # subscriber and slam_toolbox now owns localization, so it published to
-    # nobody. Re-localization goes through deserialize_map with LOCALIZE_AT_POSE
-    # (roki-iot/integration/localization_mode.py), not through a topic.
 
     def _publish_scan_context(self, waypoint: Any | None) -> None:
         if self._scan_context_sink is None:

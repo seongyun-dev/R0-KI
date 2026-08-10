@@ -48,6 +48,16 @@ class RosLidarHealthSettings:
             raise ValueError("vehicle_range_timeout_sec must be positive")
 
 
+@dataclass(frozen=True)
+class _VehicleRangeScan:
+    ranges: tuple[Any, ...]
+    angle_min_rad: float
+    angle_increment_rad: float
+    range_min_m: float
+    range_max_m: float
+    received_at: float
+
+
 class RosLidarHealthBridge:
     """LaserScan 수신 생존 여부만 판단하며 scan 내용은 해석하지 않는다."""
 
@@ -83,6 +93,7 @@ class RosLidarHealthBridge:
         self._scan_lock = threading.Lock()
         self._last_scan_time: float | None = None
         self._front_range_m: float | None = None
+        self._latest_vehicle_scan: _VehicleRangeScan | None = None
         self._current_status = "DISCONNECTED"
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -215,7 +226,13 @@ class RosLidarHealthBridge:
     ) -> float | None:
         """Record scan freshness and estimate a robust range in front of BRIO."""
 
-        self.record_scan(received_at)
+        timestamp = (
+            self._monotonic_clock()
+            if received_at is None
+            else float(received_at)
+        )
+        self.record_scan(timestamp)
+        scan_ranges = tuple(ranges)
         center_angle = math.radians(self._settings.vehicle_center_angle_deg)
         half_angle = math.radians(self._settings.vehicle_half_angle_deg)
         upper = self._settings.vehicle_max_range_m
@@ -223,7 +240,7 @@ class RosLidarHealthBridge:
             upper = min(upper, float(range_max_m))
         lower = max(0.0, float(range_min_m))
         candidates: list[float] = []
-        for index, raw_range in enumerate(ranges):
+        for index, raw_range in enumerate(scan_ranges):
             angle = float(angle_min_rad) + index * float(angle_increment_rad)
             angle_delta = (angle - center_angle + math.pi) % (2 * math.pi) - math.pi
             if abs(angle_delta) > half_angle:
@@ -241,7 +258,65 @@ class RosLidarHealthBridge:
             front_range = None
         with self._scan_lock:
             self._front_range_m = front_range
+            self._latest_vehicle_scan = _VehicleRangeScan(
+                ranges=scan_ranges,
+                angle_min_rad=float(angle_min_rad),
+                angle_increment_rad=float(angle_increment_rad),
+                range_min_m=float(range_min_m),
+                range_max_m=float(range_max_m),
+                received_at=timestamp,
+            )
         return front_range
+
+    def get_range_at_angle(
+        self,
+        angle_deg: float,
+        now: float | None = None,
+    ) -> float | None:
+        """Return a fresh representative range around a requested LiDAR angle."""
+
+        try:
+            requested_angle = math.radians(float(angle_deg))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(requested_angle):
+            return None
+        current_time = self._monotonic_clock() if now is None else float(now)
+        timeout = (
+            self._settings.vehicle_range_timeout_sec
+            if self._settings.vehicle_range_timeout_sec is not None
+            else self._settings.scan_timeout_sec
+        )
+        with self._scan_lock:
+            scan = self._latest_vehicle_scan
+        if (
+            scan is None
+            or current_time < scan.received_at
+            or current_time - scan.received_at >= timeout
+        ):
+            return None
+
+        half_angle = math.radians(self._settings.vehicle_half_angle_deg)
+        upper = self._settings.vehicle_max_range_m
+        if math.isfinite(scan.range_max_m) and scan.range_max_m > 0:
+            upper = min(upper, scan.range_max_m)
+        lower = max(0.0, scan.range_min_m)
+        candidates: list[float] = []
+        for index, raw_range in enumerate(scan.ranges):
+            sample_angle = scan.angle_min_rad + index * scan.angle_increment_rad
+            delta = (sample_angle - requested_angle + math.pi) % (2 * math.pi) - math.pi
+            if abs(delta) > half_angle:
+                continue
+            try:
+                distance = float(raw_range)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(distance) and lower <= distance <= upper:
+                candidates.append(distance)
+        if not candidates:
+            return None
+        nearest = sorted(candidates)[: self._settings.vehicle_nearest_samples]
+        return float(statistics.median(nearest))
 
     def get_front_range(self, now: float | None = None) -> float | None:
         """Return only a fresh front range so stale scans cannot place events."""

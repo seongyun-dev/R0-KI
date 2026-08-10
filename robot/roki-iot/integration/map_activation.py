@@ -9,7 +9,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
 
 import yaml
 
@@ -37,8 +37,33 @@ class ActivatedMap:
 class CurrentMapActivator:
     """Install an immutable map bundle and atomically switch its environment."""
 
-    def __init__(self, settings: MapActivationSettings) -> None:
+    def __init__(
+        self,
+        settings: MapActivationSettings,
+        *,
+        environment: MutableMapping[str, str] | None = None,
+    ) -> None:
         self._settings = settings
+        # 활성화는 env 파일과 프로세스 환경을 함께 갱신한다.
+        #
+        # A안(무재시작 모드 전환) 이전에는 모드를 바꿀 때 서비스를 재시작했고,
+        # 그래서 프로세스의 os.environ 이 항상 env 파일에서 새로 로드됐다.
+        # "os.environ 은 현재 활성 지도를 반영한다" 는 불변식이 정의상 성립했고,
+        # ROKI_MAP_* 을 os.getenv 로 읽는 코드는 전부 옳았다.
+        #
+        # 재시작을 없애면서 그 불변식만 조용히 깨졌다. 2026-08-08 실기에서
+        # 그 대가를 세 자리에서 확인했다 -- 부팅 시점 v38 을 든 프로세스가
+        # 방금 만든 v39 의 route/metadata 와 비교해 순찰을 거부했다
+        # (NAVIGATION_MAP_MISMATCH, NAVIGATION_MAP_METADATA_MISMATCH,
+        #  그리고 _build_navigation_service_from_route 의 sha256 대조).
+        #
+        # 호출부를 하나씩 파일에서 다시 읽게 고치는 것은 자리 수를 세는 일이고
+        # 넷째 자리를 막지 못한다. 여기서 불변식을 복원하면 os.getenv 가 다시
+        # 옳은 코드가 된다.
+        #
+        # 매핑은 os.environ 이지만 주입 가능하게 둔다: 테스트가 전역 환경을
+        # 오염시키지 않아야 하고, 그 오염은 순서 의존 실패로 되돌아온다.
+        self._environment = os.environ if environment is None else environment
 
     def activate(
         self,
@@ -107,6 +132,9 @@ class CurrentMapActivator:
                     for name, value in environment.items()
                 ),
             )
+            # 파일을 쓴 뒤에만 갱신한다. env 가 파일을 앞지르면, 활성화가
+            # 실패한 지도를 프로세스가 이미 활성으로 믿는 상태가 생긴다.
+            self._environment.update(environment)
             return ActivatedMap(
                 normalized_map_id,
                 normalized_map_version,

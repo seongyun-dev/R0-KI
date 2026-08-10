@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import math
 import os
@@ -143,11 +144,9 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
             # Dubin 경로는 전진으로만 휘므로 회전반경 0.34 m 로는 0.3~0.4 m
             # 옆 벽을 비켜 갈 전진 호가 없다. Reeds-Shepp 이 후진 구간을 준다.
             "GridBased.motion_model_for_search": "REEDS_SHEPP",
-            # 순찰용 2.1 은 탐사에서 과하다. 프론티어가 가깝고 축에서 크게
-            # 벗어나 있을 때(실측 0.93 m, 121도) 유일한 해가 후진으로
-            # 시작하는데, 2.1 에서는 탐색이 벽으로 쓸리는 전진 호만 골라
-            # 결국 계획이 없었다. 1.0 보다는 높여 전진을 여전히 선호한다.
-            "GridBased.reverse_penalty": 1.3,
+            # 후진은 허용하되 불필요한 전후진 전환은 기본 수준으로 억제한다.
+            # 순찰용 DUBIN 프로필과는 독립적인 매핑 전용 값이다.
+            "GridBased.reverse_penalty": 2.0,
             # 재계획 사이에 장애물 확장을 재사용하는 최적화다. SLAM 이 지도를
             # 키우는 동안은 그 전제가 매초 깨지므로, 낡은 휴리스틱으로
             # 도달 가능한 목표를 포기한다.
@@ -178,6 +177,56 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
         },
     },
 }
+
+
+PLANNER_PROFILE_IDS = {
+    "mapping": "MappingGridBased",
+    "patrol": "PatrolGridBased",
+}
+GOAL_CHECKER_PROFILE_IDS = {
+    "mapping": "mapping_goal_checker",
+    "patrol": "patrol_goal_checker",
+}
+
+
+def _parameter_tail(dotted: str, expected_head: str) -> str:
+    head, separator, tail = dotted.partition(".")
+    if not separator or head != expected_head:
+        raise ValueError(
+            f"profile parameter {dotted!r} must start with {expected_head}."
+        )
+    return tail
+
+
+def _preload_nav2_mode_plugins(config: dict[str, object]) -> None:
+    """Register both mode profiles without changing the current BT selection.
+
+    The existing trees still request ``GridBased`` and ``general_goal_checker``.
+    Keep those mapping-baseline instances and add independent mapping/patrol
+    instances beside them. No active parameter mutation is performed here;
+    this only shapes the startup parameter file.
+    """
+
+    planner = config["planner_server"]["ros__parameters"]
+    legacy_planner = planner["GridBased"]
+    planner["planner_plugins"] = ["GridBased", *PLANNER_PROFILE_IDS.values()]
+    for mode, plugin_id in PLANNER_PROFILE_IDS.items():
+        plugin = deepcopy(legacy_planner)
+        for dotted, value in MODE_PROFILES[mode]["/planner_server"].items():
+            plugin[_parameter_tail(dotted, "GridBased")] = value
+        planner[plugin_id] = plugin
+
+    controller = config["controller_server"]["ros__parameters"]
+    legacy_checker = controller["general_goal_checker"]
+    controller["goal_checker_plugins"] = [
+        "general_goal_checker",
+        *GOAL_CHECKER_PROFILE_IDS.values(),
+    ]
+    for mode, plugin_id in GOAL_CHECKER_PROFILE_IDS.items():
+        checker = deepcopy(legacy_checker)
+        for dotted, value in MODE_PROFILES[mode]["/controller_server"].items():
+            checker[_parameter_tail(dotted, "general_goal_checker")] = value
+        controller[plugin_id] = checker
 
 
 def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
@@ -253,6 +302,10 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
         for dotted, value in overrides.items():
             head, _, tail = dotted.partition(".")
             section[head][tail] = value
+
+    # P0-2 preloads both profiles while legacy IDs continue serving the
+    # protected Production Mapping BT.
+    _preload_nav2_mode_plugins(config)
 
     # The template forbids negative linear velocity, which is right for a DUBIN
     # route that must never retreat from the waypoint it was sent to. It silently

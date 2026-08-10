@@ -26,6 +26,23 @@ for path in (str(ROBOT_SRC_ROOT), str(FINAL_RUNTIME_ROOT), str(PROJECT_ROOT)):
         sys.path.insert(0, path)
 
 
+def _patrol_behavior_tree_xml() -> str:
+    """Return the Patrol-only BT path without reusing the Mapping default."""
+
+    configured = os.getenv("ROKI_NAV2_PATROL_BT_XML", "").strip()
+    path = (
+        Path(configured)
+        if configured
+        else ROBOT_ROOT
+        / "config"
+        / "ros"
+        / "nav2_fixed_path_through_poses.xml"
+    )
+    if not path.is_absolute():
+        raise RuntimeError("ROKI_NAV2_PATROL_BT_XML must be an absolute path")
+    return path.as_posix()
+
+
 def _build_final_components() -> tuple[Any, Any, Any]:
     """Build the sole ESP32 owner and read-only ROS sensor bridges."""
 
@@ -252,8 +269,11 @@ def _build_nav2_driver(
             steering_center_deg=80,
             steering_right_deg=120,
         ),
+        patrol_behavior_tree_xml=_patrol_behavior_tree_xml(),
         cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
-        navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
+        navigate_action=os.getenv(
+            "ROKI_NAVIGATE_ACTION", "/navigate_through_poses"
+        ),
         map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
         scan_dwell_sec=float(os.getenv("ROKI_SCAN_DWELL_SECONDS", "3.0")),
         cmd_vel_timeout_sec=float(
@@ -358,7 +378,6 @@ def _build_nav2_driver(
         scan_context_sink=lambda waypoint: service_holder[
             "service"
         ].update_scan_context(waypoint),
-        heading_source=lambda: service_holder["service"].current_heading_deg(),
         external_motion_authority=mapping_holds_motion_authority,
     )
 
@@ -420,7 +439,9 @@ def _build_mapping_nav2_bridge(
                 steering_right_deg=120,
             ),
             cmd_vel_topic=os.getenv("ROKI_CMD_VEL_TOPIC", "/cmd_vel"),
-            navigate_action=os.getenv("ROKI_NAVIGATE_ACTION", "/navigate_to_pose"),
+            navigate_action=os.getenv(
+                "ROKI_NAVIGATE_ACTION", "/navigate_through_poses"
+            ),
             map_frame=os.getenv("ROKI_MAP_FRAME", "map"),
         ),
         motion_sink=sink,
@@ -512,6 +533,111 @@ def _active_map_environment() -> dict[str, str]:
             if fallback:
                 values[name] = fallback
     return values
+
+
+def _patrol_start_anchor(route: Any) -> tuple[float, float, float, str] | None:
+    """Return waypoint 1 and its route-facing yaw in map coordinates."""
+
+    waypoints = tuple(getattr(route, "waypoints", ()) or ())
+    if not waypoints:
+        return None
+    first = waypoints[0]
+    explicit_yaw = getattr(first, "yaw_deg", None)
+    if explicit_yaw is not None:
+        return (
+            float(first.x),
+            float(first.y),
+            math.radians(float(explicit_yaw)),
+            "WAYPOINT_YAW",
+        )
+    if len(waypoints) < 2:
+        return None
+    second = waypoints[1]
+    delta_x = float(second.x) - float(first.x)
+    delta_y = float(second.y) - float(first.y)
+    if math.hypot(delta_x, delta_y) <= 1e-6:
+        return None
+    return (
+        float(first.x),
+        float(first.y),
+        math.atan2(delta_y, delta_x),
+        "ROUTE_GEOMETRY",
+    )
+
+
+def _prepare_patrol_localization(
+    mapping_runtime: Any,
+    route: Any | None = None,
+    *,
+    require_start_anchor: bool = False,
+) -> tuple[bool, str]:
+    """포즈그래프를 적재하고 위치추정이 실제로 붙을 때까지 기다린다.
+
+    예전에는 여기서 스캔을 끊었다 다시 이었다. 그 게이팅은 걷어냈다 --
+    slam 이 라이다를 직접 구독하므로 끊을 수 있는 것이 없고, 끊으면 map
+    프레임이 사라져 Nav2 와 pose 가 함께 죽는다(slam_toolbox.yaml 주석).
+
+    남은 것은 관측이다. ``deserialize_map`` 은 빈 응답이라 성공/실패를
+    알려주지 않으므로, 적재 이후의 새 스캔과 그에 이어진 map->odom 을 직접
+    확인해야 순찰이 지도 없이 출발하는 것을 막을 수 있다.
+    """
+
+    slam = getattr(mapping_runtime, "slam_session", None)
+    localization = getattr(mapping_runtime, "localization", None)
+    if localization is None:
+        return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
+    directory = _active_map_directory()
+    if directory is None:
+        return False, "ACTIVE_MAP_MISSING"
+    marker = slam.marker() if slam is not None else None
+    ready, reason = localization.ensure_patrol(str(directory / "posegraph"))
+    if not ready or slam is None:
+        return ready, reason
+
+    try:
+        timeout_sec = float(os.getenv("AIOT_PATROL_LOCALIZATION_TIMEOUT_SEC", "30"))
+        deadline = time.monotonic() + timeout_sec
+        if not slam.wait_for_localization_ready(marker, timeout_sec=timeout_sec):
+            return False, "LOCALIZATION_NOT_READY"
+    except Exception as exc:
+        print(f"[SLAM] patrol localization wait failed type={type(exc).__name__}")
+        return False, "LOCALIZATION_NOT_READY"
+
+    if not require_start_anchor:
+        return True, reason
+
+    anchor = _patrol_start_anchor(route)
+    if anchor is None:
+        return False, "START_ANCHOR_INVALID"
+    anchor_x, anchor_y, anchor_yaw, yaw_source = anchor
+    remaining = deadline - time.monotonic()
+    initialpose_timeout = min(
+        remaining,
+        float(os.getenv("AIOT_INITIALPOSE_TIMEOUT_SEC", "10")),
+    )
+    if initialpose_timeout <= 0:
+        return False, "INITIALPOSE_TIMEOUT"
+    print(
+        "[INITIALPOSE] start anchor "
+        f"x={anchor_x:.3f} y={anchor_y:.3f} "
+        f"yawDeg={math.degrees(anchor_yaw):.1f} source={yaw_source}"
+    )
+    try:
+        return slam.relocalize(
+            x=anchor_x,
+            y=anchor_y,
+            yaw_rad=anchor_yaw,
+            timeout_sec=initialpose_timeout,
+            position_tolerance_m=float(
+                os.getenv("AIOT_INITIALPOSE_POSITION_TOLERANCE_M", "0.25")
+            ),
+            yaw_tolerance_rad=math.radians(
+                float(os.getenv("AIOT_INITIALPOSE_YAW_TOLERANCE_DEG", "30"))
+            ),
+        )
+    except Exception as exc:
+        print(f"[INITIALPOSE] failed type={type(exc).__name__}")
+        return False, "INITIALPOSE_FAILED"
 
 
 def _no_active_map() -> bool:
@@ -721,6 +847,7 @@ def _build_mapping_runtime(
         ManualMappingRuntime,
         MappingRuntimeSettings,
     )
+    from integration.slam_session_control import RosSlamSessionControl
 
     drive_controller = ManualDriveController(
         runtime=runtime,
@@ -793,6 +920,24 @@ def _build_mapping_runtime(
         report=print,
     )
 
+    slam_session = RosSlamSessionControl(
+        reset_service=os.getenv("AIOT_SLAM_RESET_SERVICE", "/slam_toolbox/reset"),
+        # slam 이 실제로 소비하는 토픽을 관측한다. 이름에 SLAM_SCAN 을 남기면
+        # 다음 사람이 /slam_scan 을 넣을 유인이 생기는데, 그 토픽은 이제
+        # 아무도 발행하지 않는다 -- 넣는 순간 first_scan_after() 가 영원히
+        # None 이 되어 wait_for_fresh_map 과 wait_for_localization_ready 가
+        # 조용히 항상 실패한다.
+        scan_topic=os.getenv("AIOT_SLAM_OBSERVE_SCAN_TOPIC", "/scan"),
+        map_topic=os.getenv("AIOT_SLAM_MAP_TOPIC", "/map"),
+        map_frame=os.getenv("AIOT_SLAM_MAP_FRAME", "map"),
+        odom_frame=os.getenv("AIOT_SLAM_ODOM_FRAME", "odom"),
+        discovery_timeout_sec=float(
+            os.getenv("AIOT_SLAM_SESSION_DISCOVERY_TIMEOUT_SEC", "15")
+        ),
+        service_timeout_sec=float(
+            os.getenv("AIOT_SLAM_SESSION_SERVICE_TIMEOUT_SEC", "15")
+        ),
+    )
     mapping_runtime = ManualMappingRuntime(
         runtime_service=runtime_service,
         state_store=state_store,
@@ -826,6 +971,7 @@ def _build_mapping_runtime(
             )
         ),
         localization=localization_controller,
+        slam_session=slam_session,
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -837,6 +983,9 @@ def _build_mapping_runtime(
             ),
             upload_retry_max_sec=float(
                 os.getenv("AIOT_MAPPING_UPLOAD_RETRY_MAX_SEC", "30")
+            ),
+            fresh_map_timeout_sec=float(
+                os.getenv("AIOT_MAPPING_FRESH_MAP_TIMEOUT_SEC", "30")
             ),
         ),
     )
@@ -1029,6 +1178,9 @@ def create_integrated_application(
 
     runtime_components: list[Any] = []
     readiness_checks: list[Any] = []
+    slam_session = getattr(mapping_runtime, "slam_session", None)
+    if slam_session is not None:
+        runtime_components.append(slam_session)
     if mapping_motion_bridge is not None:
         # Started and stopped with the rest of the runtime so the cmd_vel
         # subscription exists for the whole mapping session.
@@ -1044,11 +1196,27 @@ def create_integrated_application(
         outbox = DetectionOutbox(
             os.getenv("AIOT_EVENT_OUTBOX_DIR", "/var/lib/aiot/outbox")
         )
+        emergency_stop_enabled = _environment_enabled(
+            "AIOT_EMERGENCY_STOP_ENABLED", False
+        )
+
+        def emergency_stop(event: Any) -> None:
+            stopped = runtime_service.pause_patrol("AI_EMERGENCY")
+            print(
+                "[AI EMERGENCY] stop requested "
+                f"eventId={getattr(event, 'event_id', None)} "
+                f"confidence={getattr(event, 'confidence', None)} "
+                f"applied={stopped}"
+            )
+
         recorder = DetectionRecorder(
             outbox,
             state_store,
             vehicle_range_source=lidar_health_bridge,
             camera_yaw_deg=float(os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0")),
+            emergency_stop_sink=(
+                emergency_stop if emergency_stop_enabled else None
+            ),
         )
         runtime_service.set_scan_context_listener(recorder.set_scan_context)
         ai_controller = ai_controller or RosAiCoordinator(recorder, state_store)
@@ -1083,13 +1251,11 @@ def create_integrated_application(
         current-map.env 에만 있고 이 프로세스의 os.environ 에는 없다.
         """
 
-        localization = getattr(mapping_runtime, "localization", None)
-        if localization is None:
-            return True, "LOCALIZATION_HANDOVER_UNAVAILABLE"
-        directory = _active_map_directory()
-        if directory is None:
-            return False, "ACTIVE_MAP_MISSING"
-        return localization.ensure_patrol(str(directory / "posegraph"))
+        return _prepare_patrol_localization(
+            mapping_runtime,
+            runtime_service.navigation_route,
+            require_start_anchor=navigation_driver is not None,
+        )
 
     command_handler = PatrolCommandHandler(
         settings=settings,

@@ -27,6 +27,7 @@ SUPPORTED_COMMANDS = frozenset(
     {
         "START_PATROL",
         "STOP_PATROL",
+        "RESUME_PATROL",
         "SET_TOKEN",
         "START_MAPPING",
         "STOP_MAPPING",
@@ -154,6 +155,8 @@ class PatrolCommandHandler:
             self._handle_start_patrol(command)
         elif command.command == "STOP_PATROL":
             self._handle_stop_patrol(command)
+        elif command.command == "RESUME_PATROL":
+            self._handle_resume_patrol(command)
         elif command.command == "SET_TOKEN":
             self._handle_set_token(command, str(payload["token"]))
         elif command.command == "START_MAPPING":
@@ -166,6 +169,12 @@ class PatrolCommandHandler:
 
         active_patrol = getattr(self._serial_reader, "active_patrol_id", None)
         if active_patrol is None:
+            self._clear_since = None
+            return
+        if getattr(self._serial_reader, "pause_reason", None) == "AI_EMERGENCY":
+            # Emergency is a terminal hold for this patrol. LiDAR CLEAR and AI
+            # readiness recovery must not restart motion; STOP_PATROL performs
+            # the normal cleanup and ACK flow.
             self._clear_since = None
             return
         status = self._state_store.get_status()
@@ -372,7 +381,15 @@ class PatrolCommandHandler:
                 print(f"[COMMAND] START_PATROL interlock rejected reason={reason}")
                 return
 
-        ready, reason = self._readiness()
+        # 인계 전이므로 인계 결과물은 묻지 않는다.
+        #
+        # 이 게이트가 지도 좌표 pose 와 Nav2 준비를 요구하고 있었는데, 그것은
+        # 아래 localization_preparer 가 만들어주는 것이다. 재시작 뒤 매핑을
+        # 한 번도 안 한 부팅에서는 스캔 게이트가 닫혀 있어 pose 가 없고,
+        # 그래서 여기서 MAP_POSE_NOT_READY 로 잘려 인계에 도달하지 못했다 --
+        # 순찰이 영원히 시작되지 않는다(2026-08-09 00:35:35 실측). 시리얼과
+        # 오도메트리처럼 지금 판정 가능한 것은 그대로 여기서 막는다.
+        ready, reason = self._preflight_readiness()
         if not ready:
             self._cancel_prepared_patrol()
             self._record_and_publish_command(
@@ -399,6 +416,15 @@ class PatrolCommandHandler:
                 )
                 print(f"[COMMAND] START_PATROL localization rejected reason={reason}")
                 return
+
+        # Localization preparation opens the scan gate. Re-run the existing
+        # readiness contract after that transition, before AI or motion.
+        ready, reason = self._readiness()
+        if not ready:
+            self._cancel_prepared_patrol()
+            self._record_and_publish_command(command, "REJECTED", reason=reason)
+            print(f"[COMMAND] START_PATROL final readiness rejected reason={reason}")
+            return
 
         # Route fetch, map validation and the OTA lease can consume most of a
         # short MQTT command TTL. Recheck at the last safe point before AI or
@@ -490,6 +516,35 @@ class PatrolCommandHandler:
         print(
             "[COMMAND] STOP_PATROL completed "
             f"commandId={command.command_id} errors={len(errors)}"
+        )
+
+    def _handle_resume_patrol(self, command: ValidatedCommand) -> None:
+        assert command.patrol_id is not None
+        try:
+            self._serial_reader.send_command(
+                "RESUME_PATROL",
+                patrolId=command.patrol_id,
+            )
+        except Exception as exc:
+            reason = str(exc) or type(exc).__name__
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason=reason,
+            )
+            print(
+                "[COMMAND] RESUME_PATROL rejected "
+                f"commandId={command.command_id} patrolId={command.patrol_id} "
+                f"reason={reason}"
+            )
+            return
+
+        self._state_store.update_robot_state("PATROLLING")
+        self._flush()
+        self._record_and_publish_command(command, "SUCCEEDED")
+        print(
+            "[COMMAND] RESUME_PATROL succeeded "
+            f"commandId={command.command_id} patrolId={command.patrol_id}"
         )
 
     def _handle_start_mapping(self, command: ValidatedCommand) -> None:
@@ -662,8 +717,23 @@ class PatrolCommandHandler:
         self._record_and_publish_command(command, "SUCCEEDED")
         print("[COMMAND] SET_TOKEN stored in protected runtime file")
 
-    def _readiness(self) -> tuple[bool, str]:
+    def _preflight_readiness(self) -> tuple[bool, str]:
+        """위치추정 인계 전 게이트. 런타임이 얕은 판정을 제공하면 그것을 쓴다.
+
+        제공하지 않으면 기존 계약 그대로 ``readiness`` 로 떨어진다 -- 이 훅이
+        없는 런타임 구현(테스트 더블 포함)에서 동작이 달라지지 않아야 한다.
+        """
+
+        return self._readiness(preflight=True)
+
+    def _readiness(self, *, preflight: bool = False) -> tuple[bool, str]:
         runtime_check = getattr(self._serial_reader, "readiness", None)
+        if preflight:
+            shallow = getattr(
+                self._serial_reader, "patrol_preflight_readiness", None
+            )
+            if callable(shallow):
+                runtime_check = shallow
         checks: list[ReadinessCheck] = []
         if callable(runtime_check):
             checks.append(runtime_check)
@@ -752,7 +822,7 @@ class PatrolCommandHandler:
             raise ValueError("issuedAt is too far in the future")
 
         patrol_id = payload.get("patrolId")
-        if command == "START_PATROL":
+        if command in {"START_PATROL", "RESUME_PATROL"}:
             if (
                 isinstance(patrol_id, bool)
                 or not isinstance(patrol_id, int)

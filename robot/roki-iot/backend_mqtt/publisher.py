@@ -105,6 +105,7 @@ class RokiPublisherApplication:
 
         self._pose_wait_log_printed = False
         self._hardware_wait_log_printed = False
+        self._hardware_gate_missing_logged = False
         self._stop_event = threading.Event()
 
     def start(self) -> None:
@@ -223,7 +224,10 @@ class RokiPublisherApplication:
         if not force and not periodic_publish_due:
             return
 
-        status = self._state_store.get_status()
+        status = self._publishable_status()
+        if status is None:
+            self._print_hardware_wait_log()
+            return
 
         self._hardware_wait_log_printed = False
 
@@ -364,6 +368,39 @@ class RokiPublisherApplication:
         )
 
         self._hardware_wait_log_printed = True
+
+    def _publishable_status(self):
+        """발행해도 되는 상태. 아직 장비 보고를 못 받았으면 ``None``.
+
+        배터리 값은 null일 수 있고 모듈 상태도 실제로 DISCONNECTED일 수
+        있으므로 payload 필드값으로 수신 여부를 추정하지 않는다. 상태 저장소가
+        관리하는 명시적인 수신 플래그만 사용한다.
+
+        수신 판정과 상태 읽기를 **저장소의 한 lock 안에서** 함께 한다. 나눠
+        부르던 예전 형태에는 좁은 경쟁이 있었다 -- 판정 뒤 읽기 전에
+        ``reset_connection()`` 이 끼어들면 초기화된 DISCONNECTED 가 실제 보고로
+        나간다.
+        """
+
+        reader = getattr(
+            type(self._state_store),
+            "get_publishable_status",
+            None,
+        )
+        if callable(reader):
+            return reader(self._state_store)
+
+        # 일부 격리 단위 테스트의 단순 Mock 저장소는 수신 생명주기를
+        # 구현하지 않는다. 운영 저장소 두 종류는 위 메서드를 모두 제공하므로
+        # 이 경로를 운영에서 타면 게이트가 사라진 것이다. 조용히 넘어가지
+        # 않는다 -- 게이트가 없어진 줄 모르는 것이 게이트가 없는 것보다 나쁘다.
+        if not self._hardware_gate_missing_logged:
+            print(
+                "[WARN] 상태 저장소에 get_publishable_status 가 없어 최초 장비 "
+                f"상태 게이트가 비활성이다 store={type(self._state_store).__name__}"
+            )
+            self._hardware_gate_missing_logged = True
+        return self._state_store.get_status()
 
 
 def create_application() -> RokiPublisherApplication:

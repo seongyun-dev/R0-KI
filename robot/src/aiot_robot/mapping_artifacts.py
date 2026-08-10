@@ -8,6 +8,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import time
 import zlib
 from collections import deque
 from dataclasses import dataclass
@@ -97,27 +98,32 @@ class SlamMapExporter:
                 pass
         except OSError:
             return False, "MAP_OUTPUT_NOT_WRITABLE"
-        try:
-            result = self._runner(
-                (
-                    self._ros2_command,
-                    "service",
-                    "list",
-                    "-t",
-                    "--no-daemon",
-                ),
-                min(self._settings.timeout_seconds, 5.0),
-            )
-        except (OSError, subprocess.SubprocessError):
-            return False, "SLAM_TOOLBOX_NOT_READY"
-        service_graph = str(getattr(result, "stdout", ""))
         expected_service = (
             "/slam_toolbox/serialize_map "
             "[slam_toolbox/srv/SerializePoseGraph]"
         )
-        if expected_service not in service_graph:
-            return False, "SLAM_TOOLBOX_NOT_READY"
-        return True, "READY"
+        command = (
+            self._ros2_command,
+            "service",
+            "list",
+            "-t",
+            "--no-daemon",
+            "--spin-time",
+            "2.0",
+        )
+        deadline = time.monotonic() + min(self._settings.timeout_seconds, 8.0)
+        for _attempt in range(2):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                result = self._runner(command, remaining)
+            except (OSError, subprocess.SubprocessError):
+                return False, "SLAM_TOOLBOX_NOT_READY"
+            service_graph = str(getattr(result, "stdout", ""))
+            if expected_service in service_graph:
+                return True, "READY"
+        return False, "SLAM_TOOLBOX_NOT_READY"
 
     def export(self, mapping_session_id: int) -> MapArtifact:
         if isinstance(mapping_session_id, bool) or mapping_session_id <= 0:
