@@ -5,6 +5,7 @@ import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import com.oneloop.map.service.MapFileStorage;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
@@ -36,6 +37,7 @@ public class PatrolPdfService {
     private final MapFileStorage mapFileStorage;
     private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
+    private final PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
     private final PatrolMapRenderer patrolMapRenderer;
 
     public byte[] generate(Long apartmentComplexId, Long patrolId) {
@@ -100,7 +102,7 @@ public class PatrolPdfService {
                 .append(patrolId)
                 .append("</div></div>");
         appendSummary(html, detail);
-        appendMap(html, mapDataUri(apartmentComplexId, detail));
+        appendMap(html, mapDataUri(apartmentComplexId, patrolId, detail));
         appendRoute(html, detail.getRoute());
         appendTimeline(html, detail.getTimeline());
         appendAiSummary(html, detail.getAiSummary());
@@ -138,18 +140,35 @@ public class PatrolPdfService {
     /**
      * 도면에 구역·순찰 경로·이벤트 위치를 얹어 data URI 로 만든다. 화면(순찰 상세)에서는 SVG 로 얹지만 openhtmltopdf 에는 SVG
      * 플러그인이 없어 서버에서 직접 합성한다.
+     *
+     * <p>구역은 "이 순찰 당시"의 것을 그린다 — 방문 기록이 참조하는 체크포인트를 쓰므로 이후 구역을
+     * 다시 등록해도 과거 순찰 PDF의 구역·경로·이벤트가 어긋나지 않는다. 방문 기록이 없는 옛 순찰만
+     * 현재 활성 구역으로 대신 그린다.
      */
-    private String mapDataUri(Long apartmentComplexId, PatrolDetailResponse detail) {
+    private String mapDataUri(Long apartmentComplexId, Long patrolId, PatrolDetailResponse detail) {
         String mapUrl = detail.getMapUrl();
         if (mapUrl == null || mapUrl.isBlank()) return null;
         try (InputStream input = mapFileStorage.loadByUrl(mapUrl).getInputStream()) {
             byte[] source = input.readAllBytes();
             PatrolMap patrolMap =
                     patrolMapRepository.findByApartmentComplexId(apartmentComplexId).orElse(null);
+            /* fetch join 필수 — 이 서비스는 트랜잭션이 없어(open-in-view 도 꺼짐) LAZY 인
+               checkpoint 를 렌더러가 읽는 순간 LazyInitializationException 이 났고,
+               렌더러의 실패 폴백이 그걸 삼켜 PDF 에 구역·경로가 통째로 빠졌다. */
             List<Checkpoint> zones =
-                    patrolMap == null
-                            ? List.of()
-                            : checkpointRepository.findAllByPatrolMapIdOrderByIdAsc(patrolMap.getId());
+                    patrolCheckpointVisitRepository
+                            .findAllWithCheckpointByPatrolId(patrolId)
+                            .stream()
+                            .map(visit -> visit.getCheckpoint())
+                            .distinct()
+                            .toList();
+            if (zones.isEmpty()) {
+                zones =
+                        patrolMap == null
+                                ? List.of()
+                                : checkpointRepository.findAllByPatrolMapIdOrderByIdAsc(
+                                        patrolMap.getId());
+            }
             byte[] rendered =
                     patrolMapRenderer.render(
                             patrolMap,

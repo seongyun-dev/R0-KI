@@ -6,6 +6,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.oneloop.apartment.domain.ApartmentComplex;
+import com.oneloop.event.domain.EventType;
+import com.oneloop.event.domain.ProcessingStatus;
+import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.map.domain.NavigationWaypoint;
 import com.oneloop.map.domain.NavigationWaypointAction;
 import com.oneloop.map.domain.PatrolMap;
@@ -35,6 +38,7 @@ class PatrolCommandStateServiceTest {
     @Mock private RobotRepository robotRepository;
     @Mock private PatrolMapRepository patrolMapRepository;
     @Mock private NavigationWaypointService navigationWaypointService;
+    @Mock private DetectedEventRepository detectedEventRepository;
 
     private PatrolCommandStateService service;
     private PatrolRobot robot;
@@ -63,7 +67,8 @@ class PatrolCommandStateServiceTest {
                         patrolRepository,
                         robotRepository,
                         patrolMapRepository,
-                        navigationWaypointService);
+                        navigationWaypointService,
+                        detectedEventRepository);
     }
 
     @Test
@@ -102,6 +107,20 @@ class PatrolCommandStateServiceTest {
                 .thenReturn(List.of(destination));
 
         assertThat(service.prepareAutoComplete(17L, new BigDecimal("2.301"), new BigDecimal("0.5")))
+                .isEmpty();
+        assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void unresolvedEmergencyDefersDestinationCompletion() {
+        Patrol patrol = patrol();
+        when(patrolRepository.findFirstForUpdateByRobotIdOrderByStartedAtDesc(17L))
+                .thenReturn(Optional.of(patrol));
+        when(detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
+                        patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED))
+                .thenReturn(true);
+
+        assertThat(service.prepareAutoComplete(17L, new BigDecimal("2.0"), new BigDecimal("0.5")))
                 .isEmpty();
         assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.IN_PROGRESS);
     }

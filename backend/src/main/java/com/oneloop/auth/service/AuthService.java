@@ -34,11 +34,20 @@ public class AuthService {
     private final PatrolMapRepository patrolMapRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final EmailVerificationService emailVerificationService;
 
     @Transactional
     public SignupResponse signup(SignupRequest request) {
         if (memberRepository.existsByUsername(request.getUsername())) {
             throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
+        }
+
+        /* 이메일은 인증을 마친 주소만 받는다. 발송 시점에도 중복을 보지만, 그 사이에 같은 주소로
+           다른 사람이 가입했을 수 있으므로 저장 직전에 한 번 더 확인한다. */
+        String email = emailVerificationService.normalize(request.getEmail());
+        emailVerificationService.assertVerified(email);
+        if (memberRepository.existsByEmail(email)) {
+            throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
 
         ApartmentRequest apartmentRequest = request.getApartment();
@@ -67,8 +76,11 @@ public class AuthService {
                         request.getPassword(),
                         request.getName(),
                         request.getPhoneNumber(),
+                        email,
                         passwordEncoder);
         memberRepository.save(member);
+        // 같은 인증으로 두 번 가입하지 못하게 한다
+        emailVerificationService.consume(email);
 
         String accessToken =
                 jwtTokenProvider.createAccessToken(
