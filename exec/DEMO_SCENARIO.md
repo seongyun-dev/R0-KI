@@ -1,7 +1,8 @@
 # 시연 시나리오
 
-확인 기준: 2026-08-10  
-서비스: `https://i15e103.p.ssafy.io/`  
+확인 기준: 2026-08-10
+
+서비스: `https://i15e103.p.ssafy.io/`
 원본 대본: [Notion 시연 대본](https://app.notion.com/p/3b815fc50ec780a1aabacf548812c478)
 
 ## 1. 로그인 정보
