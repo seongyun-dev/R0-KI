@@ -186,6 +186,42 @@ sudo /srv/aiot/deploy/rollback.sh release <release-id>
 
 배포 이력은 `/srv/aiot/deploy/release-manifest.json`과 `/srv/aiot/deploy/releases/`에 남는다.
 
+### 4.1 Jetson Robot Pull OTA
+
+Jetson 운영 배포는 SSH로 소스를 복사하거나 Jetson에서 Git을 pull하는 방식이 아니다. 승인된 Robot 패키지를 Jetson이 직접 내려받는 Pull OTA를 사용한다.
+
+```text
+iot/dev → iot/master → iot-vX.Y.Z 태그
+  → iot_package 자동 실행
+  → iot_publish 수동 승인
+  → GitLab Package Registry에 패키지 저장
+  → EC2의 stable manifest 갱신
+  → Jetson이 manifest 확인 후 새 버전만 다운로드·설치
+```
+
+배포 순서는 다음과 같다.
+
+1. 검증을 마친 Robot 코드를 `iot/master`에 병합한다.
+2. `iot/master`에 포함된 커밋으로 `iot-vX.Y.Z` 태그를 만든다.
+3. 태그 파이프라인의 `iot_package` 성공을 확인한다.
+4. `iot_publish` job을 실행해 stable 버전으로 승인한다.
+5. Jetson은 부팅 2분 후, 이후 5분마다 stable manifest를 확인한다.
+6. 새 버전이면 호환성, 용량, SHA-256, 내부 checksum과 smoke test를 통과한 뒤 `/opt/aiot/iot/current`를 원자적으로 교체한다.
+7. 기존에 실행 중이던 AI → ROS → Robot 서비스 순으로 재시작한다. 검증이나 재시작이 실패하면 `/opt/aiot/iot/previous`로 자동 복구한다.
+
+즉시 확인해야 할 때만 Jetson에서 updater를 한 번 실행한다. 이 명령도 소스를 직접 설치하지 않고 같은 stable manifest를 조회한다.
+
+```bash
+sudo systemctl start aiot-update.service
+systemctl status aiot-update.service --no-pager
+readlink -f /opt/aiot/iot/current
+cat /opt/aiot/iot/state/VERSION
+```
+
+현재 Jetson은 최초 설치가 끝난 상태이므로 일반 배포 때 설치 스크립트를 다시 실행하지 않는다. Jetson을 새로 설치하거나 초기화한 경우에만 읽기 전용 Package Registry 계정과 환경 파일을 준비한 뒤 `sudo bash infra/jetson/install.sh --enable`을 한 번 실행한다.
+
+IoT 패키지에는 `robot/` 런타임만 포함한다. 기존 AI venv, 모델, TensorRT engine, 로그와 증거 파일은 OTA가 수정하지 않는다.
+
 ## 5. 신규 서버 초기 설정
 
 EC2에는 Docker, Docker Compose, Nginx, GitLab Runner, Java 21, Node.js 20이 필요하다. TLS 인증서는 현재 `/etc/letsencrypt/live/p.ssafy.io/` 경로를 사용한다.
@@ -265,11 +301,12 @@ APP_JWT_SECRET
 
 ### 6.5 Jetson OTA 변수
 
-- `/opt/aiot/config/package-read.env`: stable manifest URL, GitLab Package Registry 읽기 전용 계정과 토큰
+- `/opt/aiot/secrets/package-read.env`: stable manifest URL, GitLab Package Registry 읽기 전용 계정과 토큰, JetPack·AI 계약 버전
 - `/opt/aiot/secrets/robot.env`: Robot Key, MQTT TLS 계정, Backend service token
-- `/opt/aiot/config/ai.env`: AI venv, ROS 2 topic, engine 및 evidence 경로
+- `/opt/aiot/secrets/ai.env`: 기존 AI venv, ROS 2 topic, engine 및 evidence 경로
+- `/opt/aiot/secrets/ros.env`: LiDAR, RF2O, SLAM/Nav2 실측 설정
 
-Robot 배포는 `iot-vX.Y.Z` 태그 생성 후 `iot_publish` 수동 job을 실행한다. Jetson은 부팅 시 stable manifest를 확인하고 새 버전만 설치한다.
+`package-read.env`의 Package Registry 토큰은 `read_package_registry` 권한만 부여한다. stable manifest는 `https://i15e103.p.ssafy.io/jetson/releases/iot/stable/manifest.json`에서 확인하며, 패키지 다운로드에만 읽기 전용 토큰을 사용한다.
 
 ## 7. DB 접속과 스키마
 
