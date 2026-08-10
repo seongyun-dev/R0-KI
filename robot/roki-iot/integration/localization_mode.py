@@ -392,11 +392,22 @@ class LocalizationModeController:
         되돌려놓았을 수 있고, 그 확인은 서비스 호출 두 번이면 끝난다.
         """
 
-        pose = dock_pose or self._dock_pose
+        # **그래프 경로만** 비교한다. seed 자세는 넣지 않는다.
+        #
+        # seed 는 적재 순간에만 쓰인다 -- slam 이 첫 스캔 자세를 그 값으로
+        # 못 박고 바로 버린다(process_near_pose_.reset). 이미 위치추정이
+        # 돌고 있으면 그 값은 과거의 입력이지 현재 상태가 아니다.
+        #
+        # 자세까지 비교하면 매핑 인계(실제 자리로 seed)와 여기(기본 도킹
+        # 지점)가 반드시 어긋나 7.2MB 그래프를 다시 읽고 **도킹 지점으로
+        # 재-seed** 한다. 그러면 매핑 직후 순찰이 다시 엉뚱한 자리에서
+        # 출발한다 -- mapping_runtime._handover_pose 가 고치려던 바로 그것이
+        # 되돌아온다.
         with self._lock:
-            already = self._mode == self.PATROL and self._patrol_arguments == (
-                posegraph_path,
-                pose,
+            already = (
+                self._mode == self.PATROL
+                and self._patrol_arguments is not None
+                and self._patrol_arguments[0] == posegraph_path
             )
         if not already:
             return self.enter_patrol(posegraph_path, dock_pose)

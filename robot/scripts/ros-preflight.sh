@@ -44,6 +44,7 @@ for config in \
   "${robot_root}/config/ros/slam_toolbox.yaml" \
   "${robot_root}/config/ros/nav2.params.yaml.template" \
   "${robot_root}/config/ros/nav2_fixed_path.xml" \
+  "${robot_root}/config/ros/nav2_fixed_path_through_poses.xml" \
   "${robot_root}/config/ros/nav2_mapping_replan.xml"; do
   test -s "${config}" || { echo "ROS config is missing: ${config}" >&2; exit 1; }
 done

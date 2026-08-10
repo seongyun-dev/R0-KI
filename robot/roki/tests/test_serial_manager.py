@@ -11,8 +11,21 @@ class FakeSerial:
         self.is_open = True
         self._payloads = list(payloads)
 
-    def readline(self) -> bytes:
-        return self._payloads.pop(0) if self._payloads else b""
+    @property
+    def in_waiting(self) -> int:
+        return len(self._payloads[0]) if self._payloads else 0
+
+    def read(self, size: int = 1) -> bytes:
+        if not self._payloads:
+            return b""
+        payload = self._payloads[0]
+        chunk = payload[:size]
+        remainder = payload[size:]
+        if remainder:
+            self._payloads[0] = remainder
+        else:
+            self._payloads.pop(0)
+        return chunk
 
 
 class FakeOpeningSerial:

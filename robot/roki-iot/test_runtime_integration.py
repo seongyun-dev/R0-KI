@@ -1228,6 +1228,44 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         application._publish_status_if_needed(105.1)
         self.assertEqual(client.publish.call_count, 2)
 
+    def test_status_waits_for_first_real_hardware_status_even_when_forced(self) -> None:
+        from backend_mqtt.publisher import RokiPublisherApplication
+
+        settings = SimpleNamespace(
+            status_publish_interval_seconds=5.0,
+            schema_version=1,
+            robot_key="ROKI-01",
+            status_topic="hanbakwi/v1/robots/ROKI-01/status",
+        )
+        store = RobotStateStore()
+        client = Mock()
+        application = RokiPublisherApplication(
+            settings=settings,
+            serial_reader=Mock(),
+            state_store=store,
+            mqtt_client=client,
+            command_handler=Mock(),
+            pipeline_runner=Mock(),
+        )
+
+        application._publish_status_if_needed(100.0)
+        application._publish_status_if_needed(101.0, force=True)
+        client.publish.assert_not_called()
+
+        store.update_hardware(
+            HardwareState(
+                battery=None,
+                motor="DISCONNECTED",
+                line_sensor="DISCONNECTED",
+            )
+        )
+        application._publish_status_if_needed(102.0, force=True)
+
+        client.publish.assert_called_once()
+        payload = client.publish.call_args.kwargs["payload"]
+        self.assertIsNone(payload["battery"])
+        self.assertEqual(payload["motor"], "DISCONNECTED")
+
     def test_lidar_bridge_is_injected_without_changing_camera(self) -> None:
         from run_integrated import create_integrated_application
 
@@ -1292,6 +1330,9 @@ class RuntimeStateBackendAdapterTest(unittest.TestCase):
         application = create_integrated_application(
             final_runtime=runtime,
             mapping_runtime=mapping_runtime,
+        )
+        runtime.state_store.update_hardware(
+            HardwareState(80.0, "NORMAL", "NORMAL")
         )
         runtime.state_store.update_lidar_status("NORMAL")
         runtime.state_store.update_obstacle(

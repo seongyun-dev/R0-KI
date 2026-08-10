@@ -46,6 +46,10 @@ class RobotStateStore:
 
         self._status = RobotStatusState()
 
+        # 기본 DISCONNECTED 값과 ESP32가 실제로 보고한 DISCONNECTED를
+        # 구분한다. MQTT는 최초 실제 보고 전까지 status를 발행하지 않는다.
+        self._hardware_status_received = False
+
         # Status에 변화가 발생했는지 표시한다.
         #
         # True인 경우 정기 발행 시각을 기다리지 않고
@@ -64,6 +68,7 @@ class RobotStateStore:
         """
 
         with self._lock:
+            self._hardware_status_received = True
             updated_status = replace(
                 self._status,
                 battery=hardware.battery,
@@ -170,6 +175,20 @@ class RobotStateStore:
         """최신 전체 로봇 상태를 반환한다."""
 
         with self._lock:
+            return self._status
+
+    def has_hardware_status(self) -> bool:
+        """ESP32의 실제 장비 상태를 한 번 이상 수신했는지 반환한다."""
+
+        with self._lock:
+            return self._hardware_status_received
+
+    def get_publishable_status(self) -> RobotStatusState | None:
+        """최초 실제 장비 상태와 현재 상태를 같은 lock에서 확인한다."""
+
+        with self._lock:
+            if not self._hardware_status_received:
+                return None
             return self._status
 
     def get_snapshot(self) -> RobotStateSnapshot:

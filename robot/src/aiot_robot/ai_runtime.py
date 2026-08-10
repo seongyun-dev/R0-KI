@@ -15,7 +15,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 import rclpy
@@ -145,6 +145,7 @@ class AiAdapterNode(Node):
         image_path: str | os.PathLike[str] | None,
         *,
         vehicle: bool = False,
+        detection_context: Mapping[str, Any] | None = None,
     ) -> None:
         with self._lock:
             patrol_id = self._active_patrol_id
@@ -157,6 +158,7 @@ class AiAdapterNode(Node):
         event_id = uuid4().hex
         evidence = self._evidence_root / f"{event_id}{source.suffix or '.jpg'}"
         try:
+            context = detection_context or {}
             message_payload = build_detection_message(
                 payload,
                 evidence_path=evidence.as_posix(),
@@ -164,6 +166,10 @@ class AiAdapterNode(Node):
                 event_id=event_id,
                 observed_at_fallback=_utc_now(),
                 vehicle=vehicle,
+                detection_bbox_xyxy=context.get("bbox"),
+                frame_width=context.get("frameWidth"),
+                camera_id=context.get("cameraId"),
+                track_id=context.get("trackId"),
             )
         except ValueError as exc:
             self.get_logger().warning(f"Dropped unsupported AI event: {exc}")
@@ -240,6 +246,30 @@ class RosEventSink:
         self, payload: dict[str, Any], image_path: Any = None
     ) -> None:
         self._node.publish_detection(payload, image_path, vehicle=True)
+
+    def enqueue_vehicle_context(
+        self,
+        payload: dict[str, Any],
+        image_path: Any = None,
+        *,
+        bbox: Any,
+        frame_width: Any,
+        camera: Any,
+        track_id: Any,
+    ) -> None:
+        """Publish camera-only metadata without changing the REST payload."""
+
+        self._node.publish_detection(
+            payload,
+            image_path,
+            vehicle=True,
+            detection_context={
+                "bbox": bbox,
+                "frameWidth": frame_width,
+                "cameraId": camera,
+                "trackId": track_id,
+            },
+        )
 
     def create_emergency_event(self, payload: dict[str, Any]) -> None:
         # The ROS contract requires evidence. Events without a frame are skipped.

@@ -27,6 +27,7 @@ SUPPORTED_COMMANDS = frozenset(
     {
         "START_PATROL",
         "STOP_PATROL",
+        "RESUME_PATROL",
         "SET_TOKEN",
         "START_MAPPING",
         "STOP_MAPPING",
@@ -154,6 +155,8 @@ class PatrolCommandHandler:
             self._handle_start_patrol(command)
         elif command.command == "STOP_PATROL":
             self._handle_stop_patrol(command)
+        elif command.command == "RESUME_PATROL":
+            self._handle_resume_patrol(command)
         elif command.command == "SET_TOKEN":
             self._handle_set_token(command, str(payload["token"]))
         elif command.command == "START_MAPPING":
@@ -166,6 +169,12 @@ class PatrolCommandHandler:
 
         active_patrol = getattr(self._serial_reader, "active_patrol_id", None)
         if active_patrol is None:
+            self._clear_since = None
+            return
+        if getattr(self._serial_reader, "pause_reason", None) == "AI_EMERGENCY":
+            # Emergency is a terminal hold for this patrol. LiDAR CLEAR and AI
+            # readiness recovery must not restart motion; STOP_PATROL performs
+            # the normal cleanup and ACK flow.
             self._clear_since = None
             return
         status = self._state_store.get_status()
@@ -509,6 +518,35 @@ class PatrolCommandHandler:
             f"commandId={command.command_id} errors={len(errors)}"
         )
 
+    def _handle_resume_patrol(self, command: ValidatedCommand) -> None:
+        assert command.patrol_id is not None
+        try:
+            self._serial_reader.send_command(
+                "RESUME_PATROL",
+                patrolId=command.patrol_id,
+            )
+        except Exception as exc:
+            reason = str(exc) or type(exc).__name__
+            self._record_and_publish_command(
+                command,
+                "REJECTED",
+                reason=reason,
+            )
+            print(
+                "[COMMAND] RESUME_PATROL rejected "
+                f"commandId={command.command_id} patrolId={command.patrol_id} "
+                f"reason={reason}"
+            )
+            return
+
+        self._state_store.update_robot_state("PATROLLING")
+        self._flush()
+        self._record_and_publish_command(command, "SUCCEEDED")
+        print(
+            "[COMMAND] RESUME_PATROL succeeded "
+            f"commandId={command.command_id} patrolId={command.patrol_id}"
+        )
+
     def _handle_start_mapping(self, command: ValidatedCommand) -> None:
         with self._mapping_lifecycle_lock:
             self._handle_start_mapping_locked(command)
@@ -784,7 +822,7 @@ class PatrolCommandHandler:
             raise ValueError("issuedAt is too far in the future")
 
         patrol_id = payload.get("patrolId")
-        if command == "START_PATROL":
+        if command in {"START_PATROL", "RESUME_PATROL"}:
             if (
                 isinstance(patrol_id, bool)
                 or not isinstance(patrol_id, int)

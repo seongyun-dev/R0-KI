@@ -115,6 +115,7 @@ class FinalRuntimeService:
         self._runtime_fault_generation = 0
         self._active_patrol_id: int | None = None
         self._paused = False
+        self._pause_reason: str | None = None
         # 인터락 STOP 을 이미 전달했는가. 아래 _apply_motion_command_locked 참고.
         self._interlock_stop_delivered = False
         self._fault_listener: Any | None = None
@@ -206,6 +207,11 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             return self._paused
 
+    @property
+    def pause_reason(self) -> str | None:
+        with self._lifecycle_lock:
+            return self._pause_reason
+
     def set_destination_listener(self, listener: Any) -> None:
         self._destination_listener = listener
 
@@ -268,6 +274,14 @@ class FinalRuntimeService:
         """
 
         return self._runtime_lifecycle_marker()
+
+    @property
+    def navigation_route(self) -> Any | None:
+        """Return the route refreshed by ``prepare_patrol`` for localization."""
+
+        with self._lifecycle_lock:
+            navigation = self._navigation_service
+            return None if navigation is None else getattr(navigation, "route", None)
 
     def readiness(self) -> tuple[bool, str]:
         """Return the physical/navigation gate without issuing a command."""
@@ -372,6 +386,7 @@ class FinalRuntimeService:
                         self._manual_controller.activate(patrol_id)
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
+                        self._pause_reason = None
                     elif self._navigation_service is not None:
                         if self._navigation_driver is not None:
                             self._start_nav2_patrol(
@@ -389,6 +404,7 @@ class FinalRuntimeService:
                         self._ensure_start_not_expired(expires_at)
                         self._active_patrol_id = int(patrol_id)
                         self._paused = False
+                        self._pause_reason = None
                         self._runtime.mission.start_patrol(
                             speed=self._patrol_drive_speed_pwm,
                             steering_deg=self._patrol_steering_degrees,
@@ -406,6 +422,18 @@ class FinalRuntimeService:
                 return
             if command == "STOP_PATROL":
                 self._stop_patrol_from_command()
+                return
+            if command == "RESUME_PATROL":
+                patrol_id = parameters.get("patrolId")
+                if (
+                    isinstance(patrol_id, bool)
+                    or not isinstance(patrol_id, int)
+                    or patrol_id <= 0
+                ):
+                    raise ValueError("patrolId must be a positive integer")
+                resumed, reason = self.resume_emergency_patrol(patrol_id)
+                if not resumed:
+                    raise RuntimeError(reason)
                 return
             raise ValueError(
                 f"unsupported Final RobotRuntime command: {command}"
@@ -455,6 +483,7 @@ class FinalRuntimeService:
         self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
+        self._pause_reason = None
         self._ensure_start_not_expired(expires_at)
         self._runtime.mission.start_patrol(
             speed=self._patrol_drive_speed_pwm,
@@ -476,6 +505,7 @@ class FinalRuntimeService:
         event = self._navigation_service.start_patrol(patrol_id=patrol_id)
         self._active_patrol_id = int(patrol_id)
         self._paused = False
+        self._pause_reason = None
         self._ensure_start_not_expired(expires_at)
         self._navigation_driver.start_patrol(
             route=self._navigation_service.route,
@@ -560,9 +590,23 @@ class FinalRuntimeService:
             return self._pause_patrol_locked(reason)
 
     def _pause_patrol_locked(self, reason: str) -> bool:
-        if self._active_patrol_id is None or self._paused:
+        if self._active_patrol_id is None:
             return False
+        if self._paused:
+            if reason != "AI_EMERGENCY" or self._pause_reason == reason:
+                return False
+            # A confirmed emergency outranks an existing obstacle/health hold.
+            # Keep Nav2 paused and refresh the physical STOP, but never resume
+            # this patrol through a later LiDAR CLEAR transition.
+            self._pause_reason = reason
+            stop_confirmed = self._best_effort_stop_runtime_patrol(reason)
+            if not stop_confirmed:
+                self._fail_patrol_locked(f"{reason}_PAUSE_FAILED")
+                return False
+            print("[AI EMERGENCY] existing pause promoted to terminal hold")
+            return True
         self._paused = True
+        self._pause_reason = reason
         self._publish_scan_context_locked(None)
         component_failure: Exception | None = None
         try:
@@ -584,8 +628,27 @@ class FinalRuntimeService:
         with self._lifecycle_lock:
             return self._resume_patrol_locked()
 
-    def _resume_patrol_locked(self) -> bool:
+    def resume_emergency_patrol(self, patrol_id: int) -> tuple[bool, str]:
+        """Resume only the active patrol held by an AI emergency."""
+
+        with self._lifecycle_lock:
+            if self._active_patrol_id != int(patrol_id):
+                return False, "ACTIVE_PATROL_MISMATCH"
+            if not self._paused:
+                return False, "PATROL_NOT_PAUSED"
+            if self._pause_reason != "AI_EMERGENCY":
+                return False, "PATROL_NOT_EMERGENCY_PAUSED"
+            ready, reason = self.readiness()
+            if not ready:
+                return False, reason
+            if not self._resume_patrol_locked(allow_emergency=True):
+                return False, "EMERGENCY_RESUME_FAILED"
+            return True, "RESUMED"
+
+    def _resume_patrol_locked(self, *, allow_emergency: bool = False) -> bool:
         if self._active_patrol_id is None or not self._paused:
+            return False
+        if self._pause_reason == "AI_EMERGENCY" and not allow_emergency:
             return False
         try:
             if self._manual_controller is not None:
@@ -606,6 +669,7 @@ class FinalRuntimeService:
             )
             return False
         self._paused = False
+        self._pause_reason = None
         return True
 
     def fail_patrol(self, reason: str) -> None:
@@ -627,6 +691,7 @@ class FinalRuntimeService:
             cleanup_failure = self._cleanup_patrol_components()
             self._active_patrol_id = None
             self._paused = False
+            self._pause_reason = None
             try:
                 self._release_patrol_lease()
             except Exception as exc:
@@ -832,6 +897,7 @@ class FinalRuntimeService:
         # stale cmd_vel callback then takes MOTION_INTERLOCK instead of rearming.
         self._active_patrol_id = None
         self._paused = False
+        self._pause_reason = None
         cleanup_failure = self._cleanup_patrol_components()
         try:
             self._release_patrol_lease()
@@ -907,6 +973,7 @@ class FinalRuntimeService:
         cleanup_failure = self._cleanup_patrol_components()
         self._active_patrol_id = None
         self._paused = False
+        self._pause_reason = None
         try:
             self._release_patrol_lease()
         except Exception as exc:
@@ -940,6 +1007,7 @@ class FinalRuntimeService:
                     )
         self._active_patrol_id = None
         self._paused = False
+        self._pause_reason = None
         try:
             self._release_patrol_lease()
         except Exception as exc:
@@ -974,6 +1042,7 @@ class FinalRuntimeService:
                 )
             self._active_patrol_id = None
             self._paused = False
+            self._pause_reason = None
             try:
                 self._release_patrol_lease()
             except Exception as exc:
@@ -1050,6 +1119,7 @@ class FinalRuntimeService:
                 self._navigation_driver.stop_patrol()
             self._active_patrol_id = None
             self._paused = False
+            self._pause_reason = None
             self._release_patrol_lease()
             self._update_runtime_state("IDLE" if stop_confirmed else "ERROR")
             if callable(self._destination_listener):

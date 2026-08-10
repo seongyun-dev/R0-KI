@@ -196,6 +196,47 @@ class SerialManager:
             self.disconnect()
             return False
 
+    def _take_buffered_line(self) -> Optional[str]:
+        """버퍼에 완결된 줄이 있으면 꺼낸다. 없으면 None.
+
+        빈 문자열은 "줄은 있었지만 내용이 없다"는 뜻이라 호출자가 구분한다.
+        """
+
+        if b"\n" not in self._read_buffer:
+            return None
+        complete_line, _, remainder = self._read_buffer.partition(b"\n")
+        self._read_buffer = bytearray(remainder)
+        return complete_line.decode("utf-8", errors="replace").strip()
+
+    def _read_available(self) -> bytes:
+        """대기 중인 바이트를 **한 번에** 가져온다.
+
+        ``pyserial.readline()`` 을 쓰면 안 된다. ``Serial`` 은 ``RawIOBase``
+        상속이라 그 readline 이 ``peek`` 없이 **1바이트씩** 읽는다 -- 130바이트
+        레코드 하나에 ``read(1)`` 이 130회, 각각 ``select()`` + ``os.read()`` 이고
+        매번 GIL 을 놓았다 잡는다.
+
+        2026-08-09 젯슨 실측(동일 경로 복제): 경쟁 파이썬 스레드가 **하나만**
+        있어도 한 레코드 읽기가 p50 1.73ms -> 2297ms 로 무너진다. 같은 조건
+        ``read(4096)`` 벌크는 10.4ms 였다(220배).
+
+        그 지연이 그대로 CONTROL 송신 간격이 된다. run_forever 가 단일
+        스레드로 읽기·파싱·쓰기를 다 하고, CONTROL 갱신은 read_line() 뒤에서만
+        돌기 때문이다. 실측 2026-08-09 07:51:57 ``sendGapMs=457.411`` ->
+        펌웨어 워치독(400ms) 발화 -> ESP32_COMMAND_TIMEOUT 으로 매핑 중단.
+
+        ``in_waiting`` 이 0 일 때는 예전처럼 1바이트 블로킹 읽기를 유지한다.
+        여기서 즉시 반환하면 호출 루프가 CPU 를 100% 태운다.
+        """
+
+        pending = 0
+        in_waiting = getattr(self._serial, "in_waiting", None)
+        if isinstance(in_waiting, int):
+            pending = in_waiting
+        if pending > 0:
+            return self._serial.read(pending)
+        return self._serial.read(1)
+
     def read_line(self) -> Optional[str]:
         """시리얼 포트에서 문자열 한 줄을 읽는다.
 
@@ -210,16 +251,20 @@ class SerialManager:
             return None
 
         try:
-            raw_data = self._serial.readline()
+            # 이미 완결된 줄이 버퍼에 있으면 포트를 만지지 않고 바로 돌려준다.
+            # 벌크로 읽으면 한 번에 여러 줄이 들어오므로 이 경로가 대부분이다.
+            buffered = self._take_buffered_line()
+            if buffered is not None:
+                return buffered or None
+
+            raw_data = self._read_available()
 
             if not raw_data:
                 return None
 
-            # ``pyserial.readline()`` may return a partial record when its
-            # timeout expires before the trailing LF arrives.  Jetson load
-            # during ROS/SLAM startup made this happen consistently and the
-            # old code tried to parse each fragment as standalone JSON. Keep
-            # fragments until a complete newline-delimited record exists.
+            # 부분 레코드는 계속 모은다. 타임아웃이 LF 앞에서 끊기면
+            # pyserial 이 조각을 돌려주는데, 예전 코드는 그 조각을 각각
+            # JSON 으로 파싱하려 했다. ROS/SLAM 기동 부하에서 늘 그랬다.
             self._read_buffer.extend(raw_data)
             if b"\n" not in self._read_buffer:
                 if len(self._read_buffer) > MAX_SERIAL_LINE_BYTES:
@@ -230,13 +275,7 @@ class SerialManager:
                     self._read_buffer.clear()
                 return None
 
-            complete_line, _, remainder = self._read_buffer.partition(b"\n")
-            self._read_buffer = bytearray(remainder)
-
-            decoded = complete_line.decode(
-                "utf-8",
-                errors="replace",
-            ).strip()
+            decoded = self._take_buffered_line()
             # A CP2102/ESP32 reset can leave CR/LF-only records in the RX
             # queue. They carry no protocol information and must be treated
             # like a read timeout, not as a hardware/protocol fault.

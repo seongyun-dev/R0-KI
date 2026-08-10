@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections import deque
@@ -26,6 +27,22 @@ class _Observation:
     sequence: int
     stamp_ns: int
     arrival: float
+
+
+@dataclass(frozen=True)
+class LocalizationPoseObservation:
+    """One pose produced by slam_toolbox after localization processing."""
+
+    sequence: int
+    stamp_ns: int
+    arrival: float
+    frame_id: str
+    x: float
+    y: float
+    yaw_rad: float
+    covariance_x: float
+    covariance_y: float
+    covariance_yaw: float
 
 
 class FreshMapTracker:
@@ -98,6 +115,11 @@ class RosSlamSessionControl:
         reset_service: str = "/slam_toolbox/reset",
         scan_topic: str = "/scan",
         map_topic: str = "/map",
+        # slam_toolbox 의 pose 발행은 **네임스페이스** 기준으로 풀린다.
+        # 서비스만 이름에 "slam_toolbox/" 접두사가 박혀 있고(serialize_map 등)
+        # pose_pub_ 는 그냥 "pose" 라서 `/slam_toolbox/pose` 가 아니라 `/pose` 다.
+        # /map, /scan 과 같은 자리다. 실기 확인: Publisher count 1.
+        pose_topic: str = "/pose",
         map_frame: str = "map",
         odom_frame: str = "odom",
         discovery_timeout_sec: float = 15.0,
@@ -112,6 +134,7 @@ class RosSlamSessionControl:
         self._reset_service = reset_service
         self._scan_topic = scan_topic
         self._map_topic = map_topic
+        self._pose_topic = pose_topic
         self._map_frame = map_frame
         self._odom_frame = odom_frame
         self._discovery_timeout_sec = discovery_timeout_sec
@@ -127,16 +150,23 @@ class RosSlamSessionControl:
         self._owns_rclpy_context = False
         self._reset_client: Any = None
         self._reset_type: Any = None
+        self._initialpose_publisher: Any = None
+        self._initialpose_type: Any = None
         self._tf_buffer: Any = None
         self._tf_listener: Any = None
         self._time_type: Any = None
         self._duration_type: Any = None
+        self._last_localization_pose_at: float | None = None
+        self._last_localization_stamp_ns: int = 0
+        self._localization_pose_sequence = 0
+        self._last_localization_pose: LocalizationPoseObservation | None = None
 
     def start(self) -> None:
         with self._lock:
             if self._node is not None:
                 return
             import rclpy
+            from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import OccupancyGrid
             from rclpy.duration import Duration
             from rclpy.executors import SingleThreadedExecutor
@@ -160,6 +190,12 @@ class RosSlamSessionControl:
                 rclpy.init(args=None)
             self._node = rclpy.create_node(self._node_name)
             self._reset_client = self._node.create_client(Reset, self._reset_service)
+            self._initialpose_type = PoseWithCovarianceStamped
+            self._initialpose_publisher = self._node.create_publisher(
+                PoseWithCovarianceStamped,
+                "/initialpose",
+                10,
+            )
             self._node.create_subscription(
                 LaserScan,
                 self._scan_topic,
@@ -174,6 +210,12 @@ class RosSlamSessionControl:
             )
             self._node.create_subscription(
                 OccupancyGrid, self._map_topic, self._on_map, map_qos
+            )
+            self._node.create_subscription(
+                PoseWithCovarianceStamped,
+                self._pose_topic,
+                self._on_localization_pose,
+                10,
             )
             self._tf_buffer = Buffer()
             self._tf_listener = TransformListener(
@@ -205,6 +247,8 @@ class RosSlamSessionControl:
             self._executor = None
             self._thread = None
             self._reset_client = None
+            self._initialpose_publisher = None
+            self._initialpose_type = None
             self._tf_listener = None
             self._tf_buffer = None
 
@@ -253,6 +297,114 @@ class RosSlamSessionControl:
                 self._condition.wait(min(remaining, 0.2))
         return self._wait_for_transform(deadline)
 
+    def relocalize(
+        self,
+        *,
+        x: float,
+        y: float,
+        yaw_rad: float,
+        timeout_sec: float,
+        position_tolerance_m: float,
+        yaw_tolerance_rad: float,
+    ) -> tuple[bool, str]:
+        """Seed slam_toolbox and accept only a new matching localization pose.
+
+        Waiting for a subscriber avoids the discovery race of a short-lived
+        ``ros2 topic pub --once`` process. Publishing is not considered an ACK;
+        only a subsequently observed matching ``/pose`` confirms localization.
+        """
+
+        publisher = self._initialpose_publisher
+        message_type = self._initialpose_type
+        node = self._node
+        if publisher is None or message_type is None or node is None:
+            return False, "INITIALPOSE_TRANSPORT_NOT_READY"
+        if timeout_sec <= 0:
+            return False, "INITIALPOSE_TIMEOUT"
+
+        deadline = self._clock() + float(timeout_sec)
+        while self._clock() < deadline:
+            try:
+                if int(publisher.get_subscription_count()) > 0:
+                    break
+            except (AttributeError, TypeError, ValueError):
+                return False, "INITIALPOSE_TRANSPORT_NOT_READY"
+            time.sleep(0.05)
+        else:
+            return False, "INITIALPOSE_SUBSCRIBER_MISSING"
+
+        with self._condition:
+            marker = self._localization_pose_sequence
+
+        message = message_type()
+        message.header.frame_id = self._map_frame
+        message.header.stamp = node.get_clock().now().to_msg()
+        message.pose.pose.position.x = float(x)
+        message.pose.pose.position.y = float(y)
+        message.pose.pose.position.z = 0.0
+        message.pose.pose.orientation.x = 0.0
+        message.pose.pose.orientation.y = 0.0
+        message.pose.pose.orientation.z = math.sin(float(yaw_rad) / 2.0)
+        message.pose.pose.orientation.w = math.cos(float(yaw_rad) / 2.0)
+        # A useful search prior without pretending centimeter-level certainty.
+        message.pose.covariance[0] = 0.25**2
+        message.pose.covariance[7] = 0.25**2
+        message.pose.covariance[35] = math.radians(15.0) ** 2
+
+        published_at = self._clock()
+        publisher.publish(message)
+        print(
+            "[INITIALPOSE] published "
+            f"x={x:.3f} y={y:.3f} yawDeg={math.degrees(yaw_rad):.1f}"
+        )
+
+        last_observation: LocalizationPoseObservation | None = None
+        observed_sequence = marker
+        with self._condition:
+            while self._clock() < deadline:
+                observation = self._last_localization_pose
+                if (
+                    observation is not None
+                    and observation.sequence > observed_sequence
+                    and observation.arrival >= published_at
+                ):
+                    observed_sequence = observation.sequence
+                    last_observation = observation
+                    if self._localization_pose_matches(
+                        observation,
+                        x=float(x),
+                        y=float(y),
+                        yaw_rad=float(yaw_rad),
+                        position_tolerance_m=float(position_tolerance_m),
+                        yaw_tolerance_rad=float(yaw_tolerance_rad),
+                    ):
+                        print(
+                            "[INITIALPOSE] confirmed "
+                            f"x={observation.x:.3f} y={observation.y:.3f} "
+                            f"yawDeg={math.degrees(observation.yaw_rad):.1f}"
+                        )
+                        return True, "START_POSE_CONFIRMED"
+                remaining = deadline - self._clock()
+                if remaining <= 0:
+                    break
+                self._condition.wait(min(remaining, 0.2))
+
+        if last_observation is None:
+            return False, "INITIALPOSE_POSE_TIMEOUT"
+        distance = math.hypot(
+            last_observation.x - float(x),
+            last_observation.y - float(y),
+        )
+        yaw_error = abs(
+            self._angle_difference(last_observation.yaw_rad, float(yaw_rad))
+        )
+        print(
+            "[INITIALPOSE] rejected "
+            f"frame={last_observation.frame_id or '?'} "
+            f"distance={distance:.3f}m yawErrorDeg={math.degrees(yaw_error):.1f}"
+        )
+        return False, "START_POSE_MISMATCH"
+
     def _invoke(self, client: Any, request: Any, description: str) -> Any:
         if client is None:
             raise ServiceCallFailed(f"{description} transport is not started")
@@ -274,6 +426,132 @@ class RosSlamSessionControl:
             self._tracker.note_map(self._stamp_ns(message))
             self._condition.notify_all()
 
+    def _on_localization_pose(self, message: Any) -> None:
+        """slam 이 스캔을 **실제로 처리했을 때만** 오는 메시지.
+
+        slam_toolbox 는 ``processed`` 가 참일 때에만 ``setTransformFromPoses`` 와
+        ``publishPose`` 를 부른다(slam_toolbox_localization.cpp:194-203). 그래서
+        이 한 건이 "위치추정이 실행됐다"는 직접 증거다. ``map->odom`` 은 값이
+        바뀌지 않아도 ``transform_publish_period`` 마다(50Hz) 재발행되므로
+        그쪽 신선도로는 실행 여부를 알 수 없다 -- 어제 얼어붙은 TF 에 당한
+        지점이 정확히 그것이다.
+
+        ``HasMovedEnough`` 는 모터가 아니라 **오도메트리 변화**를 본다. 그래서
+        섀시가 서 있어도 발행된다 -- 2026-08-09 14:32:42~14:33:24 실측:
+        ``auth=0 fwd=0 rev=0`` 로 295초간 인가 명령이 0건인 구간에서 16건.
+        rf2o 가 정지 중 임계값(0.10m / 0.10rad)을 넘게 흘러가고 스캔매칭이
+        매번 당겨오기 때문이다. 그때 교정된 자세는 ±3cm 안에서 흔들릴 뿐
+        누적되지 않았고 covXX/covYY 0.0012~0.0019, covYaw 0.0001~0.0004 였다.
+        이것이 **정상 배치의 기준선**이다.
+
+        간격은 그 구간에서 중앙값 약 2초, 최대 10.4초였다. 판정에 "N건을
+        기다린다" 를 넣을 때 이 최대값을 넘겨야 한다.
+
+        한 건이 증명하는 것은 "스캔이 처리되고 자세가 발행됐다" 까지다.
+        재위치추정이 **맞았다**는 증거가 아니고, 매핑 모드에서도 발행되므로
+        위치추정 모드라는 증거도 아니다. 강제 매칭인지 일상적인
+        ``ProcessLocalization`` 인지도 이 메시지만으로는 구별되지 않는다.
+
+        지금은 **관측만 한다.** covariance 임계값을 지금 추측으로 정하면
+        근거 없는 상수가 하나 더 생길 뿐이다. 배치를 바꿔가며 실측한 분포가
+        나온 뒤에 판정을 붙인다.
+        """
+
+        pose = getattr(getattr(message, "pose", None), "pose", None)
+        if pose is None:
+            return
+        arrival = self._clock()
+        stamp_ns = self._stamp_ns(message)
+        covariance = getattr(getattr(message, "pose", None), "covariance", None)
+        yaw = self._yaw_from_quaternion(pose.orientation)
+        frame = getattr(getattr(message, "header", None), "frame_id", "") or ""
+        with self._condition:
+            previous_arrival = self._last_localization_pose_at
+            previous_stamp = self._last_localization_stamp_ns
+            self._last_localization_pose_at = arrival
+            self._last_localization_stamp_ns = stamp_ns
+            self._localization_pose_sequence += 1
+            self._last_localization_pose = LocalizationPoseObservation(
+                sequence=self._localization_pose_sequence,
+                stamp_ns=stamp_ns,
+                arrival=arrival,
+                frame_id=frame,
+                x=float(pose.position.x),
+                y=float(pose.position.y),
+                yaw_rad=float(yaw),
+                covariance_x=self._covariance_at(covariance, 0),
+                covariance_y=self._covariance_at(covariance, 7),
+                covariance_yaw=self._covariance_at(covariance, 35),
+            )
+            self._condition.notify_all()
+        # 도착 간격과 발행 간격을 따로 적는다. executor 가 밀리면 오래된
+        # 메시지가 몰려 도착해 도착 간격만 짧아진다. slam 이 언제 처리했는지는
+        # 스탬프로만 안다.
+        arrival_gap = (
+            "-"
+            if previous_arrival is None
+            else f"{arrival - previous_arrival:.2f}"
+        )
+        source_gap = (
+            "-"
+            if not previous_stamp or not stamp_ns
+            else f"{(stamp_ns - previous_stamp) / 1_000_000_000:.2f}"
+        )
+        print(
+            "[SLAM POSE] "
+            f"frame={frame or '?'} "
+            f"x={pose.position.x:.3f} y={pose.position.y:.3f} "
+            f"yawDeg={math.degrees(yaw):.1f} "
+            f"covXX={self._covariance_at(covariance, 0):.4f} "
+            f"covYY={self._covariance_at(covariance, 7):.4f} "
+            f"covYaw={self._covariance_at(covariance, 35):.4f} "
+            f"arrivalGapSec={arrival_gap} sourceGapSec={source_gap}"
+        )
+
+    @staticmethod
+    def _covariance_at(covariance: Any, index: int) -> float:
+        """36칸 공분산에서 대각 성분 하나. 못 읽으면 nan.
+
+        rclpy 콜백에서 예외가 나가면 executor spin 이 죽는다. 로그 한 줄 때문에
+        구독 전체를 잃을 수는 없다.
+        """
+
+        try:
+            return float(covariance[index])
+        except (TypeError, IndexError, ValueError, KeyError):
+            return float("nan")
+
+    @staticmethod
+    def _yaw_from_quaternion(rotation: Any) -> float:
+        # 평면 주행이라 yaw 만 쓴다. z/x/y 회전 성분은 무시한다.
+        return math.atan2(
+            2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+            1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z),
+        )
+
+    def _localization_pose_matches(
+        self,
+        observation: LocalizationPoseObservation,
+        *,
+        x: float,
+        y: float,
+        yaw_rad: float,
+        position_tolerance_m: float,
+        yaw_tolerance_rad: float,
+    ) -> bool:
+        if observation.frame_id != self._map_frame:
+            return False
+        if math.hypot(observation.x - x, observation.y - y) > position_tolerance_m:
+            return False
+        return (
+            abs(self._angle_difference(observation.yaw_rad, yaw_rad))
+            <= yaw_tolerance_rad
+        )
+
+    @staticmethod
+    def _angle_difference(actual: float, expected: float) -> float:
+        return math.atan2(math.sin(actual - expected), math.cos(actual - expected))
+
     @staticmethod
     def _stamp_ns(message: Any) -> int:
         stamp = getattr(getattr(message, "header", None), "stamp", None)
@@ -282,6 +560,37 @@ class RosSlamSessionControl:
         return int(getattr(stamp, "sec", 0)) * 1_000_000_000 + int(
             getattr(stamp, "nanosec", 0)
         )
+
+    def current_map_pose(self) -> tuple[float, float, float] | None:
+        """지금 slam 이 믿고 있는 지도 좌표계 자세 ``(x, y, yaw)``.
+
+        **호출자가 좌표계를 책임진다.** 이 값은 slam 이 *현재* 들고 있는 지도의
+        좌표계에 있다. 매핑 직후라면 방금 저장한 포즈그래프와 같은 좌표계이므로
+        그 그래프를 적재할 때 seed 로 쓸 수 있다. 반대로 재부팅 뒤 예전 지도를
+        적재하는 경우에는 무관한 임시 지도의 좌표라서 쓰면 안 된다 -- 그때는
+        도킹 지점이 맞다.
+
+        신선하지 않으면 None 을 준다. 얼어붙은 TF 로 seed 를 잡으면 로봇이
+        과거 위치에서 위치추정을 시작한다.
+        """
+
+        if self._tf_buffer is None:
+            return None
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self._map_frame,
+                "base_link",
+                self._time_type(),
+                timeout=self._duration_type(seconds=0.5),
+            )
+        except Exception as exc:
+            print(f"[SLAM] map pose read failed type={type(exc).__name__}")
+            return None
+        if not self._transform_is_fresh(transform):
+            return None
+        translation = transform.transform.translation
+        yaw = self._yaw_from_quaternion(transform.transform.rotation)
+        return float(translation.x), float(translation.y), float(yaw)
 
     def _wait_for_transform(self, deadline: float) -> bool:
         """map->odom 이 **최근에** 발행됐는지 본다. 존재만으로는 부족하다.
@@ -319,20 +628,25 @@ class RosSlamSessionControl:
         return False
 
     def _transform_is_fresh(self, transform: Any) -> bool:
-        """발행 시각이 ROS 현재 시각에서 ``_transform_max_age_sec`` 이내인가.
+        """발행 시각이 지금으로부터 ``_transform_max_age_sec`` 이내인가.
 
-        벽시계가 아니라 ROS 시계로 비교해야 한다. TF 스탬프는 ROS 시각이고,
-        젯슨은 RTC 를 유지하지 않아 부팅 초반 두 시계가 크게 어긋난다.
+        slam 은 스탬프에 ``transform_timeout_`` 를 더해 발행하므로 정상
+        운행에서 나이가 **음수**(미래)로 나온다. 실측 -0.10 ~ -0.12초.
+        그래서 상한만 보면 안 된다 -- 얼어붙은 TF 가 미래 스탬프를 달고 있으면
+        영원히 신선해 보인다. 아래로도 같은 폭만큼 막는다.
         """
 
         if self._node is None:
             return True
+        # _stamp_ns 는 **메시지**를 받아 header.stamp 를 푼다. 여기서 stamp 를
+        # 미리 풀어 넘기면 Time 에 .header 가 없어 항상 0 이 나오고, 아래
+        # `if not stamp_ns` 가 항상 참이 되어 이 함수가 **상수 False** 가 된다.
         stamp_ns = self._stamp_ns(transform)
         if not stamp_ns:
             return False
         now_ns = self._node.get_clock().now().nanoseconds
         age_sec = (now_ns - stamp_ns) / 1_000_000_000
-        if age_sec <= self._transform_max_age_sec:
+        if -self._transform_max_age_sec <= age_sec <= self._transform_max_age_sec:
             return True
         print(
             f"[SLAM] {self._map_frame}->{self._odom_frame} is stale "

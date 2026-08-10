@@ -105,6 +105,12 @@ class FakeRuntimeService:
             self.paused = False
             if self.stop_error is not None:
                 raise self.stop_error
+        elif command == "RESUME_PATROL":
+            if self.active_patrol_id != parameters["patrolId"]:
+                raise RuntimeError("ACTIVE_PATROL_MISMATCH")
+            if not self.paused:
+                raise RuntimeError("PATROL_NOT_PAUSED")
+            self.paused = False
 
     def pause_patrol(self, reason: str) -> None:
         del reason
@@ -485,6 +491,24 @@ class CommandStateMachineTest(unittest.TestCase):
             "ESP32 STOP was not delivered",
         )
         self.assertEqual(self.ai.disabled, ["STOP_PATROL"])
+
+    def test_resume_patrol_requires_matching_paused_patrol_and_acks(self) -> None:
+        self.runtime.active_patrol_id = 7
+        self.runtime.paused = True
+        self.store.state = "PATROLLING"
+
+        self.handler.handle(
+            self.settings.command_topic,
+            payload("RESUME_PATROL", "resume-1", patrol_id=7),
+        )
+
+        self.assertFalse(self.runtime.paused)
+        self.assertEqual(self.store.state, "PATROLLING")
+        self.assertEqual(self.mqtt.messages[-1][1]["status"], "SUCCEEDED")
+        self.assertEqual(
+            self.mqtt.messages[-1][1]["command"],
+            "RESUME_PATROL",
+        )
 
     def test_obstacle_requires_stable_clear_before_resume(self) -> None:
         self.runtime.active_patrol_id = 7
