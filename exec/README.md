@@ -7,7 +7,6 @@
 - API 문서: `https://i15e103.p.ssafy.io/swagger-ui.html`
 - EC2 접속: `ssh -i I15E103T.pem ubuntu@i15e103.p.ssafy.io`
 
-비밀번호, API Key, JWT Secret, Deploy Token은 Git에 저장하지 않는다. 아래 문서에는 변수명과 보관 위치만 적는다.
 
 ## 1. 현재 운영 환경
 
@@ -15,9 +14,6 @@
 
 | 항목 | 현재 값 |
 | --- | --- |
-| OS | Ubuntu 24.04.3 LTS, Linux 6.17.0-1017-aws |
-| 사양 | 4 vCPU, RAM 15 GiB, 루트 디스크 309 GiB |
-| 디스크 사용량 | 107 GiB 사용, 203 GiB 여유(35%) |
 | Docker | 29.1.3 |
 | Docker Compose | 2.40.3 |
 | GitLab Runner | 18.11.4, Shell executor, 태그 `aiot-ec2` |
@@ -188,7 +184,7 @@ sudo /srv/aiot/deploy/rollback.sh release <release-id>
 
 ### 4.1 Jetson Robot Pull OTA
 
-Jetson 운영 배포는 SSH로 소스를 복사하거나 Jetson에서 Git을 pull하는 방식이 아니다. 승인된 Robot 패키지를 Jetson이 직접 내려받는 Pull OTA를 사용한다.
+Jetson 운영 배포는 승인된 Robot 패키지를 Jetson이 직접 내려받는 Pull OTA를 사용한다.
 
 ```text
 iot/dev → iot/master → iot-vX.Y.Z 태그
