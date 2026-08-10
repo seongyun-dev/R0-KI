@@ -732,6 +732,12 @@
 .r0ki .rmap text{font-family:var(--sans);font-size:13px;font-weight:700;fill:var(--text-2);text-anchor:middle}
 .r0ki .rmap .rt{font-size:12px;font-weight:600;fill:var(--text-3)}
 
+/* 입주민 상세 알림 이력 — 패널 안 내부 스크롤 (표가 패널보다 길어지면 잘리는 대신 스크롤) */
+.r0ki .ntlwrap{flex:1;min-height:0;overflow-y:auto;padding-right:5px}
+.r0ki .ntlwrap::-webkit-scrollbar{width:6px}
+.r0ki .ntlwrap::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+.r0ki .ntlwrap::-webkit-scrollbar-track{background:transparent}
+
 /* 순찰 지점 기록 (타임라인) — 내부 스크롤 */
 .r0ki .tline{position:relative;flex:1;min-height:0;overflow-y:auto;padding:0 5px 0 2px}
 .r0ki .tline::-webkit-scrollbar{width:6px}
