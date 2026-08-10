@@ -36,14 +36,16 @@ grep -q '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 grep -q '^Environment=PYTHONUNBUFFERED=1$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q 'fixed_resolution: false' \
+grep -q 'fixed_resolution: true' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'frequency: 10.0' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
-grep -q -- '-r __node:=rf2o_laser_odometry' \
+! grep -q -- '-r __node:=rf2o_laser_odometry' \
   "${repository_root}/robot/scripts/run-ros.sh"
+grep -q '^/\*\*:$' \
+  "${repository_root}/robot/config/ros/rf2o.yaml"
 grep -q 'use_rotate_to_heading: false' \
   "${repository_root}/robot/config/ros/nav2.params.yaml.template"
 grep -q 'motion_model_for_search: DUBIN' \
@@ -56,7 +58,9 @@ grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/ros-preflight.sh"
 grep -q 'export PYTHONPATH="${robot_root}/src' \
   "${repository_root}/robot/scripts/mqtt-e2e-check.sh"
-! grep -qE 'ROKI_(WHEELBASE_M|ROBOT_RADIUS_M)=[0-9]' \
+grep -q '^ROKI_WHEELBASE_M=0.124$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+grep -q '^ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG=8.6$' \
   "${repository_root}/infra/jetson/ros.env.example"
 grep -q '^ROKI_INITIAL_POSE_X_M=$' \
   "${repository_root}/infra/jetson/ros.env.example"
