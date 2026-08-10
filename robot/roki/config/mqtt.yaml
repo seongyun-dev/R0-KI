@@ -1,0 +1,13 @@
+broker:
+  host: "EC2_PUBLIC_IP"
+  port: 1883
+  keepalive_sec: 60
+  reconnect_interval_sec: 2.0
+
+client:
+  client_id: "roki-jetson"
+  qos: 1
+
+topics:
+  location: "robot/ROKI-01/location"
+  status: "hanbakwi/v1/robots/ROKI-01/status"

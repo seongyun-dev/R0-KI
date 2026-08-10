@@ -1,0 +1,33 @@
+[Unit]
+Description=AIoT robot runtime
+Wants=aiot-update.service aiot-ai.service aiot-ros.service
+After=aiot-ai.service aiot-ros.service
+ConditionFileIsExecutable=/opt/aiot/iot/current/robot/scripts/run.sh
+
+[Service]
+Type=simple
+User=e103
+Group=e103
+SupplementaryGroups=aiot dialout video render
+WorkingDirectory=/opt/aiot/iot/current
+# Load Robot/MQTT-specific values first, then make ros.env authoritative for
+# shared geometry, fixed-map and dock-pose values.  This keeps Nav2 and the
+# Robot cmd_vel conversion on the exact same physical configuration even when
+# an older robot.env still contains duplicate ROKI_* keys.
+EnvironmentFile=-/opt/aiot/secrets/robot.env
+EnvironmentFile=/opt/aiot/secrets/ros.env
+Environment=ROS_LOCALHOST_ONLY=1
+Environment=ROS_DOMAIN_ID=0
+Environment=ROS_HOME=/var/lib/aiot/ros
+Environment=ROS_LOG_DIR=/var/lib/aiot/ros/log
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/opt/aiot/iot/current/robot/scripts/run.sh --check
+ExecStart=/opt/aiot/iot/current/robot/scripts/run.sh
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

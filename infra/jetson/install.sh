@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "run as root: sudo bash infra/jetson/install.sh" >&2
+  exit 1
+fi
+
+source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+enable_services=false
+if [ "${1:-}" = "--enable" ]; then
+  enable_services=true
+elif [ -n "${1:-}" ]; then
+  echo "usage: sudo bash infra/jetson/install.sh [--enable]" >&2
+  exit 2
+fi
+
+getent group aiot >/dev/null || groupadd --system aiot
+if ! id aiot >/dev/null 2>&1; then
+  useradd --system --gid aiot --home-dir /opt/aiot --shell /usr/sbin/nologin aiot
+fi
+for device_group in dialout video render; do
+  if getent group "${device_group}" >/dev/null; then
+    usermod -a -G "${device_group}" aiot
+  fi
+done
+if id e103 >/dev/null 2>&1; then
+  usermod -a -G aiot e103
+else
+  echo "Warning: e103 user is missing; aiot-ai.service cannot start yet." >&2
+fi
+
+install -d -m 0755 -o root -g root /opt/aiot /opt/aiot/bin
+install -d -m 0750 -o aiot -g aiot \
+  /opt/aiot/iot \
+  /opt/aiot/iot/releases \
+  /opt/aiot/iot/.staging \
+  /opt/aiot/iot/state \
+  /opt/aiot/logs
+install -d -m 0700 -o root -g root /opt/aiot/secrets
+install -d -m 2770 -o aiot -g aiot \
+  /var/lib/aiot \
+  /var/lib/aiot/config \
+  /var/lib/aiot/evidence \
+  /var/lib/aiot/outbox \
+  /var/lib/aiot/secrets \
+  /var/lib/aiot/state \
+  /var/lib/aiot/ros \
+  /var/lib/aiot/ros/log
+if [ ! -e /var/lib/aiot/state/patrol-deploy.lock ]; then
+  install -m 0660 -o aiot -g aiot /dev/null \
+    /var/lib/aiot/state/patrol-deploy.lock
+else
+  chown aiot:aiot /var/lib/aiot/state/patrol-deploy.lock
+  chmod 0660 /var/lib/aiot/state/patrol-deploy.lock
+fi
+install -m 0755 -o root -g root "${source_dir}/aiot-update.sh" /opt/aiot/bin/aiot-update
+install -m 0755 -o root -g root "${source_dir}/aiot-ai-preflight.sh" \
+  /opt/aiot/bin/aiot-ai-preflight
+install -m 0755 -o root -g root "${source_dir}/aiot-ai-run.sh" \
+  /opt/aiot/bin/aiot-ai-run
+install -m 0755 -o root -g root "${source_dir}/aiot-ai-wait-ready.sh" \
+  /opt/aiot/bin/aiot-ai-wait-ready
+install -m 0755 -o root -g root "${source_dir}/aiot-ai-wait-ready.py" \
+  /opt/aiot/bin/aiot-ai-wait-ready.py
+install -m 0755 -o root -g root "${source_dir}/aiot-mjpeg-tunnel.sh" \
+  /opt/aiot/bin/aiot-mjpeg-tunnel
+install -m 0644 -o root -g root "${source_dir}/aiot-update.service" \
+  /etc/systemd/system/aiot-update.service
+install -m 0644 -o root -g root "${source_dir}/aiot-update.timer" \
+  /etc/systemd/system/aiot-update.timer
+install -m 0644 -o root -g root "${source_dir}/aiot-ai.service" \
+  /etc/systemd/system/aiot-ai.service
+install -m 0644 -o root -g root "${source_dir}/aiot-mjpeg-tunnel.service" \
+  /etc/systemd/system/aiot-mjpeg-tunnel.service
+install -m 0644 -o root -g root "${source_dir}/aiot-ros.service" \
+  /etc/systemd/system/aiot-ros.service
+install -m 0644 -o root -g root "${source_dir}/aiot-robot.service" \
+  /etc/systemd/system/aiot-robot.service
+install -m 0644 -o root -g root "${source_dir}/99-roki-serial.rules" \
+  /etc/udev/rules.d/99-roki-serial.rules
+install -m 0644 -o root -g root "${source_dir}/99-roki-cameras.rules" \
+  /etc/udev/rules.d/99-roki-cameras.rules
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=tty
+udevadm trigger --subsystem-match=video4linux
+
+if [ ! -e /opt/aiot/secrets/package-read.env ]; then
+  install -m 0600 -o root -g root "${source_dir}/package-read.env.example" \
+    /opt/aiot/secrets/package-read.env.example
+  echo "Create /opt/aiot/secrets/package-read.env from the example before enabling OTA."
+fi
+if [ ! -e /opt/aiot/secrets/ai.env ]; then
+  install -m 0600 -o root -g root "${source_dir}/ai.env.example" \
+    /opt/aiot/secrets/ai.env.example
+  echo "Review /opt/aiot/secrets/ai.env.example before starting AI."
+fi
+if [ ! -e /opt/aiot/secrets/ros.env ]; then
+  install -m 0600 -o root -g root "${source_dir}/ros.env.example" \
+    /opt/aiot/secrets/ros.env.example
+  echo "Review field measurements in /opt/aiot/secrets/ros.env.example before creating ros.env."
+fi
+if [ ! -e /opt/aiot/secrets/stream.env ]; then
+  install -m 0640 -o root -g aiot "${source_dir}/stream.env.example" \
+    /opt/aiot/secrets/stream.env.example
+  echo "Provision the restricted stream tunnel key and create /opt/aiot/secrets/stream.env before enabling MJPEG relay."
+fi
+
+systemctl daemon-reload
+if command -v systemd-analyze >/dev/null 2>&1; then
+  verify_units=(
+    /etc/systemd/system/aiot-update.service
+    /etc/systemd/system/aiot-update.timer
+    /etc/systemd/system/aiot-ai.service
+    /etc/systemd/system/aiot-mjpeg-tunnel.service
+  )
+  if [ -x /opt/aiot/iot/current/robot/scripts/run-ros.sh ]; then
+    verify_units+=(/etc/systemd/system/aiot-ros.service)
+  fi
+  if [ -x /opt/aiot/iot/current/robot/scripts/run.sh ] && \
+     [ -x /opt/aiot/iot/current/robot/scripts/run-ros.sh ]; then
+    verify_units+=(/etc/systemd/system/aiot-robot.service)
+  fi
+  systemd-analyze verify "${verify_units[@]}"
+fi
+if [ "${enable_services}" = true ]; then
+  systemctl enable aiot-update.timer aiot-ai.service aiot-mjpeg-tunnel.service aiot-ros.service aiot-robot.service
+  echo "Jetson services enabled. Start them only after environment review."
+else
+  echo "Jetson units installed but not newly enabled."
+  echo "After manual validation: sudo bash infra/jetson/install.sh --enable"
+fi
+echo "Credentials and existing AI runtime files were not created or overwritten."

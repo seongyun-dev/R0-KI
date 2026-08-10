@@ -1,0 +1,565 @@
+/* ============================================================
+   랜딩 전용 스타일 — docs/reference/landing.html 프로토타입 포팅.
+   랜딩은 비주얼 진실원천(landing.html)을 그대로 재현하는 예외 영역.
+   색은 tokens.css 변수를 참조(accent-2 → accent-light).
+   ============================================================ */
+
+/* ===== 액센트 — R0-Ki 블루 (S15P11E103-276) =====
+   랜딩→로그인→대시보드로 이어지는 흐름에서 브랜드 색이 끊기지 않도록
+   기존 오렌지(#e0532a)를 관제 화면 r0ki 팔레트의 파랑으로 맞춘다.
+
+   tokens.css 의 --accent* 는 전역이라 구 디자인 화면(ui/Button·Input·
+   Stepper·통계 차트 등 20여 곳)이 함께 물려 있다. 그래서 여기서 바꾸지 않고
+   .landing 하위에서만 덮어쓴다 — 랜딩 밖은 오렌지 그대로다.
+
+   ⚠️ 텍스트에는 --accent(#38BDF8)를 쓰지 않는다 — 흰 배경 대비 2.14:1 로
+   WCAG AA(4.5:1)에 한참 못 미쳐 큰 제목에서도 흐리게 읽힌다.
+   밝은 면 위 글자는 전부 --accent-deep(#0284C7, 4.51:1).
+   --accent 는 그래픽 전용(테두리·글로우·점·경로·그라데이션)이다. */
+.landing {
+  /* 파랑은 3단만 쓴다 — 명도로 역할이 갈린다.
+     단계를 늘리면(예전 --success #0369A1 vs --accent-deep #0284C7) 육안으로 구분되지 않으면서
+     의미만 달라져, 두 색 다 신호로 작동하지 못한다. */
+  --accent-light: #7DD3FC;  /* 어두운 면 위 — 아이콘·수치 */
+  --accent: #38BDF8;        /* 브랜드·그래픽 — 테두리·글로우·경로 */
+  --accent-deep: #0284C7;   /* 밝은 면 위 텍스트 — 흰 배경 4.51:1 */
+  --accent-soft: #E0F2FE;   /* 옅은 채움 — 칩·배지 (색 단계가 아니라 면) */
+  /* 글로우·그림자에서 알파를 섞어 쓰기 위한 채널값 */
+  --accent-rgb: 56 189 248;
+  --accent-light-rgb: 125 211 252;
+
+  /* '해결됨'은 아래 --mint 계열로 — 브랜드 파랑을 그대로 쓰면 상태가 아니라
+     기본값처럼 읽힌다(원래 초록이 하던 역할). 민트로 한 칸 돌려 상태색을 되살린다.
+     '라이브'는 강조가 아니라 살아있음 표시라 브랜드 파랑 그대로 둔다.
+     관제 화면의 초록(순찰 완료·충전)은 .landing 밖이라 영향 없다. */
+  --success: var(--mint-deep);
+  --success-soft: #CFFAFE;
+  --online: var(--accent);
+
+  /* 빨강도 쿨하게 — 기존 #e5484d 는 색상각 2°(노랑 쪽)라 하늘빛 배경에서 혼자 웜톤으로 뜬다.
+     로즈 계열(347°)로 내리면 파랑과 같은 차가운 축에 놓인다.
+     덤으로 흰 배경 대비도 3.93 → 4.69 로 올라 AA(4.5)를 넘긴다. */
+  --danger: #E11D48;
+  --danger-soft: #FFE4E6;
+  --danger-rgb: 225 29 72;
+
+  /* 해결 상태 — 액센트(198°)보다 민트 쪽으로 살짝 돌린 하늘색(188°).
+     같은 파랑 계열이면 카드가 그냥 '파란 테두리'로 보이는데,
+     민트기가 조금 섞이면 배경 하늘과 겹치지 않으면서도 튀지 않는다.
+     파랑과 마찬가지로 그래픽용/텍스트용 두 단계를 둔다 —
+     --mint 는 흰 배경 대비 1.81 이라 글자에 쓰면 읽히지 않는다. */
+  --mint: #22D3EE;       /* 테두리·그림자 */
+  --mint-deep: #0E7490;  /* 글자·아이콘 — 흰 배경 5.39:1 */
+  --mint-rgb: 34 211 238;
+}
+
+/* ===== 배경 — 순백 바탕 + 하늘빛 유리 =====
+   기존 랜딩은 따뜻한 회색(#f2f1ef / #eceae7 / rgba(247,246,244)) 계열이라
+   로그인 순간 톤이 확 바뀌었다. 중립 톤을 걷고 색 온도를 관제 화면 쪽으로 맞춘다.
+
+   바탕에 하늘 그라데이션을 깔았다가 순백으로 돌아왔다 —
+   그 위에 흰 베일·유리 카드가 겹치면 채도가 깎여 결국 뿌옇게 읽혔다.
+   하늘빛은 액센트·카드 테두리·3D 씬이 담당하고, 배경은 비워둔다. */
+.landing {
+  --surface: rgba(255, 255, 255, .55);   /* 카드 채움 — 불투명 회색 → 유리 */
+  --surface-2: rgba(255, 255, 255, .78); /* hover 시 살짝 진하게 */
+  --line: rgba(40, 75, 114, .14);        /* r0ki --hair — 차가운 헤어라인 */
+  --hero-to: #E1ECFA;
+  /* 유리 위에 겹치는 옅은 흰 베일 — 3D 씬이 비치되 글자는 읽히게 */
+  --veil: rgba(255, 255, 255, .4);
+  --veil-soft: rgba(255, 255, 255, .1);
+
+  /* 콘텐츠 카드 공용 레시피 — 문제·기능 카드가 같은 재질로 읽히게 한 곳에서 관리한다.
+     배경이 순백이 된 뒤로는 반투명·blur 가 뒤의 3D 씬만 뭉개 뿌옇게 보였다 — 불투명 순백으로. */
+  --card-glass: #FFFFFF;
+  --card-blur: none;
+  --card-radius: 1.5rem;
+  --card-shadow: 0 18px 44px -26px rgba(40, 75, 114, .35);
+  /* 그림자·스크림 공통 채널 — 하늘빛 배경 위에서 중성 회색 그림자는 탁하게(먼지처럼) 보인다.
+     페이지 그늘색과 같은 청색 계열로 통일한다. */
+  --shadow-rgb: 40 75 114;
+
+  /* 어두운 면 — 순검정(--ink #0a0a0a)이면 하늘빛 페이지와 톤이 끊긴다.
+     r0ki 야간 모드(nocturne) 값을 그대로 써서 '밤하늘 → 낮하늘'로 이어지게 한다. */
+  --ink-deep: #101A2B;
+  --ink-scene:
+    radial-gradient(1200px 900px at 50% -20%, rgba(150, 190, 255, .14), transparent 70%),
+    linear-gradient(176deg, #1B2739 0%, #151F2F 44%, #101A28 100%);
+  /* 아주 연한 하늘 그라데이션. 예전엔 훨씬 진해서 그 위에 흰 베일·유리가 겹치며
+     채도가 깎여 뿌옇게 읽혔다 — 지금은 흰색에서 거의 안 떨어진 폭만 쓴다.
+     3D 지면 톤(sceneTextures GROUND_TINT #E1EDFA)이 이 그라데이션 하단 구간에 놓이도록
+     맞춰져 있어, 캔버스 영역만 따로 뜨지 않는다. */
+  background: linear-gradient(176deg, #FFFFFF 0%, #F7FBFE 28%, #ECF4FC 60%, #DFEBF9 100%);
+  background-attachment: fixed;
+}
+
+/* 상단바 라이브 점의 초록 후광 — siteHeader.css 에 rgba(34,197,94,…)로 박혀 있다.
+   그 파일은 랜딩 밖에서도 쓰일 수 있는 공용 헤더라 여기서만 덮는다. */
+.landing .clock-chip .live { box-shadow: 0 0 0 3px rgb(var(--accent-light-rgb) / .28) }
+.landing .patrol-switch__seg.is-on .patrol-switch__dot--live { box-shadow: 0 0 0 3px rgb(var(--accent-light-rgb) / .32) }
+
+/* CTA 버튼(ui/Button variant="accent")은 Tailwind 리터럴 hex를 쓰므로
+   CSS 변수 오버라이드가 닿지 않는다. 랜딩 안에서만 그라데이션을 다시 칠한다
+   (tailwind.config.js 를 바꾸면 구 디자인 화면까지 전부 바뀌어 276 범위를 넘는다). */
+.landing .from-accent-light {
+  background-image: linear-gradient(to bottom right, var(--accent-light), var(--accent-deep));
+}
+/* 같은 이유 — ui/Eyebrow 의 점(bg-accent / bg-accent-light)도 Tailwind 리터럴이라
+   오렌지(#e0532a)가 그대로 남아 있었다. 섹션 소제목마다 붙는 점이라 눈에 잘 띈다. */
+.landing .bg-accent { background-color: var(--accent) }
+.landing .bg-accent-light { background-color: var(--accent-light) }
+
+/* adaptive rem grid — 랜딩 라우트에서만 (html.landing-grid) */
+@media (max-width: 1920px) { html.landing-grid { font-size: 0.833333vw } }
+@media (max-width: 1440px) { html.landing-grid { font-size: 1.111111vw } }
+@media (max-width: 1024px) { html.landing-grid { font-size: 1.5625vw } }
+@media (max-width: 640px)  { html.landing-grid { font-size: 4.166666vw } }
+
+/* 랜딩은 넓은 모니터를 채우도록 본문보다 넓은 shell을 쓴다.
+   .site-header .shell보다 뒤에 실려 헤더도 같은 폭으로 맞춰진다(정렬 유지). */
+.landing .shell { max-width: var(--shell-wide); margin-inline: auto }
+.landing .skip { position: fixed; left: 1rem; top: 1rem; z-index: 60; border-radius: .875rem; background: var(--ink-deep); padding: .5rem 1rem; font-size: .875rem; color: #fff; transform: translateY(-200%) }
+.landing .skip:focus { transform: none }
+
+/* ===== reveal engine ===== */
+.landing [data-reveal] { will-change: transform, opacity }
+.landing [data-reveal="fade"] { opacity: 0; transition: opacity .7s cubic-bezier(.22,1,.36,1) }
+.landing [data-reveal="up"] { opacity: 0; transform: translateY(var(--ry, 16px)); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1) }
+.landing [data-reveal="scale"] { opacity: 0; transform: translateY(var(--ry, 16px)) scale(.96); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1) }
+.landing [data-reveal].rv-in { opacity: 1; transform: none }
+.landing .line { display: block; overflow: hidden }
+.landing .line > .inner { display: block; transform: translateY(110%); opacity: 0; transition: transform .9s cubic-bezier(.215,.61,.355,1), opacity .9s cubic-bezier(.215,.61,.355,1) }
+.landing [data-reveal="line"].rv-in .inner { transform: none; opacity: 1 }
+
+/* ===== loader ===== */
+.loader { position: fixed; inset: 0; z-index: 120; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem; background: var(--ink-scene); color: #fff; border-radius: 0 0 2rem 2rem; transform: translateY(0%); transition: transform .7s cubic-bezier(.22,1,.36,1) }
+.loader.exit { transform: translateY(-100%) }
+.loader__center { display: flex; flex-direction: column; align-items: center; gap: 1.1rem; text-align: center; transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1) }
+.loader.exit .loader__center { opacity: 0; transform: translateY(-12px) }
+.loader__brand { display: flex; align-items: center; gap: .6rem; font-weight: 700; font-size: 1.6rem }
+.loader__brand .mk { width: 2rem; height: 2rem; color: var(--accent-light) }
+.loader__tag { max-width: 26ch; font-size: .9rem; color: rgba(255,255,255,.55) }
+.loader__progress { width: min(22rem, 72vw); display: flex; flex-direction: column; gap: .75rem }
+.loader__track { height: 2px; width: 100%; background: rgba(255,255,255,.15); border-radius: 2px; overflow: hidden }
+.loader__fill { height: 100%; background: linear-gradient(90deg, var(--accent-light), var(--accent)); width: 0%; transition: width .1s ease-out }
+.loader__row { display: flex; justify-content: space-between; font-size: .72rem; font-weight: 600; letter-spacing: .1em; color: rgba(255,255,255,.45) }
+.loader__count { color: rgba(255,255,255,.85) }
+
+/* 상단바 스타일은 components/layout/siteHeader.css 로 분리
+   (랜딩 밖 — 로그인 화면 등 — 에서도 같은 헤더를 쓰기 때문) */
+
+/* ===== patrol stage — 히어로 + 해결하는 문제를 잇는 하나의 순찰 장면 ===== */
+/* overflow는 clip을 쓴다: hidden과 달리 스크롤 컨테이너를 만들지 않아 내부 sticky가 살아난다 */
+/* 하늘은 .landing 바닥에 깔려 있으므로 무대는 옅은 유리 베일만 얹는다.
+   끝단은 베일을 걷는다 — 흰 베일을 끝까지 두면 무대가 페이지 하늘보다 밝아
+   경계가 한 줄로 드러난다. */
+/* 하단 라운드는 두지 않는다 — 프로토타입은 무대 아래도 흰 배경이라 안 보였지만
+   하늘 배경에서는 모서리가 계단처럼 드러난다 */
+.patrol-stage { position: relative; isolation: isolate; overflow: clip;
+  background: linear-gradient(180deg, var(--veil) 0%, var(--veil-soft) 55%, rgba(255,255,255,.18) 100%) }
+/* 무대 → 페이지 전환 — sticky 캔버스가 무대 끝까지 살아 있어 안개색이 그대로 이어진다.
+   아래쪽을 하늘색으로 서서히 덮어 다음 섹션과 잇는다.
+   z-index:0 — 캔버스(.patrol-stage__scene) 위, 콘텐츠(z-index:1) 아래. */
+.patrol-stage::after { content: ''; position: absolute; inset-inline: 0; bottom: 0; height: 55vh;
+  z-index: 0; pointer-events: none;
+  background: linear-gradient(180deg,
+    rgba(223,235,249,0) 0%, rgba(223,235,249,.5) 55%, rgba(223,235,249,.92) 100%) }
+/* 자식이 절대배치뿐이라 이 높이 선언이 유일한 높이 근거다.
+   lvh를 못 쓰는 환경에서 0이 되면 캔버스가 통째로 사라지므로 vh 폴백을 먼저 둔다. */
+.patrol-stage__scene { position: sticky; top: 0; z-index: 0; height: 100vh; height: 100lvh }
+.patrol-stage__scene canvas { display: block; width: 100%; height: 100% }
+/* sticky 캔버스 위로 콘텐츠를 올린다 */
+/* 무대 안의 섹션은 모두 투명해야 뒤의 3D 캔버스가 비친다.
+   #features/#problem에 걸린 흰 배경(정적 폴백용)이 그대로 먹으면 캔버스가 통째로 가려진다. */
+.patrol-stage #home,
+.patrol-stage #problem,
+.patrol-stage #features,
+.patrol-stage .journey-track,
+.patrol-stage .prob-track { position: relative; z-index: 1; background: transparent }
+/* 문제 4개를 처리하는 동안 카드가 화면에 머문다 (트랙 길이 = 문제 수 × 화면) */
+.prob-track { position: relative; z-index: 1; height: 400vh; height: 400lvh }
+.prob-pin { position: sticky; top: 0; height: 100vh; height: 100lvh; display: flex; align-items: center }
+.prob-pin #problem { width: 100%; min-height: 0 }
+/* 3D 위에 얹히지만 씬 자체가 밝아 옅은 스크림이면 충분하다.
+   너무 진하면 뒤에서 순찰하는 로봇이 씻겨나가므로 중앙부는 옅게 유지한다. */
+.prob-pin::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg,
+    rgba(255,255,255,.36) 0%, rgba(255,255,255,.28) 28%,
+    rgba(255,255,255,.05) 44%, rgba(255,255,255,.05) 74%,
+    rgba(255,255,255,.28) 100%) }
+/* 캔버스가 sticky로 첫 화면을 차지하므로 히어로는 그만큼 끌어올린다 */
+.patrol-stage #home { margin-top: -100lvh }
+
+/* ---- 문제 → 기능 전환 구간 ---- */
+/* 두 고정 스크롤 사이에서 한 박자 쉬어가며 대응 관계를 정리한다 */
+/* 두 고정 스크롤 사이에서 한 화면을 온전히 차지해야 '쉬어가는' 느낌이 난다 */
+.bridge { position: relative; z-index: 1; min-height: 100lvh; display: flex; align-items: center; padding: 5rem 1.25rem }
+@media (min-width: 640px) { .bridge { padding-left: 2rem; padding-right: 2rem } }
+.bridge .shell { width: 100% }
+/* 여기서도 로봇이 계속 비쳐야 흐름이 끊기지 않는다 — 행 자체가 배경을 가지므로 스크림은 옅게 */
+.bridge::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.24) 0%, rgba(255,255,255,.4) 30%, rgba(255,255,255,.4) 70%, rgba(255,255,255,.24) 100%) }
+.bridge-inner { display: flex; flex-direction: column; align-items: center; text-align: center }
+.bridge-eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .22em; color: var(--accent-deep) }
+.bridge-h2 { margin-top: .9rem; font-size: 1.9rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
+@media (min-width: 640px) { .bridge-h2 { font-size: 2.4rem } }
+.bridge-rows { margin-top: 2.75rem; width: 100%; max-width: 46rem; display: flex; flex-direction: column; gap: .5rem; list-style: none; padding: 0 }
+.bridge-rows li { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 1rem;
+  border-radius: 1rem; background: var(--surface); padding: 1rem 1.4rem }
+.bridge-from { font-size: .8rem; font-weight: 700; color: var(--danger); text-align: right }
+.bridge-arrow { width: 1rem; height: 1rem; color: var(--muted); flex: none }
+.bridge-to { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; text-align: left; word-break: keep-all }
+
+/* ===== hero ===== */
+#home { position: relative; isolation: isolate; min-height: 100lvh }
+/* 히어로 좌측 스크림 — 3D 씬 위에서 제목이 읽히도록. 순백 바탕과 같은 흰색으로 깐다 */
+.hero-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    linear-gradient(100deg, rgba(255,255,255,.95) 0%, rgba(255,255,255,.74) 26%, rgba(255,255,255,.28) 46%, rgba(255,255,255,0) 64%),
+    linear-gradient(to bottom, rgba(255,255,255,.55) 0%, transparent 16%),
+    linear-gradient(to top, rgba(255,255,255,.8) 0%, transparent 22%) }
+@media (max-width: 1023px) {
+  .hero-vignette { background:
+    linear-gradient(to bottom, rgba(255,255,255,.98) 0%, rgba(255,255,255,.95) 42%, rgba(255,255,255,.55) 62%, rgba(255,255,255,.05) 80%),
+    linear-gradient(to top, rgba(255,255,255,.8) 0%, transparent 20%) }
+}
+.hero-grid { position: relative; z-index: 20; display: flex; flex-direction: column; justify-content: flex-start; min-height: 100lvh; padding: 6.5rem 1.25rem 6rem }
+@media (min-width: 640px) { .hero-grid { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .hero-grid { justify-content: center; padding: 9.5rem 2rem 7rem } }
+/* 폭 제한은 제목이 마크업대로 두 줄을 유지할 만큼 넉넉해야 한다(글자를 키우면 46rem으로는 넘친다) */
+.hero-left { display: flex; flex-direction: column; gap: 2.4rem; max-width: 56rem }
+.hero-eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .85rem; font-weight: 600; color: rgba(17,17,17,.78) }
+.hero-eyebrow .dot { width: .4rem; height: .4rem; background: var(--accent); border-radius: 9999px }
+/* 한글은 어절(띄어쓰기) 단위로만 줄바꿈 — keep-all이 없으면 "시간에/도"처럼 낱글자가 끊긴다.
+   ch 단위는 숫자 폭 기준이라 전각 한글에 맞지 않으므로 폭 제한은 부모(.hero-left)에 맡긴다. */
+.hero-h1 { font-size: 2.1rem; font-weight: 700; line-height: 1.15; letter-spacing: -.03em; word-break: keep-all }
+@media (min-width: 640px) { .hero-h1 { font-size: 2.9rem } }
+@media (min-width: 768px) { .hero-h1 { font-size: 3.4rem } }
+@media (min-width: 1280px) { .hero-h1 { font-size: 3.95rem } }
+/* 두 줄이 서로 다른 문장이라 줄 사이를 띄운다.
+   line-height 대신 줄 블록 사이 여백으로 줘야, 좁은 화면에서 한 줄이 접혔을 때
+   그 안쪽 줄간격까지 같이 벌어지지 않는다. */
+.hero-h1 .line + .line { margin-top: .18em }
+.hero-h1 .accent { color: var(--accent-deep) }
+.hero-sub { max-width: 60ch; font-size: 1.04rem; line-height: 1.75; color: rgba(17,17,17,.74) }
+.cta-row { display: flex; flex-wrap: wrap; gap: .9rem }
+.hero-stats { display: flex; flex-wrap: wrap; gap: 3rem; margin-top: .75rem }
+.hero-stat .n { font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em }
+.hero-stat .n b { color: var(--accent-deep); font-weight: 700 }
+.hero-stat .l { margin-top: .3rem; font-size: .82rem; color: rgba(17,17,17,.65) }
+
+/* floating product chips */
+.robot-chip { position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: .5rem; border-radius: 9999px; background: rgba(16,26,43,.82); color: #fff; backdrop-filter: blur(8px); padding: .6rem 1.1rem; font-size: .95rem; font-weight: 600; box-shadow: 0 8px 24px -10px rgb(var(--shadow-rgb) / .5) }
+.robot-chip .live { width: .5rem; height: .5rem; border-radius: 9999px; background: var(--online); box-shadow: 0 0 0 3px rgb(var(--accent-light-rgb) / .3) }
+.robot-chip--status { top: 6.5rem; right: 2rem }
+.robot-chip--event { bottom: 7rem; right: 2rem; background: #fff; color: #111; box-shadow: 0 10px 30px -12px rgb(var(--shadow-rgb) / .3) }
+.robot-chip--event .k { width: 1.9rem; height: 1.9rem; display: grid; place-items: center; border-radius: 9999px; background: var(--accent-soft); color: var(--accent-deep) }
+.robot-chip--event .t { font-weight: 700 }
+.robot-chip--event .s { font-weight: 500; color: var(--muted); font-size: .85rem }
+.robot-hint { position: absolute; z-index: 20; bottom: 4.5rem; right: 2rem; font-size: .9rem; color: rgba(17,17,17,.7); font-weight: 600; letter-spacing: .02em; transition: opacity .4s }
+@media (max-width: 1023px) {
+  .robot-chip--status { top: 5rem; right: 1.25rem }
+  .robot-chip--event { display: none }
+  .robot-hint { left: 1.25rem; right: auto; bottom: 4.2rem }
+}
+
+.hero-status { position: absolute; inset-inline: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-inline: auto; max-width: var(--shell-wide); border-top: 1px solid var(--line); padding: 1.2rem 1.25rem; font-size: .74rem; font-weight: 600; letter-spacing: .02em; color: rgba(17,17,17,.6) }
+@media (min-width: 640px) { .hero-status { padding-left: 2rem; padding-right: 2rem } }
+.hero-status .mid { display: none }
+@media (min-width: 640px) { .hero-status .mid { display: inline } }
+.hero-status .end { display: inline-flex; gap: .5rem }
+
+/* ===== sections common ===== */
+.landing .sec-pad { padding: 4.5rem 1.25rem }
+@media (min-width: 640px) { .landing .sec-pad { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .landing .sec-pad { padding-top: 7rem; padding-bottom: 7rem } }
+.landing .center-head { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem }
+/* 한글은 어절 단위로만 줄바꿈 (keep-all 없으면 "흘/러갑니다"처럼 낱글자가 끊긴다) */
+.landing .sec-h2 { font-size: 2rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
+@media (min-width: 640px) { .landing .sec-h2 { font-size: 2.7rem } }
+
+/* ===== problem (해결하는 문제 — 카피는 landing_1p.html) ===== */
+/* 섹션은 색을 갖지 않는다 — .landing 하늘이 그대로 비친다 */
+#problem { background: transparent }
+.prob-sub { max-width: 44ch; font-size: .95rem; line-height: 1.6; color: rgba(17,17,17,.55); word-break: keep-all }
+.prob-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 3rem; list-style: none; padding: 0 }
+@media (min-width: 640px) { .prob-grid { grid-template-columns: 1fr 1fr } }
+@media (min-width: 1024px) { .prob-grid { grid-template-columns: repeat(4, 1fr) } }
+/* 유리 카드 — 기능 카드(.journey-card/.feat-card)와 같은 레시피 */
+.prob-card { height: 100%; display: flex; flex-direction: column; gap: .8rem; border-radius: var(--card-radius); background: var(--card-glass); padding: 1.75rem;
+  backdrop-filter: var(--card-blur); box-shadow: inset 0 0 0 1px var(--line), var(--card-shadow);
+  transition: transform .45s var(--ease-snap), background .45s var(--ease-snap), box-shadow .45s var(--ease-snap), opacity .45s var(--ease-snap) }
+@media (hover:hover) and (pointer:fine) { .prob-card:hover { transform: translateY(-6px); background: var(--surface-2) } }
+/* 분류명이 길어 자간이 넓으면 카드 폭을 넘긴다. 트래킹만 좁혀 한 줄로 버티는 구간을 넓히고,
+   접히더라도 keep-all로 어절 단위로만 끊는다("교대근/무"처럼 낱글자가 갈리지 않게) */
+.prob-tag { font-size: .72rem; font-weight: 700; letter-spacing: .02em; color: var(--accent-deep); word-break: keep-all }
+.prob-card h3 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; word-break: keep-all }
+.prob-card p { font-size: .88rem; line-height: 1.6; color: rgba(17,17,17,.55); word-break: keep-all }
+
+/* ---- 문제 해결 서사 (로봇이 하나씩 처리) ---- */
+/* 처리 전에는 가라앉아 있다가, 출동 대상이 되면 떠오르고, 해결되면 파랑으로 확정된다 */
+.prob-card.is-narrative { background: #fff; box-shadow: inset 0 0 0 1px var(--line);
+  opacity: .55; transform: translateY(6px) }
+.prob-card.is-narrative .prob-tag { color: rgb(var(--danger-rgb) / .85) }
+.prob-card.is-active { opacity: 1; transform: translateY(-4px); background: #fff;
+  box-shadow: inset 0 0 0 1px rgb(var(--danger-rgb) / .4), 0 18px 40px -22px rgb(var(--danger-rgb) / .25) }
+/* 해결 카드 — 테두리를 밝은 하늘색(--accent)으로 세운다.
+   테두리는 카드 안쪽 헤어라인(inset)으로만 둔다 — 바깥 spread(0 0 0 Npx)는 흐림이 없어
+   아무리 옅게 줘도 가장자리가 딱 떨어져 두 번째 테두리로 읽힌다.
+   그림자도 같은 민트로 물들여 테두리와 한 덩어리로 보이게 한다. */
+.prob-card.is-solved { opacity: 1; transform: none; background: #fff;
+  box-shadow: inset 0 0 0 1.5px rgb(var(--mint-rgb) / .62),
+    0 18px 44px -26px rgb(var(--mint-rgb) / .45) }
+.prob-card.is-solved .prob-tag { color: var(--success) }
+
+/* .prob-card p (0,2,0) 보다 뒤에 있어도 특정도가 낮으면 색이 먹지 않는다 —
+   .prob-status 도 <p> 라서 카드 본문 색에 덮여 파랑이 적용되지 않았다 */
+.prob-card .prob-status { margin-top: auto; padding-top: .9rem; display: flex; align-items: center; gap: .4rem;
+  font-size: .8rem; font-weight: 700; line-height: 1.45; color: var(--success); word-break: keep-all }
+.prob-check { flex: none; width: .95rem; height: .95rem; color: var(--success) }
+.prob-card .prob-pending { color: rgba(17,17,17,.35); font-weight: 600 }
+.prob-card .prob-working { color: var(--danger); font-weight: 700 }
+.prob-working::after { content: ''; display: inline-block; width: .35rem; height: .35rem; margin-left: .4rem;
+  border-radius: 9999px; background: rgb(var(--danger-rgb) / .55); animation: prob-blink 1s steps(2, start) infinite; vertical-align: middle }
+@keyframes prob-blink { 0%, 100% { opacity: 1 } 50% { opacity: .2 } }
+
+/* ===== features ===== */
+#features { background: transparent }
+.feat-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; margin-top: 3rem }
+@media (min-width: 768px) { .feat-grid { grid-template-columns: 1fr 1fr } }
+/* journey-card(3D 경로용)와 같은 내용의 정적 버전이라 재질도 같이 간다 — 공용 유리 레시피 */
+.feat-card { position: relative; min-height: 19rem; overflow: hidden; border-radius: var(--card-radius); background: var(--card-glass); backdrop-filter: var(--card-blur); padding: 1.75rem; color: var(--fg); box-shadow: inset 0 0 0 1px var(--line), var(--card-shadow); transition: transform .4s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .feat-card { padding: 2.1rem } }
+@media (hover:hover) and (pointer:fine) { .feat-card:hover { transform: translateY(-8px) } }
+/* 흰 카드 위에서는 글로우가 그대로면 탁해 보인다 — 옅은 하늘 얼룩 정도로 낮춘다 */
+.feat-card .glow { position: absolute; right: -6rem; top: -6rem; width: 16rem; height: 16rem; border-radius: 9999px; background: radial-gradient(closest-side, rgb(var(--accent-rgb) / .18), transparent 70%); pointer-events: none }
+.feat-top { display: flex; align-items: center; justify-content: space-between }
+.feat-ico { width: 3rem; height: 3rem; display: grid; place-items: center; border-radius: 1rem; background: var(--accent-soft); color: var(--accent-deep); box-shadow: inset 0 0 0 1px rgb(var(--accent-light-rgb) / .45) }
+.feat-ico svg { width: 1.4rem; height: 1.4rem }
+.feat-no { font-size: .75rem; font-weight: 700; color: rgba(17,17,17,.35); letter-spacing: .1em }
+.feat-body { position: absolute; inset-inline: 1.75rem; bottom: 1.75rem }
+@media (min-width: 640px) { .feat-body { inset-inline: 2.1rem; bottom: 2.1rem } }
+.feat-body h3 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em }
+@media (min-width: 640px) { .feat-body h3 { font-size: 1.65rem } }
+.feat-body p { margin-top: .6rem; max-width: 32ch; font-size: .9rem; line-height: 1.55; color: rgba(17,17,17,.58) }
+.feat-body .tags { margin-top: 1.1rem; display: flex; flex-wrap: wrap; gap: .5rem }
+
+/* ===== 기능 구간 — 무대의 캔버스를 그대로 쓰고 카드만 얹는다 ===== */
+.journey-track { position: relative; z-index: 1; height: 400vh; height: 400lvh }
+.journey-pin { position: sticky; top: 0; height: 100vh; height: 100lvh }
+/* 문제 구간에서 기능 구간으로 넘어갈 때 배경이 끊기지 않게 아주 옅은 스크림만 */
+.journey-pin::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,.28) 0%, rgba(255,255,255,.05) 24%, rgba(255,255,255,.05) 76%, rgba(255,255,255,.32) 100%) }
+
+/* 도입 문구 — 첫 카드가 열리기 전까지 */
+.journey-lead-in { position: absolute; left: 50%; top: 13%; z-index: 2; width: min(46rem, 86vw); transform: translateX(-50%); text-align: center;
+  transition: opacity .5s var(--ease-out), transform .5s var(--ease-out) }
+.journey-lead-in.is-out { opacity: 0; transform: translateX(-50%) translateY(-1.5rem); pointer-events: none }
+.journey-eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .22em; color: var(--accent-deep) }
+.journey-lead-in h2 { margin-top: .9rem; font-size: 2.4rem; font-weight: 700; letter-spacing: -.03em; word-break: keep-all }
+/* 이 기능이 어떤 문제를 되받는지 — 두 섹션을 잇는 고리 */
+/* 문제 이름이 길면 알약이 라벨 옆에 다 못 들어간다. 줄을 내려 알약이 한 줄로 유지되게 한다
+   (알약은 pill 라운드라 두 줄이 되면 모양이 깨진다) */
+.journey-answers { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .78rem; font-weight: 600 }
+.journey-answers__label { color: rgba(17,17,17,.45) }
+/* 알약은 파랑 유지 — 흰 카드 위이므로 글자만 진한 파랑(--accent-deep)으로 내린다.
+   --accent-light(#7DD3FC)를 그대로 두면 흰 배경에서 거의 안 보인다. */
+.journey-answers .font-mono { color: var(--accent-deep); padding: .2rem .55rem; border-radius: 9999px;
+  background: rgb(var(--accent-light-rgb) / .18); box-shadow: inset 0 0 0 1px rgb(var(--accent-light-rgb) / .45) }
+
+/* 기능 카드 — 체크포인트 도달 시 열린다. 네 모서리를 차례로(우상→좌상→좌하→우하), 원근 기울기 */
+.journey-card { position: absolute; z-index: 2; top: 7vh; left: 4vw; width: min(27rem, 40vw);
+  border-radius: var(--card-radius); background: var(--card-glass); backdrop-filter: var(--card-blur);
+  color: var(--fg); padding: 2rem;
+  box-shadow: inset 0 0 0 1px var(--line), var(--card-shadow);
+  opacity: 0; visibility: hidden;
+  transform: translateX(-2.5rem) perspective(1200px) rotateY(9deg);
+  transition: opacity .55s var(--ease-out), transform .55s var(--ease-out), visibility .55s }
+.journey-card.is-right { left: auto; right: 4vw; transform: translateX(2.5rem) perspective(1200px) rotateY(-9deg) }
+/* 하단 모서리 — 진행 레일(bottom 2.5rem + 높이 2.5rem)에 닿지 않게 띄운다 */
+.journey-card.is-bottom { top: auto; bottom: 7rem }
+.journey-card.is-on { opacity: 1; visibility: visible; transform: translateX(0) perspective(1200px) rotateY(0deg) }
+/* [ 01 ] 번호도 파랑 유지 — 알약과 같은 이유로 --accent-deep */
+.journey-no { font-size: .74rem; font-weight: 700; letter-spacing: .12em; color: var(--accent-deep) }
+.journey-card h3 { margin-top: .7rem; font-size: 1.65rem; font-weight: 700; letter-spacing: -.02em; word-break: keep-all }
+.journey-card p { margin-top: .8rem; font-size: .92rem; line-height: 1.65; color: rgba(17,17,17,.62); word-break: keep-all }
+.journey-tags { margin-top: 1.2rem; display: flex; flex-wrap: wrap; gap: .5rem }
+
+/* 진행 레일 */
+.journey-rail { position: absolute; z-index: 2; left: 50%; bottom: 2.5rem; transform: translateX(-50%);
+  display: flex; gap: .75rem; list-style: none; padding: 0; margin: 0 }
+.journey-rail li { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border-radius: 9999px;
+  background: #fff; box-shadow: inset 0 0 0 1px var(--line);
+  font-size: .72rem; font-weight: 700; color: rgba(17,17,17,.45);
+  transition: background .35s var(--ease-snap), color .35s var(--ease-snap), box-shadow .35s var(--ease-snap), transform .35s var(--ease-snap) }
+.journey-rail li.is-done { color: var(--accent-deep); box-shadow: inset 0 0 0 1px var(--accent-soft) }
+.journey-rail li.is-on { background: var(--accent); color: #fff; box-shadow: inset 0 0 0 1px var(--accent); transform: scale(1.12) }
+
+/* ===== how it works ===== */
+#how { background: transparent }
+.how-steps { position: relative; display: grid; grid-template-columns: 1fr; gap: 2.5rem; margin-top: 3rem; list-style: none; padding: 0 }
+@media (min-width: 640px) { .how-steps { grid-template-columns: 1fr 1fr; gap: 2.75rem 1.5rem } }
+@media (min-width: 1024px) { .how-steps { grid-template-columns: repeat(4, 1fr); gap: 0 } }
+.how-step { position: relative; padding: 0 1.25rem; text-align: center }
+/* 다음 스텝으로 잇는 점선. 스텝 '안'에 그려야 리빌 애니메이션(translateY)에도
+   원과 함께 움직여 항상 원 중심 높이(원 지름의 절반 = 1.65rem)에 붙는다.
+   좌우는 다음 원 중심(150%)까지 잇되 반지름+여백(2rem)만큼 비운다. */
+.how-step::before { content: ''; display: none; position: absolute; top: 1.65rem; left: calc(50% + 2rem); right: calc(-50% + 2rem); height: 1px; background: repeating-linear-gradient(90deg, var(--subtle) 0 6px, transparent 6px 12px); background-size: 12px 1px }
+/* 순찰이 "흘러가는" 방향으로 점선이 천천히 흐른다 */
+@media (min-width: 1024px) { .how-step:not(:last-child)::before { display: block; animation: how-flow 1.4s linear infinite } }
+@keyframes how-flow { to { background-position: 12px 0 } }
+
+.how-num { position: relative; z-index: 1; display: grid; place-items: center; width: 3.3rem; height: 3.3rem; margin: 0 auto 1.15rem; border-radius: 9999px; background: #fff; box-shadow: inset 0 0 0 1px var(--fg); font-size: .95rem; font-weight: 700;
+  transition: transform .3s var(--ease-snap), background-color .3s var(--ease-snap), color .3s var(--ease-snap), box-shadow .3s var(--ease-snap) }
+/* 03 알림도 다른 단계와 완전히 같은 먹색 — 한 단계만 색을 달리하면 그 단계가 경고처럼 읽힌다.
+   HowSection 의 alert 플래그는 지금 표시에 쓰이지 않는다. */
+/* 진입 — 원이 순서대로(--sd) 팝. fill-mode는 backwards여야 종료 후 hover transform이 살아난다 */
+@keyframes how-pop { from { transform: scale(.72); opacity: 0 } to { transform: none; opacity: 1 } }
+.how-step.rv-in .how-num { animation: how-pop .55s var(--ease-out) backwards; animation-delay: var(--sd, 0ms) }
+
+.how-step h3 { margin-bottom: .5rem; font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; transition: color .3s var(--ease-snap) }
+.how-step p { font-size: .88rem; line-height: 1.65; color: rgba(17,17,17,.55); word-break: keep-all }
+
+/* hover 스프링은 데스크톱만 */
+@media (hover: hover) and (pointer: fine) {
+  .how-step:hover .how-num { transform: scale(1.08); background: var(--ink-deep); color: #fff; box-shadow: inset 0 0 0 1px var(--ink-deep) }
+}
+
+/* ===== impact ===== */
+#impact { background: transparent }
+.impact-inner { padding: 0 1.25rem 4.5rem }
+@media (min-width: 640px) { .impact-inner { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .impact-inner { padding-bottom: 7rem } }
+.impact-panel { position: relative; overflow: hidden; border-radius: var(--card-radius); background: var(--ink-scene); padding: 3rem 1.5rem; color: #fff }
+@media (min-width: 640px) { .impact-panel { padding: 4rem 2rem } }
+@media (min-width: 768px) { .impact-panel { padding-left: 4rem; padding-right: 4rem } }
+.impact-panel .glow { position: absolute; left: -8rem; bottom: -8rem; width: 24rem; height: 24rem; border-radius: 9999px; background: radial-gradient(closest-side, rgb(var(--accent-rgb) / .28), transparent 70%); pointer-events: none }
+.impact-h2 { position: relative; margin-top: 1rem; max-width: 20ch; font-size: 1.8rem; font-weight: 700; letter-spacing: -.02em }
+@media (min-width: 768px) { .impact-h2 { font-size: 2.3rem } }
+.impact-grid { position: relative; margin-top: 3rem; display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 2rem; row-gap: 2.75rem; list-style: none; padding: 0 }
+@media (min-width: 1024px) { .impact-grid { grid-template-columns: repeat(4, 1fr) } }
+.impact-num { font-size: 2.8rem; font-weight: 700; letter-spacing: -.03em }
+@media (min-width: 640px) { .impact-num { font-size: 3.6rem } }
+.impact-num .suf { color: var(--accent-light) }
+.impact-lbl { margin-top: .6rem; font-size: .86rem; color: rgba(255,255,255,.55) }
+
+/* ===== footer ===== */
+/* 딥 블랙 배경을 걷고 페이지와 같은 밝은 톤으로 */
+.landing-footer { position: relative; overflow: hidden; background: transparent; color: var(--fg) }
+.footer-inner { position: relative; z-index: 10; padding: 4.5rem 1.25rem 2.5rem }
+@media (min-width: 640px) { .footer-inner { padding-left: 2rem; padding-right: 2rem } }
+@media (min-width: 1024px) { .footer-inner { padding-top: 6rem } }
+/* 시작 CTA 하나만 가운데에 */
+.footer-start { position: relative; z-index: 10; display: flex; justify-content: center;
+  padding: 6rem 1.25rem 7rem }
+@media (min-width: 640px) { .footer-start { padding-left: 2rem; padding-right: 2rem } }
+/* ---- 밀어서 시작 ----
+   드래그 전에는 반투명 흰색, 끝까지 밀면 액센트로 채워진다 */
+.slide-start { position: relative; display: flex; align-items: center; overflow: hidden;
+  width: min(26rem, 84vw); height: 4.6rem; padding: .375rem; border-radius: 9999px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line), 0 12px 30px -18px rgb(var(--shadow-rgb) / .42);
+  cursor: grab; touch-action: none; user-select: none;
+  transition: box-shadow .3s var(--ease-snap) }
+.slide-start.is-dragging { cursor: grabbing }
+.slide-start.is-done { cursor: default;
+  box-shadow: inset 0 0 0 1px var(--accent), 0 14px 32px -18px rgb(var(--accent-rgb) / .6) }
+
+/* 진행률(--p)만큼 차오르는 액센트 */
+.slide-start__fill { position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(120deg, var(--accent-light), var(--accent-deep));
+  transform: scaleX(var(--p, 0)); transform-origin: left center;
+  transition: transform .35s var(--ease-out) }
+.slide-start.is-dragging .slide-start__fill { transition: none }
+.slide-start.is-done .slide-start__fill { transform: none }
+
+.slide-start__label { position: relative; z-index: 1; flex: 1; text-align: center; padding-left: 3.4rem;
+  font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; white-space: nowrap;
+  color: rgba(17,17,17,.62); transition: color .3s var(--ease-snap) }
+/* 액센트가 절반쯤 차오르면 글자를 흰색으로 뒤집는다 */
+.slide-start.is-done .slide-start__label { color: #fff; padding-left: 0; padding-right: 3.4rem }
+
+.slide-start__thumb { position: absolute; z-index: 2; left: .375rem; top: .375rem;
+  width: 3.85rem; height: 3.85rem; display: grid; place-items: center; border-radius: 9999px;
+  background: #fff; color: var(--ink-deep);
+  box-shadow: 0 6px 16px -6px rgb(var(--shadow-rgb) / .45);
+  transform: translateX(calc(var(--p, 0) * (min(26rem, 84vw) - 4.6rem)));
+  transition: transform .35s var(--ease-out), color .3s var(--ease-snap) }
+.slide-start.is-dragging .slide-start__thumb { transition: color .3s var(--ease-snap) }
+.slide-start.is-done .slide-start__thumb { color: var(--accent-deep) }
+.slide-start__thumb svg { width: 1.3rem; height: 1.3rem }
+
+.slide-start:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px }
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-start__fill, .slide-start__thumb { transition: none }
+}
+
+/* [순찰 시작하기] → 회원가입 / 로그인 두 갈래로 펼쳐질 때 */
+.footer-cta__choices { display: flex; flex-wrap: wrap; justify-content: center; gap: .75rem;
+  animation: footer-choices .35s var(--ease-out) both }
+@keyframes footer-choices { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+.footer-cols { display: grid; grid-template-columns: 1fr; gap: 2.5rem; padding-top: 3.5rem; padding-bottom: 3.5rem }
+@media (min-width: 768px) { .footer-cols { grid-template-columns: 1.4fr 1fr 1fr 1fr } }
+.fcol-brand .b { display: flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 700 }
+.fcol-brand .b .mk { width: 1.5rem; height: 1.5rem; color: var(--accent-light) }
+.fcol-brand p { max-width: 24rem; margin-top: 1rem; font-size: .88rem; line-height: 1.6; color: rgba(255,255,255,.5) }
+.fcol h4 { font-size: .75rem; letter-spacing: .05em; color: rgba(255,255,255,.4); margin-bottom: 1rem; font-weight: 600 }
+.fcol ul { list-style: none; padding: 0 }
+.fcol li { font-size: .9rem; margin-bottom: .7rem }
+.alink { display: inline-flex; color: inherit; text-decoration: none; background: none; border: 0; cursor: pointer; font: inherit; padding: 0 }
+.alink > span { display: inline-block; opacity: .7; transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s cubic-bezier(.2,.8,.2,1) }
+@media (hover:hover) and (pointer:fine) { .alink:hover > span { transform: translateX(4px); opacity: 1 } }
+.footer-legal { display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid rgba(255,255,255,.1); padding-top: 2rem; font-size: .75rem; color: rgba(255,255,255,.45) }
+@media (min-width: 640px) { .footer-legal { flex-direction: row } }
+.footer-legal .lg-links { display: flex; gap: 1.5rem }
+
+/* ===== nav menu ===== */
+.navmenu { position: fixed; inset: 0; z-index: 115; display: flex; flex-direction: column; background: var(--ink-scene); color: #fff; opacity: 0; pointer-events: none; transition: opacity .35s cubic-bezier(.22,1,.36,1) }
+.navmenu.open { opacity: 1; pointer-events: auto }
+.navmenu__top { display: flex; align-items: center; justify-content: space-between; padding: 1.15rem 1.25rem }
+@media (min-width: 640px) { .navmenu__top { padding: 1.4rem 2rem } }
+.navmenu__brand { display: flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 700 }
+.navmenu__brand .mk { width: 1.5rem; height: 1.5rem; color: var(--accent-light) }
+.nm-close { display: inline-flex; align-items: center; gap: .5rem; border: 1px solid rgba(255,255,255,.15); border-radius: .875rem; padding: .55rem 1rem; font-size: .75rem; font-weight: 600; letter-spacing: .02em; color: rgba(255,255,255,.7); transition: border-color .25s, color .25s; background: none; cursor: pointer }
+@media (hover:hover) and (pointer:fine) { .nm-close:hover { border-color: rgba(255,255,255,.4); color: #fff } }
+.navmenu__nav { flex: 1; display: flex; flex-direction: column; justify-content: center }
+.navmenu__nav ul { display: flex; flex-direction: column; gap: .25rem; list-style: none; padding: 0 }
+.nm-item { display: flex; align-items: baseline; gap: 1rem; padding: .5rem 0; text-align: left; font-size: 2rem; font-weight: 700; letter-spacing: -.02em; width: 100%; transform: translateY(1rem); opacity: 0; transition: transform .5s ease-out, opacity .5s ease-out; background: none; border: 0; cursor: pointer; color: inherit }
+@media (min-width: 640px) { .nm-item { font-size: 3.2rem } }
+.navmenu.open .nm-item { transform: none; opacity: 1 }
+.nm-item .n { font-size: 1rem; font-weight: 500; color: rgba(255,255,255,.3); transition: color .3s }
+.nm-item .l { color: rgba(255,255,255,.7); transition: color .3s }
+@media (hover:hover) and (pointer:fine) { .nm-item:hover .n { color: var(--accent-light) } .nm-item:hover .l { color: #fff } }
+.navmenu__bottom { display: flex; flex-direction: column; gap: .75rem; border-top: 1px solid rgba(255,255,255,.1); padding: 1.4rem 1.25rem; font-size: .75rem; letter-spacing: .02em; color: rgba(255,255,255,.45) }
+@media (min-width: 640px) { .navmenu__bottom { flex-direction: row; align-items: center; justify-content: space-between; padding-left: 2rem; padding-right: 2rem } }
+.nm-start { color: rgba(255,255,255,.7); transition: color .25s; background: none; border: 0; cursor: pointer; font: inherit }
+@media (hover:hover) and (pointer:fine) { .nm-start:hover { color: #fff; text-decoration: underline } }
+
+/* ===== contact modal ===== */
+.lmodal { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-end; justify-content: center; padding: 1rem; background: rgba(16,26,43,.35); backdrop-filter: blur(16px); opacity: 0; pointer-events: none; transition: opacity .35s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .lmodal { align-items: center } }
+.lmodal.open { opacity: 1; pointer-events: auto }
+.lmodal__panel { position: relative; width: 100%; max-width: 32rem; overflow: hidden; border-radius: 2rem; background: #fff; padding: 1.5rem; box-shadow: 0 25px 50px -12px rgb(var(--shadow-rgb) / .3), 0 0 0 1px var(--line); transform: translateY(28px); opacity: 0; transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .4s cubic-bezier(.2,.8,.2,1) }
+@media (min-width: 640px) { .lmodal__panel { padding: 2rem } }
+.lmodal.open .lmodal__panel { transform: none; opacity: 1 }
+.lmodal__close { position: absolute; right: 1rem; top: 1rem; width: 2.25rem; height: 2.25rem; display: grid; place-items: center; border-radius: 9999px; background: var(--surface); color: rgba(17,17,17,.6); transition: background .2s, color .2s; border: 0; cursor: pointer }
+@media (hover:hover) and (pointer:fine) { .lmodal__close:hover { background: var(--surface-2); color: #111 } }
+.lmodal__head { margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: .4rem }
+.lmodal__eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .85rem; font-weight: 600; color: rgba(17,17,17,.6) }
+.lmodal__eyebrow .dot { width: .4rem; height: .4rem; border-radius: 9999px; background: var(--accent) }
+.lmodal__head h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em }
+@media (min-width: 640px) { .lmodal__head h2 { font-size: 1.8rem } }
+.lmodal form { display: flex; flex-direction: column; gap: 1rem }
+.lmodal .field { display: flex; flex-direction: column; gap: .5rem }
+.lmodal .field .cap { font-size: .75rem; font-weight: 600; letter-spacing: .02em; color: rgba(17,17,17,.5) }
+.lmodal .field input, .lmodal .field textarea { width: 100%; border: 1px solid var(--line); background: rgba(242,241,239,.5); border-radius: .875rem; padding: .75rem 1rem; font-size: .9rem; outline: none; font-family: inherit; transition: border-color .2s, background .2s }
+.lmodal .field textarea { resize: none }
+.lmodal .field input:focus, .lmodal .field textarea:focus { border-color: rgb(var(--shadow-rgb) / .4); background: #fff }
+.lmodal__submit { margin-top: .5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem }
+.lmodal__note { font-size: .75rem; color: rgba(17,17,17,.45) }
+.lmodal__success { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem; padding: 2rem 0 }
+.lmodal__success .badge { width: 3.5rem; height: 3.5rem; display: grid; place-items: center; border-radius: 9999px; background: var(--ink-deep); color: var(--accent-light) }
+.lmodal__success .badge .mk { width: 1.8rem; height: 1.8rem }
+.lmodal__success h2 { font-size: 1.5rem; font-weight: 700 }
+.lmodal__success p { max-width: 34ch; font-size: .9rem; color: rgba(17,17,17,.6) }

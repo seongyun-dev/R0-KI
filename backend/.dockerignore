@@ -1,0 +1,10 @@
+.git
+.gitignore
+.gradle
+build
+*.iml
+.idea
+.vscode
+.env
+.env.*.local
+src/main/resources/application-secret.yml

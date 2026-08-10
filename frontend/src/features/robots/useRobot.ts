@@ -1,0 +1,90 @@
+import { useCallback } from 'react'
+import { robotDetailToDomain, robotListItemToDomain } from '../../api/mappers'
+import { robotsApi, unwrapList } from '../../api/services'
+import { useApiMutation } from '../../lib/useApiMutation'
+import { useApiQuery } from '../../lib/useApiQuery'
+
+/** 로봇 목록 (1i). 서버 연동 시 useQuery(['robots'])로 교체. */
+export function useRobots(
+  params: { page?: number; size?: number; sort?: string[] } = {},
+) {
+  const query = useApiQuery(
+    async () => {
+
+      const response = await robotsApi.list(params)
+      // 목록 응답이 배열로 오면 response.content 는 undefined 라 .map 에서 터진다.
+      return {
+        ...response,
+        content: unwrapList(response).map(robotListItemToDomain),
+      }
+    },
+    [params.page, params.size, params.sort?.join(',')],
+    { delayMs: 0 },
+  )
+
+  return {
+    ...query,
+    data: query.data?.content,
+    page: query.data?.page ?? params.page ?? 0,
+    size: query.data?.size ?? params.size ?? 10,
+    totalElements: query.data?.totalElements ?? 0,
+    totalPages: query.data?.totalPages ?? 0,
+    first: query.data?.first ?? true,
+    last: query.data?.last ?? true,
+  }
+}
+
+/** 로봇 현황 통계 (1i KPI) — 전체/순찰중/대기·충전중. */
+export function useRobotStats() {
+  return useApiQuery(
+    async () => {
+
+      return robotsApi.stats()
+    },
+    [],
+    { delayMs: 0 },
+  )
+}
+
+/** 로봇 상세 (1i). 서버 연동 시 useQuery(['robot', id])로 교체. */
+export function useRobot(id: string | undefined) {
+  return useApiQuery(
+    async () => {
+      if (!id) return undefined
+      return robotDetailToDomain(await robotsApi.detail(id))
+    },
+    [id],
+    { enabled: Boolean(id), delayMs: 0 },
+  )
+}
+
+export function useUpdateRobot() {
+  const update = useCallback(
+    async (variables: { robotId: string | number; robotName: string }) => {
+      // 백엔드 수정 요청은 name만 받는다(상태는 시스템이 관리).
+      return robotsApi.update(variables.robotId, { name: variables.robotName })
+    },
+    [],
+  )
+  return useApiMutation(update)
+}
+
+export function useCreateRobot() {
+  const create = useCallback(
+    async (variables: { serialNumber: string; name: string }) => {
+      return robotsApi.create({ name: variables.name, serialNumber: variables.serialNumber })
+    },
+    [],
+  )
+  return useApiMutation(create)
+}
+
+export function useDeleteRobot() {
+  const remove = useCallback(
+    async (variables: { robotId: string | number }) => {
+      return robotsApi.delete(variables.robotId)
+    },
+    [],
+  )
+  return useApiMutation(remove)
+}
