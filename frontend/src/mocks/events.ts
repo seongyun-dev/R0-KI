@@ -17,17 +17,6 @@ export const events: PatrolEvent[] = [
       'AI가 응급상황(쓰러짐 의심 인물)을 92% 신뢰도로 탐지 — 최근 5분 내 동일 위치 재탐지로 자동 "긴급" 승격됨',
   },
   {
-    id: 'E-3312',
-    time: '11:48',
-    type: '화재 의심',
-    location: '102동 전기실',
-    robotId: 'R-01',
-    status: '탐지',
-    riskLevel: '긴급',
-    confidence: 87,
-    subType: '연기 감지',
-  },
-  {
     id: 'E-3311',
     time: '14:20',
     type: '불법주차',
