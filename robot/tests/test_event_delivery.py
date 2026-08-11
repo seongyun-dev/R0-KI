@@ -15,21 +15,25 @@ def detection(
     event_id: str = "event-1",
     *,
     confidence: float = 0.93,
+    event_type: str = "TRASH_DETECTED",
+    patrol_id: int = 15,
+    bbox: dict | None = None,
+    attributes: dict | None = None,
 ) -> DetectionEvent:
     return DetectionEvent.from_json(
         json.dumps(
             {
                 "schemaVersion": 1,
                 "eventId": event_id,
-                "patrolId": 15,
-                "eventType": "TRASH_DETECTED",
+                "patrolId": patrol_id,
+                "eventType": event_type,
                 "cameraId": "front",
                 "trackId": "track-42",
                 "confidence": confidence,
                 "observedAt": "2026-08-03T00:00:00Z",
                 "evidencePath": f"/var/lib/aiot/evidence/{event_id}.jpg",
-                "bbox": {"x": 0, "y": 0, "width": 1, "height": 1},
-                "attributes": {"riskLevel": "NORMAL"},
+                "bbox": bbox or {"x": 0, "y": 0, "width": 1, "height": 1},
+                "attributes": attributes or {"riskLevel": "NORMAL"},
             }
         )
     )
@@ -59,6 +63,101 @@ class FakeBackend:
 
 
 class EventDeliveryTest(unittest.TestCase):
+    def test_trash_uses_bbox_direction_and_lidar_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
+            )
+            requested_angles = []
+            ranges = SimpleNamespace(
+                get_range_at_angle=lambda angle: requested_angles.append(angle) or 2.0
+            )
+            event = detection(
+                "trash-ranged",
+                bbox={"x": 270, "y": 100, "width": 100, "height": 100},
+                attributes={"riskLevel": "LOW", "frameWidth": 640},
+            )
+
+            DetectionRecorder(
+                outbox,
+                store,
+                vehicle_range_source=ranges,
+                camera_horizontal_fov_deg=60,
+                lidar_forward_center_angle_deg=90,
+            )(event)
+            item = outbox.read(outbox.pending_paths()[0])
+
+            self.assertEqual(requested_angles, [90.0])
+            self.assertAlmostEqual(item["context"]["x"], 3.0, places=6)
+            self.assertAlmostEqual(item["context"]["y"], 2.0, places=6)
+            self.assertEqual(item["context"]["locationMethod"], "BBOX_LIDAR")
+
+    def test_trash_without_directional_range_keeps_observation_pose(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
+            )
+            ranges = SimpleNamespace(get_range_at_angle=lambda _angle: None)
+
+            DetectionRecorder(
+                outbox,
+                store,
+                vehicle_range_source=ranges,
+                camera_horizontal_fov_deg=60,
+            )(
+                detection(
+                    "trash-fallback",
+                    bbox={"x": 270, "y": 100, "width": 100, "height": 100},
+                    attributes={"riskLevel": "LOW", "frameWidth": 640},
+                )
+            )
+            item = outbox.read(outbox.pending_paths()[0])
+
+            self.assertEqual(item["context"]["x"], 1.0)
+            self.assertEqual(item["context"]["y"], 2.0)
+            self.assertEqual(
+                item["context"]["locationMethod"],
+                "ROBOT_OBSERVATION_POSE",
+            )
+
+    def test_recycling_area_is_recorded_once_per_patrol(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
+            )
+            recorder = DetectionRecorder(outbox, store)
+
+            recorder(
+                detection(
+                    "recycling-first",
+                    event_type="RECYCLING_AREA_FULL",
+                    patrol_id=15,
+                )
+            )
+            recorder(
+                detection(
+                    "recycling-duplicate",
+                    event_type="RECYCLING_AREA_FULL",
+                    patrol_id=15,
+                )
+            )
+            recorder(
+                detection(
+                    "recycling-next-patrol",
+                    event_type="RECYCLING_AREA_FULL",
+                    patrol_id=16,
+                )
+            )
+
+            self.assertEqual(outbox.pending_count(), 2)
+            self.assertEqual(
+                {outbox.read(path)["eventId"] for path in outbox.pending_paths()},
+                {"recycling-first", "recycling-next-patrol"},
+            )
+
     def test_recorder_drops_detection_below_confidence_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             outbox = DetectionOutbox(directory)
