@@ -64,6 +64,19 @@ set +u
 source "${ros_setup}"
 set -u
 
+explore_setup="${AIOT_EXPLORE_SETUP_FILE:-${robot_root}/ros-overlay/install/setup.bash}"
+test -r "${explore_setup}"
+set +u
+# shellcheck disable=SC1090
+source "${explore_setup}"
+set -u
+
+explore_prefix="$(ros2 pkg prefix explore_lite)"
+case "${explore_prefix}" in
+  "${robot_root}"/ros-overlay/install*) ;;
+  *) echo "Release-local explore overlay is not active: ${explore_prefix}" >&2; exit 1 ;;
+esac
+
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
 export ROS_HOME="${ROS_HOME:-/var/lib/aiot/ros}"
 export ROS_LOG_DIR="${ROS_LOG_DIR:-${ROS_HOME}/log}"

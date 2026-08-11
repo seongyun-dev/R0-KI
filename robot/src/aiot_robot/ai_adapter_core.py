@@ -21,6 +21,97 @@ _BACKEND_EVENT_TYPES = frozenset(
         "EMERGENCY",
     }
 )
+_PIPELINE_CONTEXT_FIELDS = {
+    "_bbox": "bbox",
+    "_frameWidth": "frameWidth",
+    "_camera": "cameraId",
+    "_trackId": "trackId",
+    "_detectionCount": "detectionCount",
+}
+_RECYCLING_CLASS_NAMES = frozenset({"bin_overflow", "bag_outside"})
+
+
+def collapse_recycling_events_for_frame(
+    events: Sequence[Mapping[str, Any]],
+    detections: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Represent one recycling-area scene with one event and one union bbox."""
+
+    recycling_boxes: list[tuple[float, float, float, float]] = []
+    for detection in detections:
+        if detection.get("class_name") not in _RECYCLING_CLASS_NAMES:
+            continue
+        bbox = detection.get("bbox")
+        if not isinstance(bbox, Sequence) or isinstance(bbox, (str, bytes)):
+            continue
+        if len(bbox) != 4:
+            continue
+        try:
+            x1, y1, x2, y2 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            continue
+        if all(math.isfinite(value) for value in (x1, y1, x2, y2)) and (
+            x1 >= 0 and y1 >= 0 and x2 > x1 and y2 > y1
+        ):
+            recycling_boxes.append((x1, y1, x2, y2))
+
+    union_bbox = None
+    if recycling_boxes:
+        union_bbox = [
+            min(box[0] for box in recycling_boxes),
+            min(box[1] for box in recycling_boxes),
+            max(box[2] for box in recycling_boxes),
+            max(box[3] for box in recycling_boxes),
+        ]
+
+    collapsed: list[dict[str, Any]] = []
+    recycling_added = False
+    for event in events:
+        copied = dict(event)
+        if copied.get("eventType") != "RECYCLING_AREA_FULL":
+            collapsed.append(copied)
+            continue
+        if recycling_added:
+            continue
+        recycling_added = True
+        if union_bbox is not None:
+            copied["_bbox"] = union_bbox
+            copied["_detectionCount"] = len(recycling_boxes)
+            details = str(copied.get("eventDetails") or "")
+            copied["eventDetails"] = (
+                f"{details}, detectedCount={len(recycling_boxes)}"
+                if details
+                else f"detectedCount={len(recycling_boxes)}"
+            )
+        collapsed.append(copied)
+    return collapsed
+
+
+def preserve_pipeline_detection_context(
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep AI-private detection metadata across its legacy REST boundary."""
+
+    enriched = dict(payload)
+    for source, destination in _PIPELINE_CONTEXT_FIELDS.items():
+        value = event.get(source)
+        if value is not None:
+            enriched[destination] = value
+    return enriched
+
+
+def detection_context_from_pipeline_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return only the camera metadata accepted by the Robot ROS contract."""
+
+    return {
+        "bbox": payload.get("bbox"),
+        "frameWidth": payload.get("frameWidth"),
+        "cameraId": payload.get("cameraId"),
+        "trackId": payload.get("trackId"),
+    }
 
 
 def build_detection_message(
@@ -55,6 +146,15 @@ def build_detection_message(
         attributes["eventTitle"] = str(payload["eventTitle"])
     if payload.get("riskLevel") is not None:
         attributes["riskLevel"] = str(payload["riskLevel"])
+    detection_count = payload.get("detectionCount")
+    if detection_count is not None:
+        if (
+            isinstance(detection_count, bool)
+            or not isinstance(detection_count, int)
+            or detection_count <= 0
+        ):
+            raise ValueError("detectionCount must be a positive integer")
+        attributes["detectionCount"] = detection_count
     bbox = {"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0}
     if detection_bbox_xyxy is not None:
         if len(detection_bbox_xyxy) != 4:

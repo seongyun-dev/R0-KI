@@ -3,8 +3,8 @@ import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
-import { ROBOT_ACCENT_LANDING, animateRobotLife, buildRobot } from './robotModel'
 import { gridTexture, shadowTexture } from './sceneTextures'
+import { animateRoki, buildRokiCourier } from './rokiCourierModel'
 
 /* ============================================================
    랜딩 히어로 3D 순찰 로봇 — docs/reference/landing.html의 Three.js
@@ -50,18 +50,20 @@ const BASE_SCALE = 0.62
 type SceneState = ReturnType<typeof buildScene>
 
 function buildScene() {
-  const root = new THREE.Group()
 
   // ---- 로봇 본체 (robotModel.ts 공유) ----
   // 랜딩은 액센트가 블루라 눈·글로우도 블루로 넘긴다. 관제 화면은 기본값(주황) 유지.
-  const model = buildRobot(ROBOT_ACCENT_LANDING)
-  const { robot, head, visorMat, glow, glow2 } = model
+  const root = new THREE.Group()
 
-  robot.position.y = 1.55
+  // ---- RO-KI Courier ----
+  const model = buildRokiCourier()
+
   const rig = new THREE.Group()
-  rig.add(robot)
+  rig.add(model.root)
   rig.scale.setScalar(0.62)
   root.add(rig)
+
+  // ---- ground map + contact shadow ----
 
   // ---- ground map + contact shadow ----
   // 지면은 조명·톤매핑을 타지 않는 basic 재질로 둔다.
@@ -196,7 +198,7 @@ function buildScene() {
   shadow.position.set(state.botPos.x, 0.03, state.botPos.z)
 
   return {
-    root, rig, head, shadow, visorMat, glow, glow2, trail, checkpoints, evRing, evRingMat, state,
+    root, rig, model, shadow, trail, checkpoints, evRing, evRingMat, state,
     routeCurve, routeSeg, doneGeo, plannedMat, doneMat, checkpointT,
   }
 }
@@ -389,7 +391,7 @@ function RobotScene({
       }
     }
 
-    S.rig.position.set(st.botPos.x, Math.sin(t * 3) * 0.03, st.botPos.z)
+    S.rig.position.set(st.botPos.x, Math.sin(t * 3) * 0.03+0.98, st.botPos.z)
     S.shadow.position.set(st.botPos.x, 0.03, st.botPos.z)
 
     // 액센트 트레일
@@ -428,7 +430,7 @@ function RobotScene({
     }
 
     // 로봇 생동감 (바이저 점멸 · 머리 흔들림)
-    animateRobotLife(S, t)
+    animateRoki(S.model, t, 0)
 
     // 체크포인트 — 기본은 근접 점등, 문제 해결 구간에서는 미해결(빨강)→해결(초록)
     const solved = problemRef?.current.solved ?? -1

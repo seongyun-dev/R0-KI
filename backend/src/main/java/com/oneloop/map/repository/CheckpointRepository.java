@@ -58,4 +58,8 @@ public interface CheckpointRepository extends JpaRepository<Checkpoint, Long> {
               AND checkpoint.active = true
             """)
     int deactivateAllByPatrolMapId(@Param("mapId") Long mapId);
+
+    @Modifying(flushAutomatically = true)
+    @Query("DELETE FROM Checkpoint checkpoint WHERE checkpoint.patrolMap.id = :mapId")
+    int deleteAllByPatrolMapId(@Param("mapId") Long mapId);
 }

@@ -210,6 +210,31 @@ class NavigationWaypointServiceTest {
     }
 
     @Test
+    void archivedMapBlocksWaypointReplacement() {
+        NavigationWaypointService guardedService =
+                new NavigationWaypointService(
+                        patrolMapRepository,
+                        checkpointRepository,
+                        navigationWaypointRepository,
+                        new NavigationConfigurationGuard(null));
+        PatrolMap archivedMap = map(32L);
+        archivedMap.archive();
+        when(patrolMapRepository.findForUpdateByIdAndApartmentComplexId(32L, 2L))
+                .thenReturn(Optional.of(archivedMap));
+
+        WaypointBatchReplaceRequest request =
+                request(point(1, "0.5", "0.5", NavigationWaypointAction.DESTINATION, null));
+
+        assertThatThrownBy(() -> guardedService.replaceAll(2L, 32L, request))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAP_NOT_ACTIVE));
+        verify(navigationWaypointRepository, never()).deleteAllByPatrolMapIdAndMapVersion(32L, 1);
+    }
+
+    @Test
     void activePatrolLocksConfigurationBeforeReplacing() {
         WaypointBatchReplaceRequest request =
                 request(point(1, "0.5", "0.5", NavigationWaypointAction.DESTINATION, null));

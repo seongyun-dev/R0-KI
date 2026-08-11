@@ -27,6 +27,7 @@ import com.oneloop.patrol.dto.mqtt.StopPatrolCommand;
 import com.oneloop.patrol.dto.request.PatrolStartRequest;
 import com.oneloop.patrol.dto.response.PatrolStartResponse;
 import com.oneloop.patrol.repository.PatrolRepository;
+import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import com.oneloop.robot.domain.RobotStatus;
 import com.oneloop.robot.domain.SensorStatus;
@@ -59,6 +60,7 @@ class PatrolCommandTransactionIntegrationTest {
     @Autowired private ApartmentComplexRepository apartmentComplexRepository;
     @Autowired private RobotRepository robotRepository;
     @Autowired private PatrolRepository patrolRepository;
+    @Autowired private PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
     @Autowired private PatrolMapRepository patrolMapRepository;
     @Autowired private CheckpointRepository checkpointRepository;
     @Autowired private NavigationWaypointRepository navigationWaypointRepository;
@@ -103,6 +105,8 @@ class PatrolCommandTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        complex.assignActiveMap(patrolMap);
+        apartmentComplexRepository.saveAndFlush(complex);
         Checkpoint destination =
                 checkpointRepository.saveAndFlush(
                         new Checkpoint(
@@ -164,6 +168,8 @@ class PatrolCommandTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        complex.assignActiveMap(patrolMap);
+        apartmentComplexRepository.saveAndFlush(complex);
         Checkpoint destination =
                 checkpointRepository.saveAndFlush(
                         new Checkpoint(
@@ -194,9 +200,21 @@ class PatrolCommandTransactionIntegrationTest {
         immediateAckPublisher.resetStopCommandVisible();
 
         patrolCommandService.autoCompleteIfArrived(
-                robot, new BigDecimal("0.5"), new BigDecimal("0.5"));
+                robot,
+                new BigDecimal("0.5"),
+                new BigDecimal("0.5"),
+                LocalDateTime.now());
 
         assertThat(immediateAckPublisher.isStopCommandVisible()).isTrue();
+        assertThat(
+                        patrolCheckpointVisitRepository
+                                .findAllByPatrolIdOrderByVisitSequence(patrol.getId()))
+                .singleElement()
+                .satisfies(
+                        visit -> {
+                            assertThat(visit.getCheckpoint().getId()).isEqualTo(destination.getId());
+                            assertThat(visit.getVisitSequence()).isEqualTo(1);
+                        });
         assertThat(patrolRepository.findById(patrol.getId()))
                 .get()
                 .extracting(Patrol::getStatus)
@@ -244,6 +262,10 @@ class PatrolCommandTransactionIntegrationTest {
                 .filteredOn(result -> result.errorCode() == ErrorCode.PATROL_ALREADY_IN_PROGRESS)
                 .hasSize(1);
         assertThat(activePatrols(fixture.robot().getId())).hasSize(1);
+        Patrol started = activePatrols(fixture.robot().getId()).getFirst();
+        assertThat(started.getMap()).isNotNull();
+        assertThat(started.getMap().getId()).isEqualTo(fixture.map().getId());
+        assertThat(started.getMapVersion()).isEqualTo(fixture.map().getMapVersion());
     }
 
     @Test
@@ -332,6 +354,8 @@ class PatrolCommandTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        apartment.assignActiveMap(patrolMap);
+        apartmentComplexRepository.saveAndFlush(apartment);
         Checkpoint destination =
                 checkpointRepository.saveAndFlush(
                         new Checkpoint(
