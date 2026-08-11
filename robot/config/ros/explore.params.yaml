@@ -21,6 +21,18 @@
     # depends on, since the mapping session is ended by the operator's save.
     return_to_init: false
 
+    # Navigate to a robot-connected FREE cell set back from the unknown edge,
+    # not to the UNKNOWN centroid. The MappingGridBased planner must prove a
+    # path before the navigation goal is sent.
+    frontier_approach_distance: 0.25
+    frontier_planner_id: MappingGridBased
+
+    # A transient planner/controller failure gets one delayed retry. Exhausted
+    # candidates report exploration_stalled; they are never mislabeled as a
+    # genuinely complete map.
+    frontier_retry_delay: 15.0
+    frontier_max_attempts: 2
+
     # Publishes frontier markers for RViz. Cheap and worth keeping while tuning.
     visualize: true
 

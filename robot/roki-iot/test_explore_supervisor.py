@@ -5,6 +5,7 @@ from __future__ import annotations
 import signal
 import threading
 import unittest
+from pathlib import Path
 
 from integration.explore_supervisor import ExploreSupervisor
 
@@ -181,6 +182,19 @@ class ExploreSupervisorTest(unittest.TestCase):
             }
         )
         self.assertIsNotNone(supervisor)
+
+    def test_default_setup_is_release_local_overlay(self):
+        supervisor = ExploreSupervisor.from_environment(
+            {"AIOT_MAPPING_AUTONOMOUS": "true"}
+        )
+        self.assertIsNotNone(supervisor)
+        expected = (
+            Path(__file__).resolve().parent.parent
+            / "ros-overlay"
+            / "install"
+            / "setup.bash"
+        )
+        self.assertEqual(supervisor._explore_setup_file, str(expected))
 
 
 if __name__ == "__main__":

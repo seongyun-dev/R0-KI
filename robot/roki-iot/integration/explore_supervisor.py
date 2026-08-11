@@ -81,8 +81,8 @@ class ExploreSupervisor:
         params_file = environ.get("AIOT_EXPLORE_PARAMS_FILE", "").strip() or str(
             robot_root / "config" / "ros" / "explore.params.yaml"
         )
-        setup_file = environ.get("AIOT_EXPLORE_SETUP_FILE", "").strip() or (
-            "/home/e103/explore_ws/install/setup.bash"
+        setup_file = environ.get("AIOT_EXPLORE_SETUP_FILE", "").strip() or str(
+            robot_root / "ros-overlay" / "install" / "setup.bash"
         )
         return cls(explore_setup_file=setup_file, params_file=params_file)
 
