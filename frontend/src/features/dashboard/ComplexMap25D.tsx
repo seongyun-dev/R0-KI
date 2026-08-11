@@ -20,8 +20,8 @@ import { complexMapCoordinateMetadata } from './mapCoordinateMetadata'
 import type { ComplexMapProps } from './ComplexMap'
 
 const MAX_ZOOM = 2.5
-const WALL_HEIGHT_PX = 8
-const BASE_HEIGHT_PX = 2
+const WALL_HEIGHT_PX = 10
+const BASE_HEIGHT_PX = 1.3
 const DEFAULT_VIEWPORT = { width: 960, height: 540 }
 
 const pinColor: Record<Tone, string> = {
@@ -289,7 +289,7 @@ export function ComplexMap25D({
 
         <g transform={`translate(${view.panX} ${view.panY}) scale(${view.zoom})`}>
           <g transform={`translate(${fit.translateX} ${fit.translateY}) scale(${fit.scale})`}>
-            <polygon className="dm25-floor-shadow" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset + 4 / fit.scale})`} />
+            <polygon className="dm25-floor-shadow" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset + 2.2 / fit.scale})`} />
             <polygon className="dm25-floor-side" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset})`} />
             <polygon className="dm25-floor" points={pointsAttribute(floor)} />
             {map.mapImageUrl && (
@@ -322,9 +322,8 @@ export function ComplexMap25D({
             const prefix = zonePrefix[zone.type]
             return [(
               <g className="dm25-zone" key={zone.id}>
-                <polygon className="platform" points={pointsAttribute(polygon.map((point) => ({ x: point.x, y: point.y + 4 })))} />
                 <polygon className="surface" points={pointsAttribute(polygon)} />
-                <DisplayLabel x={center.x} y={center.y + 20} viewportWidth={viewport.width} viewportHeight={viewport.height} text={prefix ? `[${prefix}] ${zone.label}` : zone.label} className="zone" />
+                <DisplayLabel x={center.x} y={center.y - 18} viewportWidth={viewport.width} viewportHeight={viewport.height} text={prefix ? `[${prefix}] ${zone.label}` : zone.label} className="zone" />
               </g>
             )]
           })}
