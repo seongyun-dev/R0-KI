@@ -58,6 +58,7 @@ class PatrolCommandServiceTest {
     @Mock private PatrolMapRepository patrolMapRepository;
     @Mock private NavigationWaypointService navigationWaypointService;
     @Mock private DetectedEventRepository detectedEventRepository;
+    @Mock private PatrolCheckpointVisitRecorder patrolCheckpointVisitRecorder;
     @Mock private NavigationWaypoint destinationWaypoint;
     @Mock private PatrolAiSummaryService patrolAiSummaryService;
     @Mock private ObjectProvider<MqttPublisher> mqttPublisherProvider;
@@ -356,11 +357,17 @@ class PatrolCommandServiceTest {
                                         .autoCompleteIfArrived(
                                                 robot,
                                                 new BigDecimal("2.0"),
-                                                new BigDecimal("0.5")))
+                                                new BigDecimal("0.5"),
+                                                LocalDateTime.now()))
                 .isInstanceOf(BusinessException.class);
         assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.STOP_REQUESTED);
 
-        service().autoCompleteIfArrived(robot, new BigDecimal("2.0"), new BigDecimal("0.5"));
+        service()
+                .autoCompleteIfArrived(
+                        robot,
+                        new BigDecimal("2.0"),
+                        new BigDecimal("0.5"),
+                        LocalDateTime.now());
 
         assertThat(patrol.getCommandId()).isEqualTo(firstCommandId.get());
         assertThat(patrol.isCompletionRequested()).isTrue();
@@ -378,7 +385,8 @@ class PatrolCommandServiceTest {
                         robotRepository,
                         patrolMapRepository,
                         navigationWaypointService,
-                        detectedEventRepository));
+                        detectedEventRepository,
+                        patrolCheckpointVisitRecorder));
     }
 
     private void stubSingleDestination() {
