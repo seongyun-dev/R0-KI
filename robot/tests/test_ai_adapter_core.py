@@ -1,11 +1,36 @@
 import unittest
 
-from aiot_robot.ai_adapter_core import build_detection_message
+from aiot_robot.ai_adapter_core import (
+    build_detection_message,
+    detection_context_from_pipeline_payload,
+    preserve_pipeline_detection_context,
+)
 from aiot_robot.contracts import DetectionEvent
 import json
 
 
 class AiAdapterCoreTest(unittest.TestCase):
+    def test_preserves_legacy_pipeline_detection_context(self) -> None:
+        payload = preserve_pipeline_detection_context(
+            {
+                "_bbox": [10, 20, 110, 220],
+                "_frameWidth": 640,
+                "_camera": "A",
+                "_trackId": 42,
+            },
+            {"eventType": "TRASH_DETECTED"},
+        )
+
+        self.assertEqual(
+            detection_context_from_pipeline_payload(payload),
+            {
+                "bbox": [10, 20, 110, 220],
+                "frameWidth": 640,
+                "cameraId": "A",
+                "trackId": 42,
+            },
+        )
+
     def test_unsupported_backend_event_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported backend eventType"):
             build_detection_message(

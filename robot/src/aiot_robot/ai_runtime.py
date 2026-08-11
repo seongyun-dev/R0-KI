@@ -24,7 +24,11 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
-from .ai_adapter_core import build_detection_message
+from .ai_adapter_core import (
+    build_detection_message,
+    detection_context_from_pipeline_payload,
+    preserve_pipeline_detection_context,
+)
 from .ai_capture import CaptureSettings, configure_capture
 from .mjpeg_stream import MjpegStreamServer
 from .patrol_activation import PatrolActivation
@@ -37,6 +41,7 @@ class AiAdapterNode(Node):
         self._evidence_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._active_patrol_id: int | None = None
+        self._recycling_published_patrol_id: int | None = None
         self._state = "STARTING"
         self._camera_ready = False
         self._engine_ready = False
@@ -155,6 +160,17 @@ class AiAdapterNode(Node):
         source = Path(image_path)
         if not source.is_file():
             return
+        recycling_reserved = False
+        if payload.get("eventType") == "RECYCLING_AREA_FULL":
+            with self._lock:
+                if self._recycling_published_patrol_id == patrol_id:
+                    self.get_logger().info(
+                        "Suppressed duplicate recycling-area event "
+                        f"patrolId={patrol_id}"
+                    )
+                    return
+                self._recycling_published_patrol_id = patrol_id
+                recycling_reserved = True
         event_id = uuid4().hex
         evidence = self._evidence_root / f"{event_id}{source.suffix or '.jpg'}"
         try:
@@ -171,11 +187,23 @@ class AiAdapterNode(Node):
                 camera_id=context.get("cameraId"),
                 track_id=context.get("trackId"),
             )
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
+            if recycling_reserved:
+                with self._lock:
+                    if self._recycling_published_patrol_id == patrol_id:
+                        self._recycling_published_patrol_id = None
             self.get_logger().warning(f"Dropped unsupported AI event: {exc}")
             return
-        if source.resolve() != evidence.resolve():
-            shutil.copy2(source, evidence)
+        try:
+            if source.resolve() != evidence.resolve():
+                shutil.copy2(source, evidence)
+        except OSError as exc:
+            if recycling_reserved:
+                with self._lock:
+                    if self._recycling_published_patrol_id == patrol_id:
+                        self._recycling_published_patrol_id = None
+            self.get_logger().warning(f"Failed to preserve AI evidence: {exc}")
+            return
         message = String()
         message.data = json.dumps(
             message_payload, ensure_ascii=False, separators=(",", ":")
@@ -197,12 +225,15 @@ class AiAdapterNode(Node):
                 ):
                     raise ValueError("ENABLE requires patrolId")
                 with self._lock:
+                    if self._active_patrol_id != patrol_id:
+                        self._recycling_published_patrol_id = None
                     self._active_patrol_id = patrol_id
                 self._patrol_activation.enable()
             elif command == "DISABLE":
                 self._patrol_activation.disable()
                 with self._lock:
                     self._active_patrol_id = None
+                    self._recycling_published_patrol_id = None
             else:
                 raise ValueError("unsupported control command")
         except (ValueError, json.JSONDecodeError) as exc:
@@ -237,10 +268,18 @@ class RosEventSink:
         return 0
 
     def send_urgent(self, payload: dict[str, Any], image_path: Any) -> None:
-        self._node.publish_detection(payload, image_path)
+        self._node.publish_detection(
+            payload,
+            image_path,
+            detection_context=detection_context_from_pipeline_payload(payload),
+        )
 
     def enqueue_batch(self, payload: dict[str, Any], image_path: Any) -> None:
-        self._node.publish_detection(payload, image_path)
+        self._node.publish_detection(
+            payload,
+            image_path,
+            detection_context=detection_context_from_pipeline_payload(payload),
+        )
 
     def enqueue_vehicle(
         self, payload: dict[str, Any], image_path: Any = None
@@ -303,6 +342,36 @@ def run_pipeline(
         module = _load_pipeline(pipeline_main)
         sink = RosEventSink(node)
         module.RestEventClient = lambda: sink
+
+        original_api_payload = module.EventManager.api_payload
+
+        def api_payload_with_detection_context(event: dict[str, Any]) -> dict[str, Any]:
+            return preserve_pipeline_detection_context(
+                event,
+                original_api_payload(event),
+            )
+
+        module.EventManager.api_payload = staticmethod(api_payload_with_detection_context)
+
+        original_dispatch_events = module.dispatch_events
+
+        def dispatch_events_with_frame_width(
+            events: list[dict[str, Any]],
+            frames_by_cam: dict[str, Any],
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            for event in events:
+                camera = event.get("_camera")
+                frame = frames_by_cam.get(camera) if camera else None
+                if frame is None and frames_by_cam:
+                    frame = next(iter(frames_by_cam.values()))
+                shape = getattr(frame, "shape", ())
+                if len(shape) >= 2:
+                    event["_frameWidth"] = int(shape[1])
+            return original_dispatch_events(events, frames_by_cam, *args, **kwargs)
+
+        module.dispatch_events = dispatch_events_with_frame_width
 
         original_detector = module.DualCamTensorRTBotSortDetector
 

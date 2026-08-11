@@ -21,6 +21,39 @@ _BACKEND_EVENT_TYPES = frozenset(
         "EMERGENCY",
     }
 )
+_PIPELINE_CONTEXT_FIELDS = {
+    "_bbox": "bbox",
+    "_frameWidth": "frameWidth",
+    "_camera": "cameraId",
+    "_trackId": "trackId",
+}
+
+
+def preserve_pipeline_detection_context(
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep AI-private detection metadata across its legacy REST boundary."""
+
+    enriched = dict(payload)
+    for source, destination in _PIPELINE_CONTEXT_FIELDS.items():
+        value = event.get(source)
+        if value is not None:
+            enriched[destination] = value
+    return enriched
+
+
+def detection_context_from_pipeline_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return only the camera metadata accepted by the Robot ROS contract."""
+
+    return {
+        "bbox": payload.get("bbox"),
+        "frameWidth": payload.get("frameWidth"),
+        "cameraId": payload.get("cameraId"),
+        "trackId": payload.get("trackId"),
+    }
 
 
 def build_detection_message(
