@@ -568,6 +568,46 @@ class RobotRuntimeTest(unittest.TestCase):
             2,
         )
 
+    def test_missing_initial_hardware_status_reconnects_after_deadline(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        now = 0.0
+        runtime._clock = lambda: now
+        bridge.connected = True
+        runtime._on_connected()
+        runtime._handle_ack("ENCODER_ZERO")
+
+        now = 14.9
+        runtime._maintain_initial_hardware_status()
+        self.assertTrue(bridge.connected)
+
+        now = 15.0
+        with self.assertLogs("runtime.robot_runtime", level="ERROR") as logs:
+            runtime._maintain_initial_hardware_status()
+
+        self.assertFalse(bridge.connected)
+        self.assertEqual(bridge.written[-1]["type"], "stop")
+        self.assertTrue(
+            any("hardware status missing" in line for line in logs.output)
+        )
+
+    def test_first_hardware_status_disarms_initial_status_deadline(self) -> None:
+        bridge = FakeBridge([])
+        runtime, _store = create_runtime(bridge)
+        now = 0.0
+        runtime._clock = lambda: now
+        bridge.connected = True
+        runtime._on_connected()
+        runtime._handle_ack("ENCODER_ZERO")
+        runtime._handle_hardware_status(
+            HardwareStatus(82.5, MotorStatus.NORMAL, LineSensorStatus.NORMAL)
+        )
+
+        now = 30.0
+        runtime._maintain_initial_hardware_status()
+
+        self.assertTrue(bridge.connected)
+
     def test_latest_emergency_stop_is_rechecked_before_control_write(self) -> None:
         bridge = FakeBridge([])
         runtime, _store = create_runtime(bridge)
