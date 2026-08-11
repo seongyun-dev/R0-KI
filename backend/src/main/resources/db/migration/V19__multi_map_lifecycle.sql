@@ -1,5 +1,6 @@
--- Multi-map lifecycle Phase 1 (MySQL 8.x).
+-- Multi-map lifecycle Phase 1.
 -- 단지당 맵 N개 허용, active 포인터, 순찰 시작 시 맵 스냅샷.
+-- UPDATE 구문은 H2(test) / MySQL(prod) 공통 서브쿼리 형태를 사용한다.
 
 -- 1) 단지당 맵 1장 UNIQUE 제거 (V9).
 ALTER TABLE patrol_maps
@@ -20,14 +21,12 @@ CREATE INDEX idx_patrol_maps_apartment_status
 ALTER TABLE apartment_complexes
     ADD COLUMN active_map_id BIGINT NULL;
 
-UPDATE apartment_complexes apartment_complex
-INNER JOIN (
-    SELECT apartment_complex_id, MIN(map_id) AS map_id
-    FROM patrol_maps
-    GROUP BY apartment_complex_id
-) first_map
-    ON first_map.apartment_complex_id = apartment_complex.apartment_complex_id
-SET apartment_complex.active_map_id = first_map.map_id;
+UPDATE apartment_complexes
+SET active_map_id = (
+    SELECT MIN(pm.map_id)
+    FROM patrol_maps pm
+    WHERE pm.apartment_complex_id = apartment_complexes.apartment_complex_id
+);
 
 ALTER TABLE apartment_complexes
     ADD CONSTRAINT fk_apartment_complexes_active_map
@@ -35,23 +34,35 @@ ALTER TABLE apartment_complexes
 
 -- 4) 순찰 시작 시점 맵 스냅샷 (레거시는 NULL 허용).
 ALTER TABLE patrols
-    ADD COLUMN map_id BIGINT NULL,
+    ADD COLUMN map_id BIGINT NULL;
+
+ALTER TABLE patrols
     ADD COLUMN map_version INT NULL;
 
-UPDATE patrols patrol
-INNER JOIN patrol_robots robot
-    ON robot.robot_id = patrol.robot_id
-INNER JOIN apartment_complexes apartment_complex
-    ON apartment_complex.apartment_complex_id = robot.apartment_complex_id
-SET
-    patrol.map_id = apartment_complex.active_map_id
-WHERE apartment_complex.active_map_id IS NOT NULL;
+UPDATE patrols
+SET map_id = (
+    SELECT ac.active_map_id
+    FROM patrol_robots robot
+    INNER JOIN apartment_complexes ac
+        ON ac.apartment_complex_id = robot.apartment_complex_id
+    WHERE robot.robot_id = patrols.robot_id
+)
+WHERE EXISTS (
+    SELECT 1
+    FROM patrol_robots robot
+    INNER JOIN apartment_complexes ac
+        ON ac.apartment_complex_id = robot.apartment_complex_id
+    WHERE robot.robot_id = patrols.robot_id
+      AND ac.active_map_id IS NOT NULL
+);
 
-UPDATE patrols patrol
-INNER JOIN patrol_maps patrol_map
-    ON patrol_map.map_id = patrol.map_id
-SET patrol.map_version = patrol_map.map_version
-WHERE patrol.map_id IS NOT NULL;
+UPDATE patrols
+SET map_version = (
+    SELECT pm.map_version
+    FROM patrol_maps pm
+    WHERE pm.map_id = patrols.map_id
+)
+WHERE map_id IS NOT NULL;
 
 ALTER TABLE patrols
     ADD CONSTRAINT fk_patrols_patrol_map

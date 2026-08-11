@@ -2,11 +2,11 @@ spring:
   config:
     import: ""
   datasource:
-    # 통합 테스트는 로컬 Docker MySQL을 사용한다 (H2 MODE=MySQL 미사용).
-    url: jdbc:mysql://localhost:3306/aiot_test?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false
-    username: ${TEST_MYSQL_USER:aiot_local}
-    password: ${TEST_MYSQL_PASSWORD:local-password}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    # CI 및 기본 테스트: H2 in-memory. 로컬 MySQL은 TEST_DATASOURCE_URL 로 override.
+    url: ${TEST_DATASOURCE_URL:jdbc:h2:mem:oneloop;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
+    username: ${TEST_DATASOURCE_USERNAME:sa}
+    password: ${TEST_DATASOURCE_PASSWORD:}
+    driver-class-name: ${TEST_DATASOURCE_DRIVER:org.h2.Driver}
   jpa:
     hibernate:
       ddl-auto: validate
