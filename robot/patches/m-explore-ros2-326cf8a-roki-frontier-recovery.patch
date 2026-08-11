@@ -1,0 +1,532 @@
+diff --git a/explore/include/explore/explore.h b/explore/include/explore/explore.h
+index 8799783..77ba69f 100644
+--- a/explore/include/explore/explore.h
++++ b/explore/include/explore/explore.h
+@@ -54,6 +54,7 @@
+ #include <visualization_msgs/msg/marker_array.hpp>
+
+ #include "nav2_msgs/action/navigate_to_pose.hpp"
++#include "nav2_msgs/action/compute_path_to_pose.hpp"
+ #include "rclcpp_action/rclcpp_action.hpp"
+
+ using namespace std::placeholders;
+@@ -83,6 +84,8 @@ public:
+
+   using NavigationGoalHandle =
+       rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>;
++  using PlanningGoalHandle =
++      rclcpp_action::ClientGoalHandle<nav2_msgs::action::ComputePathToPose>;
+
+ private:
+   /**
+@@ -97,6 +100,17 @@ private:
+       const std::vector<frontier_exploration::Frontier>& frontiers);
+
+   bool goalOnBlacklist(const geometry_msgs::msg::Point& goal);
++  bool goalOnCooldown(const geometry_msgs::msg::Point& goal);
++  void recordGoalFailure(const geometry_msgs::msg::Point& goal,
++                         const char* reason);
++  void precheckGoal(const geometry_msgs::msg::PoseStamped& target_pose);
++  void sendNavigationGoal(const geometry_msgs::msg::PoseStamped& target_pose);
++
++  struct FrontierFailure {
++    geometry_msgs::msg::Point goal;
++    unsigned int attempts;
++    rclcpp::Time retry_after;
++  };
+
+   NavigationGoalHandle::SharedPtr navigation_goal_handle_;
+   // void
+@@ -120,6 +134,8 @@ private:
+   Costmap2DClient costmap_client_;
+   rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr
+       move_base_client_;
++  rclcpp_action::Client<nav2_msgs::action::ComputePathToPose>::SharedPtr
++      planner_client_;
+   frontier_exploration::FrontierSearch search_;
+   rclcpp::TimerBase::SharedPtr exploring_timer_;
+   // rclcpp::TimerBase::SharedPtr oneshot_;
+@@ -127,7 +143,7 @@ private:
+   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr resume_subscription_;
+   void resumeCallback(const std_msgs::msg::Bool::SharedPtr msg);
+
+-  std::vector<geometry_msgs::msg::Point> frontier_blacklist_;
++  std::vector<FrontierFailure> frontier_failures_;
+   geometry_msgs::msg::Point prev_goal_;
+   double prev_distance_;
+   rclcpp::Time last_progress_;
+@@ -142,9 +158,14 @@ private:
+   double progress_timeout_;
+   bool visualize_;
+   bool return_to_init_;
++  double frontier_retry_delay_;
++  unsigned int frontier_max_attempts_;
++  std::string frontier_planner_id_;
+   std::string robot_base_frame_;
+   bool resuming_ = false;
+   bool goal_active_{false};
++  bool planning_goal_{false};
++  bool exploration_active_{true};
+   rclcpp_action::GoalUUID active_goal_id_;
+ };
+ }  // namespace explore
+diff --git a/explore/include/explore/frontier_search.h b/explore/include/explore/frontier_search.h
+index 0f8e610..48111b9 100644
+--- a/explore/include/explore/frontier_search.h
++++ b/explore/include/explore/frontier_search.h
+@@ -16,6 +16,7 @@ struct Frontier {
+   geometry_msgs::msg::Point initial;
+   geometry_msgs::msg::Point centroid;
+   geometry_msgs::msg::Point middle;
++  geometry_msgs::msg::Point approach;
+   std::vector<geometry_msgs::msg::Point> points;
+ };
+
+@@ -33,7 +34,8 @@ public:
+    * @param costmap Reference to costmap data to search.
+    */
+   FrontierSearch(nav2_costmap_2d::Costmap2D* costmap, double potential_scale,
+-                 double gain_scale, double min_frontier_size, rclcpp::Logger logger);
++                 double gain_scale, double min_frontier_size,
++                 double approach_distance, rclcpp::Logger logger);
+
+   /**
+    * @brief Runs search implementation, outward from the start position
+@@ -53,6 +55,7 @@ protected:
+    * @return new frontier
+    */
+   Frontier buildNewFrontier(unsigned int initial_cell, unsigned int reference,
++                            unsigned int approach_cell,
+                             std::vector<bool>& frontier_flag);
+
+   /**
+@@ -81,6 +84,7 @@ private:
+   unsigned int size_x_, size_y_;
+   double potential_scale_, gain_scale_;
+   double min_frontier_size_;
++  double approach_distance_;
+   rclcpp::Logger logger_;
+ };
+ }  // namespace frontier_exploration
+diff --git a/explore/src/explore.cpp b/explore/src/explore.cpp
+index d72fb18..d6fb7a1 100644
+--- a/explore/src/explore.cpp
++++ b/explore/src/explore.cpp
+@@ -38,6 +38,7 @@
+
+ #include <explore/explore.h>
+
++#include <algorithm>
+ #include <thread>
+
+ inline static bool same_point(const geometry_msgs::msg::Point& one,
+@@ -62,6 +63,8 @@ Explore::Explore()
+ {
+   double timeout;
+   double min_frontier_size;
++  double frontier_approach_distance;
++  int frontier_max_attempts;
+   this->declare_parameter<float>("planner_frequency", 1.0);
+   this->declare_parameter<float>("progress_timeout", 30.0);
+   this->declare_parameter<bool>("visualize", false);
+@@ -70,6 +73,10 @@ Explore::Explore()
+   this->declare_parameter<float>("gain_scale", 1.0);
+   this->declare_parameter<float>("min_frontier_size", 0.5);
+   this->declare_parameter<bool>("return_to_init", false);
++  this->declare_parameter<float>("frontier_approach_distance", 0.25);
++  this->declare_parameter<float>("frontier_retry_delay", 15.0);
++  this->declare_parameter<int>("frontier_max_attempts", 2);
++  this->declare_parameter<std::string>("frontier_planner_id", "MappingGridBased");
+
+   this->get_parameter("planner_frequency", planner_frequency_);
+   this->get_parameter("progress_timeout", timeout);
+@@ -79,16 +86,27 @@ Explore::Explore()
+   this->get_parameter("gain_scale", gain_scale_);
+   this->get_parameter("min_frontier_size", min_frontier_size);
+   this->get_parameter("return_to_init", return_to_init_);
++  this->get_parameter("frontier_approach_distance", frontier_approach_distance);
++  this->get_parameter("frontier_retry_delay", frontier_retry_delay_);
++  this->get_parameter("frontier_max_attempts", frontier_max_attempts);
++  this->get_parameter("frontier_planner_id", frontier_planner_id_);
+   this->get_parameter("robot_base_frame", robot_base_frame_);
+
+   progress_timeout_ = timeout;
++  frontier_max_attempts_ =
++      static_cast<unsigned int>(std::max(frontier_max_attempts, 1));
+   move_base_client_ =
+       rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
+           this, ACTION_NAME);
++  planner_client_ =
++      rclcpp_action::create_client<nav2_msgs::action::ComputePathToPose>(
++          this, "compute_path_to_pose");
+
+   search_ = frontier_exploration::FrontierSearch(costmap_client_.getCostmap(),
+                                                  potential_scale_, gain_scale_,
+-                                                 min_frontier_size, logger_);
++                                                 min_frontier_size,
++                                                 frontier_approach_distance,
++                                                 logger_);
+
+   if (visualize_) {
+     marker_array_publisher_ =
+@@ -111,6 +129,9 @@ Explore::Explore()
+   RCLCPP_INFO(logger_, "Waiting to connect to move_base nav2 server");
+   move_base_client_->wait_for_action_server();
+   RCLCPP_INFO(logger_, "Connected to move_base nav2 server");
++  RCLCPP_INFO(logger_, "Waiting to connect to planner nav2 server");
++  planner_client_->wait_for_action_server();
++  RCLCPP_INFO(logger_, "Connected to planner nav2 server");
+
+   if (return_to_init_) {
+     RCLCPP_INFO(logger_, "Getting initial pose of the robot");
+@@ -193,7 +214,7 @@ void Explore::visualizeFrontiers(
+     m.scale.y = 0.1;
+     m.scale.z = 0.1;
+     m.points = frontier.points;
+-    if (goalOnBlacklist(frontier.centroid)) {
++    if (goalOnBlacklist(frontier.approach)) {
+       m.color = red;
+     } else {
+       m.color = blue;
+@@ -202,7 +223,7 @@ void Explore::visualizeFrontiers(
+     ++id;
+     m.type = visualization_msgs::msg::Marker::SPHERE;
+     m.id = int(id);
+-    m.pose.position = frontier.centroid;
++    m.pose.position = frontier.approach;
+     // scale frontier according to its cost (costier frontiers will be smaller)
+     double scale = std::min(std::abs(min_cost * 0.4 / frontier.cost), 0.5);
+     m.scale.x = scale;
+@@ -228,6 +249,9 @@ void Explore::visualizeFrontiers(
+
+ void Explore::makePlan()
+ {
++  if (!exploration_active_ || planning_goal_) {
++    return;
++  }
+   // find frontiers
+   auto pose = costmap_client_.getRobotPose();
+   // get frontiers sorted according to cost
+@@ -255,17 +279,26 @@ void Explore::makePlan()
+   auto frontier =
+       std::find_if_not(frontiers.begin(), frontiers.end(),
+                        [this](const frontier_exploration::Frontier& f) {
+-                         return goalOnBlacklist(f.centroid);
++                         return goalOnBlacklist(f.approach) ||
++                                goalOnCooldown(f.approach);
+                        });
+   if (frontier == frontiers.end()) {
+-    RCLCPP_WARN(logger_, "All frontiers traversed/tried out, stopping.");
++    const bool has_retryable = std::any_of(
++        frontiers.begin(), frontiers.end(), [this](const auto& f) {
++          return !goalOnBlacklist(f.approach);
++        });
++    if (has_retryable) {
++      RCLCPP_WARN(logger_, "All frontier goals are cooling down; waiting before retry.");
++      return;
++    }
++    RCLCPP_ERROR(logger_, "Frontiers remain but all retries are exhausted; exploration stalled.");
++    stop(false);
+     auto status_msg = explore_lite_msgs::msg::ExploreStatus();
+-    status_msg.status = explore_lite_msgs::msg::ExploreStatus::EXPLORATION_COMPLETE;
++    status_msg.status = "exploration_stalled";
+     status_pub_->publish(status_msg);
+-    stop(true);
+     return;
+   }
+-  geometry_msgs::msg::Point target_position = frontier->centroid;
++  geometry_msgs::msg::Point target_position = frontier->approach;
+
+   // time out if we are not making any progress
+   bool same_goal = same_point(prev_goal_, target_position);
+@@ -281,8 +314,9 @@ void Explore::makePlan()
+       (this->now() - last_progress_ >
+        tf2::durationFromSec(progress_timeout_)) &&
+       !resuming_) {
+-    frontier_blacklist_.push_back(target_position);
+-    RCLCPP_DEBUG(logger_, "Adding current goal to black list");
++    recordGoalFailure(target_position, "progress_timeout");
++    goal_active_ = false;
++    move_base_client_->async_cancel_all_goals();
+     makePlan();
+     return;
+   }
+@@ -292,29 +326,71 @@ void Explore::makePlan()
+     resuming_ = false;
+   }
+
+-  // we don't need to do anything if we still pursuing the same goal
+-  if (same_goal && goal_active_) {
++  // Let an accepted goal finish. Retargeting on every map update preempts the
++  // old NavigateToPose goal; Humble cannot distinguish that preemption from a
++  // real ABORT and would consume the old frontier's retry budget.
++  if (goal_active_) {
+     return;
+   }
+
+-  RCLCPP_DEBUG(logger_, "Sending goal to move base nav2");
++  geometry_msgs::msg::PoseStamped target_pose;
++  target_pose.pose.position = target_position;
++  const double yaw = std::atan2(target_position.y - pose.position.y,
++                                target_position.x - pose.position.x);
++  target_pose.pose.orientation.z = std::sin(yaw * 0.5);
++  target_pose.pose.orientation.w = std::cos(yaw * 0.5);
++  target_pose.header.frame_id = costmap_client_.getGlobalFrameID();
++  target_pose.header.stamp = this->now();
++  precheckGoal(target_pose);
++}
+
+-  // send goal to move_base if we have something new to pursue
+-  auto goal = nav2_msgs::action::NavigateToPose::Goal();
+-  goal.pose.pose.position = target_position;
+-  goal.pose.pose.orientation.w = 1.;
+-  goal.pose.header.frame_id = costmap_client_.getGlobalFrameID();
+-  goal.pose.header.stamp = this->now();
++void Explore::precheckGoal(const geometry_msgs::msg::PoseStamped& target_pose)
++{
++  planning_goal_ = true;
++  auto goal = nav2_msgs::action::ComputePathToPose::Goal();
++  goal.goal = target_pose;
++  goal.use_start = false;
++  goal.planner_id = frontier_planner_id_;
++  auto options = rclcpp_action::Client<nav2_msgs::action::ComputePathToPose>::SendGoalOptions();
++  options.goal_response_callback =
++      [this, target_pose](const PlanningGoalHandle::SharedPtr& handle) {
++        if (!handle) {
++          planning_goal_ = false;
++          recordGoalFailure(target_pose.pose.position, "planner_rejected");
++        }
++      };
++  options.result_callback =
++      [this, target_pose](const PlanningGoalHandle::WrappedResult& result) {
++        planning_goal_ = false;
++        if (!exploration_active_) {
++          return;
++        }
++        if (result.code != rclcpp_action::ResultCode::SUCCEEDED ||
++            !result.result || result.result->path.poses.empty()) {
++          recordGoalFailure(target_pose.pose.position, "path_unavailable");
++          makePlan();
++          return;
++        }
++        sendNavigationGoal(target_pose);
++      };
++  planner_client_->async_send_goal(goal, options);
++}
+
++void Explore::sendNavigationGoal(const geometry_msgs::msg::PoseStamped& target_pose)
++{
++  RCLCPP_DEBUG(logger_, "Sending prechecked FREE-space goal to move base nav2");
++  auto goal = nav2_msgs::action::NavigateToPose::Goal();
++  goal.pose = target_pose;
+   goal_active_ = true;
+   auto send_goal_options = rclcpp_action::Client<
+       nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+
+   send_goal_options.goal_response_callback =
+-      [this](const NavigationGoalHandle::SharedPtr& goal_handle) {
++      [this, target_pose](const NavigationGoalHandle::SharedPtr& goal_handle) {
+         if (!goal_handle) {
+           RCLCPP_ERROR(logger_, "Goal was REJECTED by the action server");
+           goal_active_ = false;
++          recordGoalFailure(target_pose.pose.position, "navigation_rejected");
+         } else {
+           active_goal_id_ = goal_handle->get_goal_id();
+           RCLCPP_DEBUG(logger_, "Goal ACCEPTED, uuid: %s",
+@@ -324,8 +400,8 @@ void Explore::makePlan()
+
+   send_goal_options.result_callback =
+       [this,
+-       target_position](const NavigationGoalHandle::WrappedResult& result) {
+-        reachedGoal(result, target_position);
++       target_pose](const NavigationGoalHandle::WrappedResult& result) {
++        reachedGoal(result, target_pose.pose.position);
+       };
+   move_base_client_->async_send_goal(goal, send_goal_options);
+ }
+@@ -362,9 +438,12 @@ bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
+   nav2_costmap_2d::Costmap2D* costmap2d = costmap_client_.getCostmap();
+
+   // check if a goal is on the blacklist for goals that we're pursuing
+-  for (auto& frontier_goal : frontier_blacklist_) {
+-    double x_diff = fabs(goal.x - frontier_goal.x);
+-    double y_diff = fabs(goal.y - frontier_goal.y);
++  for (auto& failure : frontier_failures_) {
++    if (failure.attempts < frontier_max_attempts_) {
++      continue;
++    }
++    double x_diff = fabs(goal.x - failure.goal.x);
++    double y_diff = fabs(goal.y - failure.goal.y);
+
+     if (x_diff < tolerace * costmap2d->getResolution() &&
+         y_diff < tolerace * costmap2d->getResolution())
+@@ -373,6 +452,42 @@ bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
+   return false;
+ }
+
++bool Explore::goalOnCooldown(const geometry_msgs::msg::Point& goal)
++{
++  constexpr static size_t tolerance = 5;
++  const double radius = tolerance * costmap_client_.getCostmap()->getResolution();
++  for (auto& failure : frontier_failures_) {
++    if (fabs(goal.x - failure.goal.x) < radius &&
++        fabs(goal.y - failure.goal.y) < radius) {
++      return failure.attempts < frontier_max_attempts_ &&
++             this->now() < failure.retry_after;
++    }
++  }
++  return false;
++}
++
++void Explore::recordGoalFailure(const geometry_msgs::msg::Point& goal,
++                                const char* reason)
++{
++  constexpr static size_t tolerance = 5;
++  const double radius = tolerance * costmap_client_.getCostmap()->getResolution();
++  auto it = std::find_if(frontier_failures_.begin(), frontier_failures_.end(),
++      [&goal, radius](const FrontierFailure& failure) {
++        return fabs(goal.x - failure.goal.x) < radius &&
++               fabs(goal.y - failure.goal.y) < radius;
++      });
++  if (it == frontier_failures_.end()) {
++    frontier_failures_.push_back(
++        FrontierFailure{goal, 1, this->now() + rclcpp::Duration::from_seconds(frontier_retry_delay_)});
++    it = std::prev(frontier_failures_.end());
++  } else {
++    ++it->attempts;
++    it->retry_after = this->now() + rclcpp::Duration::from_seconds(frontier_retry_delay_);
++  }
++  RCLCPP_WARN(logger_, "Frontier goal failed reason=%s attempts=%u/%u target=(%.3f, %.3f)",
++              reason, it->attempts, frontier_max_attempts_, goal.x, goal.y);
++}
++
+ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
+                           const geometry_msgs::msg::Point& frontier_goal) {
+   // discard stale callbacks from previously preempted goals
+@@ -393,14 +508,14 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
+         RCLCPP_DEBUG(logger_, "Goal aborted with error_code=%d (%s) — blacklisting frontier",
+                      result.result->error_code,
+                      result.result->error_msg.c_str());
+-        frontier_blacklist_.push_back(frontier_goal);
++        recordGoalFailure(frontier_goal, "navigation_aborted");
+       } else {
+         RCLCPP_DEBUG(logger_, "Goal aborted with error_code=0 — likely a preemption, not blacklisting");
+       }
+ #else
+       // Humble: no error_code field, blacklist unconditionally on abort
+       RCLCPP_DEBUG(logger_, "Goal aborted — blacklisting frontier");
+-      frontier_blacklist_.push_back(frontier_goal);
++      recordGoalFailure(frontier_goal, "navigation_aborted_humble");
+ #endif
+       // If it was aborted probably because we've found another frontier goal,
+       // so just return and don't make plan again
+@@ -439,6 +554,8 @@ void Explore::stop(bool finished_exploring)
+   RCLCPP_INFO(logger_, "Exploration stopped.");
+
+   goal_active_ = false;
++  planning_goal_ = false;
++  exploration_active_ = false;
+   // Only publish paused status if manually stopped (not finished exploring)
+   if (!finished_exploring) {
+     auto status_msg = explore_lite_msgs::msg::ExploreStatus();
+@@ -447,6 +564,7 @@ void Explore::stop(bool finished_exploring)
+   }
+
+   move_base_client_->async_cancel_all_goals();
++  planner_client_->async_cancel_all_goals();
+   exploring_timer_->cancel();
+
+   if (return_to_init_ && finished_exploring) {
+@@ -456,6 +574,7 @@ void Explore::stop(bool finished_exploring)
+
+ void Explore::resume()
+ {
++  exploration_active_ = true;
+   resuming_ = true;
+   RCLCPP_INFO(logger_, "Exploration resuming.");
+   auto status_msg = explore_lite_msgs::msg::ExploreStatus();
+diff --git a/explore/src/frontier_search.cpp b/explore/src/frontier_search.cpp
+index 6085fd8..1c53bd0 100644
+--- a/explore/src/frontier_search.cpp
++++ b/explore/src/frontier_search.cpp
+@@ -14,11 +14,13 @@ using nav2_costmap_2d::NO_INFORMATION;
+
+ FrontierSearch::FrontierSearch(nav2_costmap_2d::Costmap2D* costmap,
+                                double potential_scale, double gain_scale,
+-                               double min_frontier_size, rclcpp::Logger logger)
++                               double min_frontier_size,
++                               double approach_distance, rclcpp::Logger logger)
+   : costmap_(costmap)
+   , potential_scale_(potential_scale)
+   , gain_scale_(gain_scale)
+   , min_frontier_size_(min_frontier_size)
++  , approach_distance_(approach_distance)
+   , logger_(logger)
+ {
+ }
+@@ -46,6 +48,7 @@ FrontierSearch::searchFrom(geometry_msgs::msg::Point position)
+   // initialize flag arrays to keep track of visited and frontier cells
+   std::vector<bool> frontier_flag(size_x_ * size_y_, false);
+   std::vector<bool> visited_flag(size_x_ * size_y_, false);
++  std::vector<unsigned int> parent(size_x_ * size_y_);
+
+   // initialize breadth first search
+   std::queue<unsigned int> bfs;
+@@ -59,6 +62,7 @@ FrontierSearch::searchFrom(geometry_msgs::msg::Point position)
+     RCLCPP_WARN(logger_, "[FrontierSearch] Could not find nearby clear cell to start search");
+   }
+   visited_flag[bfs.front()] = true;
++  parent[bfs.front()] = bfs.front();
+
+   while (!bfs.empty()) {
+     unsigned int idx = bfs.front();
+@@ -70,12 +74,25 @@ FrontierSearch::searchFrom(geometry_msgs::msg::Point position)
+       // initialized on non-free cell
+       if (map_[nbr] <= map_[idx] && !visited_flag[nbr]) {
+         visited_flag[nbr] = true;
++        parent[nbr] = idx;
+         bfs.push(nbr);
+         // check if cell is new frontier cell (unvisited, NO_INFORMATION, free
+         // neighbour)
+       } else if (isNewFrontierCell(nbr, frontier_flag)) {
+         frontier_flag[nbr] = true;
+-        Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
++        // idx is a FREE cell reached by the robot-connected BFS. Retreat from
++        // the unknown boundary before selecting it as the navigation target;
++        // the frontier centroid itself is UNKNOWN and can lie inside/behind a
++        // wall in concave maps.
++        unsigned int approach = idx;
++        const unsigned int retreat_cells = static_cast<unsigned int>(
++            std::ceil(approach_distance_ / costmap_->getResolution()));
++        for (unsigned int step = 0;
++             step < retreat_cells && parent[approach] != approach; ++step) {
++          approach = parent[approach];
++        }
++        Frontier new_frontier =
++            buildNewFrontier(nbr, pos, approach, frontier_flag);
+         if (new_frontier.size * costmap_->getResolution() >=
+             min_frontier_size_) {
+           frontier_list.push_back(new_frontier);
+@@ -97,6 +114,7 @@ FrontierSearch::searchFrom(geometry_msgs::msg::Point position)
+
+ Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
+                                           unsigned int reference,
++                                          unsigned int approach_cell,
+                                           std::vector<bool>& frontier_flag)
+ {
+   // initialize frontier structure
+@@ -111,6 +129,10 @@ Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
+   costmap_->indexToCells(initial_cell, ix, iy);
+   costmap_->mapToWorld(ix, iy, output.initial.x, output.initial.y);
+
++  unsigned int ax, ay;
++  costmap_->indexToCells(approach_cell, ax, ay);
++  costmap_->mapToWorld(ax, ay, output.approach.x, output.approach.y);
++
+   // push initial gridcell onto queue
+   std::queue<unsigned int> bfs;
+   bfs.push(initial_cell);
+warning: in the working copy of 'explore/include/explore/explore.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'explore/include/explore/frontier_search.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'explore/src/explore.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'explore/src/frontier_search.cpp', LF will be replaced by CRLF the next time Git touches it
