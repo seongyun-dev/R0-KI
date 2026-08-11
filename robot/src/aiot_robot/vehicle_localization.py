@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from .detection_localization import project_detection
+
 
 @dataclass(frozen=True)
 class VehicleMapPosition:
@@ -69,9 +71,13 @@ def project_front_vehicle(
         raise ValueError("vehicle projection values must be finite")
     if values[3] <= 0:
         raise ValueError("vehicle range must be positive")
-    angle_rad = math.radians(values[2] + values[4])
+    projected = project_detection(
+        pose,
+        values[3],
+        bearing_deg=values[4],
+    )
     return VehicleMapPosition(
-        x=values[0] + values[3] * math.cos(angle_rad),
-        y=values[1] + values[3] * math.sin(angle_rad),
-        range_m=values[3],
+        x=projected.x,
+        y=projected.y,
+        range_m=projected.range_m,
     )

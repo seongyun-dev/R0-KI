@@ -10,6 +10,7 @@ import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.file.FileStorageProperties;
 import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.CheckpointType;
+import com.oneloop.map.domain.MapStatus;
 import com.oneloop.map.domain.NavigationWaypoint;
 import com.oneloop.map.domain.NavigationWaypointAction;
 import com.oneloop.map.domain.PatrolMap;
@@ -18,6 +19,8 @@ import com.oneloop.map.dto.request.WaypointBatchReplaceRequest;
 import com.oneloop.map.dto.request.WaypointReplaceItemRequest;
 import com.oneloop.map.dto.request.ZoneBatchCreateRequest;
 import com.oneloop.map.dto.request.ZoneCreateRequest;
+import com.oneloop.map.dto.response.MapDetailResponse;
+import com.oneloop.map.dto.response.MapListResponse;
 import com.oneloop.map.repository.CheckpointRepository;
 import com.oneloop.map.repository.NavigationWaypointRepository;
 import com.oneloop.map.repository.PatrolMapRepository;
@@ -141,7 +144,7 @@ class MapConfigurationTransactionIntegrationTest {
     }
 
     @Test
-    void mapReuploadInvalidatesConfigurationOnceAndCompletedRetryIsIdempotent() {
+    void mapReuploadInsertsNewActiveMapAndKeepsPreviousConfiguration() {
         Fixture fixture = fixture("map-reupload");
         Checkpoint oldZone = checkpoint(fixture.map(), "old parking");
         navigationWaypointRepository.saveAndFlush(
@@ -158,43 +161,160 @@ class MapConfigurationTransactionIntegrationTest {
         mappingSessionRepository.saveAndFlush(session);
 
         MapUploadRequest request = uploadRequest(commandId);
-        mapService.upload(session.getId(), fixture.robot().getId(), request);
+        var uploadResponse =
+                mapService.upload(session.getId(), fixture.robot().getId(), request);
 
         assertThat(mappingSessionRepository.findById(session.getId()))
                 .get()
                 .extracting(MappingSession::getStatus)
                 .isEqualTo(MappingStatus.COMPLETED);
 
-        PatrolMap updatedMap = patrolMapRepository.findById(fixture.map().getId()).orElseThrow();
-        assertThat(updatedMap.getMapVersion()).isEqualTo(2);
-        assertThat(checkpointRepository.findAllByPatrolMapId(updatedMap.getId())).isEmpty();
+        PatrolMap archivedMap = patrolMapRepository.findById(fixture.map().getId()).orElseThrow();
+        assertThat(archivedMap.getMapVersion()).isEqualTo(1);
+        assertThat(archivedMap.getStatus()).isEqualTo(MapStatus.ARCHIVED);
+        assertThat(checkpointRepository.findAllByPatrolMapId(archivedMap.getId()))
+                .extracting(Checkpoint::getName)
+                .containsExactly("old parking");
         assertThat(
                         navigationWaypointRepository
                                 .findAllByPatrolMapIdAndMapVersionOrderBySequenceAsc(
-                                        updatedMap.getId(), updatedMap.getMapVersion()))
-                .isEmpty();
+                                        archivedMap.getId(), archivedMap.getMapVersion()))
+                .hasSize(1);
 
-        Checkpoint currentZone = checkpoint(updatedMap, "current parking");
-        navigationWaypointRepository.saveAndFlush(
-                waypoint(
-                        updatedMap,
-                        updatedMap.getMapVersion(),
-                        1,
-                        NavigationWaypointAction.DESTINATION,
-                        currentZone));
+        PatrolMap newMap = patrolMapRepository.findById(uploadResponse.getMapId()).orElseThrow();
+        assertThat(newMap.getId()).isNotEqualTo(archivedMap.getId());
+        assertThat(newMap.getStatus()).isEqualTo(MapStatus.ACTIVE);
+        assertThat(newMap.getMapVersion()).isEqualTo(1);
+        assertThat(checkpointRepository.findAllByPatrolMapId(newMap.getId())).isEmpty();
+        assertThat(apartmentComplexRepository.findById(fixture.apartment().getId()))
+                .get()
+                .extracting(apartment -> apartment.getActiveMap().getId())
+                .isEqualTo(newMap.getId());
+
         mapService.upload(session.getId(), fixture.robot().getId(), request);
 
-        assertThat(patrolMapRepository.findById(updatedMap.getId()).orElseThrow().getMapVersion())
-                .isEqualTo(2);
-        assertThat(checkpointRepository.findAllByPatrolMapId(updatedMap.getId()))
-                .extracting(Checkpoint::getName)
-                .containsExactly("current parking");
-        assertThat(
-                        navigationWaypointRepository
-                                .findAllByPatrolMapIdAndMapVersionOrderBySequenceAsc(
-                                        updatedMap.getId(), updatedMap.getMapVersion()))
-                .hasSize(1);
+        assertThat(patrolMapRepository.findById(newMap.getId()).orElseThrow().getMapVersion())
+                .isEqualTo(1);
+        assertThat(mapService.getCurrent(fixture.apartment().getId()).getMapId())
+                .isEqualTo(newMap.getId());
         assertThat(fakeMapFileStorage.storeCount()).isEqualTo(1);
+    }
+
+    @Test
+    void listActivateAndDeleteFollowMultiMapLifecycle() {
+        Fixture fixture = fixture("map-lifecycle");
+        String commandId = UUID.randomUUID().toString();
+        MappingSession session =
+                new MappingSession(fixture.apartment(), fixture.robot(), commandId);
+        session.startMapping();
+        mappingSessionRepository.saveAndFlush(session);
+
+        var uploadResponse =
+                mapService.upload(
+                        session.getId(), fixture.robot().getId(), uploadRequest(commandId));
+        PatrolMap first = fixture.map();
+        PatrolMap second =
+                patrolMapRepository.findById(uploadResponse.getMapId()).orElseThrow();
+
+        MapListResponse listed = mapService.list(fixture.apartment().getId());
+        assertThat(listed.getActiveMapId()).isEqualTo(second.getId());
+        assertThat(listed.getMaps())
+                .extracting(MapDetailResponse::getMapId)
+                .containsExactly(second.getId(), first.getId());
+        assertThat(listed.getMaps().get(0).getStatus()).isEqualTo(MapStatus.ACTIVE);
+
+        MapDetailResponse activated =
+                mapService.activate(fixture.apartment().getId(), first.getId());
+        assertThat(activated.getMapId()).isEqualTo(first.getId());
+        assertThat(activated.getStatus()).isEqualTo(MapStatus.ACTIVE);
+        assertThat(patrolMapRepository.findById(second.getId()).orElseThrow().getStatus())
+                .isEqualTo(MapStatus.ARCHIVED);
+        assertThat(mapService.activate(fixture.apartment().getId(), first.getId()).getMapId())
+                .isEqualTo(first.getId());
+
+        assertThatThrownBy(
+                        () -> mapService.delete(fixture.apartment().getId(), first.getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.MAP_ACTIVE_CANNOT_DELETE);
+
+        Patrol patrol =
+                patrolRepository.saveAndFlush(
+                        new Patrol(
+                                fixture.robot(),
+                                second,
+                                LocalDateTime.now(),
+                                UUID.randomUUID().toString()));
+        assertThatThrownBy(
+                        () -> mapService.delete(fixture.apartment().getId(), second.getId()))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.MAP_REFERENCED_BY_PATROL);
+
+        patrolRepository.delete(patrol);
+
+        mapService.delete(fixture.apartment().getId(), second.getId());
+        assertThat(patrolMapRepository.findById(second.getId())).isEmpty();
+    }
+
+    @Test
+    void archivedMapAllowsReadButBlocksEditUntilActivated() {
+        Fixture fixture = fixture("archived-edit-guard");
+        Checkpoint zone = checkpoint(fixture.map(), "archived parking");
+        navigationWaypointRepository.saveAndFlush(
+                waypoint(
+                        fixture.map(),
+                        fixture.map().getMapVersion(),
+                        1,
+                        NavigationWaypointAction.DESTINATION,
+                        zone));
+
+        String commandId = UUID.randomUUID().toString();
+        MappingSession session =
+                new MappingSession(fixture.apartment(), fixture.robot(), commandId);
+        session.startMapping();
+        mappingSessionRepository.saveAndFlush(session);
+        mapService.upload(session.getId(), fixture.robot().getId(), uploadRequest(commandId));
+
+        PatrolMap archived = fixture.map();
+        PatrolMap active =
+                patrolMapRepository
+                        .findByApartmentComplexId(fixture.apartment().getId())
+                        .orElseThrow();
+
+        assertThat(zoneService.findAll(fixture.apartment().getId(), archived.getId())).hasSize(1);
+        assertThat(
+                        navigationWaypointService
+                                .findAll(fixture.apartment().getId(), archived.getId())
+                                .getWaypoints())
+                .hasSize(1);
+
+        assertThatThrownBy(
+                        () ->
+                                zoneService.createAll(
+                                        fixture.apartment().getId(),
+                                        archived.getId(),
+                                        zoneRequest(archived.getMapVersion(), "new parking")))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAP_NOT_ACTIVE));
+
+        mapService.activate(fixture.apartment().getId(), archived.getId());
+        zoneService.createAll(
+                fixture.apartment().getId(),
+                archived.getId(),
+                zoneRequest(archived.getMapVersion(), "new parking"));
+        assertThat(checkpointRepository.findAllByPatrolMapId(archived.getId()))
+                .extracting(Checkpoint::getName)
+                .containsExactly("new parking");
+        assertThat(
+                        patrolMapRepository
+                                .findByApartmentComplexId(fixture.apartment().getId())
+                                .map(PatrolMap::getId))
+                .contains(archived.getId());
+        assertThat(active.getId()).isNotEqualTo(archived.getId());
     }
 
     @Test
@@ -335,6 +455,8 @@ class MapConfigurationTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        apartment.assignActiveMap(map);
+        apartmentComplexRepository.saveAndFlush(apartment);
         return new Fixture(apartment, robot, map);
     }
 

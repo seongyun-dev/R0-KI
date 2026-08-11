@@ -101,16 +101,26 @@ class SerialManager:
             connection.open()
             self._serial = connection
             self._read_buffer.clear()
+            logger.warning(
+                "SERIAL_CONNECT_STAGE stage=PORT_OPENED port=%s",
+                self._settings.port,
+            )
 
-            # Allow any already-running telemetry record to finish, then start
-            # the mandatory STOP/HELLO/ENCODER_ZERO handshake on a clean RX
-            # boundary.
+            # Give a running ESP32 time to finish its current telemetry record,
+            # then discard everything already queued.  Do not call
+            # ``Serial.readline()`` here.  It is inherited from ``RawIOBase``
+            # and reads one byte at a time; under the Jetson's concurrent
+            # AI/ROS startup load that call has been observed to remain inside
+            # poll for minutes.  A record that is already in flight while the
+            # kernel buffer is reset may leave one partial JSON line, but the
+            # normal buffered parser safely drops that startup fragment and
+            # accepts the following complete record.
             time.sleep(self._settings.startup_wait_sec)
             self._serial.reset_input_buffer()
-            original_timeout = self._serial.timeout
-            self._serial.timeout = max(0.25, self._settings.timeout_sec)
-            self._serial.readline()
-            self._serial.timeout = original_timeout
+            logger.warning(
+                "SERIAL_CONNECT_STAGE stage=RX_BUFFER_RESET port=%s",
+                self._settings.port,
+            )
 
             logger.info(
                 "Serial port connected: port=%s, baudrate=%d",

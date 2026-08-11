@@ -24,6 +24,8 @@ set -u
 "${robot_root}/.venv/bin/python" -c \
   'import rclpy; from std_msgs.msg import String; print("Robot ROS dependencies OK")'
 
+"${robot_root}/scripts/build-explore-overlay.sh"
+
 if [ "$(id -u)" -eq 0 ] && id aiot >/dev/null 2>&1; then
   install -d -m 2770 -o aiot -g aiot \
     /var/lib/aiot/config \

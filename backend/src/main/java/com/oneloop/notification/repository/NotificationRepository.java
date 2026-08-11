@@ -21,6 +21,7 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             Long apartmentComplexId, Pageable pageable);
 
     // 알림 상세 조회
+    @EntityGraph(attributePaths = {"event", "event.patrol.map", "recipient"})
     Optional<Notification> findByIdAndRecipientApartmentComplexId(Long id, Long apartmentComplexId);
 
     // 입주민 상세 - 그 입주민에게 보낸 알림 이력을 최신순으로 조회한다

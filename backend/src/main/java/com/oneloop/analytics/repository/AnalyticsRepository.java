@@ -5,6 +5,7 @@ import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -33,6 +34,7 @@ public interface AnalyticsRepository extends JpaRepository<DetectedEvent, Long> 
      * <p>구역(zone) 필터는 여기서 하지 않는다.
      * 이벤트에 zoneId가 없고 좌표만 있어서, 서비스에서 CheckpointLocator로 후처리한다.
      */
+    @EntityGraph(attributePaths = {"patrol.map"})
     @Query(
             """
             SELECT event

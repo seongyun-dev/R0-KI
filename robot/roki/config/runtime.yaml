@@ -6,3 +6,5 @@ runtime:
   # CP2102 open resets the ESP32. Keep the operating gate closed, but allow
   # enough bounded retries for firmware boot and initial telemetry recovery.
   encoder_zero_max_attempts: 8
+  # ACK 뒤 실제 하드웨어 상태가 오지 않으면 열린 포트를 정상으로 간주하지 않는다.
+  initial_hardware_status_timeout_sec: 15.0
