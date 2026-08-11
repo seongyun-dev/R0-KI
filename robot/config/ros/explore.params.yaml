@@ -15,11 +15,14 @@
     costmap_topic: map
     costmap_updates_topic: map_updates
 
-    # Off deliberately. The start pose is behind the robot once exploration has
-    # moved on, and a Dubin-only chassis needs a wide arc to face backwards -- a
-    # goal that fails far more often than it succeeds and that no part of the demo
-    # depends on, since the mapping session is ended by the operator's save.
-    return_to_init: false
+    # Return to the pose captured when explore_lite starts. The mapping Nav2
+    # profile uses REEDS_SHEPP and a direction-independent goal tolerance, so
+    # the Ackermann chassis may reverse instead of attempting an in-place turn.
+    # ExploreSupervisor observes the return status and explicitly pauses/cancels
+    # the Nav2 goal before STOP_MAPPING or abort terminates the explorer.
+    # Returning does not save/upload automatically; the operator still reviews
+    # the map and ends the mapping session explicitly.
+    return_to_init: true
 
     # Publishes frontier markers for RViz. Cheap and worth keeping while tuning.
     visualize: true
