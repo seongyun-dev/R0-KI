@@ -5,6 +5,7 @@ import {
   gridRectToWorldBounds,
   mapPixelToWorld,
   mapRatiosToWorld,
+  worldBoundsFromPoints,
   worldBoundsCorners,
   worldBoundsToGridRect,
   worldToMapPixel,
@@ -126,6 +127,29 @@ test('2D and 2.5D selection recover the same physical point', () => {
     { left: 5, top: 9, width: 800, height: 400 },
   )
   closePoint(from25d, from2d)
+})
+
+test('2D and 2.5D preserve the same raw map top/bottom orientation', () => {
+  const metadata = map()
+  const projection = createIsometricProjection(metadata)
+  const top = worldToIsometric(metadata, projection, mapRatiosToWorld(metadata, { xRatio: 0.5, yRatio: 0.2 }))
+  const bottom = worldToIsometric(metadata, projection, mapRatiosToWorld(metadata, { xRatio: 0.5, yRatio: 0.8 }))
+  assert.ok(top.y < bottom.y, '2.5D must preserve the 2D map top-to-bottom display orientation')
+})
+
+test('2D and 2.5D drag endpoints serialize identical Zone world bounds', () => {
+  const metadata = map({ originYaw: 0.31 })
+  const start2d = mapRatiosToWorld(metadata, { xRatio: 0.18, yRatio: 0.27 })
+  const end2d = mapRatiosToWorld(metadata, { xRatio: 0.71, yRatio: 0.76 })
+  const rect = { left: 12, top: 24, width: 920, height: 510 }
+  const start25d = roundTripThroughScreen(metadata, start2d, { zoom: 1.4, panX: 17, panY: -9 }, rect)
+  const end25d = roundTripThroughScreen(metadata, end2d, { zoom: 1.4, panX: 17, panY: -9 }, rect)
+  const bounds2d = worldBoundsFromPoints(start2d, end2d)
+  const bounds25d = worldBoundsFromPoints(start25d, end25d)
+  close(bounds25d.minX, bounds2d.minX)
+  close(bounds25d.minY, bounds2d.minY)
+  close(bounds25d.maxX, bounds2d.maxX)
+  close(bounds25d.maxY, bounds2d.maxY)
 })
 
 test('grid fallback derives display cells from world bounds', () => {

@@ -6,22 +6,17 @@ import {
   applyIsometricScreenFit,
   createIsometricProjection,
   fitIsometricProjection,
-  mapPixelToIsometric,
+  MAP_25D_PROJECTION_OPTIONS,
+  MAP_25D_WALL_HEIGHT_PX,
   pointsAttribute,
   worldBoundsToIsometricPolygon,
   worldToIsometric,
 } from '../onboarding/mapProjection25d'
-import {
-  cleanupDisplayOccupiedMask,
-  occupiedMaskToImageData,
-  rgbaToOccupiedMask,
-} from './displayGeometry25d'
+import { Map25DBase } from './Map25DBase'
 import { complexMapCoordinateMetadata } from './mapCoordinateMetadata'
 import type { ComplexMapProps } from './ComplexMap'
 
 const MAX_ZOOM = 2.5
-const WALL_HEIGHT_PX = 10
-const BASE_HEIGHT_PX = 1.3
 const DEFAULT_VIEWPORT = { width: 960, height: 540 }
 
 const pinColor: Record<Tone, string> = {
@@ -52,55 +47,6 @@ function validWorldPoint(value: { worldX?: number; worldY?: number }) {
 
 function markerLabel(pin: MapPin) {
   return pin.detail ? `${pin.label} · ${pin.detail}` : pin.label
-}
-
-function useDisplayWallMask(source: string | undefined, width: number | undefined, height: number | undefined) {
-  const [displayMaskUrl, setDisplayMaskUrl] = useState<string>()
-
-  useEffect(() => {
-    setDisplayMaskUrl(undefined)
-    if (!source || !width || !height || typeof window === 'undefined') return
-    let disposed = false
-    let objectUrl: string | undefined
-    const image = new Image()
-
-    try {
-      const resolved = new URL(source, window.location.href)
-      if (resolved.origin !== window.location.origin) image.crossOrigin = 'anonymous'
-    } catch {
-      // Relative and opaque URLs can still be loaded. Canvas security is handled by the fallback below.
-    }
-
-    image.onload = () => {
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const context = canvas.getContext('2d', { willReadFrequently: true })
-        if (!context) return
-        context.drawImage(image, 0, 0, width, height)
-        const raw = context.getImageData(0, 0, width, height)
-        const occupied = rgbaToOccupiedMask(raw.data, width, height)
-        const cleaned = cleanupDisplayOccupiedMask(occupied, width, height)
-        context.putImageData(occupiedMaskToImageData(cleaned, width, height), 0, 0)
-        canvas.toBlob((blob) => {
-          if (disposed || !blob) return
-          objectUrl = URL.createObjectURL(blob)
-          setDisplayMaskUrl(objectUrl)
-        }, 'image/png')
-      } catch {
-        // CORS-tainted or unsupported map images safely fall back to the original display filter.
-      }
-    }
-    image.src = source
-
-    return () => {
-      disposed = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [height, source, width])
-
-  return displayMaskUrl
 }
 
 function DisplayLabel({
@@ -179,26 +125,11 @@ export function ComplexMap25D({
   }, [])
 
   const metadata = complexMapCoordinateMetadata(map)
-  const displayWallMaskUrl = useDisplayWallMask(map.mapImageUrl, metadata?.width, metadata?.height)
   if (!metadata) return null
 
-  const projection = createIsometricProjection(metadata, { tileX: 1, tileY: 0.58, margin: 8 })
+  const projection = createIsometricProjection(metadata, MAP_25D_PROJECTION_OPTIONS)
   const fit = fitIsometricProjection(projection, viewport, 0.065)
   const toScreen = (point: { x: number; y: number }) => applyIsometricScreenFit(point, fit)
-  const floor = [
-    { x: 0, y: 0 },
-    { x: metadata.width, y: 0 },
-    { x: metadata.width, y: metadata.height },
-    { x: 0, y: metadata.height },
-  ].map((point) => mapPixelToIsometric(projection, point))
-  const imageTransform = [
-    projection.tileX,
-    projection.tileY,
-    projection.tileX,
-    -projection.tileY,
-    projection.offsetX - metadata.height * projection.tileX,
-    projection.offsetY + metadata.height * projection.tileY,
-  ].join(' ')
   const displayedRobots = robots?.length ? robots : robot ? [robot] : []
   const plannedRoute = checkpoints.filter(validWorldPoint).map((point) =>
     toScreen(worldToIsometric(metadata, projection, { x: point.worldX!, y: point.worldY! })))
@@ -207,9 +138,7 @@ export function ComplexMap25D({
     points: (item.routePoints ?? []).filter(validWorldPoint).map((point) =>
       toScreen(worldToIsometric(metadata, projection, { x: point.worldX!, y: point.worldY! }))),
   })).filter((route) => route.points.length > 1)
-  const wallOffset = WALL_HEIGHT_PX / fit.scale
-  const baseOffset = BASE_HEIGHT_PX / fit.scale
-  const wallImageUrl = displayWallMaskUrl ?? map.mapImageUrl
+  const wallOffset = MAP_25D_WALL_HEIGHT_PX / fit.scale
 
   const zoomBy = (factor: number) => setView((current) => ({
     ...current,
@@ -252,64 +181,9 @@ export function ComplexMap25D({
         onPointerCancel={onPointerUp}
       >
         <title>실시간 로봇 위치, 순찰 경로, 구역 및 이벤트를 표시하는 2.5D 지도</title>
-        <defs>
-          <filter id="dm25-wall-side-mask" colorInterpolationFilters="sRGB">
-            <feColorMatrix
-              type="matrix"
-              values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -0.333 -0.333 -0.333 0 1"
-              result="occupied"
-            />
-            <feComponentTransfer in="occupied" result="threshold">
-              <feFuncA type="discrete" tableValues="0 0 1 1" />
-            </feComponentTransfer>
-            <feMorphology in="threshold" operator="erode" radius="0.35" result="openedInset" />
-            <feMorphology in="openedInset" operator="dilate" radius="0.35" result="opened" />
-            <feMorphology in="opened" operator="dilate" radius="0.22" result="closedOutset" />
-            <feMorphology in="closedOutset" operator="erode" radius="0.22" result="cleaned" />
-            <feFlood floodColor="var(--dm25-wall-side)" result="wallColor" />
-            <feComposite in="wallColor" in2="cleaned" operator="in" />
-          </filter>
-          <filter id="dm25-wall-top-mask" colorInterpolationFilters="sRGB">
-            <feColorMatrix
-              type="matrix"
-              values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -0.333 -0.333 -0.333 0 1"
-              result="occupied"
-            />
-            <feComponentTransfer in="occupied" result="threshold">
-              <feFuncA type="discrete" tableValues="0 0 1 1" />
-            </feComponentTransfer>
-            <feMorphology in="threshold" operator="erode" radius="0.35" result="openedInset" />
-            <feMorphology in="openedInset" operator="dilate" radius="0.35" result="opened" />
-            <feMorphology in="opened" operator="dilate" radius="0.22" result="closedOutset" />
-            <feMorphology in="closedOutset" operator="erode" radius="0.22" result="cleaned" />
-            <feFlood floodColor="var(--dm25-wall-top)" result="wallColor" />
-            <feComposite in="wallColor" in2="cleaned" operator="in" />
-          </filter>
-        </defs>
-
         <g transform={`translate(${view.panX} ${view.panY}) scale(${view.zoom})`}>
           <g transform={`translate(${fit.translateX} ${fit.translateY}) scale(${fit.scale})`}>
-            <polygon className="dm25-floor-shadow" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset + 2.2 / fit.scale})`} />
-            <polygon className="dm25-floor-side" points={pointsAttribute(floor)} transform={`translate(0 ${baseOffset})`} />
-            <polygon className="dm25-floor" points={pointsAttribute(floor)} />
-            {map.mapImageUrl && (
-              <>
-                <image
-                  className="dm25-map-image"
-                  href={map.mapImageUrl}
-                  width={metadata.width}
-                  height={metadata.height}
-                  preserveAspectRatio="none"
-                  transform={`matrix(${imageTransform})`}
-                />
-                <g className="dm25-wall-side" transform={`translate(0 ${wallOffset})`} data-cleanup={displayWallMaskUrl ? 'ready' : 'fallback'}>
-                  <image href={wallImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-side-mask)" />
-                </g>
-                <g className="dm25-wall-top" data-cleanup={displayWallMaskUrl ? 'ready' : 'fallback'}>
-                  <image href={wallImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={`matrix(${imageTransform})`} filter="url(#dm25-wall-top-mask)" />
-                </g>
-              </>
-            )}
+            <Map25DBase metadata={metadata} projection={projection} mapImageUrl={map.mapImageUrl} wallOffset={wallOffset} />
           </g>
 
           {map.zones.flatMap((zone) => {

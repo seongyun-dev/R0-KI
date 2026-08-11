@@ -1,6 +1,7 @@
 export type DisplayMaskCleanupOptions = {
   maxNoiseComponentPx?: number
   fillSurroundedHoleNeighbors?: number
+  spurPasses?: number
 }
 
 const NEIGHBORS = [
@@ -44,6 +45,7 @@ export function cleanupDisplayOccupiedMask(
   validateMask(source, width, height)
   const maxNoiseComponentPx = options.maxNoiseComponentPx ?? 2
   const fillSurroundedHoleNeighbors = options.fillSurroundedHoleNeighbors ?? 7
+  const spurPasses = options.spurPasses ?? 2
   const cleaned = source.slice()
   const visited = new Uint8Array(source.length)
   const queue = new Int32Array(source.length)
@@ -77,19 +79,23 @@ export function cleanupDisplayOccupiedMask(
     }
   }
 
-  const withoutSpurs = cleaned.slice()
-  for (let y = 1; y < height - 1; y += 1) {
-    for (let x = 1; x < width - 1; x += 1) {
-      const index = y * width + x
-      if (!cleaned[index] || occupiedNeighborCount(cleaned, width, height, x, y) !== 1) continue
-      for (const [dx, dy] of NEIGHBORS) {
-        const nx = x + dx
-        const ny = y + dy
-        if (!cleaned[ny * width + nx]) continue
-        if (occupiedNeighborCount(cleaned, width, height, nx, ny) >= 4) withoutSpurs[index] = 0
-        break
+  let withoutSpurs = cleaned
+  for (let pass = 0; pass < spurPasses; pass += 1) {
+    const next = withoutSpurs.slice()
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x
+        if (!withoutSpurs[index] || occupiedNeighborCount(withoutSpurs, width, height, x, y) !== 1) continue
+        for (const [dx, dy] of NEIGHBORS) {
+          const nx = x + dx
+          const ny = y + dy
+          if (!withoutSpurs[ny * width + nx]) continue
+          if (occupiedNeighborCount(withoutSpurs, width, height, nx, ny) >= 4) next[index] = 0
+          break
+        }
       }
     }
+    withoutSpurs = next
   }
 
   const result = withoutSpurs.slice()
