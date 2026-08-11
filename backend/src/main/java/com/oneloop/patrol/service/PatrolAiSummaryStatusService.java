@@ -5,8 +5,7 @@ import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.map.domain.Checkpoint;
-import com.oneloop.map.repository.CheckpointRepository;
-import com.oneloop.map.repository.PatrolMapRepository;
+import com.oneloop.map.util.EventCheckpointResolver;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.domain.PatrolAiSummary;
 import com.oneloop.patrol.domain.AiSummaryGenerationStatus;
@@ -14,8 +13,8 @@ import com.oneloop.patrol.dto.internal.PatrolSummaryInput;
 import com.oneloop.patrol.repository.PatrolAiSummaryRepository;
 import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import com.oneloop.patrol.repository.PatrolRepository;
-import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,8 +28,7 @@ public class PatrolAiSummaryStatusService {
     private final PatrolAiSummaryRepository patrolAiSummaryRepository;
     private final PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
     private final DetectedEventRepository detectedEventRepository;
-    private final PatrolMapRepository patrolMapRepository;
-    private final CheckpointRepository checkpointRepository;
+    private final EventCheckpointResolver eventCheckpointResolver;
 
     /**
      * 요약 상태를 PROCESSING으로 바꾸고 GMS에 전달할 데이터를 조회한다.
@@ -59,12 +57,6 @@ public class PatrolAiSummaryStatusService {
 
         aiSummary.startGeneration();
 
-        List<Checkpoint> checkpoints =
-                patrolMapRepository
-                        .findByApartmentComplexId(patrol.getRobot().getApartmentComplex().getId())
-                        .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
-                        .orElseGet(List::of);
-
         List<PatrolSummaryInput.VisitedCheckpoint> visitedCheckpoints =
                 patrolCheckpointVisitRepository
                         .findAllByPatrolIdOrderByVisitSequence(patrolId)
@@ -79,9 +71,13 @@ public class PatrolAiSummaryStatusService {
                                                 .build())
                         .toList();
 
+        List<DetectedEvent> detectedEvents =
+                detectedEventRepository.findAllByPatrolIdOrderByOccurredAt(patrolId);
+        Map<Long, List<Checkpoint>> checkpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(detectedEvents);
         List<PatrolSummaryInput.DetectedEventInput> events =
-                detectedEventRepository.findAllByPatrolIdOrderByOccurredAt(patrolId).stream()
-                        .map(event -> toEventInput(event, checkpoints))
+                detectedEvents.stream()
+                        .map(event -> toEventInput(event, checkpointsByMap))
                         .toList();
 
         return Optional.of(
@@ -119,7 +115,7 @@ public class PatrolAiSummaryStatusService {
     }
 
     private PatrolSummaryInput.DetectedEventInput toEventInput(
-            DetectedEvent event, List<Checkpoint> checkpoints) {
+            DetectedEvent event, Map<Long, List<Checkpoint>> checkpointsByMap) {
         return PatrolSummaryInput.DetectedEventInput.builder()
                 .eventId(event.getId())
                 .eventType(event.getType())
@@ -127,27 +123,13 @@ public class PatrolAiSummaryStatusService {
                 .details(event.getDetails())
                 .riskLevel(event.getRiskLevel())
                 .occurredAt(event.getOccurredAt())
-                .checkpointName(findCheckpointName(event, checkpoints))
+                .checkpointName(
+                        eventCheckpointResolver
+                                .findContaining(event, checkpointsByMap)
+                                .map(Checkpoint::getName)
+                                .orElse(null))
                 .processingStatus(event.getProcessingStatus())
                 .build();
-    }
-
-    private String findCheckpointName(DetectedEvent event, List<Checkpoint> checkpoints) {
-        if (event.getX() == null || event.getY() == null) {
-            return null;
-        }
-        return checkpoints.stream()
-                .filter(checkpoint -> contains(checkpoint, event.getX(), event.getY()))
-                .findFirst()
-                .map(Checkpoint::getName)
-                .orElse(null);
-    }
-
-    private boolean contains(Checkpoint checkpoint, BigDecimal x, BigDecimal y) {
-        return x.compareTo(checkpoint.getMinX()) >= 0
-                && x.compareTo(checkpoint.getMaxX()) <= 0
-                && y.compareTo(checkpoint.getMinY()) >= 0
-                && y.compareTo(checkpoint.getMaxY()) <= 0;
     }
 
     private Integer toMinutes(Integer totalDurationSeconds) {

@@ -2,10 +2,11 @@ spring:
   config:
     import: ""
   datasource:
-    url: jdbc:h2:mem:oneloop;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    username: sa
-    password:
-    driver-class-name: org.h2.Driver
+    # CI 및 기본 테스트: H2 in-memory. 로컬 MySQL은 TEST_DATASOURCE_URL 로 override.
+    url: ${TEST_DATASOURCE_URL:jdbc:h2:mem:oneloop;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
+    username: ${TEST_DATASOURCE_USERNAME:sa}
+    password: ${TEST_DATASOURCE_PASSWORD:}
+    driver-class-name: ${TEST_DATASOURCE_DRIVER:org.h2.Driver}
   jpa:
     hibernate:
       ddl-auto: validate

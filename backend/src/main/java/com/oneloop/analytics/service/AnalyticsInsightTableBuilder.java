@@ -8,7 +8,7 @@ import com.oneloop.event.domain.DetectedEvent;
 import com.oneloop.event.domain.EventType;
 import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.map.domain.Checkpoint;
-import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.map.util.EventCheckpointResolver;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
@@ -51,7 +51,7 @@ public class AnalyticsInsightTableBuilder {
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final AnalyticsQueryService analyticsQueryService;
-    private final CheckpointLocator checkpointLocator;
+    private final EventCheckpointResolver eventCheckpointResolver;
 
     public String buildTablesMarkdown(
             Long apartmentComplexId,
@@ -89,19 +89,20 @@ public class AnalyticsInsightTableBuilder {
         List<DetectedEvent> previousEvents =
                 analyticsQueryService.findEventsForInsight(
                         apartmentComplexId, previousFrom, previousTo);
-        List<Checkpoint> checkpoints =
-                analyticsQueryService.findCheckpointsForInsight(apartmentComplexId);
+        Map<Long, List<Checkpoint>> checkpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(currentEvents);
+        int zoneCount = checkpointsByMap.values().stream().mapToInt(List::size).sum();
 
         StringBuilder sb = new StringBuilder();
-        appendMeta(sb, periodType, periodKey, periodFrom, periodTo, previousFrom, previousTo, checkpoints.size());
+        appendMeta(sb, periodType, periodKey, periodFrom, periodTo, previousFrom, previousTo, zoneCount);
         sb.append('\n');
         appendSummaryTable(sb, overview, currentHandling, previousHandling);
         sb.append('\n');
         appendTypeTable(sb, currentEvents, previousEvents);
         sb.append('\n');
-        appendZoneTable(sb, byZone, currentEvents, checkpoints);
+        appendZoneTable(sb, byZone, currentEvents, checkpointsByMap);
         sb.append('\n');
-        appendPendingTable(sb, currentEvents, checkpoints);
+        appendPendingTable(sb, currentEvents, checkpointsByMap);
         return sb.toString();
     }
 
@@ -229,8 +230,8 @@ public class AnalyticsInsightTableBuilder {
             StringBuilder sb,
             ByZoneResponse byZone,
             List<DetectedEvent> currentEvents,
-            List<Checkpoint> checkpoints) {
-        Map<Long, Long> pendingByZone = countPendingByZone(currentEvents, checkpoints);
+            Map<Long, List<Checkpoint>> checkpointsByMap) {
+        Map<Long, Long> pendingByZone = countPendingByZone(currentEvents, checkpointsByMap);
 
         sb.append("## 3. 구역별 관리 우선순위\n");
         sb.append("| 순위 | 구역명 | 이벤트 수 | 순찰 방문 | 순찰당 이벤트 | 주요 유형 | 미처리 |\n");
@@ -270,7 +271,9 @@ public class AnalyticsInsightTableBuilder {
     }
 
     private void appendPendingTable(
-            StringBuilder sb, List<DetectedEvent> currentEvents, List<Checkpoint> checkpoints) {
+            StringBuilder sb,
+            List<DetectedEvent> currentEvents,
+            Map<Long, List<Checkpoint>> checkpointsByMap) {
         LocalDateTime now = LocalDateTime.now(SERVICE_ZONE);
         Map<String, PendingAgg> aggs = new HashMap<>();
 
@@ -279,8 +282,8 @@ public class AnalyticsInsightTableBuilder {
                 continue;
             }
             String zoneName =
-                    checkpointLocator
-                            .findContaining(checkpoints, event.getX(), event.getY())
+                    eventCheckpointResolver
+                            .findContaining(event, checkpointsByMap)
                             .map(Checkpoint::getName)
                             .orElse("구역 미상");
             String typeName = AnalyticsInsightEventLabels.toKorean(event.getType());
@@ -401,14 +404,14 @@ public class AnalyticsInsightTableBuilder {
     }
 
     private Map<Long, Long> countPendingByZone(
-            List<DetectedEvent> events, List<Checkpoint> checkpoints) {
+            List<DetectedEvent> events, Map<Long, List<Checkpoint>> checkpointsByMap) {
         Map<Long, Long> map = new HashMap<>();
         for (DetectedEvent event : events) {
             if (event.getProcessingStatus() == ProcessingStatus.COMPLETED) {
                 continue;
             }
-            checkpointLocator
-                    .findContaining(checkpoints, event.getX(), event.getY())
+            eventCheckpointResolver
+                    .findContaining(event, checkpointsByMap)
                     .ifPresent(checkpoint -> map.merge(checkpoint.getId(), 1L, Long::sum));
         }
         return map;

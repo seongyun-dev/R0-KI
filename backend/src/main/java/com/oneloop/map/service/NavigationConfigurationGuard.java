@@ -2,6 +2,7 @@ package com.oneloop.map.service;
 
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
+import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.repository.PatrolRepository;
 import java.util.List;
@@ -22,6 +23,13 @@ public class NavigationConfigurationGuard {
         if (patrolRepository.existsByRobotApartmentComplexIdAndStatusIn(
                 apartmentComplexId, LOCKING_STATUSES)) {
             throw new BusinessException(ErrorCode.MAP_CONFIGURATION_LOCKED);
+        }
+    }
+
+    /** zone/waypoint PUT 은 active 맵에서만 허용한다. */
+    public void assertActiveForEdit(PatrolMap patrolMap) {
+        if (patrolMap == null || !patrolMap.isActive()) {
+            throw new BusinessException(ErrorCode.MAP_NOT_ACTIVE);
         }
     }
 }

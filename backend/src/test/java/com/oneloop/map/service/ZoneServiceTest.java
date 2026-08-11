@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -39,11 +40,12 @@ class ZoneServiceTest {
     @Mock private NavigationConfigurationGuard navigationConfigurationGuard;
     @Mock private ApartmentComplex apartmentComplex;
 
+    private PatrolMap patrolMap;
     private ZoneService service;
 
     @BeforeEach
     void setUp() {
-        PatrolMap patrolMap =
+        patrolMap =
                 new PatrolMap(
                         apartmentComplex,
                         "map",
@@ -55,7 +57,8 @@ class ZoneServiceTest {
                         100,
                         100);
         ReflectionTestUtils.setField(patrolMap, "id", 31L);
-        when(patrolMapRepository.findForUpdateByIdAndApartmentComplexId(31L, 2L))
+        lenient()
+                .when(patrolMapRepository.findForUpdateByIdAndApartmentComplexId(31L, 2L))
                 .thenReturn(Optional.of(patrolMap));
         service =
                 new ZoneService(
@@ -75,6 +78,7 @@ class ZoneServiceTest {
 
         verify(patrolMapRepository).findForUpdateByIdAndApartmentComplexId(31L, 2L);
         verify(navigationConfigurationGuard).assertMutable(2L);
+        verify(navigationConfigurationGuard).assertActiveForEdit(patrolMap);
         InOrder order = inOrder(navigationWaypointRepository, checkpointRepository);
         order.verify(navigationWaypointRepository).deleteAllByPatrolMapId(31L);
         order.verify(checkpointRepository).deactivateAllByPatrolMapId(31L);
@@ -121,6 +125,41 @@ class ZoneServiceTest {
         verify(navigationConfigurationGuard, never()).assertMutable(2L);
         verify(navigationWaypointRepository, never()).deleteAllByPatrolMapId(31L);
         verify(checkpointRepository, never()).deactivateAllByPatrolMapId(31L);
+    }
+
+    @Test
+    void archivedMapBlocksZoneReplacement() {
+        ZoneService guardedService =
+                new ZoneService(
+                        patrolMapRepository,
+                        checkpointRepository,
+                        navigationWaypointRepository,
+                        new NavigationConfigurationGuard(null));
+        PatrolMap archivedMap =
+                new PatrolMap(
+                        apartmentComplex,
+                        "archived",
+                        "/api/map/files/archived.png",
+                        new BigDecimal("0.05"),
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        100,
+                        100);
+        ReflectionTestUtils.setField(archivedMap, "id", 32L);
+        archivedMap.archive();
+        when(patrolMapRepository.findForUpdateByIdAndApartmentComplexId(32L, 2L))
+                .thenReturn(Optional.of(archivedMap));
+
+        ZoneBatchCreateRequest request = request(1, zone("parking", "0", "0", "2", "2"));
+
+        assertThatThrownBy(() -> guardedService.createAll(2L, 32L, request))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAP_NOT_ACTIVE));
+        verify(navigationWaypointRepository, never()).deleteAllByPatrolMapId(32L);
     }
 
     @Test
