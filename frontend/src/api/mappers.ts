@@ -118,13 +118,12 @@ function eventType(value: string): EventType {
     ILLEGAL_PARKING: '불법주차',
     UNREGISTERED_VEHICLE: '미등록 차량',
     TRASH_DETECTED: '쓰레기',
-    RECYCLING_AREA_FULL: '쓰레기',
+    RECYCLING_AREA_FULL: '분리수거장',
     EMERGENCY: '응급상황',
     // 한글 별칭(하위호환)
     미등록차량: '불법주차',
     쓰레기탐지: '쓰레기',
-    분리수거장포화: '쓰레기',
-    화재의심: '화재 의심',
+    분리수거장포화: '분리수거장',
   }
   return map[value] ?? (value as EventType)
 }
