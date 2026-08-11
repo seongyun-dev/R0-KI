@@ -50,6 +50,28 @@ class FakeRun:
         return "active [3]"
 
 
+class FakeMonitor:
+    def __init__(self, on_status) -> None:
+        self.on_status = on_status
+        self.started = False
+        self.pause_requests = 0
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def request_pause(self, timeout_sec=1.0) -> bool:
+        self.pause_requests += 1
+        self.on_status("exploration_paused")
+        return True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def emit(self, status: str) -> None:
+        self.on_status(status)
+
+
 class ExploreSupervisorTest(unittest.TestCase):
     def build(self, run_outputs, process=None):
         self.process = process or FakeProcess()
@@ -66,6 +88,10 @@ class ExploreSupervisorTest(unittest.TestCase):
         def fake_sleep(seconds):
             self.clock[0] += seconds
 
+        def fake_monitor_factory(on_status):
+            self.monitor = FakeMonitor(on_status)
+            return self.monitor
+
         return ExploreSupervisor(
             explore_setup_file="/opt/explore/setup.bash",
             params_file="/opt/robot/config/ros/explore.params.yaml",
@@ -76,6 +102,7 @@ class ExploreSupervisorTest(unittest.TestCase):
             run=FakeRun(run_outputs),
             monotonic=fake_monotonic,
             sleep=fake_sleep,
+            monitor_factory=fake_monitor_factory,
         )
 
     def join_starter(self, supervisor):
@@ -152,8 +179,22 @@ class ExploreSupervisorTest(unittest.TestCase):
 
         supervisor.stop("finish")
 
+        self.assertEqual(self.monitor.pause_requests, 1)
+        self.assertTrue(self.monitor.stopped)
         self.assertIn(signal.SIGINT, self.process.signals)
         self.assertFalse(supervisor.running)
+
+    def test_tracks_return_to_origin_status(self):
+        supervisor = self.build(["active [3]"])
+        supervisor.start(7)
+        self.join_starter(supervisor)
+
+        self.monitor.emit("returning_to_origin")
+        self.assertEqual(supervisor.status, "returning_to_origin")
+        self.monitor.emit("returned_to_origin")
+        self.assertEqual(supervisor.status, "returned_to_origin")
+
+        supervisor.stop("finish")
 
     def test_stop_without_start_is_a_no_op(self):
         supervisor = self.build(["active [3]"])
