@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -45,4 +46,13 @@ public interface MappingSessionRepository extends JpaRepository<MappingSession, 
                     + "where session.id = :id and session.commandId = :commandId")
     Optional<MappingSession> findForUpdateByIdAndCommandId(
             @Param("id") Long id, @Param("commandId") String commandId);
+
+    @Modifying(flushAutomatically = true)
+    @Query(
+            """
+            UPDATE MappingSession session
+            SET session.resultMap = null
+            WHERE session.resultMap.id = :mapId
+            """)
+    int clearResultMapId(@Param("mapId") Long mapId);
 }

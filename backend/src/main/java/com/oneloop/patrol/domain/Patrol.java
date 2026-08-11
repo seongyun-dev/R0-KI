@@ -1,6 +1,7 @@
 package com.oneloop.patrol.domain;
 
 import com.oneloop.global.common.BaseEntity;
+import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.robot.domain.PatrolRobot;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
@@ -21,6 +22,14 @@ public class Patrol extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "robot_id", nullable = false)
     private PatrolRobot robot;
+
+    // 순찰 시작 시점의 맵 스냅샷. 레거시 행은 null 일 수 있다.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "map_id")
+    private PatrolMap map;
+
+    @Column(name = "map_version")
+    private Integer mapVersion;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "patrol_status", nullable = false, length = 20)
@@ -57,6 +66,22 @@ public class Patrol extends BaseEntity {
         this.startedAt = startedAt;
         this.commandId = commandId;
         this.startBatteryLevel = robot.getBatteryLevel();
+    }
+
+    public Patrol(
+            PatrolRobot robot, PatrolMap map, LocalDateTime startedAt, String commandId) {
+        this(robot, startedAt, commandId);
+        bindMap(map);
+    }
+
+    public void bindMap(PatrolMap map) {
+        if (map == null) {
+            this.map = null;
+            this.mapVersion = null;
+            return;
+        }
+        this.map = map;
+        this.mapVersion = map.getMapVersion();
     }
 
     public void increaseDetectedEventCount() {

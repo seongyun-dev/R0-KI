@@ -17,10 +17,7 @@ import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.response.PageResponse;
 import com.oneloop.map.domain.Checkpoint;
-import com.oneloop.map.domain.PatrolMap;
-import com.oneloop.map.repository.CheckpointRepository;
-import com.oneloop.map.repository.PatrolMapRepository;
-import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.map.util.EventCheckpointResolver;
 import com.oneloop.member.repository.MemberRepository;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -29,7 +26,6 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -48,9 +44,7 @@ public class EventService {
     private final DetectedEventRepository detectedEventRepository;
     private final EventProcessingHistoryRepository eventProcessingHistoryRepository;
     private final EventEvidenceRepository eventEvidenceRepository;
-    private final PatrolMapRepository patrolMapRepository;
-    private final CheckpointRepository checkpointRepository;
-    private final CheckpointLocator checkpointLocator;
+    private final EventCheckpointResolver eventCheckpointResolver;
     private final MemberRepository memberRepository;
     private final EmergencyPatrolResumeService emergencyPatrolResumeService;
 
@@ -70,7 +64,8 @@ public class EventService {
                         apartmentComplexId, type, status, range.fromAt(), range.toAt(), pageable);
 
         // 체크포인트 목록은 단지당 1번만 조회해서 페이지 내 모든 이벤트의 위치 매칭에 재사용
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
+        Map<Long, List<Checkpoint>> checkpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(events.getContent());
         List<Long> eventIds = events.stream().map(DetectedEvent::getId).toList();
         Map<Long, String> assigneeByEventId = findLatestAssigneeByEventId(eventIds);
 
@@ -79,7 +74,8 @@ public class EventService {
                         event ->
                                 EventListResponse.of(
                                         event,
-                                        findCheckpointName(event, checkpoints),
+                                        eventCheckpointResolver.resolveLocationName(
+                                                event, checkpointsByMap),
                                         assigneeByEventId.get(event.getId())));
         return PageResponse.from(responses);
     }
@@ -94,8 +90,9 @@ public class EventService {
                         .findByIdAndRobotApartmentComplexId(eventId, apartmentComplexId)
                         .orElseThrow(() -> new BusinessException(ErrorCode.EVENT_NOT_FOUND));
 
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
-        String location = findCheckpointName(event, checkpoints);
+        Map<Long, List<Checkpoint>> checkpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(List.of(event));
+        String location = eventCheckpointResolver.resolveLocationName(event, checkpointsByMap);
         // 처리중이면 경과초, 완료됐으면 null (완료시각 자체는 event.processedAt으로 별도 노출)
         Long elapsedSeconds = calculateElapsedSeconds(event);
         // 처리완료 상태일 때만 완료 시점 처리이력의 메모를 붙임
@@ -136,19 +133,6 @@ public class EventService {
         }
 
         return EventStatusChangeResponse.of(event, history.getChangedAt());
-    }
-
-    // 단지의 순찰 지도에 속한 체크포인트 전체를 가져온다. 지도가 없으면(아직 등록 안 됨) 빈 목록
-    private List<Checkpoint> findCheckpoints(Long apartmentComplexId) {
-        Optional<PatrolMap> patrolMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId);
-        return patrolMap
-                .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
-                .orElseGet(List::of);
-    }
-
-    // 이벤트 좌표(x, y)가 속한 체크포인트 이름을 찾는다. 정확히 매칭 안 되면 CheckpointLocator가 "근처" 폴백까지 처리
-    private String findCheckpointName(DetectedEvent event, List<Checkpoint> checkpoints) {
-        return checkpointLocator.resolveLocationName(checkpoints, event.getX(), event.getY());
     }
 
     // 이벤트 ID 목록에 대한 처리이력을 한 번에 조회한 뒤, 이벤트별로 가장 최근(changedAt 최신) 담당자 이름만 뽑는다
