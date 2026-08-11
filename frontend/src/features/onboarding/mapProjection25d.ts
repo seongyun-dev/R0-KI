@@ -31,6 +31,9 @@ export type IsometricScreenFit = {
   viewportHeight: number
 }
 
+export const MAP_25D_PROJECTION_OPTIONS = { tileX: 1, tileY: 0.58, margin: 8 } as const
+export const MAP_25D_WALL_HEIGHT_PX = 16
+
 export function createIsometricProjection(
   map: MapCoordinateMetadata,
   options: { tileX?: number; tileY?: number; margin?: number } = {},
@@ -58,10 +61,9 @@ export function mapPixelToIsometric(
   projection: IsometricProjection,
   point: MapPixel,
 ): IsometricPoint {
-  const mapYUp = projection.mapHeight - point.y
   return {
-    x: projection.offsetX + (point.x - mapYUp) * projection.tileX,
-    y: projection.offsetY + (point.x + mapYUp) * projection.tileY,
+    x: projection.offsetX + (point.x - point.y) * projection.tileX,
+    y: projection.offsetY + (point.x + point.y) * projection.tileY,
   }
 }
 
@@ -72,8 +74,8 @@ export function isometricToMapPixel(
   const rawX = (point.x - projection.offsetX) / projection.tileX
   const rawY = (point.y - projection.offsetY) / projection.tileY
   const pixelX = (rawX + rawY) / 2
-  const mapYUp = (rawY - rawX) / 2
-  return { x: pixelX, y: projection.mapHeight - mapYUp }
+  const pixelY = (rawY - rawX) / 2
+  return { x: pixelX, y: pixelY }
 }
 
 export function worldToIsometric(

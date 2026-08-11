@@ -402,6 +402,8 @@ export type PatrolDetailResponse = {
   startedAt: string
   endedAt?: string | null
   totalDurationMinutes?: number | null
+  mapId?: Id | null
+  mapVersion?: number | null
   mapUrl?: string | null
   route?: PatrolRouteCheckpointResponse[]
   battery?: PatrolBatteryResponse
