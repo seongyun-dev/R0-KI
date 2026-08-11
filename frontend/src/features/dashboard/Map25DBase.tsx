@@ -1,10 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import type { MapCoordinateMetadata } from '../onboarding/mapCoordinates'
-import {
-  mapPixelToIsometric,
-  pointsAttribute,
-  type IsometricProjection,
-} from '../onboarding/mapProjection25d'
+import type { IsometricProjection } from '../onboarding/mapProjection25d'
 import {
   cleanupDisplayOccupiedMask,
   occupiedMaskToImageData,
@@ -38,7 +34,11 @@ function useDisplayWallMask(source: string | undefined, width: number | undefine
         context.drawImage(image, 0, 0, width, height)
         const raw = context.getImageData(0, 0, width, height)
         const occupied = rgbaToOccupiedMask(raw.data, width, height)
-        const cleaned = cleanupDisplayOccupiedMask(occupied, width, height)
+        const cleaned = cleanupDisplayOccupiedMask(occupied, width, height, {
+          maxNoiseComponentPx: 3,
+          spurPasses: 3,
+          axisStraighteningPasses: 1,
+        })
         context.putImageData(occupiedMaskToImageData(cleaned, width, height), 0, 0)
         canvas.toBlob((blob) => {
           if (disposed || !blob) return
@@ -86,12 +86,6 @@ export function Map25DBase({
   const sideFilter = `${filterPrefix}-wall-side`
   const topFilter = `${filterPrefix}-wall-top`
   const displayWallMaskUrl = useDisplayWallMask(mapImageUrl, metadata.width, metadata.height)
-  const floor = [
-    { x: 0, y: 0 },
-    { x: metadata.width, y: 0 },
-    { x: metadata.width, y: metadata.height },
-    { x: 0, y: metadata.height },
-  ].map((point) => mapPixelToIsometric(projection, point))
   const imageTransform = map25DImageTransform(projection)
   const wallImageUrl = displayWallMaskUrl ?? mapImageUrl
 
@@ -108,17 +102,15 @@ export function Map25DBase({
             <feComponentTransfer in="occupied" result="threshold">
               <feFuncA type="discrete" tableValues="0 0 1 1" />
             </feComponentTransfer>
-            <feMorphology in="threshold" operator="erode" radius="0.42" result="openedInset" />
-            <feMorphology in="openedInset" operator="dilate" radius="0.42" result="opened" />
-            <feMorphology in="opened" operator="dilate" radius="0.24" result="closedOutset" />
-            <feMorphology in="closedOutset" operator="erode" radius="0.24" result="cleaned" />
+            <feMorphology in="threshold" operator="erode" radius="0.7" result="openedInset" />
+            <feMorphology in="openedInset" operator="dilate" radius="0.7" result="opened" />
+            <feMorphology in="opened" operator="dilate" radius="0.35" result="closedOutset" />
+            <feMorphology in="closedOutset" operator="erode" radius="0.35" result="cleaned" />
             <feFlood floodColor={filterId === sideFilter ? 'var(--dm25-wall-side)' : 'var(--dm25-wall-top)'} result="wallColor" />
             <feComposite in="wallColor" in2="cleaned" operator="in" />
           </filter>
         ))}
       </defs>
-      <polygon className="dm25-floor-shadow" points={pointsAttribute(floor)} transform="translate(0 1)" />
-      <polygon className="dm25-floor" points={pointsAttribute(floor)} />
       {mapImageUrl && wallImageUrl && (
         <>
           <image className="dm25-map-image" href={mapImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} />
