@@ -26,6 +26,7 @@ from std_msgs.msg import String
 
 from .ai_adapter_core import (
     build_detection_message,
+    collapse_recycling_events_for_frame,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
 )
@@ -352,6 +353,27 @@ def run_pipeline(
             )
 
         module.EventManager.api_payload = staticmethod(api_payload_with_detection_context)
+
+        original_create_events = module.EventManager.create_events
+
+        def create_events_with_recycling_cluster(
+            manager: Any,
+            detections: list[dict[str, Any]],
+            *args: Any,
+            **kwargs: Any,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            batch_events, urgent_events = original_create_events(
+                manager,
+                detections,
+                *args,
+                **kwargs,
+            )
+            return (
+                collapse_recycling_events_for_frame(batch_events, detections),
+                urgent_events,
+            )
+
+        module.EventManager.create_events = create_events_with_recycling_cluster
 
         original_dispatch_events = module.dispatch_events
 

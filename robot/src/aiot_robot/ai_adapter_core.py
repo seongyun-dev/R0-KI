@@ -27,6 +27,62 @@ _PIPELINE_CONTEXT_FIELDS = {
     "_camera": "cameraId",
     "_trackId": "trackId",
 }
+_RECYCLING_CLASS_NAMES = frozenset({"bin_overflow", "bag_outside"})
+
+
+def collapse_recycling_events_for_frame(
+    events: Sequence[Mapping[str, Any]],
+    detections: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Represent one recycling-area scene with one event and one union bbox."""
+
+    recycling_boxes: list[tuple[float, float, float, float]] = []
+    for detection in detections:
+        if detection.get("class_name") not in _RECYCLING_CLASS_NAMES:
+            continue
+        bbox = detection.get("bbox")
+        if not isinstance(bbox, Sequence) or isinstance(bbox, (str, bytes)):
+            continue
+        if len(bbox) != 4:
+            continue
+        try:
+            x1, y1, x2, y2 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            continue
+        if all(math.isfinite(value) for value in (x1, y1, x2, y2)) and (
+            x1 >= 0 and y1 >= 0 and x2 > x1 and y2 > y1
+        ):
+            recycling_boxes.append((x1, y1, x2, y2))
+
+    union_bbox = None
+    if recycling_boxes:
+        union_bbox = [
+            min(box[0] for box in recycling_boxes),
+            min(box[1] for box in recycling_boxes),
+            max(box[2] for box in recycling_boxes),
+            max(box[3] for box in recycling_boxes),
+        ]
+
+    collapsed: list[dict[str, Any]] = []
+    recycling_added = False
+    for event in events:
+        copied = dict(event)
+        if copied.get("eventType") != "RECYCLING_AREA_FULL":
+            collapsed.append(copied)
+            continue
+        if recycling_added:
+            continue
+        recycling_added = True
+        if union_bbox is not None:
+            copied["_bbox"] = union_bbox
+            details = str(copied.get("eventDetails") or "")
+            copied["eventDetails"] = (
+                f"{details}, detectedCount={len(recycling_boxes)}"
+                if details
+                else f"detectedCount={len(recycling_boxes)}"
+            )
+        collapsed.append(copied)
+    return collapsed
 
 
 def preserve_pipeline_detection_context(

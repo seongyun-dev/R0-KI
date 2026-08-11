@@ -2,6 +2,7 @@ import unittest
 
 from aiot_robot.ai_adapter_core import (
     build_detection_message,
+    collapse_recycling_events_for_frame,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
 )
@@ -10,6 +11,34 @@ import json
 
 
 class AiAdapterCoreTest(unittest.TestCase):
+    def test_collapses_recycling_scene_into_one_union_bbox(self) -> None:
+        events = [
+            {
+                "eventType": "RECYCLING_AREA_FULL",
+                "eventDetails": "BIN_OVERFLOW, confidence=0.90",
+                "_bbox": [10, 20, 30, 40],
+            },
+            {
+                "eventType": "RECYCLING_AREA_FULL",
+                "eventDetails": "BAG_OUTSIDE, confidence=0.80",
+                "_bbox": [100, 80, 150, 160],
+            },
+            {"eventType": "TRASH_DETECTED", "_bbox": [300, 200, 320, 220]},
+        ]
+        detections = [
+            {"class_name": "bin_overflow", "bbox": [10, 20, 30, 40]},
+            {"class_name": "bag_outside", "bbox": [100, 80, 150, 160]},
+            {"class_name": "small_trash", "bbox": [300, 200, 320, 220]},
+        ]
+
+        collapsed = collapse_recycling_events_for_frame(events, detections)
+
+        self.assertEqual(len(collapsed), 2)
+        recycling = collapsed[0]
+        self.assertEqual(recycling["_bbox"], [10.0, 20.0, 150.0, 160.0])
+        self.assertIn("detectedCount=2", recycling["eventDetails"])
+        self.assertEqual(collapsed[1]["eventType"], "TRASH_DETECTED")
+
     def test_preserves_legacy_pipeline_detection_context(self) -> None:
         payload = preserve_pipeline_detection_context(
             {
