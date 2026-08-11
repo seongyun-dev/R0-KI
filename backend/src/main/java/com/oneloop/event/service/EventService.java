@@ -164,7 +164,9 @@ public class EventService {
                                 Collectors.collectingAndThen(
                                         Collectors.reducing((first, second) -> first),
                                         history ->
-                                                history.map(h -> h.getProcessingMember().getName()).orElse(null))));
+                                                history.map(EventProcessingHistory::getProcessingMember)
+                                                        .map(member -> member.getName())
+                                                        .orElse(null))));
     }
 
     // 처리완료 전에는 탐지시각부터 지금까지의 경과시간(초)을, 완료됐으면 null을 반환한다
