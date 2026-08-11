@@ -396,6 +396,9 @@ class EventDeliveryWorker:
             details += f", locationMethod={location_method}"
         if context.get("rangeM") is not None:
             details += f", rangeM={float(context['rangeM']):.2f}"
+        detection_count = attributes.get("detectionCount")
+        if isinstance(detection_count, int) and detection_count > 0:
+            details += f", detectedCount={detection_count}"
         if isinstance(plate, str) and plate.strip():
             response = client.check_vehicles(
                 [

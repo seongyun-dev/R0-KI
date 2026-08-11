@@ -26,6 +26,7 @@ _PIPELINE_CONTEXT_FIELDS = {
     "_frameWidth": "frameWidth",
     "_camera": "cameraId",
     "_trackId": "trackId",
+    "_detectionCount": "detectionCount",
 }
 _RECYCLING_CLASS_NAMES = frozenset({"bin_overflow", "bag_outside"})
 
@@ -75,6 +76,7 @@ def collapse_recycling_events_for_frame(
         recycling_added = True
         if union_bbox is not None:
             copied["_bbox"] = union_bbox
+            copied["_detectionCount"] = len(recycling_boxes)
             details = str(copied.get("eventDetails") or "")
             copied["eventDetails"] = (
                 f"{details}, detectedCount={len(recycling_boxes)}"
@@ -144,6 +146,15 @@ def build_detection_message(
         attributes["eventTitle"] = str(payload["eventTitle"])
     if payload.get("riskLevel") is not None:
         attributes["riskLevel"] = str(payload["riskLevel"])
+    detection_count = payload.get("detectionCount")
+    if detection_count is not None:
+        if (
+            isinstance(detection_count, bool)
+            or not isinstance(detection_count, int)
+            or detection_count <= 0
+        ):
+            raise ValueError("detectionCount must be a positive integer")
+        attributes["detectionCount"] = detection_count
     bbox = {"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0}
     if detection_bbox_xyxy is not None:
         if len(detection_bbox_xyxy) != 4:

@@ -36,6 +36,7 @@ class AiAdapterCoreTest(unittest.TestCase):
         self.assertEqual(len(collapsed), 2)
         recycling = collapsed[0]
         self.assertEqual(recycling["_bbox"], [10.0, 20.0, 150.0, 160.0])
+        self.assertEqual(recycling["_detectionCount"], 2)
         self.assertIn("detectedCount=2", recycling["eventDetails"])
         self.assertEqual(collapsed[1]["eventType"], "TRASH_DETECTED")
 
@@ -89,6 +90,25 @@ class AiAdapterCoreTest(unittest.TestCase):
         self.assertEqual(event.camera_id, "A")
         self.assertEqual(event.track_id, "42")
         self.assertEqual(event.confidence, 0.93)
+
+    def test_recycling_count_is_preserved_in_ros_attributes(self) -> None:
+        payload = preserve_pipeline_detection_context(
+            {"_detectionCount": 3},
+            {
+                "eventType": "RECYCLING_AREA_FULL",
+                "eventDetails": "BIN_OVERFLOW, confidence=0.91",
+            },
+        )
+
+        message = build_detection_message(
+            payload,
+            evidence_path="/var/lib/aiot/evidence/recycling.jpg",
+            patrol_id=9,
+            event_id="recycling-1",
+            observed_at_fallback="2026-08-03T00:00:01Z",
+        )
+
+        self.assertEqual(message["attributes"]["detectionCount"], 3)
 
     def test_vehicle_is_neutral_and_keeps_plate_for_backend_decision(self) -> None:
         message = build_detection_message(
