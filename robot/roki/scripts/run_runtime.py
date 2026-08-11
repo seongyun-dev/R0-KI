@@ -230,6 +230,9 @@ def build_runtime() -> RobotRuntime:
             encoder_zero_max_attempts=int(
                 runtime_values["encoder_zero_max_attempts"]
             ),
+            initial_hardware_status_timeout_sec=float(
+                runtime_values["initial_hardware_status_timeout_sec"]
+            ),
         ),
     )
 
