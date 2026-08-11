@@ -513,7 +513,8 @@ export default function PatrolDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const { data: patrol, isLoading, error, refetch } = usePatrol(id)
-  const mapId = useAuthStore((state) => state.mapId)
+  const activeMapId = useAuthStore((state) => state.mapId)
+  const detailMapId = patrol?.mapId ?? activeMapId
   const [mapImageUrl, setMapImageUrl] = useState<string>()
   const [mapDetail, setMapDetail] = useState<MapDetailResponse>()
   const [checkpointZones, setCheckpointZones] = useState<ZoneCreateResponse[]>([])
@@ -543,7 +544,7 @@ export default function PatrolDetail() {
   }
 
   useEffect(() => {
-    if (!mapId && !patrol?.mapUrl) {
+    if (!detailMapId && !patrol?.mapUrl) {
       setMapImageUrl(undefined)
       setMapDetail(undefined)
       setCheckpointZones([])
@@ -553,8 +554,8 @@ export default function PatrolDetail() {
     const controller = new AbortController()
     let objectUrl: string | undefined
 
-    const detailPromise = mapId
-      ? Promise.all([mapApi.detail(mapId), mapApi.zones(mapId)])
+    const detailPromise = detailMapId
+      ? Promise.all([mapApi.detail(detailMapId), mapApi.zones(detailMapId)])
           .then(([detail, zones]) => {
             setCheckpointZones(zones)
             return detail
@@ -583,7 +584,7 @@ export default function PatrolDetail() {
       controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [mapId, patrol?.mapUrl])
+  }, [detailMapId, patrol?.mapUrl])
 
   // 시안은 최신순 (복귀가 맨 위)
   const points = [...(patrol?.points ?? [])].sort((a, b) => timeMin(b.time) - timeMin(a.time))

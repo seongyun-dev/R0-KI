@@ -415,6 +415,7 @@ export function patrolDetailToDomain(value: PatrolDetailResponse, id: string): P
         }
       : undefined,
     points: timeline.length > 0 ? timeline.map(timelinePoint) : undefined,
+    mapId: value.mapId ?? undefined,
     mapUrl: value.mapUrl ?? undefined,
     routePoints: (value.routePoints ?? [])
       .map((point) => ({

@@ -166,6 +166,7 @@ export interface Patrol {
   batteryTo?: number;               // 82
   report?: PatrolReport;
   points?: PatrolPoint[];
+  mapId?: string | number;
   mapUrl?: string;
   routePoints?: PatrolRoutePoint[];
 }
