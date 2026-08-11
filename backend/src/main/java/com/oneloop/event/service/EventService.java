@@ -16,6 +16,7 @@ import com.oneloop.event.repository.EventProcessingHistoryRepository;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.response.PageResponse;
+import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.util.EventCheckpointResolver;
 import com.oneloop.member.repository.MemberRepository;
 import java.time.Duration;
