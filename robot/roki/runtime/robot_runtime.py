@@ -73,6 +73,7 @@ class RuntimeSettings:
     disconnected_poll_sec: float
     encoder_zero_retry_interval_sec: float = 0.5
     encoder_zero_max_attempts: int = 3
+    initial_hardware_status_timeout_sec: float = 15.0
     control_refresh_interval_sec: float = CONTROL_REFRESH_INTERVAL_SEC
     outbound_write_timeout_sec: float = 2.0
 
@@ -81,6 +82,8 @@ class RuntimeSettings:
             raise ValueError("encoder zero retry interval must be positive")
         if self.encoder_zero_max_attempts < 1:
             raise ValueError("encoder zero max attempts must be at least one")
+        if self.initial_hardware_status_timeout_sec <= 0:
+            raise ValueError("initial hardware status timeout must be positive")
         if self.control_refresh_interval_sec <= 0:
             raise ValueError("control refresh interval must be positive")
         if self.outbound_write_timeout_sec <= 0:
@@ -209,6 +212,7 @@ class RobotRuntime:
         self._parse_error_count = 0
         self._odometry_baseline_pending = True
         self._encoder_zero_acknowledged = False
+        self._encoder_zero_acknowledged_at: float | None = None
         self._encoder_zero_attempts = 0
         self._encoder_zero_last_sent_at: float | None = None
         self._encoder_zero_wait_logged = False
@@ -372,6 +376,10 @@ class RobotRuntime:
                 self._maintain_encoder_zero_handshake()
                 if not self._bridge.is_connected():
                     self._count_control_outcome("dropped_in_handshake")
+                    continue
+                self._maintain_initial_hardware_status()
+                if not self._bridge.is_connected():
+                    self._count_control_outcome("dropped_before_hardware_status")
                     continue
                 raw = self._bridge.read_line()
                 if raw is None:
@@ -646,6 +654,7 @@ class RobotRuntime:
         self._telemetry_recovery_generation = None
         self._odometry_baseline_pending = True
         self._encoder_zero_acknowledged = False
+        self._encoder_zero_acknowledged_at = None
         self._encoder_zero_attempts = 0
         self._encoder_zero_last_sent_at = None
         self._encoder_zero_wait_logged = False
@@ -725,6 +734,40 @@ class RobotRuntime:
         )
         self._fail_closed_mission("ENCODER_ZERO_HANDSHAKE_FAILED")
         self._bridge.close(build_stop_command(self._sequence.next()))
+        self._encoder_zero_acknowledged_at = None
+        self._encoder_zero_attempts = 0
+        self._encoder_zero_last_sent_at = None
+
+    def _maintain_initial_hardware_status(self) -> None:
+        """Reconnect if a completed handshake never yields real hardware data.
+
+        The MQTT publisher intentionally suppresses status before the first
+        real ESP32 report.  Without a deadline, an open-but-silent generation
+        therefore looks like a healthy systemd service forever and operators
+        have to restart ``aiot-robot`` manually.
+        """
+
+        acknowledged_at = self._encoder_zero_acknowledged_at
+        if (
+            not self._encoder_zero_acknowledged
+            or acknowledged_at is None
+            or self._latest_hardware_status is not None
+        ):
+            return
+        if (
+            self._clock() - acknowledged_at
+            < self._settings.initial_hardware_status_timeout_sec
+        ):
+            return
+        logger.error(
+            "Initial ESP32 hardware status missing for %.1fs; "
+            "reconnecting Serial",
+            self._settings.initial_hardware_status_timeout_sec,
+        )
+        self._fail_closed_mission("INITIAL_HARDWARE_STATUS_TIMEOUT")
+        self._bridge.close(build_stop_command(self._sequence.next()))
+        self._encoder_zero_acknowledged = False
+        self._encoder_zero_acknowledged_at = None
         self._encoder_zero_attempts = 0
         self._encoder_zero_last_sent_at = None
 
@@ -746,6 +789,7 @@ class RobotRuntime:
         self._safety.reset_connection()
         self._state_store.reset_connection()
         self._encoder_zero_acknowledged = True
+        self._encoder_zero_acknowledged_at = self._clock()
         self._encoder_zero_wait_logged = False
         # This warning-level marker is intentionally stable: the field
         # preparation command waits for it before claiming that mapping is
@@ -1464,6 +1508,7 @@ class RobotRuntime:
             self._ignore_operating_data_until_encoder_zero()
             return
         now = self._clock()
+        first_hardware_status = self._latest_hardware_status is None
         logger.debug(
             "HardwareStatus: batteryPercent=%s batteryVoltage=%s motor=%s "
             "lineSensor=%s",
@@ -1484,6 +1529,14 @@ class RobotRuntime:
         self._latest_hardware_status = hardware_status
         self._safety.record_hardware_status(now)
         self._last_hardware_received_at = now
+        if first_hardware_status:
+            logger.warning(
+                "ESP32_HARDWARE_READY batteryPercent=%s motor=%s "
+                "lineSensor=%s",
+                hardware_status.battery_percent,
+                hardware_status.motor.value,
+                hardware_status.line_sensor.value,
+            )
 
         observer_generation = self._connection_generation
 

@@ -11,12 +11,16 @@ from typing import Any, Callable, Mapping
 
 from .backend_client import BackendConfig, RobotBackendClient
 from .contracts import DetectionEvent
+from .detection_localization import bbox_center_bearing_deg, project_detection
 from .outbox import DetectionOutbox
 from .vehicle_localization import project_front_vehicle
 
 
 BackendFactory = Callable[[], RobotBackendClient]
 DEFAULT_MIN_DETECTION_CONFIDENCE = 0.5
+_DIRECTIONAL_ENVIRONMENT_EVENT_TYPES = frozenset(
+    {"TRASH_DETECTED", "RECYCLING_AREA_FULL"}
+)
 
 
 class DetectionRecorder:
@@ -29,6 +33,8 @@ class DetectionRecorder:
         *,
         vehicle_range_source: Any | None = None,
         camera_yaw_deg: float = 0.0,
+        camera_horizontal_fov_deg: float | None = None,
+        lidar_forward_center_angle_deg: float | None = None,
         minimum_confidence: float | None = None,
         emergency_stop_sink: Callable[[Any], None] | None = None,
     ) -> None:
@@ -36,6 +42,26 @@ class DetectionRecorder:
         self._state_store = state_store
         self._vehicle_range_source = vehicle_range_source
         self._camera_yaw_deg = float(camera_yaw_deg)
+        self._camera_horizontal_fov_deg = float(
+            os.getenv("AIOT_DETECTION_CAMERA_HORIZONTAL_FOV_DEG", "48")
+            if camera_horizontal_fov_deg is None
+            else camera_horizontal_fov_deg
+        )
+        self._lidar_forward_center_angle_deg = float(
+            os.getenv(
+                "AIOT_LIDAR_FORWARD_CENTER_ANGLE_DEG",
+                os.getenv("AIOT_VEHICLE_LIDAR_CENTER_ANGLE_DEG", "0"),
+            )
+            if lidar_forward_center_angle_deg is None
+            else lidar_forward_center_angle_deg
+        )
+        if (
+            not math.isfinite(self._camera_horizontal_fov_deg)
+            or not 0.0 < self._camera_horizontal_fov_deg < 180.0
+        ):
+            raise ValueError("camera horizontal FOV must be between 0 and 180")
+        if not math.isfinite(self._lidar_forward_center_angle_deg):
+            raise ValueError("LiDAR forward center angle must be finite")
         self._minimum_confidence = (
             float(os.getenv("AIOT_MIN_DETECTION_CONFIDENCE", "0.5"))
             if minimum_confidence is None
@@ -49,6 +75,8 @@ class DetectionRecorder:
         self._emergency_stop_sink = emergency_stop_sink
         self._scan_context_lock = threading.Lock()
         self._scan_context: dict[str, Any] | None = None
+        self._recycling_lock = threading.Lock()
+        self._recycling_patrol_ids: set[int] = set()
 
     def set_scan_context(self, waypoint: Any | None) -> None:
         """Receive the current SCAN hook from the navigation runtime."""
@@ -71,6 +99,14 @@ class DetectionRecorder:
                 f"threshold={self._minimum_confidence:.3f}"
             )
             return
+        if event.event_type == "RECYCLING_AREA_FULL" and event.patrol_id is not None:
+            with self._recycling_lock:
+                if event.patrol_id in self._recycling_patrol_ids:
+                    print(
+                        "[EVENT] recycling-area duplicate suppressed "
+                        f"eventId={event.event_id} patrolId={event.patrol_id}"
+                    )
+                    return
         if event.event_type == "EMERGENCY" and callable(
             self._emergency_stop_sink
         ):
@@ -135,7 +171,79 @@ class DetectionRecorder:
                 f"estimatedVehicle=({vehicle.x:.3f},{vehicle.y:.3f}) "
                 f"zone={zone_id or 'UNAVAILABLE'}"
             )
-        self._outbox.enqueue(event, context=context)
+        elif event.event_type in _DIRECTIONAL_ENVIRONMENT_EVENT_TYPES:
+            localized = self._localize_environment_detection(event, pose)
+            if localized is not None:
+                context.update(
+                    {
+                        "x": localized.x,
+                        "y": localized.y,
+                        "rangeM": localized.range_m,
+                        "bearingDeg": localized.bearing_deg,
+                        "locationMethod": "BBOX_LIDAR",
+                    }
+                )
+                print(
+                    "[ENVIRONMENT_LOCALIZATION] "
+                    f"eventType={event.event_type} "
+                    f"robot=({x:.3f},{y:.3f}) "
+                    f"bearingDeg={localized.bearing_deg:.2f} "
+                    f"range={localized.range_m:.3f} "
+                    f"estimated=({localized.x:.3f},{localized.y:.3f})"
+                )
+            else:
+                # Preserve the previous behavior rather than losing a report
+                # when a low floor object is below the 2D LiDAR scan plane.
+                context["locationMethod"] = "ROBOT_OBSERVATION_POSE"
+                print(
+                    "[ENVIRONMENT_LOCALIZATION] fallback to observation pose "
+                    f"eventType={event.event_type} eventId={event.event_id}"
+                )
+        recycling_reserved = False
+        if event.event_type == "RECYCLING_AREA_FULL" and event.patrol_id is not None:
+            with self._recycling_lock:
+                if event.patrol_id in self._recycling_patrol_ids:
+                    return
+                self._recycling_patrol_ids.add(event.patrol_id)
+                recycling_reserved = True
+        try:
+            self._outbox.enqueue(event, context=context)
+        except BaseException:
+            if recycling_reserved:
+                with self._recycling_lock:
+                    self._recycling_patrol_ids.discard(event.patrol_id)
+            raise
+
+    def _localize_environment_detection(
+        self,
+        event: DetectionEvent,
+        pose: Any,
+    ) -> Any | None:
+        get_range = getattr(self._vehicle_range_source, "get_range_at_angle", None)
+        if not callable(get_range):
+            return None
+        frame_width = event.attributes.get("frameWidth")
+        if frame_width is None:
+            return None
+        try:
+            bearing_deg = bbox_center_bearing_deg(
+                event.bbox,
+                float(frame_width),
+                camera_horizontal_fov_deg=self._camera_horizontal_fov_deg,
+                camera_yaw_deg=self._camera_yaw_deg,
+            )
+            range_m = get_range(
+                self._lidar_forward_center_angle_deg + bearing_deg
+            )
+            if range_m is None:
+                return None
+            return project_detection(
+                pose,
+                float(range_m),
+                bearing_deg=bearing_deg,
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
 
 
 class EventDeliveryWorker:
@@ -283,6 +391,14 @@ class EventDeliveryWorker:
                 f", scanSequence={scan.get('sequence')}, "
                 f"scanZoneId={scan.get('zoneId')}"
             )
+        location_method = context.get("locationMethod")
+        if isinstance(location_method, str) and location_method:
+            details += f", locationMethod={location_method}"
+        if context.get("rangeM") is not None:
+            details += f", rangeM={float(context['rangeM']):.2f}"
+        detection_count = attributes.get("detectionCount")
+        if isinstance(detection_count, int) and detection_count > 0:
+            details += f", detectedCount={detection_count}"
         if isinstance(plate, str) and plate.strip():
             response = client.check_vehicles(
                 [
