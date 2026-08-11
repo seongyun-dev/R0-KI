@@ -651,20 +651,6 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                       mapImageUrl={mapImageUrl}
                       wallOffset={MAP_25D_WALL_HEIGHT_PX}
                     />
-                    <g className="au-iso-grid" aria-hidden>
-                      {Array.from({ length: COLS + 1 }, (_, index) => {
-                        const x = (index / COLS) * isoProjection.mapWidth
-                        const start = mapPixelToIsometric(isoProjection, { x, y: 0 })
-                        const end = mapPixelToIsometric(isoProjection, { x, y: isoProjection.mapHeight })
-                        return <line key={`c-${index}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
-                      })}
-                      {Array.from({ length: ROWS + 1 }, (_, index) => {
-                        const y = (index / ROWS) * isoProjection.mapHeight
-                        const start = mapPixelToIsometric(isoProjection, { x: 0, y })
-                        const end = mapPixelToIsometric(isoProjection, { x: isoProjection.mapWidth, y })
-                        return <line key={`r-${index}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} />
-                      })}
-                    </g>
                     <polygon className="au-iso-hit" points={pointsAttribute(isoBasePoints)} />
 
                     {zones.map((zone) => {
@@ -698,7 +684,8 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                         { x: 0, y: 0 },
                       )
                       const screen = applyViewTransform(center, isoView)
-                      const labelWidth = Math.max(42, Math.min(128, zone.label.length * 7 + 16))
+                      const compactLabel = zone.label.length > 14 ? `${zone.label.slice(0, 13)}…` : zone.label
+                      const labelWidth = Math.max(42, Math.min(116, compactLabel.length * 7 + 16))
                       const fixedScale = 1 / isoScreenScale
                       return (
                         <g
@@ -707,7 +694,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                           transform={`translate(${screen.x} ${screen.y - 18 * fixedScale}) scale(${fixedScale}) translate(${-labelWidth / 2} -10)`}
                         >
                           <rect width={labelWidth} height="20" rx="10" />
-                          <text x={labelWidth / 2} y="13">{zone.label}</text>
+                          <text x={labelWidth / 2} y="13">{compactLabel}</text>
                         </g>
                       )
                     })}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   cleanupDisplayOccupiedMask,
+  rgbaToObservedMask,
   rgbaToOccupiedMask,
 } from '../src/features/dashboard/displayGeometry25d.ts'
 
@@ -96,9 +97,9 @@ test('strong display cleanup preserves major components, bounds and representati
   occupied.push([6, 1], [7, 1], [7, 2])
   const source = mask(width, height, occupied)
   const cleaned = cleanupDisplayOccupiedMask(source, width, height, {
-    maxNoiseComponentPx: 3,
+    maxNoiseComponentPx: 4,
     spurPasses: 3,
-    axisStraighteningPasses: 1,
+    axisStraighteningPasses: 2,
   })
   assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height).slice(0, 2))
   assert.equal(cleaned[4 * width + 7], 0, 'the opening between major components must remain open')
@@ -127,4 +128,26 @@ test('map grayscale conversion keeps unknown and free pixels out of occupied geo
     254, 254, 254, 255,
   ])
   assert.deepEqual([...rgbaToOccupiedMask(rgba, 3, 1)], [1, 0, 0])
+})
+
+test('observed floor keeps occupied and free space but removes the unknown outer slab', () => {
+  const rgba = new Uint8ClampedArray([
+    205, 205, 205, 255,
+    0, 0, 0, 255,
+    254, 254, 254, 255,
+    205, 205, 205, 255,
+    205, 205, 205, 255,
+  ])
+  assert.deepEqual([...rgbaToObservedMask(rgba, 5, 1)], [0, 1, 1, 0, 0])
+})
+
+test('observed floor conversion is display-only and does not mutate source pixels', () => {
+  const rgba = new Uint8ClampedArray([
+    0, 0, 0, 255,
+    205, 205, 205, 255,
+    254, 254, 254, 255,
+  ])
+  const before = rgba.slice()
+  rgbaToObservedMask(rgba, 3, 1)
+  assert.deepEqual(rgba, before)
 })
