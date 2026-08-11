@@ -59,7 +59,8 @@ public class RobotTelemetryService {
         publishLocationUpdated(robot);
 
         // 최신 위치 반영 후 도착지 도달 여부를 확인해 진행 중인 순찰의 자동 종료를 시도합니다.
-        patrolCommandService.autoCompleteIfArrived(robot, message.x(), message.y());
+        patrolCommandService.autoCompleteIfArrived(
+                robot, message.x(), message.y(), reportedAt);
     }
 
     // status 메시지 처리 진입점 - robotKey로 로봇을 찾아 applyStatus로 위임

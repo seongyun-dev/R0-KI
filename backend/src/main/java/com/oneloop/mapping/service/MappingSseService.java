@@ -48,10 +48,12 @@ public class MappingSseService {
 
         // ACK가 SSE 연결보다 먼저 도착한 경우에도 프론트가 최신 상태를 바로 알 수 있게 한다.
         Long mapId =
-                patrolMapRepository
-                        .findByApartmentComplexId(session.getApartmentComplex().getId())
-                        .map(patrolMap -> patrolMap.getId())
-                        .orElse(null);
+                session.getResultMap() != null
+                        ? session.getResultMap().getId()
+                        : patrolMapRepository
+                                .findByApartmentComplexId(session.getApartmentComplex().getId())
+                                .map(patrolMap -> patrolMap.getId())
+                                .orElse(null);
         send(mappingSessionId, emitter, MappingStatusEventResponse.from(session, mapId));
         if (isTerminal(session.getStatus())) {
             complete(mappingSessionId, emitter);

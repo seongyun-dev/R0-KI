@@ -30,6 +30,8 @@ public interface PatrolRepository extends JpaRepository<Patrol, Long> {
     boolean existsByRobotApartmentComplexIdAndStatusIn(
             Long apartmentComplexId, Collection<PatrolStatus> statuses);
 
+    boolean existsByMapId(Long mapId);
+
     List<Patrol> findAllByStatusIn(Collection<PatrolStatus> statuses);
 
     List<Patrol> findAllByRobotIdInAndStatusInOrderByStartedAtDesc(
@@ -54,6 +56,17 @@ public interface PatrolRepository extends JpaRepository<Patrol, Long> {
             @Param("to") LocalDateTime to);
 
     Optional<Patrol> findByIdAndRobotApartmentComplexId(Long id, Long apartmentComplexId);
+
+    @EntityGraph(attributePaths = {"robot", "map"})
+    @Query(
+            """
+            SELECT patrol
+            FROM Patrol patrol
+            WHERE patrol.id = :id
+              AND patrol.robot.apartmentComplex.id = :apartmentComplexId
+            """)
+    Optional<Patrol> findDetailByIdAndApartmentComplexId(
+            @Param("id") Long id, @Param("apartmentComplexId") Long apartmentComplexId);
 
     @EntityGraph(attributePaths = "robot")
     @Query(

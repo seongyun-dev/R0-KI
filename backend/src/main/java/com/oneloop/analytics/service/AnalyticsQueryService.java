@@ -15,10 +15,7 @@ import com.oneloop.event.domain.ProcessingStatus;
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.map.domain.Checkpoint;
-import com.oneloop.map.domain.PatrolMap;
-import com.oneloop.map.repository.CheckpointRepository;
-import com.oneloop.map.repository.PatrolMapRepository;
-import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.map.util.EventCheckpointResolver;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.repository.PatrolCheckpointVisitRepository;
 import com.oneloop.patrol.repository.PatrolRepository;
@@ -37,7 +34,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,9 +72,7 @@ public class AnalyticsQueryService {
     private static final LocalDate HOUR3_ANCHOR_DATE = LocalDate.of(2000, 1, 1);
 
     private final AnalyticsRepository analyticsRepository;
-    private final PatrolMapRepository patrolMapRepository;
-    private final CheckpointRepository checkpointRepository;
-    private final CheckpointLocator checkpointLocator;
+    private final EventCheckpointResolver eventCheckpointResolver;
     private final PatrolCheckpointVisitRepository patrolCheckpointVisitRepository;
     private final PatrolRepository patrolRepository;
 
@@ -113,28 +107,27 @@ public class AnalyticsQueryService {
         // from이 to보다 이후면 집계 의미가 없으므로 바로 400 처리
         validateRange(from, to);
 
-        // 구역 통계/필터는 이벤트에 zoneId가 직접 없어서, 좌표(x,y) → Checkpoint 매핑이 필요하다.
-        // 단지 지도의 체크포인트(구역)를 한 번만 가져와 아래에서 재사용한다.
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
-
+        // 이벤트마다 순찰 당시 지도에서 좌표(x,y) → Checkpoint를 매핑한다.
         // 1) 현재 조회 기간 이벤트
         List<DetectedEvent> currentEvents =
-                filterByZone(
-                        findEvents(apartmentComplexId, from, to, eventTypes, robotIds),
-                        checkpoints,
-                        zoneIds);
+                findEvents(apartmentComplexId, from, to, eventTypes, robotIds);
+        Map<Long, List<Checkpoint>> currentCheckpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(currentEvents);
+        currentEvents = filterByZone(currentEvents, currentCheckpointsByMap, zoneIds);
 
         // 2) "오늘" 카드용 이벤트 (요청 기간과 별개, KST 오늘)
         DateRange today = todayRange();
         List<DetectedEvent> todayEvents =
+                findEvents(
+                        apartmentComplexId,
+                        today.from(),
+                        today.to(),
+                        eventTypes,
+                        robotIds);
+        todayEvents =
                 filterByZone(
-                        findEvents(
-                                apartmentComplexId,
-                                today.from(),
-                                today.to(),
-                                eventTypes,
-                                robotIds),
-                        checkpoints,
+                        todayEvents,
+                        eventCheckpointResolver.loadCheckpointIndex(todayEvents),
                         zoneIds);
 
         // 3) KPI: 완료 순찰 수 / 평균 처리시간
@@ -143,7 +136,7 @@ public class AnalyticsQueryService {
 
         // 4) 최다 유형 / 최다 구역
         Map<EventType, Long> currentTypeCounts = countByType(currentEvents);
-        OverviewResponse.Zone topZone = findTopZone(currentEvents, checkpoints);
+        OverviewResponse.Zone topZone = findTopZone(currentEvents, currentCheckpointsByMap);
         EventType topType =
                 currentTypeCounts.entrySet().stream()
                         .max(Map.Entry.comparingByValue())
@@ -158,14 +151,16 @@ public class AnalyticsQueryService {
         if (compare) {
             DateRange previous = previousRange(from, to);
             List<DetectedEvent> previousEvents =
+                    findEvents(
+                            apartmentComplexId,
+                            previous.from(),
+                            previous.to(),
+                            eventTypes,
+                            robotIds);
+            previousEvents =
                     filterByZone(
-                            findEvents(
-                                    apartmentComplexId,
-                                    previous.from(),
-                                    previous.to(),
-                                    eventTypes,
-                                    robotIds),
-                            checkpoints,
+                            previousEvents,
+                            eventCheckpointResolver.loadCheckpointIndex(previousEvents),
                             zoneIds);
             Map<EventType, Long> previousTypeCounts = countByType(previousEvents);
             long previousPatrolCount =
@@ -243,19 +238,17 @@ public class AnalyticsQueryService {
             throw new BusinessException(ErrorCode.INVALID_INPUT);
         }
 
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
-
         List<DetectedEvent> events =
+                findEvents(
+                        apartmentComplexId,
+                        from,
+                        to,
+                        eventTypes,
+                        robotIds,
+                        statuses);
+        events =
                 filterByZone(
-                        findEvents(
-                                apartmentComplexId,
-                                from,
-                                to,
-                                eventTypes,
-                                robotIds,
-                                statuses),
-                        checkpoints,
-                        zoneIds);
+                        events, eventCheckpointResolver.loadCheckpointIndex(events), zoneIds);
 
         // hour3: 기간 전체를 시각대 8칸으로만 합산 (달력 시계열이 아님)
         if (bucket == AnalyticsBucket.hour3) {
@@ -317,14 +310,12 @@ public class AnalyticsQueryService {
             List<Long> zoneIds,
             List<Long> robotIds) {
         validateRange(from, to);
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
-
         // 처리현황은 상태 필터를 걸지 않는다. (handled/pending을 나눠 세야 하므로)
         List<DetectedEvent> events =
+                findEvents(apartmentComplexId, from, to, null, robotIds, null);
+        events =
                 filterByZone(
-                        findEvents(apartmentComplexId, from, to, null, robotIds, null),
-                        checkpoints,
-                        zoneIds);
+                        events, eventCheckpointResolver.loadCheckpointIndex(events), zoneIds);
 
         List<HandlingResponse.HandlingItem> items = new ArrayList<>();
         // 1) 전체
@@ -373,14 +364,13 @@ public class AnalyticsQueryService {
             List<Long> robotIds,
             List<ProcessingStatus> statuses) {
         validateRange(from, to);
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
-
         // 1) 현재 기간 이벤트 (유형 필터는 넣지 않음 — 유형별 전체를 보는 API이기 때문)
         List<DetectedEvent> currentEvents =
+                findEvents(apartmentComplexId, from, to, null, robotIds, statuses);
+        currentEvents =
                 filterByZone(
-                        findEvents(
-                                apartmentComplexId, from, to, null, robotIds, statuses),
-                        checkpoints,
+                        currentEvents,
+                        eventCheckpointResolver.loadCheckpointIndex(currentEvents),
                         zoneIds);
         Map<EventType, Long> currentTypeCounts = countByType(currentEvents);
         long totalCount = currentEvents.size();
@@ -390,15 +380,17 @@ public class AnalyticsQueryService {
         if (compare) {
             DateRange previous = previousRange(from, to);
             List<DetectedEvent> previousEvents =
+                    findEvents(
+                            apartmentComplexId,
+                            previous.from(),
+                            previous.to(),
+                            null,
+                            robotIds,
+                            statuses);
+            previousEvents =
                     filterByZone(
-                            findEvents(
-                                    apartmentComplexId,
-                                    previous.from(),
-                                    previous.to(),
-                                    null,
-                                    robotIds,
-                                    statuses),
-                            checkpoints,
+                            previousEvents,
+                            eventCheckpointResolver.loadCheckpointIndex(previousEvents),
                             zoneIds);
             previousTypeCounts = countByType(previousEvents);
         }
@@ -474,24 +466,23 @@ public class AnalyticsQueryService {
         validateRange(from, to);
         ZoneSort effectiveSort = sort == null ? ZoneSort.count_desc : sort;
 
-        List<Checkpoint> checkpoints = findCheckpoints(apartmentComplexId);
         Map<Long, String> zoneNames = new HashMap<>();
-        for (Checkpoint checkpoint : checkpoints) {
-            zoneNames.put(checkpoint.getId(), checkpoint.getName());
-        }
 
         // 1) 이벤트 조회 후 좌표→구역 매핑하여 구역별 건수/유형 집계
         List<DetectedEvent> events =
                 findEvents(apartmentComplexId, from, to, eventTypes, robotIds, statuses);
+        Map<Long, List<Checkpoint>> checkpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(events);
 
         Map<Long, Long> eventCountByZone = new HashMap<>();
         Map<Long, Map<EventType, Long>> typeCountByZone = new HashMap<>();
         for (DetectedEvent event : events) {
-            checkpointLocator
-                    .findContaining(checkpoints, event.getX(), event.getY())
+            eventCheckpointResolver
+                    .findContaining(event, checkpointsByMap)
                     .ifPresent(
                             checkpoint -> {
                                 Long zoneId = checkpoint.getId();
+                                zoneNames.putIfAbsent(zoneId, checkpoint.getName());
                                 eventCountByZone.merge(zoneId, 1L, Long::sum);
                                 typeCountByZone
                                         .computeIfAbsent(zoneId, key -> new HashMap<>())
@@ -870,11 +861,6 @@ public class AnalyticsQueryService {
         return new LocalDateTime[] {previous.from(), previous.to()};
     }
 
-    /** LLM 인사이트 표 생성 전용: 단지 체크포인트 목록. */
-    public List<Checkpoint> findCheckpointsForInsight(Long apartmentComplexId) {
-        return findCheckpoints(apartmentComplexId);
-    }
-
     /**
      * 조회 기간 유효성 검사.
      * from/to가 없거나 from >= to 이면 INVALID_INPUT(COMMON_001)을 던진다.
@@ -886,35 +872,27 @@ public class AnalyticsQueryService {
     }
 
     /**
-     * 단지에 등록된 순찰 지도의 체크포인트(구역) 목록을 가져온다.
-     * 지도가 아직 없으면 빈 목록을 반환한다.
-     * → 이 경우 구역 필터/최다 구역은 매칭되지 않아 top.zone=null이 될 수 있다.
-     */
-    private List<Checkpoint> findCheckpoints(Long apartmentComplexId) {
-        Optional<PatrolMap> patrolMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId);
-        return patrolMap.map(map -> checkpointRepository.findAllByPatrolMapId(map.getId())).orElseGet(List::of);
-    }
-
-    /**
      * 이벤트 좌표가 선택한 구역(체크포인트 사각형) 안에 들어오는 것만 남긴다.
      *
      * <p>왜 서비스에서 필터하나:
      * DetectedEvent 테이블에 zoneId 컬럼이 없고 x/y만 있다.
-     * 그래서 DB WHERE로 바로 zoneId를 걸 수 없고, CheckpointLocator로 좌표 포함 여부를 본다.
+     * 그래서 DB WHERE로 바로 zoneId를 걸 수 없고, 순찰 당시 지도의 구역으로 좌표 포함 여부를 본다.
      *
      * <p>주의: findContaining(정확히 사각형 안)만 사용한다.
      * 목록 API의 "근처" 폴백 이름은 통계 집계에는 쓰지 않는다. (모호한 위치까지 구역으로 세지 않기 위함)
      */
     private List<DetectedEvent> filterByZone(
-            List<DetectedEvent> events, List<Checkpoint> checkpoints, List<Long> zoneIds) {
+            List<DetectedEvent> events,
+            Map<Long, List<Checkpoint>> checkpointsByMap,
+            List<Long> zoneIds) {
         if (zoneIds == null || zoneIds.isEmpty()) {
             return events;
         }
         return events.stream()
                 .filter(
                         event ->
-                                checkpointLocator
-                                        .findContaining(checkpoints, event.getX(), event.getY())
+                                eventCheckpointResolver
+                                        .findContaining(event, checkpointsByMap)
                                         .map(Checkpoint::getId)
                                         .filter(zoneIds::contains)
                                         .isPresent())
@@ -938,12 +916,13 @@ public class AnalyticsQueryService {
      * 좌표가 어떤 체크포인트에도 안 들어가면 집계에서 빠진다.
      * 동점이면 max 비교 결과에 따라 하나가 선택된다.
      */
-    private OverviewResponse.Zone findTopZone(List<DetectedEvent> events, List<Checkpoint> checkpoints) {
+    private OverviewResponse.Zone findTopZone(
+            List<DetectedEvent> events, Map<Long, List<Checkpoint>> checkpointsByMap) {
         Map<Long, Long> countByZoneId = new HashMap<>();
         Map<Long, String> zoneNames = new HashMap<>();
         for (DetectedEvent event : events) {
-            checkpointLocator
-                    .findContaining(checkpoints, event.getX(), event.getY())
+            eventCheckpointResolver
+                    .findContaining(event, checkpointsByMap)
                     .ifPresent(
                             checkpoint -> {
                                 countByZoneId.merge(checkpoint.getId(), 1L, Long::sum);

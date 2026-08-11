@@ -30,6 +30,7 @@ public class ZoneService {
     public List<ZoneResponse> createAll(
             Long apartmentComplexId, Long mapId, ZoneBatchCreateRequest request) {
         PatrolMap patrolMap = findMapForUpdate(apartmentComplexId, mapId);
+        navigationConfigurationGuard.assertActiveForEdit(patrolMap);
         validateMapVersion(patrolMap, request.getMapVersion());
         List<Checkpoint> checkpoints =
                 request.getZones().stream()

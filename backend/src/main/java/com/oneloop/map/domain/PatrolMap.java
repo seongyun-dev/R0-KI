@@ -4,12 +4,14 @@ import com.oneloop.apartment.domain.ApartmentComplex;
 import com.oneloop.global.common.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import lombok.AccessLevel;
@@ -26,8 +28,9 @@ public class PatrolMap extends BaseEntity {
     @Column(name = "map_id")
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "apartment_complex_id", nullable = false, unique = true)
+    // 단지당 맵을 여러 장 둘 수 있다. active 는 ApartmentComplex.activeMap 이 가리킨다.
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "apartment_complex_id", nullable = false)
     private ApartmentComplex apartmentComplex;
 
     @Column(name = "map_name", nullable = false, length = 255)
@@ -57,6 +60,10 @@ public class PatrolMap extends BaseEntity {
     @Column(name = "map_version")
     private Integer mapVersion = 1;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "map_status", nullable = false, length = 20)
+    private MapStatus status = MapStatus.ACTIVE;
+
     public PatrolMap(
             ApartmentComplex apartmentComplex,
             String name,
@@ -77,6 +84,7 @@ public class PatrolMap extends BaseEntity {
         this.width = width;
         this.height = height;
         this.mapVersion = 1;
+        this.status = MapStatus.ACTIVE;
     }
 
     public void update(
@@ -97,5 +105,17 @@ public class PatrolMap extends BaseEntity {
         this.width = width;
         this.height = height;
         this.mapVersion = mapVersion == null ? 1 : mapVersion + 1;
+    }
+
+    public void activate() {
+        this.status = MapStatus.ACTIVE;
+    }
+
+    public void archive() {
+        this.status = MapStatus.ARCHIVED;
+    }
+
+    public boolean isActive() {
+        return status == MapStatus.ACTIVE;
     }
 }

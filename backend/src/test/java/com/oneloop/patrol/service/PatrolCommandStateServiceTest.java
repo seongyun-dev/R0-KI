@@ -1,6 +1,8 @@
 package com.oneloop.patrol.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,6 +41,7 @@ class PatrolCommandStateServiceTest {
     @Mock private PatrolMapRepository patrolMapRepository;
     @Mock private NavigationWaypointService navigationWaypointService;
     @Mock private DetectedEventRepository detectedEventRepository;
+    @Mock private PatrolCheckpointVisitRecorder patrolCheckpointVisitRecorder;
 
     private PatrolCommandStateService service;
     private PatrolRobot robot;
@@ -68,7 +71,8 @@ class PatrolCommandStateServiceTest {
                         robotRepository,
                         patrolMapRepository,
                         navigationWaypointService,
-                        detectedEventRepository);
+                        detectedEventRepository,
+                        patrolCheckpointVisitRecorder);
     }
 
     @Test
@@ -82,15 +86,28 @@ class PatrolCommandStateServiceTest {
         when(navigationWaypointService.requireValidCurrentRoute(patrolMap))
                 .thenReturn(List.of(pass, destination));
 
-        assertThat(service.prepareAutoComplete(17L, new BigDecimal("0.5"), new BigDecimal("0.5")))
+        assertThat(
+                        service.prepareAutoComplete(
+                                17L,
+                                new BigDecimal("0.5"),
+                                new BigDecimal("0.5"),
+                                LocalDateTime.now()))
                 .isEmpty();
         PatrolCommandStateService.PreparedAutoComplete first =
-                service.prepareAutoComplete(17L, new BigDecimal("2.3"), new BigDecimal("0.5"))
+                service.prepareAutoComplete(
+                                17L,
+                                new BigDecimal("2.3"),
+                                new BigDecimal("0.5"),
+                                LocalDateTime.now())
                         .orElseThrow();
         assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.STOP_REQUESTED);
         assertThat(patrol.isCompletionRequested()).isTrue();
         PatrolCommandStateService.PreparedAutoComplete retry =
-                service.prepareAutoComplete(17L, new BigDecimal("2.0"), new BigDecimal("0.5"))
+                service.prepareAutoComplete(
+                                17L,
+                                new BigDecimal("2.0"),
+                                new BigDecimal("0.5"),
+                                LocalDateTime.now())
                         .orElseThrow();
         assertThat(retry.commandId()).isEqualTo(first.commandId());
         verify(navigationWaypointService, times(2)).requireValidCurrentRoute(patrolMap);
@@ -106,7 +123,12 @@ class PatrolCommandStateServiceTest {
         when(navigationWaypointService.requireValidCurrentRoute(patrolMap))
                 .thenReturn(List.of(destination));
 
-        assertThat(service.prepareAutoComplete(17L, new BigDecimal("2.301"), new BigDecimal("0.5")))
+        assertThat(
+                        service.prepareAutoComplete(
+                                17L,
+                                new BigDecimal("2.301"),
+                                new BigDecimal("0.5"),
+                                LocalDateTime.now()))
                 .isEmpty();
         assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.IN_PROGRESS);
     }
@@ -116,13 +138,22 @@ class PatrolCommandStateServiceTest {
         Patrol patrol = patrol();
         when(patrolRepository.findFirstForUpdateByRobotIdOrderByStartedAtDesc(17L))
                 .thenReturn(Optional.of(patrol));
+        when(patrolMapRepository.findByApartmentComplexId(2L)).thenReturn(Optional.of(patrolMap));
         when(detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
                         patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED))
                 .thenReturn(true);
 
-        assertThat(service.prepareAutoComplete(17L, new BigDecimal("2.0"), new BigDecimal("0.5")))
+        assertThat(
+                        service.prepareAutoComplete(
+                                17L,
+                                new BigDecimal("2.0"),
+                                new BigDecimal("0.5"),
+                                LocalDateTime.now()))
                 .isEmpty();
         assertThat(patrol.getStatus()).isEqualTo(PatrolStatus.IN_PROGRESS);
+        verify(patrolCheckpointVisitRecorder)
+                .recordEntry(
+                        same(patrol), same(patrolMap), any(), any(), any());
     }
 
     private Patrol patrol() {

@@ -54,6 +54,7 @@ public class PatrolCommandStateService {
     private final PatrolMapRepository patrolMapRepository;
     private final NavigationWaypointService navigationWaypointService;
     private final DetectedEventRepository detectedEventRepository;
+    private final PatrolCheckpointVisitRecorder patrolCheckpointVisitRecorder;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PreparedStart prepareStart(Long apartmentComplexId, PatrolStartRequest request) {
@@ -66,13 +67,14 @@ public class PatrolCommandStateService {
                         .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
 
         validateReadyForPatrol(robot);
-        validateNavigationRoute(apartmentComplexId);
+        PatrolMap activeMap = requireActiveMapForPatrol(apartmentComplexId);
         if (patrolRepository.existsByRobotIdAndStatusIn(robot.getId(), ACTIVE_PATROL_STATUSES)) {
             throw new BusinessException(ErrorCode.PATROL_ALREADY_IN_PROGRESS);
         }
 
         String commandId = UUID.randomUUID().toString();
-        Patrol patrol = patrolRepository.save(new Patrol(robot, LocalDateTime.now(), commandId));
+        Patrol patrol =
+                patrolRepository.save(new Patrol(robot, activeMap, LocalDateTime.now(), commandId));
         StartPatrolCommand command = StartPatrolCommand.of(commandId, patrol.getId());
         return new PreparedStart(
                 patrol.getId(),
@@ -118,7 +120,7 @@ public class PatrolCommandStateService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<PreparedAutoComplete> prepareAutoComplete(
-            Long robotId, BigDecimal x, BigDecimal y) {
+            Long robotId, BigDecimal x, BigDecimal y, LocalDateTime reportedAt) {
         Patrol patrol =
                 patrolRepository
                         .findFirstForUpdateByRobotIdOrderByStartedAtDesc(robotId)
@@ -139,19 +141,24 @@ public class PatrolCommandStateService {
         if (patrol.getStatus() != PatrolStatus.IN_PROGRESS) {
             return Optional.empty();
         }
-        if (detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
-                patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED)) {
-            log.info(
-                    "[MQTT] 미처리 응급 이벤트가 있어 도착지 자동 완료를 보류합니다. patrolId={}",
-                    patrol.getId());
-            return Optional.empty();
-        }
 
         PatrolMap patrolMap =
                 patrolMapRepository
                         .findByApartmentComplexId(patrol.getRobot().getApartmentComplex().getId())
                         .orElse(null);
         if (patrolMap == null) {
+            return Optional.empty();
+        }
+
+        // 같은 순찰 행 잠금 아래에서 방문 순서를 계산해 동시 pose의 sequence 충돌을 막는다.
+        // 자동 완료가 보류되거나 경로 설정이 잘못된 경우에도 실제 구역 방문은 남긴다.
+        patrolCheckpointVisitRecorder.recordEntry(patrol, patrolMap, x, y, reportedAt);
+
+        if (detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
+                patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED)) {
+            log.info(
+                    "[MQTT] 미처리 응급 이벤트가 있어 도착지 자동 완료를 보류합니다. patrolId={}",
+                    patrol.getId());
             return Optional.empty();
         }
 
@@ -197,13 +204,14 @@ public class PatrolCommandStateService {
         }
     }
 
-    private void validateNavigationRoute(Long apartmentComplexId) {
+    private PatrolMap requireActiveMapForPatrol(Long apartmentComplexId) {
         PatrolMap patrolMap =
                 patrolMapRepository
                         .findForUpdateByApartmentComplexId(apartmentComplexId)
                         .orElseThrow(
                                 () -> new BusinessException(ErrorCode.NAVIGATION_CONFIG_NOT_READY));
         navigationWaypointService.requireValidCurrentRoute(patrolMap);
+        return patrolMap;
     }
 
     private boolean hasArrived(NavigationWaypoint destination, BigDecimal x, BigDecimal y) {
