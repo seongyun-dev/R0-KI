@@ -162,6 +162,41 @@ export function rgbaToOccupiedMask(
   return mask
 }
 
+/**
+ * Return the observed part of a trinary occupancy map for display-only floors.
+ *
+ * ROS map previews use dark pixels for occupied space, near-white pixels for
+ * free space and mid gray (normally 205) for unknown space. Keeping occupied
+ * and free pixels while excluding unknown pixels gives the real mapped floor
+ * silhouette without reviving the large rectangular/diamond outer slab.
+ */
+export function rgbaToObservedMask(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  unknownLuminanceMin = 176,
+  unknownLuminanceMax = 232,
+) {
+  if (rgba.length !== width * height * 4) throw new Error('RGBA map 데이터 길이가 올바르지 않습니다.')
+  if (
+    !Number.isFinite(unknownLuminanceMin)
+    || !Number.isFinite(unknownLuminanceMax)
+    || unknownLuminanceMin < 0
+    || unknownLuminanceMax > 255
+    || unknownLuminanceMin >= unknownLuminanceMax
+  ) {
+    throw new Error('unknown luminance 범위가 올바르지 않습니다.')
+  }
+  const mask = new Uint8Array(width * height)
+  for (let index = 0; index < mask.length; index += 1) {
+    const offset = index * 4
+    if (rgba[offset + 3] === 0) continue
+    const luminance = rgba[offset] * 0.2126 + rgba[offset + 1] * 0.7152 + rgba[offset + 2] * 0.0722
+    mask[index] = luminance < unknownLuminanceMin || luminance > unknownLuminanceMax ? 1 : 0
+  }
+  return mask
+}
+
 export function occupiedMaskToImageData(mask: Uint8Array, width: number, height: number) {
   validateMask(mask, width, height)
   const rgba = new Uint8ClampedArray(width * height * 4)
@@ -171,6 +206,20 @@ export function occupiedMaskToImageData(mask: Uint8Array, width: number, height:
     rgba[offset] = value
     rgba[offset + 1] = value
     rgba[offset + 2] = value
+    rgba[offset + 3] = 255
+  }
+  return new ImageData(rgba, width, height)
+}
+
+export function observedMaskToImageData(mask: Uint8Array, width: number, height: number) {
+  validateMask(mask, width, height)
+  const rgba = new Uint8ClampedArray(width * height * 4)
+  for (let index = 0; index < mask.length; index += 1) {
+    if (!mask[index]) continue
+    const offset = index * 4
+    rgba[offset] = 255
+    rgba[offset + 1] = 255
+    rgba[offset + 2] = 255
     rgba[offset + 3] = 255
   }
   return new ImageData(rgba, width, height)
