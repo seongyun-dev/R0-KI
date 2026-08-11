@@ -2,6 +2,7 @@ package com.oneloop.mapping.domain;
 
 import com.oneloop.apartment.domain.ApartmentComplex;
 import com.oneloop.global.common.BaseEntity;
+import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.robot.domain.PatrolRobot;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -12,6 +13,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
@@ -63,6 +65,11 @@ public class MappingSession extends BaseEntity {
     @Column(name = "finished_at")
     private LocalDateTime finishedAt;
 
+    // 업로드 완료 시 생성된 맵. COMPLETED 재시도 응답에 사용한다.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "result_map_id")
+    private PatrolMap resultMap;
+
     public MappingSession(ApartmentComplex apartmentComplex, PatrolRobot robot, String commandId) {
         this.apartmentComplex = apartmentComplex;
         this.robot = robot;
@@ -81,9 +88,10 @@ public class MappingSession extends BaseEntity {
         startedAt = LocalDateTime.now();
     }
 
-    public void complete() {
+    public void complete(PatrolMap resultMap) {
         status = MappingStatus.COMPLETED;
         finishedAt = LocalDateTime.now();
+        this.resultMap = resultMap;
     }
 
     public void prepareStop(String newStopCommandId) {
@@ -132,6 +140,7 @@ public class MappingSession extends BaseEntity {
         status = MappingStatus.REQUESTED;
         startedAt = null;
         finishedAt = null;
+        resultMap = null;
         stopCommandId = null;
         stopCommandStatus = null;
         stopFailureReason = null;

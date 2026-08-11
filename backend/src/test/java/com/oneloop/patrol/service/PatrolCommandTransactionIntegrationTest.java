@@ -103,6 +103,8 @@ class PatrolCommandTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        complex.assignActiveMap(patrolMap);
+        apartmentComplexRepository.saveAndFlush(complex);
         Checkpoint destination =
                 checkpointRepository.saveAndFlush(
                         new Checkpoint(
@@ -164,6 +166,8 @@ class PatrolCommandTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        complex.assignActiveMap(patrolMap);
+        apartmentComplexRepository.saveAndFlush(complex);
         Checkpoint destination =
                 checkpointRepository.saveAndFlush(
                         new Checkpoint(
@@ -244,6 +248,10 @@ class PatrolCommandTransactionIntegrationTest {
                 .filteredOn(result -> result.errorCode() == ErrorCode.PATROL_ALREADY_IN_PROGRESS)
                 .hasSize(1);
         assertThat(activePatrols(fixture.robot().getId())).hasSize(1);
+        Patrol started = activePatrols(fixture.robot().getId()).getFirst();
+        assertThat(started.getMap()).isNotNull();
+        assertThat(started.getMap().getId()).isEqualTo(fixture.map().getId());
+        assertThat(started.getMapVersion()).isEqualTo(fixture.map().getMapVersion());
     }
 
     @Test
@@ -332,6 +340,8 @@ class PatrolCommandTransactionIntegrationTest {
                                 BigDecimal.ZERO,
                                 100,
                                 100));
+        apartment.assignActiveMap(patrolMap);
+        apartmentComplexRepository.saveAndFlush(apartment);
         Checkpoint destination =
                 checkpointRepository.saveAndFlush(
                         new Checkpoint(

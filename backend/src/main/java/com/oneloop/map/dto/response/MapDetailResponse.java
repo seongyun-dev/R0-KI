@@ -1,8 +1,10 @@
 package com.oneloop.map.dto.response;
 
+import com.oneloop.map.domain.MapStatus;
 import com.oneloop.map.domain.PatrolMap;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -21,6 +23,9 @@ public class MapDetailResponse {
     private Integer width;
     private Integer height;
     private Integer mapVersion;
+    private MapStatus status;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 
     public static MapDetailResponse from(PatrolMap patrolMap) {
         return MapDetailResponse.builder()
@@ -34,6 +39,9 @@ public class MapDetailResponse {
                 .width(patrolMap.getWidth())
                 .height(patrolMap.getHeight())
                 .mapVersion(patrolMap.getMapVersion())
+                .status(patrolMap.getStatus())
+                .createdAt(patrolMap.getCreatedAt())
+                .updatedAt(patrolMap.getUpdatedAt())
                 .build();
     }
 }

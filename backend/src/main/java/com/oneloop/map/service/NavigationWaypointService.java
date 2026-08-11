@@ -48,6 +48,7 @@ public class NavigationWaypointService {
     public WaypointSetResponse replaceAll(
             Long apartmentComplexId, Long mapId, WaypointBatchReplaceRequest request) {
         PatrolMap patrolMap = findMapForUpdate(apartmentComplexId, mapId);
+        navigationConfigurationGuard.assertActiveForEdit(patrolMap);
         validateRequestedMapVersion(patrolMap, request == null ? null : request.getMapVersion());
 
         List<WaypointReplaceItemRequest> ordered = validateRequest(patrolMap, request);

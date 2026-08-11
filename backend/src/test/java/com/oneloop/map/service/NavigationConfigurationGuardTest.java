@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.oneloop.global.exception.BusinessException;
 import com.oneloop.global.exception.ErrorCode;
+import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.patrol.domain.PatrolStatus;
 import com.oneloop.patrol.repository.PatrolRepository;
 import org.junit.jupiter.api.Test;
@@ -48,5 +49,31 @@ class NavigationConfigurationGuardTest {
                         exception ->
                                 assertThat(exception.getErrorCode())
                                         .isEqualTo(ErrorCode.MAP_CONFIGURATION_LOCKED));
+    }
+
+    @Test
+    void rejectsEditOnArchivedMap() {
+        PatrolMap archivedMap =
+                new PatrolMap(
+                        null,
+                        "archived",
+                        "/api/map/files/archived.png",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        archivedMap.archive();
+
+        assertThatThrownBy(
+                        () ->
+                                new NavigationConfigurationGuard(patrolRepository)
+                                        .assertActiveForEdit(archivedMap))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        exception ->
+                                assertThat(exception.getErrorCode())
+                                        .isEqualTo(ErrorCode.MAP_NOT_ACTIVE));
     }
 }

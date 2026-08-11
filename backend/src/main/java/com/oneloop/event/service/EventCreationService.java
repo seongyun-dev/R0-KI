@@ -25,10 +25,9 @@ import com.oneloop.global.exception.ErrorCode;
 import com.oneloop.global.file.FileStorageService;
 import com.oneloop.map.domain.Checkpoint;
 import com.oneloop.map.domain.CheckpointType;
-import com.oneloop.map.domain.PatrolMap;
 import com.oneloop.map.repository.CheckpointRepository;
-import com.oneloop.map.repository.PatrolMapRepository;
 import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.map.util.EventCheckpointResolver;
 import com.oneloop.notification.service.NotificationService;
 import com.oneloop.patrol.domain.Patrol;
 import com.oneloop.patrol.repository.PatrolRepository;
@@ -40,6 +39,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -62,9 +62,9 @@ public class EventCreationService {
     private final EventEvidenceRepository eventEvidenceRepository;
     private final PatrolRepository patrolRepository;
     private final RegisteredVehicleRepository registeredVehicleRepository;
-    private final PatrolMapRepository patrolMapRepository;
     private final CheckpointRepository checkpointRepository;
     private final CheckpointLocator checkpointLocator;
+    private final EventCheckpointResolver eventCheckpointResolver;
     private final FileStorageService fileStorageService;
     private final NotificationService notificationService;
     private final ApplicationEventPublisher eventPublisher;
@@ -145,8 +145,7 @@ public class EventCreationService {
                         .findFirstByRobotIdOrderByStartedAtDesc(robotId)
                         .orElseThrow(() -> new BusinessException(ErrorCode.PATROL_NOT_FOUND));
         PatrolRobot robot = patrol.getRobot();
-        List<Checkpoint> parkingCheckpoints =
-                findParkingCheckpoints(robot.getApartmentComplex().getId());
+        List<Checkpoint> parkingCheckpoints = findParkingCheckpoints(patrol);
 
         List<VehicleViolationResponse> violations =
                 request.getVehicles().stream()
@@ -231,13 +230,12 @@ public class EventCreationService {
         return offsetDateTime.atZoneSameInstant(SERVICE_ZONE).toLocalDateTime();
     }
 
-    // 단지의 순찰 지도에 속한 체크포인트 중 PARKING 타입만 가져온다. 지도가 없으면 빈 목록
-    private List<Checkpoint> findParkingCheckpoints(Long apartmentComplexId) {
-        Optional<PatrolMap> patrolMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId);
-        return patrolMap
-                .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
-                .orElseGet(List::of)
-                .stream()
+    // 해당 순찰이 시작할 때 확정한 지도에서 PARKING 구역만 가져온다.
+    private List<Checkpoint> findParkingCheckpoints(Patrol patrol) {
+        if (patrol.getMap() == null) {
+            return List.of();
+        }
+        return checkpointRepository.findAllByPatrolMapId(patrol.getMap().getId()).stream()
                 .filter(checkpoint -> checkpoint.getType() == CheckpointType.PARKING)
                 .toList();
     }
@@ -287,17 +285,17 @@ public class EventCreationService {
 
         PatrolRobot robot = event.getRobot();
         Long apartmentComplexId = robot.getApartmentComplex().getId();
-        Optional<PatrolMap> patrolMap =
-                patrolMapRepository.findByApartmentComplexId(apartmentComplexId);
-        List<Checkpoint> checkpoints =
-                patrolMap
-                        .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
-                        .orElseGet(List::of);
+        Map<Long, List<Checkpoint>> checkpointsByMap =
+                eventCheckpointResolver.loadCheckpointIndex(List.of(event));
         String location =
-                checkpointLocator
-                        .findContaining(checkpoints, event.getX(), event.getY())
+                eventCheckpointResolver
+                        .findContaining(event, checkpointsByMap)
                         .map(Checkpoint::getName)
                         .orElse(null);
+        Long mapId =
+                event.getPatrol() == null || event.getPatrol().getMap() == null
+                        ? null
+                        : event.getPatrol().getMap().getId();
 
         EmergencyEventSseResponse response =
                 EmergencyEventSseResponse.builder()
@@ -309,7 +307,7 @@ public class EventCreationService {
                         .robotName(robot.getName())
                         .riskLevel(event.getRiskLevel())
                         .processingStatus(event.getProcessingStatus())
-                        .mapId(patrolMap.map(PatrolMap::getId).orElse(null))
+                        .mapId(mapId)
                         .x(event.getX())
                         .y(event.getY())
                         .build();

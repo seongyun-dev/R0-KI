@@ -66,13 +66,14 @@ public class PatrolCommandStateService {
                         .orElseThrow(() -> new BusinessException(ErrorCode.ROBOT_NOT_FOUND));
 
         validateReadyForPatrol(robot);
-        validateNavigationRoute(apartmentComplexId);
+        PatrolMap activeMap = requireActiveMapForPatrol(apartmentComplexId);
         if (patrolRepository.existsByRobotIdAndStatusIn(robot.getId(), ACTIVE_PATROL_STATUSES)) {
             throw new BusinessException(ErrorCode.PATROL_ALREADY_IN_PROGRESS);
         }
 
         String commandId = UUID.randomUUID().toString();
-        Patrol patrol = patrolRepository.save(new Patrol(robot, LocalDateTime.now(), commandId));
+        Patrol patrol =
+                patrolRepository.save(new Patrol(robot, activeMap, LocalDateTime.now(), commandId));
         StartPatrolCommand command = StartPatrolCommand.of(commandId, patrol.getId());
         return new PreparedStart(
                 patrol.getId(),
@@ -197,13 +198,14 @@ public class PatrolCommandStateService {
         }
     }
 
-    private void validateNavigationRoute(Long apartmentComplexId) {
+    private PatrolMap requireActiveMapForPatrol(Long apartmentComplexId) {
         PatrolMap patrolMap =
                 patrolMapRepository
                         .findForUpdateByApartmentComplexId(apartmentComplexId)
                         .orElseThrow(
                                 () -> new BusinessException(ErrorCode.NAVIGATION_CONFIG_NOT_READY));
         navigationWaypointService.requireValidCurrentRoute(patrolMap);
+        return patrolMap;
     }
 
     private boolean hasArrived(NavigationWaypoint destination, BigDecimal x, BigDecimal y) {

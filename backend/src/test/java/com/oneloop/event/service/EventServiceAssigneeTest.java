@@ -14,13 +14,10 @@ import com.oneloop.event.repository.DetectedEventRepository;
 import com.oneloop.event.repository.EventEvidenceRepository;
 import com.oneloop.event.repository.EventProcessingHistoryRepository;
 import com.oneloop.global.response.PageResponse;
-import com.oneloop.map.repository.CheckpointRepository;
-import com.oneloop.map.repository.PatrolMapRepository;
-import com.oneloop.map.util.CheckpointLocator;
+import com.oneloop.map.util.EventCheckpointResolver;
 import com.oneloop.member.repository.MemberRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -36,9 +33,7 @@ class EventServiceAssigneeTest {
     @Mock private DetectedEventRepository detectedEventRepository;
     @Mock private EventProcessingHistoryRepository eventProcessingHistoryRepository;
     @Mock private EventEvidenceRepository eventEvidenceRepository;
-    @Mock private PatrolMapRepository patrolMapRepository;
-    @Mock private CheckpointRepository checkpointRepository;
-    @Mock private CheckpointLocator checkpointLocator;
+    @Mock private EventCheckpointResolver eventCheckpointResolver;
     @Mock private MemberRepository memberRepository;
     @Mock private EmergencyPatrolResumeService emergencyPatrolResumeService;
 
@@ -65,8 +60,6 @@ class EventServiceAssigneeTest {
                         isNull(),
                         eq(pageable)))
                 .thenReturn(new PageImpl<>(List.of(event), pageable, 1));
-        when(patrolMapRepository.findByApartmentComplexId(apartmentComplexId))
-                .thenReturn(Optional.empty());
         when(eventProcessingHistoryRepository.findAllByEventIdInOrderByChangedAtDesc(
                         List.of(event.getId())))
                 .thenReturn(List.of(history));
