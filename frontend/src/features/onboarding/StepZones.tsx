@@ -27,12 +27,15 @@ import {
   createIsometricProjection,
   invertViewTransform,
   isometricToMapPixel,
+  MAP_25D_PROJECTION_OPTIONS,
+  MAP_25D_WALL_HEIGHT_PX,
   mapPixelToIsometric,
   pointsAttribute,
   worldBoundsToIsometricPolygon,
   type IsometricPoint,
   type ViewTransform,
 } from './mapProjection25d'
+import { Map25DBase } from '../dashboard/Map25DBase'
 import { StepWaypoints } from './StepWaypoints'
 
 export type StepZonesProps = {
@@ -134,7 +137,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
   const [isSaving, setIsSaving] = useState(false)
   const savingRef = useRef(false)
   const isoProjection = useMemo(
-    () => map ? createIsometricProjection(map) : undefined,
+    () => map ? createIsometricProjection(map, MAP_25D_PROJECTION_OPTIONS) : undefined,
     [map],
   )
   // 겹침 등 경고 칩 (시안 .au-warn) — 잠시 떴다 사라진다
@@ -437,9 +440,6 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
         { x: 0, y: isoProjection.mapHeight },
       ].map((point) => mapPixelToIsometric(isoProjection, point))
     : []
-  const isoRasterTransform = isoProjection
-    ? `matrix(${isoProjection.tileX} ${isoProjection.tileY} ${isoProjection.tileX} ${-isoProjection.tileY} ${isoProjection.offsetX - isoProjection.mapHeight * isoProjection.tileX} ${isoProjection.offsetY + isoProjection.mapHeight * isoProjection.tileY})`
-    : undefined
 
   if (editorStage === 'waypoints' && map && mapImageUrl) {
     return (
@@ -629,17 +629,12 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                   onContextMenu={(event) => event.preventDefault()}
                 >
                   <g transform={`translate(${isoView.panX} ${isoView.panY}) scale(${isoView.zoom})`}>
-                    <polygon className="au-iso-floor" points={pointsAttribute(isoBasePoints)} />
-                    {mapImageUrl && (
-                      <image
-                        href={mapImageUrl}
-                        width={isoProjection.mapWidth}
-                        height={isoProjection.mapHeight}
-                        preserveAspectRatio="none"
-                        transform={isoRasterTransform}
-                        className="au-iso-map-image"
-                      />
-                    )}
+                    <Map25DBase
+                      metadata={map}
+                      projection={isoProjection}
+                      mapImageUrl={mapImageUrl}
+                      wallOffset={MAP_25D_WALL_HEIGHT_PX}
+                    />
                     <g className="au-iso-grid" aria-hidden>
                       {Array.from({ length: COLS + 1 }, (_, index) => {
                         const x = (index / COLS) * isoProjection.mapWidth
@@ -662,6 +657,7 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                         (sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }),
                         { x: 0, y: 0 },
                       )
+                      const labelWidth = Math.max(42, Math.min(128, zone.label.length * 7 + 18))
                       return (
                         <g
                           key={zone.id}
@@ -671,7 +667,10 @@ export function StepZones({ mapId, onPrev, onComplete }: StepZonesProps) {
                           onClick={() => openEdit(zone)}
                         >
                           <polygon points={pointsAttribute(points)} />
-                          <text x={center.x} y={center.y}>{zone.label}</text>
+                          <g className="au-iso-zone-label" transform={`translate(${center.x - labelWidth / 2} ${center.y - 23})`}>
+                            <rect width={labelWidth} height="20" rx="10" />
+                            <text x={labelWidth / 2} y="13">{zone.label}</text>
+                          </g>
                         </g>
                       )
                     })}
