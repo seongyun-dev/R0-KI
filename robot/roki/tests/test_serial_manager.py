@@ -67,8 +67,8 @@ class FakeOpeningSerial:
     def read(self, size: int = 1) -> bytes:
         return b""
 
-    def readline(self) -> bytes:
-        return b""
+    def readline(self) -> bytes:  # pragma: no cover - 연결 경로에서도 금지
+        raise AssertionError("connect must not wait in readline()")
 
     def close(self) -> None:
         self.is_open = False
