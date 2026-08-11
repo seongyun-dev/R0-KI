@@ -1213,7 +1213,21 @@ def create_integrated_application(
             outbox,
             state_store,
             vehicle_range_source=lidar_health_bridge,
-            camera_yaw_deg=float(os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0")),
+            camera_yaw_deg=float(
+                os.getenv(
+                    "AIOT_DETECTION_CAMERA_YAW_DEG",
+                    os.getenv("AIOT_VEHICLE_CAMERA_YAW_DEG", "0"),
+                )
+            ),
+            camera_horizontal_fov_deg=float(
+                os.getenv("AIOT_DETECTION_CAMERA_HORIZONTAL_FOV_DEG", "48")
+            ),
+            lidar_forward_center_angle_deg=float(
+                os.getenv(
+                    "AIOT_LIDAR_FORWARD_CENTER_ANGLE_DEG",
+                    os.getenv("AIOT_VEHICLE_LIDAR_CENTER_ANGLE_DEG", "0"),
+                )
+            ),
             emergency_stop_sink=(
                 emergency_stop if emergency_stop_enabled else None
             ),
