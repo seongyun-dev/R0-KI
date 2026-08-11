@@ -29,8 +29,14 @@ public class PatrolDetailResponse {
     @Schema(description = "총 순찰 시간(분)", example = "42", nullable = true)
     private Integer totalDurationMinutes;
 
+    @Schema(description = "순찰 시작 시점의 지도 ID", example = "12", nullable = true)
+    private Long mapId;
+
+    @Schema(description = "순찰 시작 시점의 지도 버전", example = "1", nullable = true)
+    private Integer mapVersion;
+
     @Schema(
-            description = "순찰 지도 URL",
+            description = "순찰 시작 시점 지도 URL (레거시 순찰은 null)",
             example = "https://example.com/maps/patrol-map.png",
             nullable = true)
     private String mapUrl;
@@ -63,6 +69,8 @@ public class PatrolDetailResponse {
                 .startedAt(patrol.getStartedAt())
                 .endedAt(patrol.getEndedAt())
                 .totalDurationMinutes(toMinutes(patrol.getTotalDuration()))
+                .mapId(patrol.getMap() == null ? null : patrol.getMap().getId())
+                .mapVersion(patrol.getMapVersion())
                 .mapUrl(mapUrl)
                 .route(route)
                 .battery(PatrolBatteryResponse.from(patrol))

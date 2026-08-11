@@ -97,14 +97,15 @@ public class PatrolService {
     public PatrolDetailResponse findDetail(Long apartmentComplexId, Long patrolId) {
         Patrol patrol =
                 patrolRepository
-                        .findByIdAndRobotApartmentComplexId(patrolId, apartmentComplexId)
+                        .findDetailByIdAndApartmentComplexId(patrolId, apartmentComplexId)
                         .orElseThrow(() -> new BusinessException(ErrorCode.PATROL_NOT_FOUND));
+
+        Optional<PatrolMap> snapshotMap = resolveSnapshotMap(patrol, apartmentComplexId);
 
         List<RoutePosition> routePositions =
                 routePositionRepository.findAllByPatrolIdOrderByRecordedAt(patrolId);
-        Optional<PatrolMap> patrolMap = patrolMapRepository.findByApartmentComplexId(apartmentComplexId);
         List<Checkpoint> checkpoints =
-                patrolMap
+                snapshotMap
                         .map(map -> checkpointRepository.findAllByPatrolMapId(map.getId()))
                         .orElseGet(List::of);
         List<PatrolRouteCheckpointResponse> route = findRoute(patrolId);
@@ -113,11 +114,19 @@ public class PatrolService {
 
         return PatrolDetailResponse.of(
                 patrol,
-                patrolMap.map(PatrolMap::getUrl).orElse(null),
+                snapshotMap.map(PatrolMap::getUrl).orElse(null),
                 route,
                 routePositions,
                 timeline,
                 aiSummary);
+    }
+
+    private Optional<PatrolMap> resolveSnapshotMap(Patrol patrol, Long apartmentComplexId) {
+        if (patrol.getMap() == null) {
+            return Optional.empty();
+        }
+        return patrolMapRepository.findByIdAndApartmentComplexId(
+                patrol.getMap().getId(), apartmentComplexId);
     }
 
     private List<PatrolRouteCheckpointResponse> findRoute(Long patrolId) {

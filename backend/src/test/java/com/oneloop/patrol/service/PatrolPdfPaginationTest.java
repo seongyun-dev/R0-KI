@@ -58,7 +58,7 @@ class PatrolPdfPaginationTest {
         byte[] png = dummyMap();
         lenient().when(mapFileStorage.loadByUrl(any())).thenReturn(new ByteArrayResource(png));
         lenient()
-                .when(patrolMapRepository.findByApartmentComplexId(complexId))
+                .when(patrolMapRepository.findByIdAndApartmentComplexId(55L, complexId))
                 .thenReturn(Optional.empty());
         lenient()
                 .when(patrolMapRenderer.render(any(), any(), any(), any(), any(), any()))
@@ -116,6 +116,8 @@ class PatrolPdfPaginationTest {
                 .startedAt(LocalDateTime.of(2026, 8, 5, 20, 40))
                 .endedAt(LocalDateTime.of(2026, 8, 5, 21, 58))
                 .totalDurationMinutes(78)
+                .mapId(55L)
+                .mapVersion(1)
                 .mapUrl("/api/v1/maps/files/sample.png")
                 .route(route)
                 .timeline(timeline)

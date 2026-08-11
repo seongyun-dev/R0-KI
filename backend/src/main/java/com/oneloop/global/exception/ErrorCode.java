@@ -31,6 +31,9 @@ public enum ErrorCode {
     NAVIGATION_CONFIG_NOT_READY(
             HttpStatus.CONFLICT, "MAP_006", "로봇이 사용할 수 있는 지도와 순찰 경로 설정이 준비되지 않았습니다."),
     MAP_CONFIGURATION_LOCKED(HttpStatus.CONFLICT, "MAP_007", "순찰 중에는 지도·구역·경로 설정을 변경할 수 없습니다."),
+    MAP_NOT_ACTIVE(HttpStatus.CONFLICT, "MAP_010", "사용 중인 지도만 구역·경로를 편집할 수 있습니다. 먼저 해당 지도를 활성화하세요."),
+    MAP_ACTIVE_CANNOT_DELETE(HttpStatus.CONFLICT, "MAP_008", "사용 중인 지도는 삭제할 수 없습니다. 다른 지도를 활성화한 뒤 삭제하세요."),
+    MAP_REFERENCED_BY_PATROL(HttpStatus.CONFLICT, "MAP_009", "순찰 기록이 참조 중인 지도는 삭제할 수 없습니다."),
     PATROL_NOT_FOUND(HttpStatus.NOT_FOUND, "PATROL_001", "존재하지 않는 순찰 기록입니다."),
     PATROL_ALREADY_IN_PROGRESS(HttpStatus.CONFLICT, "PATROL_002", "해당 로봇은 이미 순찰 중입니다."),
     PATROL_INVALID_STATE(HttpStatus.CONFLICT, "PATROL_003", "현재 상태에서는 순찰을 종료할 수 없습니다."),
