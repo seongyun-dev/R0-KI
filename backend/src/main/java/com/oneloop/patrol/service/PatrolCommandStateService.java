@@ -54,6 +54,7 @@ public class PatrolCommandStateService {
     private final PatrolMapRepository patrolMapRepository;
     private final NavigationWaypointService navigationWaypointService;
     private final DetectedEventRepository detectedEventRepository;
+    private final PatrolCheckpointVisitRecorder patrolCheckpointVisitRecorder;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PreparedStart prepareStart(Long apartmentComplexId, PatrolStartRequest request) {
@@ -118,7 +119,7 @@ public class PatrolCommandStateService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<PreparedAutoComplete> prepareAutoComplete(
-            Long robotId, BigDecimal x, BigDecimal y) {
+            Long robotId, BigDecimal x, BigDecimal y, LocalDateTime reportedAt) {
         Patrol patrol =
                 patrolRepository
                         .findFirstForUpdateByRobotIdOrderByStartedAtDesc(robotId)
@@ -139,19 +140,24 @@ public class PatrolCommandStateService {
         if (patrol.getStatus() != PatrolStatus.IN_PROGRESS) {
             return Optional.empty();
         }
-        if (detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
-                patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED)) {
-            log.info(
-                    "[MQTT] 미처리 응급 이벤트가 있어 도착지 자동 완료를 보류합니다. patrolId={}",
-                    patrol.getId());
-            return Optional.empty();
-        }
 
         PatrolMap patrolMap =
                 patrolMapRepository
                         .findByApartmentComplexId(patrol.getRobot().getApartmentComplex().getId())
                         .orElse(null);
         if (patrolMap == null) {
+            return Optional.empty();
+        }
+
+        // 같은 순찰 행 잠금 아래에서 방문 순서를 계산해 동시 pose의 sequence 충돌을 막는다.
+        // 자동 완료가 보류되거나 경로 설정이 잘못된 경우에도 실제 구역 방문은 남긴다.
+        patrolCheckpointVisitRecorder.recordEntry(patrol, patrolMap, x, y, reportedAt);
+
+        if (detectedEventRepository.existsByPatrolIdAndTypeAndProcessingStatusNot(
+                patrol.getId(), EventType.EMERGENCY, ProcessingStatus.COMPLETED)) {
+            log.info(
+                    "[MQTT] 미처리 응급 이벤트가 있어 도착지 자동 완료를 보류합니다. patrolId={}",
+                    patrol.getId());
             return Optional.empty();
         }
 

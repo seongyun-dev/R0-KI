@@ -12,6 +12,7 @@ import com.oneloop.patrol.dto.response.PatrolStopResponse;
 import com.oneloop.patrol.repository.PatrolRepository;
 import com.oneloop.robot.domain.PatrolRobot;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -79,9 +80,12 @@ public class PatrolCommandService {
     // pose 수신 때마다 RobotTelemetryService.updatePose()에서 호출된다.
     // 로봇의 진행중인 순찰이 있고 좌표가 도착지(DESTINATION) 체크포인트 안에 들어오면 STOP을 요청한다.
     // COMPLETED 확정과 AI 요약 요청은 실제 STOP 성공 ACK를 받은 뒤 처리한다.
-    public void autoCompleteIfArrived(PatrolRobot robot, BigDecimal x, BigDecimal y) {
+    public void autoCompleteIfArrived(
+            PatrolRobot robot, BigDecimal x, BigDecimal y, LocalDateTime reportedAt) {
         PatrolCommandStateService.PreparedAutoComplete prepared =
-                patrolCommandStateService.prepareAutoComplete(robot.getId(), x, y).orElse(null);
+                patrolCommandStateService
+                        .prepareAutoComplete(robot.getId(), x, y, reportedAt)
+                        .orElse(null);
         if (prepared == null) {
             return;
         }

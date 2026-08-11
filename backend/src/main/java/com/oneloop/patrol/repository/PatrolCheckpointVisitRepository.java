@@ -3,6 +3,7 @@ package com.oneloop.patrol.repository;
 import com.oneloop.patrol.domain.PatrolCheckpointVisit;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +12,8 @@ public interface PatrolCheckpointVisitRepository
         extends JpaRepository<PatrolCheckpointVisit, Long> {
 
     List<PatrolCheckpointVisit> findAllByPatrolIdOrderByVisitSequence(Long patrolId);
+
+    Optional<PatrolCheckpointVisit> findFirstByPatrolIdOrderByVisitSequenceDesc(Long patrolId);
 
     /**
      * 방문 + 체크포인트를 한 번에 가져온다.
