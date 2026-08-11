@@ -3,7 +3,6 @@ import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
-import { ROBOT_ACCENT_LANDING, animateRobotLife, buildRobot } from './robotModel'
 import { gridTexture, shadowTexture } from './sceneTextures'
 import { animateRoki, buildRokiCourier } from './rokiCourierModel'
 
