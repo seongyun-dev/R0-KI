@@ -652,24 +652,104 @@ class ModelCoverageTest(unittest.TestCase):
         "매핑 BT 에서 ClearEntireCostmap 제거 (BT 를 모델링하지 않는다)",
     )
 
-    def test_v026_differs_from_v022_only_in_unmodelled_ways(self):
+    def test_v026_modelled_differences_from_v022(self):
+        """7c9caee 부터 v0.2.6 은 모델이 **볼 수 있는** 차이를 갖는다.
+
+        8c7a466 시점에는 인플레이션과 yaw 가 v0.2.2 로 회귀해 모델이 보는 차이가
+        retry_delay 하나뿐이었고, 그래서 결과가 v0.2.2 와 소수점까지 같았다.
+        7c9caee 가 allow_unknown=false 와 국소 FREE 성장 재평가를 넣었으므로 이제는
+        측정 가능하다. 그 사실을 여기에 못 박아, 다음에 결과가 같아졌을 때
+        "원래 같은 것" 으로 넘기지 않게 한다.
+        """
         v022 = profiles_mod.PROFILE_V022
         v026 = profiles_mod.PROFILE_V026
-        # 모델이 보는 축에서 v0.2.6 과 v0.2.2 가 실제로 무엇이 다른지 열거한다.
+        prev = profiles_mod.PROFILE_V026_8C7A466
+
+        # 회귀된 두 축은 여전히 v0.2.2 와 같다.
         self.assertEqual(
             v022.inflation.inflation_radius_m, v026.inflation.inflation_radius_m
         )
         self.assertIs(v022.goal_yaw_rule, v026.goal_yaw_rule)
-        self.assertEqual(v022.planner, v026.planner)
         self.assertEqual(v022.frontier, v026.frontier)
-        # 모델이 보는 유일한 차이는 재시도 간격이다.
-        self.assertNotEqual(
-            v022.retry.retry_delay_sec, v026.retry.retry_delay_sec
+
+        # 7c9caee 가 만든 **측정 가능한** 차이 두 개.
+        self.assertTrue(v022.planner.allow_unknown)
+        self.assertFalse(
+            v026.planner.allow_unknown,
+            "MappingSafeGridBased 는 allow_unknown=false 여야 한다",
         )
-        self.assertEqual(v026.retry.retry_delay_sec, 5.0)
+        self.assertIs(
+            v026.retry.blacklist_mode, BlacklistMode.LOCAL_FREE_GROWTH
+        )
+        self.assertEqual(v026.retry.recheck_radius_m, 0.40)
+        self.assertEqual(v026.retry.recheck_min_free_cells, 12)
+
+        # allow_unknown 외의 플래너 파라미터는 동일해야 한다 -- 실제로도
+        # MappingGridBased 를 deepcopy 한 뒤 그 한 키만 덮어쓴다.
+        self.assertEqual(
+            replace(v026.planner, allow_unknown=True), v022.planner
+        )
+
+        # 8c7a466 프로필은 그 두 변경 이전 상태로 남아 있어야 한다 (격리 비교용).
+        self.assertTrue(prev.planner.allow_unknown)
+        self.assertIs(prev.retry.blacklist_mode, BlacklistMode.COORDINATE_COOLDOWN)
+
         # await_cancel 은 True 지만 retarget_while_active 가 False 라 읽히지 않는다.
         self.assertTrue(v026.await_cancel_before_new_goal)
         self.assertFalse(v026.retarget_while_active)
+
+    def test_local_free_growth_needs_growth_near_that_target(self):
+        """국소 재평가가 **그 목표 주변** 성장만 본다는 것을 고정한다.
+
+        내가 앞서 제안한 MAP_REVISION_SOFT 는 지도 어디가 바뀌어도 되돌렸다.
+        7c9caee 는 그보다 좁고, 그 좁음이 무한 재시도를 막는 장치다.
+        """
+        ground = synthetic.wide_room()
+        discovered = DiscoveredMap(ground.spec)
+        v026 = profiles_mod.PROFILE_V026
+        ledger = FailureLedger(v026, ground.spec.resolution)
+
+        target_x, target_y = ground.spec.cell_to_world(20, 15)
+        far_x, far_y = ground.spec.cell_to_world(34, 26)
+
+        for _ in range(v026.retry.max_attempts):
+            ledger.record(
+                target_x, target_y, "path_unavailable", 0.0, discovered.revision,
+                discovered,
+            )
+        self.assertTrue(ledger.is_blacklisted(target_x, target_y))
+
+        # 목표에서 먼 곳만 열어준다 -> 되살아나면 안 된다.
+        discovered.reveal(
+            ground.raycast(
+                Pose(far_x, far_y, 0.0),
+                LidarSpec(max_range_m=0.5, angle_increment_deg=2.0),
+            )
+        )
+        self.assertEqual(ledger.note_local_free_growth(discovered), 0)
+        self.assertTrue(
+            ledger.is_blacklisted(target_x, target_y),
+            "목표와 무관한 지도 변화로 배제가 풀렸다",
+        )
+
+        # 목표 주변을 열어준다 -> 되살아나야 한다.
+        discovered.reveal(
+            ground.raycast(
+                Pose(target_x, target_y, 0.0),
+                LidarSpec(max_range_m=1.0, angle_increment_deg=2.0),
+            )
+        )
+        self.assertGreaterEqual(ledger.note_local_free_growth(discovered), 1)
+        self.assertFalse(ledger.is_blacklisted(target_x, target_y))
+
+        # 같은 성장으로 두 번 되살아나지 않아야 한다 (기준선 갱신 확인).
+        for _ in range(v026.retry.max_attempts):
+            ledger.record(
+                target_x, target_y, "path_unavailable", 100.0,
+                discovered.revision, discovered,
+            )
+        self.assertTrue(ledger.is_blacklisted(target_x, target_y))
+        self.assertEqual(ledger.note_local_free_growth(discovered), 0)
 
     def test_progress_timeout_is_recorded_but_not_simulated(self):
         # 값은 프로필에 남아 있어야 한다 (provenance 완전성).

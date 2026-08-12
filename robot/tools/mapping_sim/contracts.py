@@ -78,12 +78,17 @@ class PlannerFlavor(Enum):
 
 
 class BlacklistMode(Enum):
-    """실패 후보를 배제하는 두 가지 방식. 비교 대상이다."""
+    """실패 후보를 배제하는 방식들. 비교 대상이다."""
 
-    # 현행: 좌표 상자 + 고정 쿨다운 + 시도횟수 소진 시 영구 배제.
+    # 좌표 상자 + 고정 쿨다운 + 시도횟수 소진 시 영구 배제 (v0.2.2 ~ v0.2.6 8c7a466).
     COORDINATE_COOLDOWN = "coordinate_cooldown"
-    # 후보: 지도 개정(map revision) 이 바뀌면 soft-block 을 재평가.
+    # 지도 개정(map revision) 이 바뀌면 soft-block 을 전부 재평가.
+    # 내가 제안했던 방식이고, 지도 어디가 바뀌어도 되돌린다는 점이 거칠다.
     MAP_REVISION_SOFT = "map_revision_soft"
+    # v0.2.6 (7c9caee): **그 목표 주변**의 FREE 셀이 일정 수 이상 늘었을 때만
+    # attempts 를 0 으로 되돌린다. 지도 다른 곳의 변화는 이력을 지우지 않는다.
+    # MAP_REVISION_SOFT 보다 국소적이라 무한 재시도로 흐를 위험이 작다.
+    LOCAL_FREE_GROWTH = "local_free_growth"
 
 
 class MergeMetric(Enum):
@@ -274,6 +279,9 @@ class RetryParams:
     retry_delay_sec: float = 15.0
     # explore.cpp 는 tolerance=5 셀을 체비셰프로 비교해 0.5x0.5 m 상자를 만든다.
     merge_radius_cells: int = 5
+    # LOCAL_FREE_GROWTH 용. explore.params.yaml 의 frontier_recheck_* 에 대응한다.
+    recheck_radius_m: float = 0.40
+    recheck_min_free_cells: int = 12
     merge_metric: MergeMetric = MergeMetric.CHEBYSHEV
     blacklist_mode: BlacklistMode = BlacklistMode.COORDINATE_COOLDOWN
     # planner_frequency 0.15 -> upstream 의 uint16_t 캐스트로 6666 ms 가 된다.
@@ -409,6 +417,9 @@ class FailureRecord:
     last_reason: str
     map_revision_at_failure: int
     reactivated_by_map_change: bool = False
+    # 실패 당시 목표 주변 recheck_radius_m 안의 FREE 셀 수. LOCAL_FREE_GROWTH 가
+    # 이 값 대비 증가분을 본다.
+    local_free_cells: int = 0
 
 
 @dataclass

@@ -130,10 +130,24 @@ class FailureLedger:
         return min(pending) if pending else None
 
     def record(
-        self, x: float, y: float, reason: str, now: float, map_revision: int
+        self,
+        x: float,
+        y: float,
+        reason: str,
+        now: float,
+        map_revision: int,
+        discovered: DiscoveredMap | None = None,
     ) -> FailureRecord:
         index = self._hit(x, y)
         retry_after = now + self._retry.retry_delay_sec
+        # 실패 시점의 주변 FREE 셀 수를 기준선으로 남긴다. LOCAL_FREE_GROWTH 가
+        # 이 값 대비 증가분을 보므로, 기준선을 갱신하지 않으면 한 번 자란 지도로
+        # 계속 되살아난다.
+        local_free = (
+            self.count_local_free_cells(x, y, discovered)
+            if discovered is not None
+            else 0
+        )
         if index is None:
             record = FailureRecord(
                 x=x,
@@ -142,6 +156,7 @@ class FailureLedger:
                 retry_after_sec=retry_after,
                 last_reason=reason,
                 map_revision_at_failure=map_revision,
+                local_free_cells=local_free,
             )
             self._records.append(record)
             return record
@@ -152,9 +167,65 @@ class FailureLedger:
             retry_after_sec=retry_after,
             last_reason=reason,
             map_revision_at_failure=map_revision,
+            local_free_cells=local_free,
         )
         self._records[index] = record
         return record
+
+    def count_local_free_cells(
+        self, x: float, y: float, discovered: DiscoveredMap
+    ) -> int:
+        """(x, y) 중심 recheck_radius_m 원 안의 FREE 셀 수.
+
+        explore.cpp 의 ``countLocalFreeCells`` 와 같다 -- 원형 마스크이고
+        ``getCost(...) == FREE_SPACE`` 를 센다. explore 는 costmap_topic 이 raw
+        ``map`` 이므로 인플레이션이 없는 발견 지도를 그대로 보는 것이 맞다.
+        """
+        spec = discovered.spec
+        radius_cells = int(math.ceil(self._retry.recheck_radius_m / spec.resolution))
+        if radius_cells <= 0:
+            return 0
+        center_col, center_row = spec.world_to_cell(x, y)
+        if not spec.contains(center_col, center_row):
+            return 0
+        free_cells = 0
+        for dy in range(-radius_cells, radius_cells + 1):
+            for dx in range(-radius_cells, radius_cells + 1):
+                if dx * dx + dy * dy > radius_cells * radius_cells:
+                    continue
+                col, row = center_col + dx, center_row + dy
+                if not spec.contains(col, row):
+                    continue
+                if discovered.state_at_cell(col, row) is CellState.FREE:
+                    free_cells += 1
+        return free_cells
+
+    def note_local_free_growth(self, discovered: DiscoveredMap) -> int:
+        """v0.2.6 (7c9caee): 목표 주변 FREE 가 자란 실패만 되살린다.
+
+        MAP_REVISION_SOFT 와 달리 지도 다른 곳의 변화로는 되돌아오지 않는다.
+        되살릴 때 기준선(local_free_cells)을 새 값으로 갱신하므로, 같은 성장으로
+        두 번 되살아나지 않는다 -- 그것이 무한 재시도를 막는 장치다.
+        """
+        if self._retry.blacklist_mode is not BlacklistMode.LOCAL_FREE_GROWTH:
+            return 0
+        reactivated = 0
+        for index, record in enumerate(self._records):
+            if record.attempts < self._retry.max_attempts:
+                continue
+            free_cells = self.count_local_free_cells(record.x, record.y, discovered)
+            if free_cells < record.local_free_cells + self._retry.recheck_min_free_cells:
+                continue
+            self._records[index] = replace(
+                record,
+                attempts=0,
+                retry_after_sec=0.0,
+                local_free_cells=free_cells,
+                reactivated_by_map_change=True,
+            )
+            reactivated += 1
+        self._reactivations += reactivated
+        return reactivated
 
     def note_map_revision(self, revision: int) -> int:
         """지도가 바뀌었다. soft 모드면 낡은 근거의 배제를 되돌린다."""
@@ -346,6 +417,7 @@ def run(
         changed = discovered.reveal(revealed)
         if changed:
             ledger.note_map_revision(discovered.revision)
+            ledger.note_local_free_growth(discovered)
         return changed
 
     discovered.mark_step(0)
@@ -431,7 +503,7 @@ def run(
             if timed_out:
                 metrics.plan_budget_exhausted += 1
             failure = ledger.record(
-                goal.x, goal.y, reason, sim_time, discovered.revision
+                goal.x, goal.y, reason, sim_time, discovered.revision, discovered
             )
             metrics.frontier_retries += 1
             if not profile.retry_with_alternate_approach:
