@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   cleanupDisplayOccupiedMask,
@@ -155,6 +156,38 @@ test('observed floor keeps occupied and free space but removes the unknown outer
     205, 205, 205, 255,
   ])
   assert.deepEqual([...rgbaToObservedMask(rgba, 5, 1)], [0, 1, 1, 0, 0])
+})
+
+test('2.5D layers render observed free and occupied cells but no unknown cells', () => {
+  const rgba = new Uint8ClampedArray([
+    205, 205, 205, 255,
+    254, 254, 254, 255,
+    0, 0, 0, 255,
+  ])
+  const observed = rgbaToObservedMask(rgba, 3, 1)
+  const occupied = rgbaToOccupiedMask(rgba, 3, 1)
+
+  assert.deepEqual([...observed], [0, 1, 1], 'unknown must render none; free and wall stay observed')
+  assert.deepEqual([...occupied], [0, 0, 1], 'only the raw occupied cell becomes a wall')
+})
+
+test('shared 2.5D base has no full-map frame or decorative base geometry', () => {
+  const source = readFileSync(new URL('../src/features/dashboard/Map25DBase.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(source, /dm25-map-image|dm25-inner-floor-shadow/)
+  assert.doesNotMatch(source, /<(?:polygon|rect|path)\b/)
+  assert.match(source, /observedMaskToImageData\(observed/)
+  assert.match(source, /occupiedMaskToImageData\(cleanedWall/)
+})
+
+test('Dashboard and Zone Editor keep the same 2.5D base renderer', () => {
+  const dashboard = readFileSync(new URL('../src/features/dashboard/ComplexMap25D.tsx', import.meta.url), 'utf8')
+  const zoneEditor = readFileSync(new URL('../src/features/onboarding/StepZones.tsx', import.meta.url), 'utf8')
+
+  assert.match(dashboard, /import \{ Map25DBase \} from '\.\/Map25DBase'/)
+  assert.match(zoneEditor, /import \{ Map25DBase \} from '\.\.\/dashboard\/Map25DBase'/)
+  assert.match(dashboard, /<Map25DBase\b/)
+  assert.match(zoneEditor, /<Map25DBase\b/)
 })
 
 test('observed floor conversion is display-only and does not mutate source pixels', () => {

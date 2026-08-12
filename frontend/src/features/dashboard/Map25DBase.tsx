@@ -138,12 +138,7 @@ export function Map25DBase({
       {mapImageUrl && wallImageUrl && (
         <>
           {displayMasks.floor && (
-            <>
-              <g transform={`translate(0 ${wallOffset * 0.18})`}>
-                <image className="dm25-inner-floor-shadow" href={displayMasks.floor} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} />
-              </g>
-              <image className="dm25-inner-floor" href={displayMasks.floor} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} />
-            </>
+            <image className="dm25-inner-floor" href={displayMasks.floor} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} />
           )}
           <g className="dm25-wall-side" transform={`translate(0 ${wallOffset})`} data-cleanup={displayMasks.wall ? 'ready' : 'fallback'}>
             <image href={wallImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} filter={`url(#${sideFilter})`} />
