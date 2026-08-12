@@ -29,7 +29,14 @@
     frontier_approach_distance: 0.25
     frontier_max_approaches: 3
     frontier_candidate_spacing: 0.20
+    # Permit the short UNKNOWN fringe at the robot and frontier. For a detached
+    # known island reached through a long UNKNOWN shortcut, follow only the
+    # known-space prefix, stop 10 cm early, observe again, and replan.
+    frontier_max_internal_unknown_run: 0.30
+    frontier_unknown_bridge_standoff: 0.10
     frontier_planner_id: MappingGridBased
+    frontier_controller_id: FollowPath
+    frontier_goal_checker_id: mapping_goal_checker
 
     # A transient planner/controller failure gets one delayed retry. Exhausted
     # candidates report exploration_stalled; they are never mislabeled as a
