@@ -32,7 +32,7 @@ export type IsometricScreenFit = {
 }
 
 export const MAP_25D_PROJECTION_OPTIONS = { tileX: 1, tileY: 0.58, margin: 8 } as const
-export const MAP_25D_WALL_HEIGHT_PX = 16
+export const MAP_25D_WALL_HEIGHT_PX = 12
 
 export function createIsometricProjection(
   map: MapCoordinateMetadata,
