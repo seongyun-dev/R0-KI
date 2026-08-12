@@ -69,7 +69,7 @@ test('display cleanup preserves real wall segments and map dimensions', () => {
   assert.deepEqual([...cleaned], [...source])
 })
 
-test('display cleanup fills only a fully surrounded one-pixel pinhole', () => {
+test('display cleanup preserves a fully surrounded one-pixel pinhole', () => {
   const occupied: Array<[number, number]> = []
   for (let y = 1; y <= 3; y += 1) {
     for (let x = 1; x <= 3; x += 1) {
@@ -77,7 +77,7 @@ test('display cleanup fills only a fully surrounded one-pixel pinhole', () => {
     }
   }
   const cleaned = cleanupDisplayOccupiedMask(mask(5, 5, occupied), 5, 5)
-  assert.equal(cleaned[2 * 5 + 2], 1)
+  assert.equal(cleaned[2 * 5 + 2], 0)
 })
 
 test('display cleanup does not close a corridor or doorway gap', () => {
@@ -86,7 +86,7 @@ test('display cleanup does not close a corridor or doorway gap', () => {
   assert.equal(cleaned[2 * 7 + 3], 0)
 })
 
-test('strong display cleanup preserves major components, bounds and representative opening', () => {
+test('display cleanup preserves raw topology, bounds and representative opening', () => {
   const width = 14
   const height = 9
   const occupied: Array<[number, number]> = []
@@ -97,15 +97,14 @@ test('strong display cleanup preserves major components, bounds and representati
   occupied.push([6, 1], [7, 1], [7, 2])
   const source = mask(width, height, occupied)
   const cleaned = cleanupDisplayOccupiedMask(source, width, height, {
-    maxNoiseComponentPx: 4,
-    spurPasses: 3,
-    axisStraighteningPasses: 2,
+    maxNoiseComponentPx: 2,
   })
-  assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height).slice(0, 2))
+  assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height))
+  assert.deepEqual([...cleaned], [...source])
   assert.equal(cleaned[4 * width + 7], 0, 'the opening between major components must remain open')
 })
 
-test('axis straightening removes an isolated bump and fills a one-pixel edge notch', () => {
+test('minimal cleanup preserves connected bumps and one-pixel edge notches', () => {
   const width = 9
   const occupied: Array<[number, number]> = []
   for (let y = 3; y <= 5; y += 1) {
@@ -114,11 +113,28 @@ test('axis straightening removes an isolated bump and fills a one-pixel edge not
     }
   }
   occupied.push([2, 2])
-  const cleaned = cleanupDisplayOccupiedMask(mask(width, 8, occupied), width, 8, {
-    axisStraighteningPasses: 1,
-  })
-  assert.equal(cleaned[2 * width + 2], 0)
-  assert.equal(cleaned[3 * width + 4], 1)
+  const source = mask(width, 8, occupied)
+  const cleaned = cleanupDisplayOccupiedMask(source, width, 8)
+  assert.deepEqual([...cleaned], [...source])
+  assert.equal(cleaned[2 * width + 2], 1)
+  assert.equal(cleaned[3 * width + 4], 0)
+})
+
+test('raw and 2.5D occupied topology differ only by tiny isolated specks', () => {
+  const width = 12
+  const height = 8
+  const occupied: Array<[number, number]> = []
+  for (let x = 1; x <= 10; x += 1) occupied.push([x, 2], [x, 6])
+  for (let y = 2; y <= 6; y += 1) occupied.push([1, y], [10, y])
+  occupied.splice(occupied.findIndex(([x, y]) => x === 5 && y === 2), 1)
+  occupied.push([6, 3], [11, 0])
+  const source = mask(width, height, occupied)
+  const cleaned = cleanupDisplayOccupiedMask(source, width, height)
+
+  assert.equal(cleaned[2 * width + 5], 0, 'raw wall gap must stay open')
+  assert.equal(cleaned[3 * width + 6], 1, 'connected jagged wall edge must stay occupied')
+  assert.equal(cleaned[11], 0, 'one-pixel isolated speck may be removed')
+  assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height))
 })
 
 test('map grayscale conversion keeps unknown and free pixels out of occupied geometry', () => {

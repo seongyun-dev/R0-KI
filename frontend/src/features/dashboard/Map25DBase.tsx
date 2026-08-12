@@ -42,16 +42,9 @@ function useDisplayMapMasks(source: string | undefined, width: number | undefine
         const raw = context.getImageData(0, 0, width, height)
         const occupied = rgbaToOccupiedMask(raw.data, width, height)
         const cleanedWall = cleanupDisplayOccupiedMask(occupied, width, height, {
-          maxNoiseComponentPx: 4,
-          spurPasses: 3,
-          axisStraighteningPasses: 2,
+          maxNoiseComponentPx: 2,
         })
         const observed = rgbaToObservedMask(raw.data, width, height)
-        const cleanedFloor = cleanupDisplayOccupiedMask(observed, width, height, {
-          maxNoiseComponentPx: 8,
-          fillSurroundedHoleNeighbors: 7,
-          spurPasses: 0,
-        })
 
         const publishMask = (
           imageData: ImageData,
@@ -72,7 +65,7 @@ function useDisplayMapMasks(source: string | undefined, width: number | undefine
         }
 
         publishMask(occupiedMaskToImageData(cleanedWall, width, height), 'wall')
-        publishMask(observedMaskToImageData(cleanedFloor, width, height), 'floor')
+        publishMask(observedMaskToImageData(observed, width, height), 'floor')
       } catch {
         // CORS-tainted or unsupported images safely fall back to the source map.
       }
@@ -111,7 +104,6 @@ export function Map25DBase({
   wallOffset: number
 }) {
   const filterPrefix = useId().replaceAll(':', '')
-  const floorMask = `${filterPrefix}-floor-mask`
   const sideFilter = `${filterPrefix}-wall-side`
   const topFilter = `${filterPrefix}-wall-top`
   const displayMasks = useDisplayMapMasks(mapImageUrl, metadata.width, metadata.height)
@@ -121,11 +113,6 @@ export function Map25DBase({
   return (
     <>
       <defs>
-        {displayMasks.floor && (
-          <mask id={floorMask} maskUnits="userSpaceOnUse">
-            <image href={displayMasks.floor} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} />
-          </mask>
-        )}
         {[sideFilter, topFilter].map((filterId) => (
           <filter id={filterId} key={filterId} colorInterpolationFilters="sRGB">
             <feColorMatrix
@@ -136,15 +123,11 @@ export function Map25DBase({
             <feComponentTransfer in="occupied" result="threshold">
               <feFuncA type="discrete" tableValues="0 0 1 1" />
             </feComponentTransfer>
-            <feMorphology in="threshold" operator="erode" radius="0.82" result="openedInset" />
-            <feMorphology in="openedInset" operator="dilate" radius="0.82" result="opened" />
-            <feMorphology in="opened" operator="dilate" radius="0.42" result="closedOutset" />
-            <feMorphology in="closedOutset" operator="erode" radius="0.42" result="cleaned" />
-            <feMorphology in="cleaned" operator="dilate" radius="0.28" result="outlineMask" />
+            <feMorphology in="threshold" operator="dilate" radius="0.28" result="outlineMask" />
             <feFlood floodColor="var(--dm25-wall-outline)" result="outlineColor" />
             <feComposite in="outlineColor" in2="outlineMask" operator="in" result="outline" />
             <feFlood floodColor={filterId === sideFilter ? 'var(--dm25-wall-side)' : 'var(--dm25-wall-top)'} result="wallColor" />
-            <feComposite in="wallColor" in2="cleaned" operator="in" result="wall" />
+            <feComposite in="wallColor" in2="threshold" operator="in" result="wall" />
             <feMerge>
               <feMergeNode in="outline" />
               <feMergeNode in="wall" />
@@ -162,7 +145,6 @@ export function Map25DBase({
               <image className="dm25-inner-floor" href={displayMasks.floor} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} />
             </>
           )}
-          <image className="dm25-map-image" href={mapImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} mask={displayMasks.floor ? `url(#${floorMask})` : undefined} />
           <g className="dm25-wall-side" transform={`translate(0 ${wallOffset})`} data-cleanup={displayMasks.wall ? 'ready' : 'fallback'}>
             <image href={wallImageUrl} width={metadata.width} height={metadata.height} preserveAspectRatio="none" transform={imageTransform} filter={`url(#${sideFilter})`} />
           </g>
