@@ -194,6 +194,19 @@ class RosConfigTest(unittest.TestCase):
                     circumscribed,
                 )
 
+    def test_open_field_uses_a_broad_shared_inflation_skirt(self):
+        """Both costmaps should steer paths away from walls consistently."""
+
+        config = self._render()
+
+        for scope in ("global_costmap", "local_costmap"):
+            with self.subTest(scope=scope):
+                inflation = config[scope][scope]["ros__parameters"][
+                    "inflation_layer"
+                ]
+                self.assertEqual(float(inflation["inflation_radius"]), 0.40)
+                self.assertEqual(float(inflation["cost_scaling_factor"]), 3.0)
+
     def _render(self):
         template = (
             Path(__file__).resolve().parents[1]
@@ -290,6 +303,24 @@ class RosConfigTest(unittest.TestCase):
                     "/planner_server"
                 ].items():
                     self.assertEqual(plugin[dotted.split(".", 1)[1]], expected)
+
+    def test_mapping_prefers_straight_forward_paths_without_changing_patrol(self):
+        config = self._render()
+        planner = config["planner_server"]["ros__parameters"]
+        mapping = planner["MappingGridBased"]
+        patrol = planner["PatrolGridBased"]
+
+        self.assertEqual(mapping["motion_model_for_search"], "REEDS_SHEPP")
+        self.assertEqual(mapping["reverse_penalty"], 3.0)
+        self.assertEqual(mapping["change_penalty"], 0.15)
+        self.assertEqual(mapping["non_straight_penalty"], 1.4)
+        self.assertEqual(mapping["cost_penalty"], 2.5)
+
+        self.assertEqual(patrol["motion_model_for_search"], "DUBIN")
+        self.assertEqual(patrol["reverse_penalty"], 2.1)
+        self.assertEqual(patrol["change_penalty"], 0.0)
+        self.assertEqual(patrol["non_straight_penalty"], 1.2)
+        self.assertEqual(patrol["cost_penalty"], 2.0)
 
     def test_preloads_both_goal_checkers_with_legacy_mapping_id(self):
         config = self._render()
