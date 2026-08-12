@@ -312,12 +312,12 @@ export default function EventDetail() {
               )}
 
               {/* 처리 상태 — 경비원이 직접 변경 */}
-              <div className={`actwrap event-detail-actions event-detail-page-actions${isCompleted ? ' completed' : ''}`}>
-                {isCompleted && (
-                  <div className="actk">
-                    처리 완료된 이벤트는 상태를 변경할 수 없습니다
-                  </div>
-                )}
+              <div className="actwrap">
+                <div className="actk">
+                  {isCompleted
+                    ? '처리 완료된 이벤트는 상태를 변경할 수 없습니다'
+                    : '처리 상태 — 경비원이 직접 변경 (기본: 탐지)'}
+                </div>
                 <div className="acts">
                   {PROC_STATUSES.map((s) => (
                     <button
