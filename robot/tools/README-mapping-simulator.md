@@ -80,14 +80,16 @@ cd robot && C:/workspace/iot/.codex_tmp/iot-ci-venv/Scripts/python.exe -m unitte
 ```
 
 인공 지도 8종(넓은 방 / 벽 분리 / 좁은 틈 / U자 / 좁은 복도 / 막다른 길 /
-바로 옆 프론티어 / 재발견 후 접근 가능)에 대해 39개 검사가 돕니다. 핵심 assertion:
+바로 옆 프론티어 / 재발견 후 접근 가능)에 대해 45개 검사가 돕니다. 핵심 assertion:
 
 - 점유 셀을 통과한 경로는 승인되지 않음
 - `allow_unknown=false` 에서 unknown 경로 거부
 - DUBIN 후진 0, REEDS_SHEPP 후진 식별
 - footprint 충돌 감지 (**자세 의존 충돌** 포함)
 - 프론티어가 남은 상태를 COMPLETE 로 표시하지 않음
-- map revision 변경 후 soft-block 재평가
+- 국소 FREE 성장 재평가가 **그 목표 주변** 성장만 본다
+- 재평가 상한(`frontier_max_reactivations`)이 실제로 동작한다
+- UNKNOWN 통과 판정이 샘플 개수가 아니라 **길이** 기준이다
 - 같은 입력·seed 에서 동일 결과 (**경계 있음**, 아래 참조)
 
 ### 결정론의 경계
@@ -123,20 +125,31 @@ robot/patches/...frontier-recovery.patch     목표 yaw 규칙 변경 + frontier
 인플레이션 반경. 프로필을 그 두 축으로 구성한 것은 임의 선택이 아니라 diff 가
 그렇게 나왔기 때문입니다.
 
-| 프로필 | 출처 | 목표 yaw | 인플레이션 | 재시도 |
-|---|---|---|---|---|
-| `v0.2.2` | `iot-v0.2.2` (341b920) | `atan2(approach − robot)` | 0.25 m | 15 s |
-| `v0.2.5` | `iot-v0.2.5` (af1478c) | `atan2(frontier_free − approach)` | 0.40 m | 15 s |
-| `v0.2.6` | `iot/feat/v0.2.6-mapping-stability` (8c7a466) **브랜치, 태그 아님** | `atan2(approach − robot)` (v0.2.2 로 회귀) | 0.25 m (회귀) | **5 s** |
-| `proposed-clearance` | **릴리스 아님 · 제안** | 기준선 2배 | 0.40 m | 15 s |
-| `upstream-retarget` | **태그 아님 · 대조군** | v0.2.5 와 동일 | 0.40 m | 15 s |
+| 프로필 | 출처 | 목표 yaw | 인플레이션 | allow_unknown | 재시도 |
+|---|---|---|---|---|---|
+| `v0.2.2` | `iot-v0.2.2` (341b920) | `atan2(approach − robot)` | 0.25 m | true | 15 s |
+| `v0.2.5` | `iot-v0.2.5` (af1478c) | `atan2(frontier_free − approach)` | 0.40 m | true | 15 s |
+| `v0.2.6` | 브랜치 `a3d7d62` **태그 아님** | `atan2(approach − robot)` | 0.25 m | true + **UNKNOWN 통과 ≤ 0.25 m** | 5 s |
+| `v0.2.6@7c9caee` | 브랜치 이전 커밋 | 동일 | 0.25 m | **false** | 5 s |
+| `v0.2.6@8c7a466` | 브랜치 이전 커밋 | 동일 | 0.25 m | true | 5 s |
+| `proposed-clearance` | **릴리스 아님 · 제안** | 기준선 2배 | 0.40 m | true | 15 s |
+| `upstream-retarget` | **태그 아님 · 대조군** | v0.2.5 와 동일 | 0.40 m | true | 15 s |
 
-`v0.2.6` 은 v0.2.5 의 두 실험(경계 접선 yaw, 인플레이션 0.40)을 **모두 철회**하고
-재시도 간격을 줄인 릴리스입니다. 여기에 더해 시뮬레이터로는 표현되지 않는 변경이
-있습니다: `progress_timeout` 을 활성 목표에 매기도록 수정, `canceling_goal_` 로 취소
-종결을 기다림, `ExploreStatusMonitor` 가 `/explore/status` 를 구독, 매핑 BT 에서
-`ClearEntireCostmap` 제거. **clearance 기반 접근점 선택과 `frontier_failures_` 초기화는
-v0.2.6 에 없습니다.**
+### v0.2.6 브랜치의 커밋별 상태
+
+`v0.2.6` 은 태그가 아니라 브랜치이고, 커밋마다 동작이 크게 달랐습니다. 그래서 세
+시점을 프로필로 보존해 무엇이 무엇을 되돌렸는지 격리해 볼 수 있게 했습니다.
+
+| 커밋 | 핵심 |
+|---|---|
+| `8c7a466` | 인플레이션·yaw 를 v0.2.2 로 회귀, `retry_delay` 5 s, `progress_timeout` 을 활성 목표에 매김, `canceling_goal_`, `/explore/status` 구독 |
+| `7c9caee` | `MappingSafeGridBased(allow_unknown=false)` 를 precheck·BT 양쪽에 적용 + 국소 FREE 성장 재평가 |
+| `a3d7d62` | `allow_unknown=false` **철회**. 대신 반환된 경로의 UNKNOWN 통과 **길이**를 재서 0.25 m 초과만 거부. 재평가 상한 1, 재평가 시 `attempts = max_attempts − 1`(전액 복구 아님) |
+
+시뮬레이터로 표현되지 **않는** v0.2.6 변경은 여전히 있습니다: `progress_timeout`
+(컨트롤러가 없어 발화하지 않음), `canceling_goal_` 취소 종결 대기, `/explore/status`
+구독과 stall 생애주기, BT 의 `ClearEntireCostmap` 제거. `ModelCoverageTest` 가 그
+목록을 들고 있습니다.
 
 `proposed-clearance` 는 제 진단에서 나온 제안이고 **실제 v0.2.6 브랜치에 없습니다.**
 이름에 버전을 붙이지 않은 이유가 그것입니다.
