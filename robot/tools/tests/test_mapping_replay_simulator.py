@@ -632,6 +632,67 @@ class SingleActiveGoalTest(unittest.TestCase):
         )
 
 
+class ModelCoverageTest(unittest.TestCase):
+    """시뮬레이터가 **평가할 수 없는** 변경을 명시적으로 못 박는다.
+
+    이 클래스가 있는 이유: v0.2.6 을 돌려 보면 v0.2.2 와 지표가 완전히 같게 나온다.
+    그것을 "v0.2.6 이 v0.2.2 와 동등하다" 는 증거로 읽으면 틀린다. 실제 v0.2.6 의
+    변경 대부분이 이 모델에 없어서 같게 나오는 것이다. 침묵을 증거로 오해하지
+    않도록 그 사실을 테스트로 고정한다.
+    """
+
+    #: 실제 v0.2.6 에 있으나 이 시뮬레이터가 모델링하지 않는 것들.
+    UNMODELLED = (
+        "progress_timeout 을 활성 목표에 매기는 수정 "
+        "(컨트롤러가 없어 progress_timeout 자체가 발화하지 않는다)",
+        "canceling_goal_ / replan_after_cancel_ 취소 종결 대기 "
+        "(retarget_while_active=False 라 취소 경로를 타지 않는다)",
+        "ExploreStatusMonitor 의 /explore/status 구독과 stall 생애주기 연결 "
+        "(오케스트레이션 레이어는 모델 밖이다)",
+        "매핑 BT 에서 ClearEntireCostmap 제거 (BT 를 모델링하지 않는다)",
+    )
+
+    def test_v026_differs_from_v022_only_in_unmodelled_ways(self):
+        v022 = profiles_mod.PROFILE_V022
+        v026 = profiles_mod.PROFILE_V026
+        # 모델이 보는 축에서 v0.2.6 과 v0.2.2 가 실제로 무엇이 다른지 열거한다.
+        self.assertEqual(
+            v022.inflation.inflation_radius_m, v026.inflation.inflation_radius_m
+        )
+        self.assertIs(v022.goal_yaw_rule, v026.goal_yaw_rule)
+        self.assertEqual(v022.planner, v026.planner)
+        self.assertEqual(v022.frontier, v026.frontier)
+        # 모델이 보는 유일한 차이는 재시도 간격이다.
+        self.assertNotEqual(
+            v022.retry.retry_delay_sec, v026.retry.retry_delay_sec
+        )
+        self.assertEqual(v026.retry.retry_delay_sec, 5.0)
+        # await_cancel 은 True 지만 retarget_while_active 가 False 라 읽히지 않는다.
+        self.assertTrue(v026.await_cancel_before_new_goal)
+        self.assertFalse(v026.retarget_while_active)
+
+    def test_progress_timeout_is_recorded_but_not_simulated(self):
+        # 값은 프로필에 남아 있어야 한다 (provenance 완전성).
+        self.assertEqual(profiles_mod.PROFILE_V026.retry.progress_timeout_sec, 90.0)
+        # 그러나 루프가 그 값을 읽지 않는다. 읽게 되면 이 테스트를 고치고
+        # UNMODELLED 목록에서 해당 항목을 지워야 한다.
+        source = (
+            Path(__file__).resolve().parent.parent
+            / "mapping_sim"
+            / "simulator.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn(
+            "progress_timeout_sec",
+            source,
+            "simulator 가 progress_timeout 을 쓰기 시작했다면 "
+            "ModelCoverageTest.UNMODELLED 를 갱신하라",
+        )
+
+    def test_unmodelled_list_is_not_silently_emptied(self):
+        # 목록이 비면 "전부 모델링됐다" 는 뜻이 되므로 근거 없이 비우지 못하게 한다.
+        self.assertGreaterEqual(len(self.UNMODELLED), 4)
+
+
 class DeterminismTest(unittest.TestCase):
     @staticmethod
     def _fingerprint(result):

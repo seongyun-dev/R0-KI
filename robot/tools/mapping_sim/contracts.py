@@ -278,6 +278,15 @@ class RetryParams:
     blacklist_mode: BlacklistMode = BlacklistMode.COORDINATE_COOLDOWN
     # planner_frequency 0.15 -> upstream 의 uint16_t 캐스트로 6666 ms 가 된다.
     planner_period_sec: float = 6.666
+    # 기록용이며 **이 시뮬레이터는 모델링하지 않는다.**
+    #
+    # 실제 explore 에서 progress_timeout 이 발화하는 조건은 "목표를 향해 주행 중인데
+    # 가까워지지 않는다" 이고, 그 상황은 컨트롤러가 실패할 때 생긴다. 이 시뮬레이터는
+    # 컨트롤러가 없어서 계획 경로를 그대로 따라가므로 목표는 항상 종결된다. 게다가
+    # 속도 0.09 m/s 에 90 s 면 8.1 m 인데 대부분의 경로가 그보다 짧다.
+    #
+    # 따라서 이 값을 profiles 에 적어 두는 것은 프로필의 provenance 를 완전하게
+    # 남기기 위한 것이고, 이 값에 의존하는 결론을 내면 안 된다.
     progress_timeout_sec: float = 90.0
 
 
