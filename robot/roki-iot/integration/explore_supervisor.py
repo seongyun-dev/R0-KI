@@ -34,6 +34,62 @@ def _environment_enabled(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+class ExploreStatusMonitor:
+    """Subscribe to explore_lite status without sharing another ROS context."""
+
+    def __init__(self, on_status: Any, *, topic: str = "/explore/status") -> None:
+        self._on_status = on_status
+        self._topic = topic
+        self._context: Any = None
+        self._executor: Any = None
+        self._node: Any = None
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        import rclpy
+        from explore_lite_msgs.msg import ExploreStatus
+        from rclpy.context import Context
+        from rclpy.executors import SingleThreadedExecutor
+
+        context = Context()
+        rclpy.init(args=None, context=context)
+        node = rclpy.create_node("aiot_explore_status_monitor", context=context)
+        executor = SingleThreadedExecutor(context=context)
+        executor.add_node(node)
+        node.create_subscription(ExploreStatus, self._topic, self._callback, 10)
+        self._context = context
+        self._executor = executor
+        self._node = node
+        self._thread = threading.Thread(
+            target=executor.spin,
+            name="ros-explore-status-monitor",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2.0)
+        if self._node is not None:
+            self._node.destroy_node()
+        if self._context is not None:
+            try:
+                self._context.shutdown()
+            except Exception:
+                pass
+        self._context = None
+        self._executor = None
+        self._node = None
+        self._thread = None
+
+    def _callback(self, message: Any) -> None:
+        status = str(getattr(message, "status", "")).strip()
+        if status:
+            self._on_status(status)
+
+
 class ExploreSupervisor:
     def __init__(
         self,
@@ -48,6 +104,7 @@ class ExploreSupervisor:
         run: Any = subprocess.run,
         monotonic: Any = time.monotonic,
         sleep: Any = time.sleep,
+        monitor_factory: Any = ExploreStatusMonitor,
     ) -> None:
         if not explore_setup_file or not params_file:
             raise ValueError("explore setup and params files are required")
@@ -63,10 +120,14 @@ class ExploreSupervisor:
         self._run = run
         self._monotonic = monotonic
         self._sleep = sleep
+        self._monitor_factory = monitor_factory
         self._lock = threading.Lock()
         self._stop_requested = threading.Event()
         self._process: Any | None = None
         self._starter: threading.Thread | None = None
+        self._monitor: Any | None = None
+        self._status: str | None = None
+        self._status_listener: Any | None = None
 
     @classmethod
     def from_environment(
@@ -91,6 +152,17 @@ class ExploreSupervisor:
         with self._lock:
             process = self._process
         return process is not None and process.poll() is None
+
+    @property
+    def status(self) -> str | None:
+        with self._lock:
+            return self._status
+
+    def set_status_listener(self, listener: Any) -> None:
+        if not callable(listener):
+            raise ValueError("explore status listener must be callable")
+        with self._lock:
+            self._status_listener = listener
 
     def start(self, mapping_session_id: int) -> None:
         """Spawn the explorer once Nav2 is active. Never blocks the caller."""
@@ -120,19 +192,25 @@ class ExploreSupervisor:
         with self._lock:
             process = self._process
             self._process = None
-        if process is None or process.poll() is not None:
-            return
-        self._signal_group(process, signal.SIGINT)
-        if self._wait(process, self._terminate_grace_sec):
-            print(f"[MAPPING] explore stopped reason={reason}")
-            return
-        self._signal_group(process, signal.SIGTERM)
-        if self._wait(process, 3.0):
-            print(f"[MAPPING] explore terminated reason={reason}")
-            return
-        self._signal_group(process, signal.SIGKILL)
-        process.wait()
-        print(f"[MAPPING] explore killed reason={reason}")
+            monitor = self._monitor
+            self._monitor = None
+        try:
+            if process is None or process.poll() is not None:
+                return
+            self._signal_group(process, signal.SIGINT)
+            if self._wait(process, self._terminate_grace_sec):
+                print(f"[MAPPING] explore stopped reason={reason}")
+                return
+            self._signal_group(process, signal.SIGTERM)
+            if self._wait(process, 3.0):
+                print(f"[MAPPING] explore terminated reason={reason}")
+                return
+            self._signal_group(process, signal.SIGKILL)
+            process.wait()
+            print(f"[MAPPING] explore killed reason={reason}")
+        finally:
+            if monitor is not None:
+                monitor.stop()
 
     def _start_worker(self, mapping_session_id: int) -> None:
         if not self._wait_for_bt_navigator_active():
@@ -142,8 +220,25 @@ class ExploreSupervisor:
                     "reason=NAV2_NOT_ACTIVE "
                     f"mappingSessionId={mapping_session_id}"
                 )
+                self._on_status("exploration_start_failed")
             return
         if self._stop_requested.is_set():
+            return
+        monitor = self._monitor_factory(self._on_status)
+        try:
+            monitor.start()
+        except Exception as exc:
+            try:
+                monitor.stop()
+            except Exception:
+                pass
+            print(
+                "[MAPPING] explore not started "
+                "reason=STATUS_MONITOR_FAILED "
+                f"mappingSessionId={mapping_session_id} "
+                f"type={type(exc).__name__}"
+            )
+            self._on_status("exploration_start_failed")
             return
         command = (
             "set -e; "
@@ -152,17 +247,45 @@ class ExploreSupervisor:
             f"--params-file {self._shell_quote(self._params_file)}"
         )
         with self._lock:
-            if self._stop_requested.is_set():
+            stopped_before_spawn = self._stop_requested.is_set()
+        if stopped_before_spawn:
+            monitor.stop()
+            return
+        try:
+            with self._lock:
+                if self._stop_requested.is_set():
+                    stopped_before_spawn = True
+                else:
+                    stopped_before_spawn = False
+                    self._monitor = monitor
+                    self._status = None
+                    self._process = self._popen(
+                        ["bash", "-c", command],
+                        start_new_session=True,
+                    )
+            if stopped_before_spawn:
+                monitor.stop()
                 return
-            self._process = self._popen(
-                ["bash", "-c", command],
-                start_new_session=True,
-            )
+        except Exception:
+            with self._lock:
+                self._monitor = None
+                self._process = None
+            monitor.stop()
+            self._on_status("exploration_start_failed")
+            raise
         print(
             "[MAPPING] explore started "
             f"mappingSessionId={mapping_session_id} "
             f"pid={self._process.pid}"
         )
+
+    def _on_status(self, status: str) -> None:
+        with self._lock:
+            self._status = status
+            listener = self._status_listener
+        print(f"[MAPPING] explore status={status}")
+        if listener is not None:
+            listener(status)
 
     def _wait_for_bt_navigator_active(self) -> bool:
         deadline = self._monotonic() + self._nav2_wait_timeout_sec
@@ -208,7 +331,7 @@ class ExploreSupervisor:
     def _signal_group(self, process: Any, signum: int) -> None:
         try:
             os.killpg(os.getpgid(process.pid), signum)
-        except (ProcessLookupError, PermissionError, OSError):
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
             try:
                 process.send_signal(signum)
             except Exception:
