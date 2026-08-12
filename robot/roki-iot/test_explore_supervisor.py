@@ -51,11 +51,25 @@ class FakeRun:
         return "active [3]"
 
 
+class FakeMonitor:
+    def __init__(self, on_status) -> None:
+        self.on_status = on_status
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 class ExploreSupervisorTest(unittest.TestCase):
     def build(self, run_outputs, process=None):
         self.process = process or FakeProcess()
         self.popen_calls = []
         self.clock = [0.0]
+        self.monitors = []
 
         def fake_popen(argv, **kwargs):
             self.popen_calls.append((argv, kwargs))
@@ -67,6 +81,11 @@ class ExploreSupervisorTest(unittest.TestCase):
         def fake_sleep(seconds):
             self.clock[0] += seconds
 
+        def monitor_factory(on_status):
+            monitor = FakeMonitor(on_status)
+            self.monitors.append(monitor)
+            return monitor
+
         return ExploreSupervisor(
             explore_setup_file="/opt/explore/setup.bash",
             params_file="/opt/robot/config/ros/explore.params.yaml",
@@ -77,6 +96,7 @@ class ExploreSupervisorTest(unittest.TestCase):
             run=FakeRun(run_outputs),
             monotonic=fake_monotonic,
             sleep=fake_sleep,
+            monitor_factory=monitor_factory,
         )
 
     def join_starter(self, supervisor):
@@ -119,10 +139,13 @@ class ExploreSupervisorTest(unittest.TestCase):
 
     def test_never_spawns_when_nav2_stays_inactive(self):
         supervisor = self.build(["inactive [2]"] * 100)
+        statuses = []
+        supervisor.set_status_listener(statuses.append)
         supervisor.start(7)
         self.join_starter(supervisor)
 
         self.assertEqual(self.popen_calls, [])
+        self.assertEqual(statuses, ["exploration_start_failed"])
 
     def test_stop_during_wait_cancels_the_spawn(self):
         gate = threading.Event()
@@ -155,6 +178,19 @@ class ExploreSupervisorTest(unittest.TestCase):
 
         self.assertIn(signal.SIGINT, self.process.signals)
         self.assertFalse(supervisor.running)
+        self.assertTrue(self.monitors[0].stopped)
+
+    def test_forwards_terminal_status_to_listener(self):
+        statuses = []
+        supervisor = self.build(["active [3]"])
+        supervisor.set_status_listener(statuses.append)
+        supervisor.start(7)
+        self.join_starter(supervisor)
+
+        self.monitors[0].on_status("exploration_stalled")
+
+        self.assertEqual(supervisor.status, "exploration_stalled")
+        self.assertEqual(statuses, ["exploration_stalled"])
 
     def test_stop_without_start_is_a_no_op(self):
         supervisor = self.build(["active [3]"])
