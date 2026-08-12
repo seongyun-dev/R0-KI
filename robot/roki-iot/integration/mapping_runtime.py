@@ -1,4 +1,4 @@
-"""Manual mapping lifecycle behind the existing Backend mapping session."""
+"""Mapping lifecycle behind the existing Backend mapping session."""
 
 from __future__ import annotations
 
@@ -47,15 +47,15 @@ FailureListener = Callable[[str], None]
 
 
 class ManualMappingRuntime:
-    """Coordinate gamepad motion, ROS map export and idempotent upload."""
+    """Coordinate autonomous/manual motion, ROS export and idempotent upload."""
 
     def __init__(
         self,
         *,
         runtime_service: Any,
         state_store: Any,
-        drive_controller: Any,
-        gamepad_input: Any,
+        drive_controller: Any | None = None,
+        gamepad_input: Any | None = None,
         map_exporter: Any,
         map_activator: Any,
         settings: MappingRuntimeSettings,
@@ -63,7 +63,12 @@ class ManualMappingRuntime:
         explore_supervisor: Any | None = None,
         localization: Any | None = None,
         slam_session: Any | None = None,
+        motion_authorization: Any | None = None,
     ) -> None:
+        if (drive_controller is None) != (gamepad_input is None):
+            raise ValueError(
+                "drive_controller and gamepad_input must be configured together"
+            )
         self._runtime_service = runtime_service
         self._state_store = state_store
         self._drive_controller = drive_controller
@@ -74,6 +79,7 @@ class ManualMappingRuntime:
         # 이 의존성을 모른 채로도 성립해야 한다.
         self._localization = localization
         self._slam_session = slam_session
+        self._motion_authorization = motion_authorization
         self._settings = settings
         self._client_factory = client_factory or self._build_client
         # The explorer's lifetime belongs to the mapping session, not to the
@@ -142,7 +148,7 @@ class ManualMappingRuntime:
             return self._last_error
 
     def motion_timeline_diagnostic_context(self) -> dict[str, object]:
-        """Aggregate read-only mapping/gamepad context for Runtime fault logs."""
+        """Aggregate read-only Mapping control context for Runtime fault logs."""
 
         with self._lock:
             context: dict[str, object] = {
@@ -150,6 +156,9 @@ class ManualMappingRuntime:
                 "mappingMotionActive": self._state
                 in {"STARTING", "MAPPING", "STOPPING"},
             }
+        context["mappingControlMode"] = (
+            "GAMEPAD" if self._gamepad_input is not None else "AUTONOMOUS"
+        )
         snapshot = getattr(self._gamepad_input, "diagnostic_snapshot", None)
         if not callable(snapshot):
             context.update(
@@ -345,12 +354,14 @@ class ManualMappingRuntime:
                 if not entered:
                     self._rollback_start(mode_reason)
                     return False, mode_reason
-        try:
-            self._drive_controller.activate(mapping_session_id)
-            self._gamepad_input.start()
-        except Exception as exc:
-            self._rollback_start(type(exc).__name__)
-            return False, "GAMEPAD_NOT_READY"
+        if self._gamepad_input is not None:
+            try:
+                assert self._drive_controller is not None
+                self._drive_controller.activate(mapping_session_id)
+                self._gamepad_input.start()
+            except Exception as exc:
+                self._rollback_start(type(exc).__name__)
+                return False, "GAMEPAD_NOT_READY"
 
         if not self._lifecycle_unchanged(lifecycle_marker):
             self._rollback_start("RUNTIME_LIFECYCLE_CHANGED")
@@ -366,10 +377,14 @@ class ManualMappingRuntime:
             self._rollback_start("MAPPING_START_INTERRUPTED")
             return False, "MAPPING_START_INTERRUPTED"
 
+        controller = (
+            str(self._gamepad_input.device_path)
+            if self._gamepad_input is not None
+            else "autonomous-nav2"
+        )
         print(
             "[MAPPING] started "
-            f"mappingSessionId={mapping_session_id} "
-            f"controller={self._gamepad_input.device_path}"
+            f"mappingSessionId={mapping_session_id} controller={controller}"
         )
         # Only after the session is committed: the motion gate is open now, so
         # the explorer's very first goal can actually drive the chassis
@@ -438,11 +453,7 @@ class ManualMappingRuntime:
         self._shutdown.set()
         if self._explore is not None:
             self._explore.stop("shutdown")
-        try:
-            self._gamepad_input.stop()
-        finally:
-            if self._drive_controller.active:
-                self._drive_controller.deactivate()
+        self._stop_mapping_motion("shutdown")
         worker = self._worker
         if worker is not None and worker is not threading.current_thread():
             worker.join(timeout=2.0)
@@ -450,7 +461,7 @@ class ManualMappingRuntime:
             self._reset_locked()
 
     def abort(self, reason: str) -> str | None:
-        """Fail-close active gamepad motion and require a new START_MAPPING."""
+        """Fail-close active Mapping motion and require a new START_MAPPING."""
 
         if not reason:
             raise ValueError("mapping abort reason is required")
@@ -490,8 +501,10 @@ class ManualMappingRuntime:
                     # Serialize recovery with abort(): once abort owns the
                     # lifecycle lock, no input source may be restarted after it
                     # has returned.
-                    self._drive_controller.activate(mapping_session_id)
-                    self._gamepad_input.start()
+                    if self._gamepad_input is not None:
+                        assert self._drive_controller is not None
+                        self._drive_controller.activate(mapping_session_id)
+                        self._gamepad_input.start()
                 except Exception as exc:
                     restart_exc = exc
                     self._last_error = type(exc).__name__
@@ -504,6 +517,8 @@ class ManualMappingRuntime:
                 )
                 self._notify_failure("MAPPING_RESTART_FAILED")
                 return
+            if self._explore is not None:
+                self._explore.start(mapping_session_id)
             return
 
         with self._lock:
@@ -636,37 +651,45 @@ class ManualMappingRuntime:
         return marker is None or (callable(current) and current() == marker)
 
     def _rollback_start(self, reason: str) -> None:
-        try:
-            self._gamepad_input.stop()
-        except Exception as exc:
-            print(f"[MAPPING] gamepad rollback failed type={type(exc).__name__}")
-        try:
-            if self._drive_controller.active:
-                self._drive_controller.deactivate()
-        except Exception as exc:
-            print(f"[MAPPING] drive rollback failed type={type(exc).__name__}")
+        self._stop_mapping_motion("rollback")
         with self._lock:
             self._reset_locked()
             self._last_error = reason
 
     def _stop_mapping_motion(self, operation: str) -> list[Exception]:
         failures: list[Exception] = []
-        try:
-            self._gamepad_input.stop()
-        except Exception as exc:
-            failures.append(exc)
-            print(
-                f"[MAPPING] gamepad {operation} failed "
-                f"type={type(exc).__name__}"
-            )
-        try:
-            self._drive_controller.deactivate()
-        except Exception as exc:
-            failures.append(exc)
-            print(
-                f"[MAPPING] drive {operation} failed "
-                f"type={type(exc).__name__}"
-            )
+        release = getattr(
+            self._motion_authorization,
+            "release_motion_authorization",
+            None,
+        )
+        if callable(release):
+            try:
+                release(f"MAPPING_{operation.upper()}")
+            except Exception as exc:
+                failures.append(exc)
+                print(
+                    f"[MAPPING] motion authorization {operation} failed "
+                    f"type={type(exc).__name__}"
+                )
+        if self._gamepad_input is not None:
+            try:
+                self._gamepad_input.stop()
+            except Exception as exc:
+                failures.append(exc)
+                print(
+                    f"[MAPPING] gamepad {operation} failed "
+                    f"type={type(exc).__name__}"
+                )
+        if self._drive_controller is not None:
+            try:
+                self._drive_controller.deactivate()
+            except Exception as exc:
+                failures.append(exc)
+                print(
+                    f"[MAPPING] drive {operation} failed "
+                    f"type={type(exc).__name__}"
+                )
         return failures
 
     def _notify_failure(self, reason: str) -> None:

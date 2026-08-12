@@ -5,11 +5,11 @@ no patrol: the goals come from the frontier explorer, not from a stored route. S
 the same converted command needs a different gate -- the mapping session itself.
 
 This deliberately reuses ``RobotRuntime.mission`` exactly as the patrol path does
-(``start_patrol`` for a bounded speed/steering target, ``stop_patrol`` for zero),
-so the firmware watchdog, the hardware safety controller and the LiDAR obstacle
-interlock all keep applying unchanged. The gamepad drive controller is not used
-here: it is a discrete W/A/S/D pulse interface and cannot express a continuous
-``cmd_vel``.
+for a bounded speed/steering target. A temporary Nav2 zero remains an authorised
+zero target; only the mapping lifecycle calls ``release_motion_authorization``.
+The firmware watchdog, hardware safety controller and LiDAR obstacle interlock
+therefore keep applying unchanged. The gamepad drive controller is not used here:
+it is a discrete W/A/S/D pulse interface and cannot express continuous ``cmd_vel``.
 """
 
 from __future__ import annotations
@@ -53,6 +53,13 @@ class MappingMotionSink:
 
         return self._authorised()
 
+    def release_motion_authorization(self, reason: str) -> None:
+        """Revoke the Mapping-owned mission target on an actual lifecycle stop."""
+
+        if not reason:
+            raise ValueError("mapping motion release reason is required")
+        self._stop(reason)
+
     def _authorised(self) -> bool:
         mapping_runtime = self._mapping_runtime_getter()
         if mapping_runtime is None:
@@ -93,19 +100,18 @@ class MappingMotionSink:
             return
         speed = int(getattr(command, "speed_pwm", 0))
         if speed == 0:
-            reason = getattr(command, "stop_reason", None)
-
-            if reason == "IN_PLACE_ROTATION_REJECTED":
-                self._runtime.mission.start_patrol(
-                    speed=0,
-                    steering_deg=int(command.steering_deg),
-                )
-                with self._lock:
-                    self._driving = False
-                    self._stopped = False
-                return
-
-            self._stop(reason or "MAPPING_NAV2_STOP")
+            # Nav2 publishes zero while a goal succeeds/cancels, a frontier is
+            # replaced, or a transient planner/obstacle hold is active. That is
+            # a motor target, not a Mapping lifecycle transition. Keeping the
+            # mission active lets a later frontier resume without bypassing any
+            # safety check in RobotRuntime.
+            self._runtime.mission.start_patrol(
+                speed=0,
+                steering_deg=int(command.steering_deg),
+            )
+            with self._lock:
+                self._driving = False
+                self._stopped = False
             return
         self._runtime.mission.start_patrol(
             speed=speed,
