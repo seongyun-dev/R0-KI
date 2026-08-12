@@ -223,7 +223,13 @@ class FailureLedger:
                 continue
             self._records[index] = replace(
                 record,
-                attempts=0,
+                # a3d7d62: attempts = max_attempts - 1 이다. **0 이 아니다.**
+                # 원문 주석: "A changed local map earns one fresh proof attempt,
+                # not a full retry budget. This keeps STALLED bounded even while
+                # the map grows elsewhere."
+                # 0 으로 되돌리면 재평가마다 예산이 전액 복구되어 stall 도달이
+                # 훨씬 늦어진다 -- 내가 앞서 지적한 그 문제다.
+                attempts=max(0, self._retry.max_attempts - 1),
                 retry_after_sec=0.0,
                 local_free_cells=free_cells,
                 reactivations=record.reactivations + 1,
