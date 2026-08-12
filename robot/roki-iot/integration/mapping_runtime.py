@@ -100,6 +100,14 @@ class ManualMappingRuntime:
         self._completed = threading.Event()
         self._last_error: str | None = None
         self._failure_listener: FailureListener | None = None
+        if self._explore is not None:
+            set_status_listener = getattr(
+                self._explore,
+                "set_status_listener",
+                None,
+            )
+            if callable(set_status_listener):
+                set_status_listener(self._on_explore_status)
 
     @property
     def active(self) -> bool:
@@ -190,6 +198,29 @@ class ManualMappingRuntime:
             raise ValueError("mapping failure listener must be callable")
         with self._lock:
             self._failure_listener = listener
+
+    def _on_explore_status(self, status: str) -> None:
+        """Log explorer outcomes without changing the Backend-owned lifecycle."""
+
+        if status not in {
+            "exploration_complete",
+            "exploration_stalled",
+            "exploration_start_failed",
+        }:
+            return
+        with self._lock:
+            state = self._state
+            mapping_session_id = self._mapping_session_id
+        event = {
+            "exploration_complete": "EXPLORATION_COMPLETE",
+            "exploration_stalled": "EXPLORATION_STALLED",
+            "exploration_start_failed": "NAVIGATION_FAILED",
+        }[status]
+        print(
+            f"[MAPPING_DIAGNOSTIC] event={event} "
+            f"mappingSessionId={mapping_session_id} state={state} "
+            "lifecycleAction=NONE awaiting=STOP_MAPPING"
+        )
 
     def readiness(self) -> tuple[bool, str]:
         runtime_check = getattr(self._runtime_service, "mapping_readiness", None)
@@ -408,6 +439,11 @@ class ManualMappingRuntime:
             mapping_session_id = self._mapping_session_id
             command_id = self._command_id
         assert mapping_session_id is not None and command_id is not None
+
+        print(
+            "[MAPPING_DIAGNOSTIC] event=EXTERNAL_STOP_MAPPING "
+            f"mappingSessionId={mapping_session_id} lifecycleAction=SAVE_UPLOAD"
+        )
 
         # STOPPING revokes the motion gate immediately. Silence the goal source
         # as well so Nav2 does not keep producing commands while the map saves.
