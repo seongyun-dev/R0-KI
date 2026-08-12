@@ -32,6 +32,7 @@ from .contracts import (
     MergeMetric,
     PlannedPath,
     PlannerFlavor,
+    PlannerParams,
     Pose,
     Profile,
     RobotSpec,
@@ -213,6 +214,10 @@ class FailureLedger:
         for index, record in enumerate(self._records):
             if record.attempts < self._retry.max_attempts:
                 continue
+            # a3d7d62: 되살릴 수 있는 횟수에 상한을 둔다. 없으면 반경 안 셀 수
+            # (약 201)/12 = 약 16회까지 되살아나 stall 신호가 늦어진다.
+            if record.reactivations >= self._retry.max_reactivations:
+                continue
             free_cells = self.count_local_free_cells(record.x, record.y, discovered)
             if free_cells < record.local_free_cells + self._retry.recheck_min_free_cells:
                 continue
@@ -221,6 +226,7 @@ class FailureLedger:
                 attempts=0,
                 retry_after_sec=0.0,
                 local_free_cells=free_cells,
+                reactivations=record.reactivations + 1,
                 reactivated_by_map_change=True,
             )
             reactivated += 1
@@ -264,6 +270,45 @@ class FailureLedger:
 
     def snapshot(self) -> list[FailureRecord]:
         return list(self._records)
+
+
+def unknown_path_length_m(path: PlannedPath) -> float:
+    """경로가 UNKNOWN 칸을 통과하는 누적 길이.
+
+    explore.cpp 의 ``pathCrossesUnsafeUnknown`` 과 같은 방식이다 -- 경로를
+    해상도 절반 간격으로 샘플하고, UNKNOWN 칸에 놓인 샘플이 대표하는 구간
+    길이를 더한다. 우리 플래너는 이미 그 간격으로 샘플을 만들어 두므로 샘플 간
+    거리를 그대로 쓴다.
+
+    구간 길이를 쓰는 것이 중요하다. 샘플 **개수**로 세면 해상도나 프리미티브
+    길이가 바뀔 때 같은 경로가 다르게 판정된다.
+    """
+    total = 0.0
+    previous = None
+    for sample in path.samples:
+        if previous is not None and sample.cell_state is CellState.UNKNOWN:
+            total += math.hypot(
+                sample.pose.x - previous.x, sample.pose.y - previous.y
+            )
+        previous = sample.pose
+    return total
+
+
+def path_crosses_unsafe_unknown(
+    path: PlannedPath, params: PlannerParams
+) -> bool:
+    """a3d7d62: 점유 칸을 지나거나 UNKNOWN 통과가 허용치를 넘으면 거부.
+
+    실제 구현은 점유 칸을 만나면 즉시 거부하므로 여기서도 같이 본다. 우리
+    플래너는 애초에 점유 칸을 지나는 경로를 만들지 않지만, 판정을 한곳에 모아
+    두면 나중에 플래너를 바꿔도 이 계약이 유지된다.
+    """
+    if path.occupied_cells > 0:
+        return True
+    limit = params.max_unknown_path_length_m
+    if limit is None:
+        return False
+    return unknown_path_length_m(path) > limit
 
 
 def validate_start_pose(
@@ -492,6 +537,17 @@ def run(
             path = planner.plan(
                 discovered, pose, goal, profile.planner, profile.inflation, robot
             )
+            # a3d7d62: 경로가 나와도 UNKNOWN 통과가 허용치를 넘으면 거부한다.
+            # 플래너는 allow_unknown 으로 탐사적으로 두고, 실행 가능한 경로인지는
+            # 오버레이가 따로 판정하는 구조다.
+            if path is not None and path_crosses_unsafe_unknown(
+                path, profile.planner
+            ):
+                metrics.plan_rejected_unknown += 1
+                unknown_reject = True
+                path = None
+            else:
+                unknown_reject = False
             if path is not None:
                 break
             metrics.plan_failures += 1
@@ -499,8 +555,13 @@ def run(
             # 후자는 시뮬레이터의 한계이고 실물 Nav2(C++)라면 성공했을 수 있으므로,
             # 뭉개면 프로필 비교가 조용히 오염된다.
             timed_out = bool(getattr(planner, "last_timeout", False))
-            reason = "planner_budget_exhausted" if timed_out else "path_unavailable"
-            if timed_out:
+            if unknown_reject:
+                reason = "path_crosses_unknown"
+            elif timed_out:
+                reason = "planner_budget_exhausted"
+            else:
+                reason = "path_unavailable"
+            if timed_out and not unknown_reject:
                 metrics.plan_budget_exhausted += 1
             failure = ledger.record(
                 goal.x, goal.y, reason, sim_time, discovered.revision, discovered
@@ -527,11 +588,21 @@ def run(
             verdict=(
                 CandidateVerdict.SELECTED
                 if path is not None
-                else CandidateVerdict.PATH_UNAVAILABLE
+                else (
+                    CandidateVerdict.PATH_CROSSES_UNKNOWN
+                    if unknown_reject
+                    else CandidateVerdict.PATH_UNAVAILABLE
+                )
             ),
             approach=(goal.x, goal.y),
             goal_yaw=goal.yaw,
-            reject_detail="" if path is not None else "사전검사 실패",
+            reject_detail=(
+                ""
+                if path is not None
+                else (
+                    "UNKNOWN 통과 초과" if unknown_reject else "사전검사 실패"
+                )
+            ),
         )
         record.candidates = candidates
 
@@ -620,6 +691,7 @@ def run(
     metrics.discovered_free_cells = discovered.free_cell_count()
     metrics.net_displacement_m = math.hypot(pose.x - start.x, pose.y - start.y)
     metrics.permanently_excluded = ledger.permanently_excluded()
+    metrics.failures_reactivated = ledger.reactivations
     if metrics.total_travel_m > 0.0:
         metrics.reverse_ratio = metrics.reverse_distance_m / metrics.total_travel_m
     if math.isinf(metrics.min_wall_clearance_m):

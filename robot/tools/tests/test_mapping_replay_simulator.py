@@ -43,7 +43,9 @@ from tools.mapping_sim.simulator import (
     FailureLedger,
     SimSettings,
     StartPoseError,
+    path_crosses_unsafe_unknown as sim_crosses_unknown,
     run,
+    unknown_path_length_m as sim_unknown_length,
     validate_start_pose,
 )
 from tools.mapping_sim.worldmodel import DiscoveredMap, GroundTruth
@@ -672,31 +674,122 @@ class ModelCoverageTest(unittest.TestCase):
         self.assertIs(v022.goal_yaw_rule, v026.goal_yaw_rule)
         self.assertEqual(v022.frontier, v026.frontier)
 
-        # 7c9caee 가 만든 **측정 가능한** 차이 두 개.
+        # a3d7d62 가 allow_unknown=false 를 **철회**했다. 플래너는 탐사적으로
+        # 두고, UNKNOWN 통과는 경로 길이로 제한한다.
         self.assertTrue(v022.planner.allow_unknown)
-        self.assertFalse(
+        self.assertTrue(
             v026.planner.allow_unknown,
-            "MappingSafeGridBased 는 allow_unknown=false 여야 한다",
+            "a3d7d62 는 allow_unknown 을 true 로 되돌렸다",
+        )
+        self.assertEqual(v026.planner.max_unknown_path_length_m, 0.25)
+        self.assertIsNone(
+            v022.planner.max_unknown_path_length_m,
+            "a3d7d62 이전 프로필은 UNKNOWN 길이 검사를 하지 않는다",
         )
         self.assertIs(
             v026.retry.blacklist_mode, BlacklistMode.LOCAL_FREE_GROWTH
         )
         self.assertEqual(v026.retry.recheck_radius_m, 0.40)
         self.assertEqual(v026.retry.recheck_min_free_cells, 12)
+        self.assertEqual(v026.retry.max_reactivations, 1)
 
-        # allow_unknown 외의 플래너 파라미터는 동일해야 한다 -- 실제로도
-        # MappingGridBased 를 deepcopy 한 뒤 그 한 키만 덮어쓴다.
+        # UNKNOWN 길이 제한 외의 플래너 파라미터는 v0.2.2 와 동일해야 한다 --
+        # a3d7d62 는 planner_plugins 에서 MappingSafeGridBased 를 지우고
+        # MappingGridBased 로 되돌렸을 뿐이다.
         self.assertEqual(
-            replace(v026.planner, allow_unknown=True), v022.planner
+            replace(v026.planner, max_unknown_path_length_m=None), v022.planner
         )
 
-        # 8c7a466 프로필은 그 두 변경 이전 상태로 남아 있어야 한다 (격리 비교용).
+        # 이전 커밋 프로필들이 격리 비교용으로 남아 있어야 한다.
         self.assertTrue(prev.planner.allow_unknown)
         self.assertIs(prev.retry.blacklist_mode, BlacklistMode.COORDINATE_COOLDOWN)
+        seven = profiles_mod.PROFILE_V026_7C9CAEE
+        self.assertFalse(
+            seven.planner.allow_unknown,
+            "7c9caee 프로필은 allow_unknown=false 상태로 보존돼야 한다",
+        )
 
         # await_cancel 은 True 지만 retarget_while_active 가 False 라 읽히지 않는다.
         self.assertTrue(v026.await_cancel_before_new_goal)
         self.assertFalse(v026.retarget_while_active)
+
+    def test_unknown_path_length_uses_distance_not_sample_count(self):
+        """a3d7d62 의 판정이 샘플 **개수**가 아니라 **길이** 기준임을 고정한다.
+
+        개수로 세면 해상도나 프리미티브 길이가 바뀔 때 같은 경로가 다르게
+        판정된다. explore.cpp 도 represented_distance 를 누적한다.
+        """
+        ground = synthetic.wide_room()
+        discovered = DiscoveredMap(ground.spec)
+        start = Pose(*ground.spec.cell_to_world(6, 15), 0.0)
+        # 좁게만 관측해 목표 주변을 UNKNOWN 으로 남긴다.
+        discovered.reveal(
+            ground.raycast(
+                start, LidarSpec(max_range_m=0.45, angle_increment_deg=2.0)
+            )
+        )
+        goal = Pose(*ground.spec.cell_to_world(24, 15), 0.0)
+        planner = ApproximateAckermannPlanner()
+        permissive = replace(
+            V025.planner, allow_unknown=True, max_unknown_path_length_m=None
+        )
+        path = planner.plan(
+            discovered, start, goal, permissive, V025.inflation, ROBOT
+        )
+        if path is None:
+            self.skipTest("이 배치에서 경로가 나오지 않았다")
+
+        length = sim_unknown_length(path)
+        self.assertGreater(length, 0.0, "UNKNOWN 을 지나지 않는 경로가 나왔다")
+
+        # 길이가 허용치를 넘으면 거부, 넉넉하면 통과해야 한다.
+        strict = replace(permissive, max_unknown_path_length_m=length * 0.5)
+        loose = replace(permissive, max_unknown_path_length_m=length * 2.0)
+        self.assertTrue(sim_crosses_unknown(path, strict))
+        self.assertFalse(sim_crosses_unknown(path, loose))
+        # 검사를 끈 프로필은 언제나 통과한다.
+        self.assertFalse(sim_crosses_unknown(path, permissive))
+
+    def test_reactivation_cap_bounds_stall_delay(self):
+        """a3d7d62 의 frontier_max_reactivations 가 실제로 상한을 만드는지.
+
+        상한이 없으면 반경 안 셀 수(약 201)/12 = 약 16회까지 되살아나
+        exploration_stalled 도달이 그만큼 늦어진다.
+        """
+        ground = synthetic.wide_room()
+        v026 = profiles_mod.PROFILE_V026
+        self.assertEqual(v026.retry.max_reactivations, 1)
+
+        for cap, expected in ((1, 1), (0, 0)):
+            with self.subTest(cap=cap):
+                profile = replace(
+                    v026, retry=replace(v026.retry, max_reactivations=cap)
+                )
+                discovered = DiscoveredMap(ground.spec)
+                ledger = FailureLedger(profile, ground.spec.resolution)
+                tx, ty = ground.spec.cell_to_world(20, 15)
+                total = 0
+                for step in range(6):
+                    for _ in range(profile.retry.max_attempts):
+                        ledger.record(
+                            tx, ty, "path_unavailable", step * 100.0,
+                            discovered.revision, discovered,
+                        )
+                    # 매번 목표 주변을 더 넓게 열어 성장 조건을 만족시킨다.
+                    discovered.reveal(
+                        ground.raycast(
+                            Pose(tx, ty, 0.0),
+                            LidarSpec(
+                                max_range_m=0.3 + 0.25 * step,
+                                angle_increment_deg=2.0,
+                            ),
+                        )
+                    )
+                    total += ledger.note_local_free_growth(discovered)
+                self.assertEqual(
+                    total, expected,
+                    f"상한 {cap} 인데 {total}회 되살아났다",
+                )
 
     def test_local_free_growth_needs_growth_near_that_target(self):
         """국소 재평가가 **그 목표 주변** 성장만 본다는 것을 고정한다.

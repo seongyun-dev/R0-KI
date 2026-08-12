@@ -107,6 +107,8 @@ class CandidateVerdict(Enum):
     TOO_SMALL = "too_small"                  # min_frontier_size 미달
     NO_APPROACH_CELL = "no_approach_cell"    # 접근점을 만들 수 없음
     PATH_UNAVAILABLE = "path_unavailable"    # 사전검사 실패
+    # a3d7d62: 반환된 경로가 UNKNOWN 을 허용치보다 길게 통과한다
+    PATH_CROSSES_UNKNOWN = "path_crosses_unknown"
     GOAL_IN_COLLISION = "goal_in_collision"  # 목표 자세에서 footprint 충돌
     NOT_EVALUATED = "not_evaluated"          # 더 좋은 후보가 먼저 뽑혀 평가 안 함
 
@@ -269,6 +271,12 @@ class PlannerParams:
     non_straight_penalty: float = 1.2
     cost_penalty: float = 2.0
     retrospective_penalty: float = 0.025
+    # a3d7d62: 플래너는 allow_unknown 으로 UNKNOWN 을 지날 수 있지만, explore
+    # 오버레이가 **반환된 경로**의 UNKNOWN 통과 길이를 재서 이 값을 넘으면 거부한다.
+    # 프론티어 자세는 필연적으로 차체 일부가 미지 칸 옆에 놓이므로 약간은 허용해야
+    # 하고(그렇지 않으면 모든 목표가 막힌다), 긴 미지 지름길은 막아야 한다.
+    # None 이면 검사하지 않는다 (a3d7d62 이전 프로필).
+    max_unknown_path_length_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -282,6 +290,10 @@ class RetryParams:
     # LOCAL_FREE_GROWTH 용. explore.params.yaml 의 frontier_recheck_* 에 대응한다.
     recheck_radius_m: float = 0.40
     recheck_min_free_cells: int = 12
+    # a3d7d62: 목표 하나가 되살아날 수 있는 최대 횟수. 0 이면 재평가 없음.
+    # 이 상한이 없으면 반경 안 셀 수(약 201)/12 = 약 16회까지 되살아나 stall
+    # 신호 도달이 지연된다.
+    max_reactivations: int = 1
     merge_metric: MergeMetric = MergeMetric.CHEBYSHEV
     blacklist_mode: BlacklistMode = BlacklistMode.COORDINATE_COOLDOWN
     # planner_frequency 0.15 -> upstream 의 uint16_t 캐스트로 6666 ms 가 된다.
@@ -420,6 +432,8 @@ class FailureRecord:
     # 실패 당시 목표 주변 recheck_radius_m 안의 FREE 셀 수. LOCAL_FREE_GROWTH 가
     # 이 값 대비 증가분을 본다.
     local_free_cells: int = 0
+    # 이 레코드가 되살아난 횟수. max_reactivations 와 비교한다.
+    reactivations: int = 0
 
 
 @dataclass
@@ -471,6 +485,10 @@ class RunMetrics:
     # 아니라 시뮬레이터의 한계다. 0 이 아니면 그 실행의 계획 실패 수치를
     # 그대로 믿으면 안 된다.
     plan_budget_exhausted: int = 0
+    # 경로는 나왔으나 UNKNOWN 통과가 허용치를 넘어 거부된 횟수 (a3d7d62).
+    plan_rejected_unknown: int = 0
+    # 국소 FREE 성장으로 되살아난 실패 레코드 수.
+    failures_reactivated: int = 0
     planner_flavor: str = PlannerFlavor.APPROXIMATE.value
 
 

@@ -155,32 +155,66 @@ PROFILE_V026 = Profile(
     name="v0.2.6",
     provenance=ProfileProvenance(
         tag="iot/feat/v0.2.6-mapping-stability (브랜치, 태그 아님)",
-        commit="7c9caee",
+        commit="a3d7d62",
         sources=(_EXPLORE_SOURCE, _ROSCFG_SOURCE, _TEMPLATE_SOURCE, _PATCH_SOURCE,
                  "robot/config/ros/nav2_mapping_replan.xml",
                  "robot/roki-iot/integration/explore_supervisor.py"),
         notes=(
-            "[8c7a466] 인플레이션 0.40 -> 0.25 회귀 (MEASURED_INFLATION_RADIUS_M)",
-            "[8c7a466] 목표 yaw 가 v0.2.2 방식으로 회귀: atan2(target - pose)",
-            "[8c7a466] frontier_free 제거, frontier_retry_delay 15.0 -> 5.0",
+            "[8c7a466] 인플레이션 0.40 -> 0.25 회귀, 목표 yaw v0.2.2 방식 회귀",
+            "[8c7a466] frontier_retry_delay 15.0 -> 5.0",
             "[8c7a466] progress_timeout 을 활성 목표에 매김 / canceling_goal_ 도입",
             "[8c7a466] ExploreStatusMonitor 가 /explore/status 를 구독",
-            "[7c9caee] **새 플래너 MappingSafeGridBased (allow_unknown=false)** 를 "
-            "프론티어 precheck 과 NavigateToPose BT 양쪽에 적용",
-            "[7c9caee] 프론티어 재평가: 목표 주변 0.40 m 안 FREE 셀이 12개 이상 "
-            "늘면 attempts 를 0 으로 되돌린다 (countLocalFreeCells)",
+            "[7c9caee] 프론티어 재평가: 목표 주변 0.40 m 안 FREE 가 12셀 이상 늘면 "
+            "attempts 를 0 으로 되돌린다",
+            "[a3d7d62] MappingSafeGridBased(allow_unknown=false) **철회**. "
+            "플래너는 MappingGridBased(allow_unknown=true)로 되돌리고, 대신 "
+            "오버레이가 반환된 경로의 UNKNOWN 통과 길이를 재서 "
+            "frontier_max_unknown_path_length(0.25 m) 초과만 거부한다",
+            "[a3d7d62] frontier_max_reactivations: 1 -- 재평가 횟수 상한",
             "clearance/footprint 기반 접근점 선택은 여전히 없다",
         ),
     ),
     frontier=_shared_frontier(),
-    # MappingSafeGridBased = MappingGridBased 사본에 allow_unknown=False.
-    # 나머지 파라미터는 동일하다 (deepcopy 후 한 키만 덮어쓴다).
+    # allow_unknown 은 true 로 되돌아갔다. UNKNOWN 통과는 경로 **길이**로 제한한다.
+    planner=_mapping_planner(max_unknown_path_length_m=0.25),
+    retry=_shared_retry(
+        retry_delay_sec=5.0,
+        blacklist_mode=BlacklistMode.LOCAL_FREE_GROWTH,
+        recheck_radius_m=0.40,
+        recheck_min_free_cells=12,
+        max_reactivations=1,
+    ),
+    inflation=InflationSpec(inflation_radius_m=0.25, cost_scaling_factor=3.0),
+    goal_yaw_rule=GoalYawRule.BEARING_FROM_ROBOT,
+    single_active_goal=True,
+    retarget_while_active=False,
+    await_cancel_before_new_goal=True,
+    retry_with_alternate_approach=False,
+)
+
+
+# 7c9caee 시점. allow_unknown=false 였고 재평가 상한이 없었다. a3d7d62 가 무엇을
+# 되돌렸는지 격리해서 보려고 남겨둔다.
+PROFILE_V026_7C9CAEE = Profile(
+    name="v0.2.6@7c9caee",
+    provenance=ProfileProvenance(
+        tag="iot/feat/v0.2.6-mapping-stability (이전 커밋)",
+        commit="7c9caee",
+        sources=(_EXPLORE_SOURCE, _ROSCFG_SOURCE, _PATCH_SOURCE),
+        notes=(
+            "MappingSafeGridBased: allow_unknown=false (a3d7d62 가 철회함)",
+            "재평가 상한 없음",
+            "시뮬레이터 실측: 지도 5장 전부 목표 전송 0건, 이동 0.00 m",
+        ),
+    ),
+    frontier=_shared_frontier(),
     planner=_mapping_planner(allow_unknown=False),
     retry=_shared_retry(
         retry_delay_sec=5.0,
         blacklist_mode=BlacklistMode.LOCAL_FREE_GROWTH,
         recheck_radius_m=0.40,
         recheck_min_free_cells=12,
+        max_reactivations=999,
     ),
     inflation=InflationSpec(inflation_radius_m=0.25, cost_scaling_factor=3.0),
     goal_yaw_rule=GoalYawRule.BEARING_FROM_ROBOT,
@@ -294,6 +328,7 @@ BUILTIN_PROFILES: dict[str, Profile] = {
     PROFILE_V022.name: PROFILE_V022,
     PROFILE_V025.name: PROFILE_V025,
     PROFILE_V026.name: PROFILE_V026,
+    PROFILE_V026_7C9CAEE.name: PROFILE_V026_7C9CAEE,
     PROFILE_V026_8C7A466.name: PROFILE_V026_8C7A466,
     PROFILE_PROPOSED_CLEARANCE.name: PROFILE_PROPOSED_CLEARANCE,
     PROFILE_UPSTREAM_RETARGET.name: PROFILE_UPSTREAM_RETARGET,
