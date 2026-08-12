@@ -34,7 +34,9 @@ from tools.mapping_sim.contracts import (
     MergeMetric,
     MotionModel,
     PlannerFlavor,
+    PlannedPath,
     Pose,
+    PathSample,
     RobotSpec,
     TerminationState,
     polygon_overlaps_cell,
@@ -56,6 +58,7 @@ V025 = profiles_mod.PROFILE_V025
 V022 = profiles_mod.PROFILE_V022
 V026 = profiles_mod.PROFILE_PROPOSED_CLEARANCE   # 제안(가설). 실제 v0.2.6 아님
 V026_REAL = profiles_mod.PROFILE_V026
+V026_8C7A466 = profiles_mod.PROFILE_V026_8C7A466
 V026_VIEWPOINTS = profiles_mod.PROFILE_V026_VIEWPOINTS
 
 
@@ -396,7 +399,16 @@ class FrontierTest(unittest.TestCase):
             "viewpoint 후보가 UNKNOWN hard gate를 되살리면 안 됩니다",
         )
         self.assertEqual(V026_VIEWPOINTS.retry.retry_delay_sec, 5.0)
-        self.assertEqual(V026_VIEWPOINTS.retry.max_reactivations, 1)
+        self.assertEqual(
+            V026_VIEWPOINTS.retry,
+            V026_8C7A466.retry,
+            "viewpoints 실험이 실패 회계 축까지 함께 바꾸면 안 된다",
+        )
+        self.assertIs(
+            V026_VIEWPOINTS.goal_yaw_rule,
+            V026_8C7A466.goal_yaw_rule,
+            "viewpoints 실험이 철회된 v0.2.5 yaw 규칙을 되살리면 안 된다",
+        )
         self.assertFalse(V026_VIEWPOINTS.retry_with_alternate_approach)
 
     def test_viewpoint_long_baseline_receives_a_distinct_heading_reference(self):
@@ -451,6 +463,71 @@ class FrontierTest(unittest.TestCase):
         for (x, y), yaw, _ in options:
             expected = math.atan2(y - pose.y, x - pose.x)
             self.assertAlmostEqual(yaw, expected, places=9)
+
+    def test_selected_viewpoint_records_its_own_clearance(self):
+        class RejectFirstPlanner:
+            flavor = PlannerFlavor.APPROXIMATE
+
+            def __init__(self):
+                self.calls = 0
+
+            def plan(self, discovered, start, goal, params, inflation, robot):
+                self.calls += 1
+                if self.calls == 1:
+                    return None
+                return PlannedPath(
+                    flavor=PlannerFlavor.APPROXIMATE,
+                    samples=(
+                        PathSample(
+                            pose=start,
+                            reverse=False,
+                            cell_state=CellState.FREE,
+                            inflation_cost=0,
+                        ),
+                        PathSample(
+                            pose=goal,
+                            reverse=False,
+                            cell_state=CellState.FREE,
+                            inflation_cost=0,
+                        ),
+                    ),
+                    length_m=math.hypot(goal.x - start.x, goal.y - start.y),
+                    reverse_length_m=0.0,
+                    direction_changes=0,
+                    traversal_cost=0.0,
+                    free_cells=2,
+                    unknown_cells=0,
+                    occupied_cells=0,
+                    planning_time_sec=0.0,
+                    iterations=1,
+                )
+
+        ground = synthetic.wide_room()
+        start = Pose(*ground.spec.cell_to_world(20, 15), 0.0)
+        result = run(
+            V026_VIEWPOINTS,
+            ground,
+            start,
+            _fast_settings(max_steps=1),
+            backend=RejectFirstPlanner(),
+        )
+        selected = next(
+            candidate
+            for step in result.steps
+            for candidate in step.candidates
+            if candidate.verdict is CandidateVerdict.SELECTED
+        )
+        selected_option = next(
+            option
+            for option in selected.approach_options
+            if option[0] == selected.approach
+        )
+        self.assertAlmostEqual(
+            selected.approach_clearance_m,
+            selected_option[2],
+            places=9,
+            msg="대체 접근점을 선택한 뒤 첫 접근점 clearance가 남았다",
+        )
 
     def test_cost_uses_documented_formula(self):
         ground = synthetic.wide_room()

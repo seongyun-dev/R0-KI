@@ -554,7 +554,7 @@ def run(
         option_index = 0
         plan_started = time.monotonic()
         while True:
-            (option_x, option_y), option_yaw, _ = options[option_index]
+            (option_x, option_y), option_yaw, option_clearance = options[option_index]
             goal = Pose(option_x, option_y, option_yaw)
             attempted.append((goal.x, goal.y))
             path = planner.plan(
@@ -629,6 +629,7 @@ def run(
             ),
             approach=(goal.x, goal.y),
             goal_yaw=goal.yaw,
+            approach_clearance_m=option_clearance,
             reject_detail=(
                 ""
                 if path is not None
