@@ -282,7 +282,14 @@ export function EventDetailModal({
   const onProcClick = (
     next: ProcessingStatus,
   ) => {
-    if (isCompleted) return
+    if (isCompleted) {
+      if (next === '처리완료') {
+        setMemoInput(memo ?? '')
+        setMemoModalOpen(true)
+      }
+      return
+    }
+
     if (next === proc) return
 
     if (next === '처리완료') {
@@ -699,7 +706,8 @@ export function EventDetailModal({
                             }
                             disabled={
                               updateStatus.isPending ||
-                              isCompleted
+                              (isCompleted &&
+                                status !== '처리완료')
                             }
                             onClick={() =>
                               onProcClick(
