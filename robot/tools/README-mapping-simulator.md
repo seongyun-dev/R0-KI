@@ -88,7 +88,21 @@ cd robot && C:/workspace/iot/.codex_tmp/iot-ci-venv/Scripts/python.exe -m unitte
 - footprint 충돌 감지 (**자세 의존 충돌** 포함)
 - 프론티어가 남은 상태를 COMPLETE 로 표시하지 않음
 - map revision 변경 후 soft-block 재평가
-- 같은 입력·seed 에서 동일 결과
+- 같은 입력·seed 에서 동일 결과 (**경계 있음**, 아래 참조)
+
+### 결정론의 경계
+
+판정·지표·궤적·후보 목록은 완전히 재현됩니다. **벽시계 필드
+(`planning_time_sec`, `compute_time_sec`)는 재현되지 않으며 그래야 정상입니다** —
+그 값이 결정에 쓰이면 호스트 속도가 결과를 바꾸므로, 시뮬레이터는 iteration 을
+예산으로 쓰고 벽시계는 기록만 합니다. 따라서 `trace.jsonl` 을 바이트로 비교하면
+그 필드에서만 차이가 납니다. 실측 확인: 같은 지도·같은 시작점 2회 실행에서 30줄 중
+차이 4건, 전부 `planning_time_sec`.
+
+참고로 근사 플래너의 `planning_time_sec` 은 한 계획에서 10 s 를 넘기도 합니다
+(Nav2 의 `max_planning_time` 3.5 는 C++ 기준 값입니다). 그래서 이 값을 실패 판정에
+쓰지 않습니다. 예산을 소진해 실패한 경우는 `plan_budget_exhausted` 로 따로 셉니다 —
+0 이 아니면 그 실행의 계획 실패 수치를 그대로 믿으면 안 됩니다.
 
 ---
 

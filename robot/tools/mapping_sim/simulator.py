@@ -423,8 +423,15 @@ def run(
             if path is not None:
                 break
             metrics.plan_failures += 1
+            # "경로가 없다" 와 "파이썬 backend 가 예산을 소진했다" 를 구분해 기록한다.
+            # 후자는 시뮬레이터의 한계이고 실물 Nav2(C++)라면 성공했을 수 있으므로,
+            # 뭉개면 프로필 비교가 조용히 오염된다.
+            timed_out = bool(getattr(planner, "last_timeout", False))
+            reason = "planner_budget_exhausted" if timed_out else "path_unavailable"
+            if timed_out:
+                metrics.plan_budget_exhausted += 1
             failure = ledger.record(
-                goal.x, goal.y, "path_unavailable", sim_time, discovered.revision
+                goal.x, goal.y, reason, sim_time, discovered.revision
             )
             metrics.frontier_retries += 1
             if not profile.retry_with_alternate_approach:

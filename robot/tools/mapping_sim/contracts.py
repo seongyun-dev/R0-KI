@@ -447,6 +447,10 @@ class RunMetrics:
     permanently_excluded: int = 0
     compute_time_sec: float = 0.0
     steps: int = 0
+    # 근사 플래너가 예산을 소진해 실패한 횟수. 이건 실물 Nav2(C++)의 실패가
+    # 아니라 시뮬레이터의 한계다. 0 이 아니면 그 실행의 계획 실패 수치를
+    # 그대로 믿으면 안 된다.
+    plan_budget_exhausted: int = 0
     planner_flavor: str = PlannerFlavor.APPROXIMATE.value
 
 

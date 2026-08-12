@@ -674,6 +674,67 @@ class DeterminismTest(unittest.TestCase):
         second = run(V025, ground, start, settings)
         self.assertEqual(self._fingerprint(first), self._fingerprint(second))
 
+    def test_only_wall_clock_fields_are_nondeterministic(self):
+        """결정론의 경계를 명시한다.
+
+        판정·지표·궤적은 완전히 재현된다. 벽시계 측정값(``planning_time_sec``,
+        ``compute_time_sec``)은 재현되지 않으며 그래야 정상이다 -- 그 값이
+        결정에 쓰이면 호스트 속도가 결과를 바꾸므로, 시뮬레이터는 iteration 을
+        예산으로 쓰고 벽시계는 기록만 한다.
+
+        이 테스트가 있는 이유: trace.jsonl 을 바이트로 비교하면 실패하는데, 그
+        원인이 벽시계 필드 하나뿐임을 고정해 두지 않으면 나중에 진짜 비결정성이
+        섞여도 "원래 다르던 것" 으로 넘어가게 된다.
+        """
+        WALL_CLOCK_FIELDS = {"planning_time_sec", "compute_time_sec"}
+
+        ground = synthetic.wide_room()
+        start = Pose(*ground.spec.cell_to_world(20, 15), 0.0)
+        settings = _fast_settings(max_steps=10)
+        first = run(V025, ground, start, settings)
+        second = run(V025, ground, start, settings)
+
+        def strip(result):
+            payload = []
+            for step in result.steps:
+                path = step.path
+                payload.append(
+                    (
+                        step.step,
+                        step.map_revision,
+                        (step.pose.x, step.pose.y, step.pose.yaw),
+                        step.selected_id,
+                        step.note,
+                        None
+                        if path is None
+                        else (
+                            path.length_m,
+                            path.reverse_length_m,
+                            path.direction_changes,
+                            path.traversal_cost,
+                            path.iterations,
+                            len(path.samples),
+                        ),
+                        tuple((p.x, p.y, p.yaw) for p in step.travelled),
+                        tuple(
+                            (c.candidate_id, c.verdict.value, c.cost, c.approach)
+                            for c in step.candidates
+                        ),
+                    )
+                )
+            return payload
+
+        self.assertEqual(strip(first), strip(second))
+        # 그리고 실제로 다른 것은 벽시계뿐임을 확인한다.
+        differing = {
+            field
+            for a, b in zip(first.steps, second.steps)
+            if a.path is not None and b.path is not None
+            for field in ("planning_time_sec",)
+            if getattr(a.path, field) != getattr(b.path, field)
+        }
+        self.assertTrue(differing <= WALL_CLOCK_FIELDS)
+
     def test_noise_seed_is_reproducible(self):
         ground = synthetic.wide_room()
         start = Pose(*ground.spec.cell_to_world(20, 15), 0.0)
