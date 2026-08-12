@@ -24,9 +24,14 @@ only to the release-local copy, and builds `ros-overlay/install`. It never
 modifies `/home/e103/explore_ws`. The explorer supervisor and smoke test both
 require that release-local overlay, which keeps activation and rollback atomic.
 
-The patch changes mapping only: it chooses a robot-connected FREE approach
-cell, points the goal from that approach cell toward the last FREE cell at the
-frontier boundary, prechecks it with `MappingGridBased`, retries transient
-failures with a bounded cooldown, and distinguishes `exploration_stalled` from
-true completion. Start-point return remains disabled in
-`config/ros/explore.params.yaml`.
+The patch changes mapping only. Each frontier cluster gets up to three
+separated, robot-connected FREE viewpoints. `MappingGridBased` checks them in
+sequence, the first feasible viewpoint keeps the established robot-to-target yaw,
+and only exhaustion of all viewpoints consumes one retry for the cluster.
+Failures cool down for five seconds and an exhausted cluster can be
+reactivated once only after local FREE-space growth proves that the map has
+changed. It also distinguishes `exploration_stalled` from true completion and
+waits for the previous Nav2 action to become terminal before replacing it. A
+five-second cancel deadline fails closed instead of allowing a stale path to
+remain live, and late callbacks from an older mapping generation are ignored.
+Start-point return remains disabled in `config/ros/explore.params.yaml`.

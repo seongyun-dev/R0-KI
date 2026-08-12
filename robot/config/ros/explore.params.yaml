@@ -21,17 +21,32 @@
     # depends on, since the mapping session is ended by the operator's save.
     return_to_init: false
 
-    # Navigate to a robot-connected FREE cell set back from the unknown edge,
-    # not to the UNKNOWN centroid. The MappingGridBased planner must prove a
-    # path before the navigation goal is sent.
+    # Build up to three distinct, robot-connected FREE viewpoints for each
+    # frontier cluster. They are checked in order by MappingGridBased and the
+    # first feasible pose is used. Goal yaw keeps the established 8c7a466
+    # robot-to-target bearing; multi-viewpoint selection must not change the
+    # yaw policy in the same experiment.
     frontier_approach_distance: 0.25
+    frontier_max_approaches: 3
+    frontier_candidate_spacing: 0.20
     frontier_planner_id: MappingGridBased
 
     # A transient planner/controller failure gets one delayed retry. Exhausted
     # candidates report exploration_stalled; they are never mislabeled as a
     # genuinely complete map.
-    frontier_retry_delay: 15.0
+    frontier_retry_delay: 5.0
+    # If Nav2 never acknowledges cancellation, fail closed instead of keeping
+    # a stale controller path alive indefinitely.
+    frontier_cancel_timeout: 5.0
     frontier_max_attempts: 2
+
+    # Failure accounting is per frontier cluster, not per viewpoint. An
+    # exhausted cluster is reactivated at most once, and only when the local
+    # map has gained a meaningful number of FREE cells around that frontier.
+    frontier_max_reactivations: 1
+    frontier_reactivation_radius: 0.50
+    frontier_reactivation_min_free_cells: 8
+    frontier_failure_match_radius: 0.25
 
     # Publishes frontier markers for RViz. Cheap and worth keeping while tuning.
     visualize: true
