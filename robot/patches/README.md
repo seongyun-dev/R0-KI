@@ -25,6 +25,8 @@ modifies `/home/e103/explore_ws`. The explorer supervisor and smoke test both
 require that release-local overlay, which keeps activation and rollback atomic.
 
 The patch changes mapping only: it chooses a robot-connected FREE approach
-cell, prechecks it with `MappingGridBased`, retries transient failures with a
-bounded cooldown, and distinguishes `exploration_stalled` from true completion.
-Start-point return remains disabled in `config/ros/explore.params.yaml`.
+cell, points the goal from that approach cell toward the last FREE cell at the
+frontier boundary, prechecks it with `MappingGridBased`, retries transient
+failures with a bounded cooldown, and distinguishes `exploration_stalled` from
+true completion. Start-point return remains disabled in
+`config/ros/explore.params.yaml`.
