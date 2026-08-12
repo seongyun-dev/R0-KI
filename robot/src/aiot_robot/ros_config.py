@@ -376,6 +376,19 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
     # a negative command reaches the chassis as reverse.
     follow_path["allow_reversing"] = True
 
+    # Candidate B: isolate the Ackermann lookahead experiment from Patrol.
+    # The measured 8.6 degree road-wheel limit and 0.124 m wheelbase give a
+    # minimum turning radius of about 0.82 m. Candidate A's shared 0.45/0.50 m
+    # lookahead can therefore put the carrot inside the tightest physical arc.
+    # Clone the fully rendered common controller only for Mapping; Patrol keeps
+    # selecting the existing FollowPath instance without any changed value.
+    mapping_follow_path = deepcopy(follow_path)
+    mapping_follow_path["min_lookahead_dist"] = 0.85
+    mapping_follow_path["lookahead_dist"] = 0.90
+    mapping_follow_path["max_lookahead_dist"] = 1.00
+    controller["controller_plugins"] = ["FollowPath", "MappingFollowPath"]
+    controller["MappingFollowPath"] = mapping_follow_path
+
     bt = config["bt_navigator"]["ros__parameters"]
     mapping_bt = environment.get("ROKI_NAV2_MAPPING_BT_XML", "").strip()
     if mapping_bt:

@@ -244,6 +244,29 @@ class RosConfigTest(unittest.TestCase):
         # 후진은 계속 허용돼야 REEDS_SHEPP 경로가 성립한다.
         self.assertLess(smoother["min_velocity"][0], 0.0)
 
+    def test_mapping_lookahead_is_isolated_from_patrol_controller(self):
+        config = self._render()
+        controller = config["controller_server"]["ros__parameters"]
+
+        self.assertEqual(
+            controller["controller_plugins"],
+            ["FollowPath", "MappingFollowPath"],
+        )
+        self.assertEqual(controller["FollowPath"]["min_lookahead_dist"], 0.45)
+        self.assertEqual(controller["FollowPath"]["lookahead_dist"], 0.50)
+        self.assertEqual(controller["FollowPath"]["max_lookahead_dist"], 0.65)
+        self.assertEqual(
+            controller["MappingFollowPath"]["min_lookahead_dist"], 0.85
+        )
+        self.assertEqual(controller["MappingFollowPath"]["lookahead_dist"], 0.90)
+        self.assertEqual(
+            controller["MappingFollowPath"]["max_lookahead_dist"], 1.00
+        )
+        self.assertEqual(
+            controller["MappingFollowPath"]["desired_linear_vel"],
+            controller["FollowPath"]["desired_linear_vel"],
+        )
+
     def test_localization_servers_are_gone(self):
         """slam_toolbox 가 두 운행의 위치추정을 다 맡으므로 중복 발행자를 없앴다.
 
