@@ -255,7 +255,7 @@ PROFILE_V026_VIEWPOINTS = Profile(
     name="v0.2.6-viewpoints",
     provenance=ProfileProvenance(
         tag="iot/feat/v0.2.6-frontier-viewpoints (candidate)",
-        commit="working-tree",
+        commit="be3c427",
         sources=(_EXPLORE_SOURCE, _ROSCFG_SOURCE, _PATCH_SOURCE),
         notes=(
             "8c7a466 base; frontier cluster당 최대 3개 robot-connected FREE 접근 자세",
@@ -283,7 +283,10 @@ PROFILE_V026_VIEWPOINTS = Profile(
     single_active_goal=True,
     retarget_while_active=False,
     await_cancel_before_new_goal=True,
-    retry_with_alternate_approach=True,
+    # max_approaches=3 이 이미 같은 frontier의 대체 접근점을 모두 제공한다.
+    # max_approaches<=1 전용 legacy 재시도 스위치를 켜면 효과가 없는데도
+    # 기능이 활성화된 것처럼 보이므로 명시적으로 끈다.
+    retry_with_alternate_approach=False,
 )
 
 

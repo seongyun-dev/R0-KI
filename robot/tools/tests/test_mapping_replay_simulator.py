@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 _ROBOT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROBOT_ROOT) not in sys.path:
@@ -370,6 +371,11 @@ class FrontierTest(unittest.TestCase):
         ]
         self.assertTrue(approaches, "viewpoint 후보가 하나도 생성되지 않았습니다")
         for options in approaches:
+            self.assertGreaterEqual(
+                len(options),
+                2,
+                "완료 전 BFS reachability를 쓰면 다중 접근점이 하나로 퇴화한다",
+            )
             self.assertLessEqual(len(options), 3)
             for index, (point, _, _) in enumerate(options):
                 column, row = discovered.spec.world_to_cell(*point)
@@ -391,7 +397,60 @@ class FrontierTest(unittest.TestCase):
         )
         self.assertEqual(V026_VIEWPOINTS.retry.retry_delay_sec, 5.0)
         self.assertEqual(V026_VIEWPOINTS.retry.max_reactivations, 1)
-        self.assertTrue(V026_VIEWPOINTS.retry_with_alternate_approach)
+        self.assertFalse(V026_VIEWPOINTS.retry_with_alternate_approach)
+
+    def test_viewpoint_long_baseline_receives_a_distinct_heading_reference(self):
+        ground = synthetic.wide_room()
+        discovered = DiscoveredMap(ground.spec)
+        pose = Pose(*ground.spec.cell_to_world(10, 15), 0.37)
+        discovered.reveal(
+            ground.raycast(
+                pose, LidarSpec(max_range_m=1.2, angle_increment_deg=2.0)
+            )
+        )
+
+        original = frontier_mod._goal_yaw
+        with patch.object(frontier_mod, "_goal_yaw", wraps=original) as spy:
+            frontier_mod.detect(
+                discovered,
+                pose,
+                V026_VIEWPOINTS.frontier,
+                ROBOT,
+                GoalYawRule.APPROACH_TO_BOUNDARY_LONG_BASELINE,
+            )
+
+        self.assertTrue(spy.call_args_list)
+        self.assertTrue(
+            all(call.args[1] == pose for call in spy.call_args_list),
+            "viewpoint yaw 계산에서 robot_pose가 유실됐다",
+        )
+        self.assertTrue(
+            any(call.args[3] != call.args[4] for call in spy.call_args_list),
+            "LONG_BASELINE heading 기준점이 approach로 퇴화했다",
+        )
+
+    def test_viewpoint_bearing_from_robot_uses_the_actual_robot_pose(self):
+        ground = synthetic.wide_room()
+        discovered = DiscoveredMap(ground.spec)
+        pose = Pose(*ground.spec.cell_to_world(10, 15), 0.37)
+        discovered.reveal(
+            ground.raycast(
+                pose, LidarSpec(max_range_m=1.2, angle_increment_deg=2.0)
+            )
+        )
+
+        candidates = frontier_mod.detect(
+            discovered,
+            pose,
+            V026_VIEWPOINTS.frontier,
+            ROBOT,
+            GoalYawRule.BEARING_FROM_ROBOT,
+        )
+        options = [option for candidate in candidates for option in candidate.approach_options]
+        self.assertTrue(options)
+        for (x, y), yaw, _ in options:
+            expected = math.atan2(y - pose.y, x - pose.x)
+            self.assertAlmostEqual(yaw, expected, places=9)
 
     def test_cost_uses_documented_formula(self):
         ground = synthetic.wide_room()

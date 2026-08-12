@@ -36,10 +36,10 @@
   넣고 앞의 것만 visited 로 표시한다. FREE 로만 확장하는 우리 조건에서는 로봇
   셀이 FREE 가 아니면 거기서 더 나갈 수 없으므로, 최근접 FREE 셀 하나만 넣는
   것과 결과가 같다.
-* ``min_distance`` 는 **셀 단위** 거리로 잰다 (이 저장소의 비용식 정의).
-  셀 거리 x res 는 정확히 미터 거리라, 비용의 첫 항은 ``potential_scale *
-  min_distance_m`` 과 같은 값이 된다 -- ``FrontierCandidate.min_distance_m``
-  에 채우는 값이 그것이다.
+* ``min_distance`` 는 upstream 처럼 **미터 단위** 거리로 잰다. 다만 실제
+  ``frontierCost`` 는 그 값에 해상도를 한 번 더 곱하므로 거리항은
+  ``potential_scale * min_distance_m * resolution`` 이다. 이 재현을 빼면
+  해상도 0.05 m 에서 거리 비용을 실제보다 20배 크게 계산하게 된다.
 * 여유(clearance)는 점유셀까지의 거리에 **지도 경계까지의 거리** 를 함께
   본다. ``DiscoveredMap.min_obstacle_distance`` 는 점유셀만 재기 때문에
   경계를 따로 보지 않으면 지도 밖으로 나가는 footprint 를 안전하다고 답한다.
@@ -131,7 +131,11 @@ def detect(
     reference_col, reference_row = col, row
 
     queue = deque((start,))
-    candidates: list[FrontierCandidate] = []
+    # Operational C++ is deliberately two-pass here.  It grows frontier
+    # clusters while the robot-origin BFS is running, but builds approach
+    # candidates only after that BFS has completed.  Keeping the same order is
+    # essential: ``parent`` and ``visited`` are the robot-reachability proof.
+    pending_frontiers: list[tuple[list[int], int]] = []
     while queue:
         index = queue.popleft()
         for neighbour in _nhood4(index, width, size):
@@ -144,20 +148,24 @@ def detect(
                 # index 는 로봇에서 연결된 FREE 셀, neighbour 는 그에 맞닿은
                 # UNKNOWN 시드다. 패치가 frontier_free 로 기록하는 셀이 index 다.
                 cluster = _grow_cluster(neighbour, states, flagged, width, size)
-                candidates.append(
-                    _candidate_from_cluster(
-                        discovered,
-                        parent,
-                        cluster,
-                        index,
-                        reference_col=reference_col,
-                        reference_row=reference_row,
-                        robot_pose=robot_pose,
-                        params=params,
-                        robot=robot,
-                        yaw_rule=yaw_rule,
-                    )
-                )
+                pending_frontiers.append((cluster, index))
+
+    candidates = [
+        _candidate_from_cluster(
+            discovered,
+            parent,
+            visited,
+            cluster,
+            boundary,
+            reference_col=reference_col,
+            reference_row=reference_row,
+            robot_pose=robot_pose,
+            params=params,
+            robot=robot,
+            yaw_rule=yaw_rule,
+        )
+        for cluster, boundary in pending_frontiers
+    ]
 
     # 비용만으로 정렬한다. 파이썬 sort 는 안정 정렬이므로 비용이 같은 후보는
     # BFS 발견 순서를 유지한다 -- 리플레이 시뮬레이터에서 같은 입력이 같은
@@ -172,16 +180,15 @@ def alternate_approaches(
     robot: RobotSpec,
     params: FrontierParams,
     yaw_rule: GoalYawRule,
+    robot_pose: Pose,
     exclude: Sequence[tuple[float, float]],
 ) -> list[tuple[tuple[float, float], float, float]]:
     """(approach_xy, goal_yaw, clearance) 대안 목록. v0.2.6 의 재시도용.
 
-    같은 클러스터의 **다른** ``boundary_free`` 셀들에서 접근점을 다시 유도한다.
-    ``detect`` 의 로봇 기준 parent 체인은 여기서 다시 쓸 수 없다 (이 시그니처에
-    로봇 자세가 없다). 대신 그 클러스터의 boundary_free 셀들을 동시 출발점으로
-    두는 다중 시작 BFS 를 돌려, "경계에서 멀어지는 방향" 의 체인을 만든다.
-    체인의 0 번은 boundary_free 셀이고 i 번은 거기서 i 홉 물러난 셀이라, 아래
-    ``_select_on_chain`` 을 ``detect`` 와 그대로 공유한다.
+    현재 로봇 자세에서 FREE BFS를 다시 완성한 뒤 ``viewpoint_approaches`` 와
+    같은 robot-origin parent 체인으로 접근점을 만든다. 예전 frontier-origin
+    다중 시작 BFS는 짧은 잎 가지를 버렸고 BEARING_FROM_ROBOT 규칙에 필요한
+    로봇 자세도 잃었으므로 사용하지 않는다.
 
     여유 조건은 프로필의 ``clearance_aware_approach`` 와 무관하게 항상 건다.
     재시도 자체가 v0.2.6 후보의 기능이고, 요구사항이 "clearance 를 만족하는
@@ -191,9 +198,6 @@ def alternate_approaches(
     if not candidate.cluster_cells:
         return []
 
-    # 여기서는 ``detect`` 처럼 지도 전체를 스냅샷 뜨지 않는다. 탐색 범위가 한
-    # 클러스터 주변 depth_limit 홉으로 한정돼 있어서, 전수 스냅샷 비용이 실제
-    # 탐색 비용보다 크다. 그래서 셀 상태를 그때그때 읽는다.
     spec = discovered.spec
     width = spec.width
     size = width * spec.height
@@ -201,52 +205,48 @@ def alternate_approaches(
 
     required = _required_clearance_m(params, robot)
     probe_limit = required * _CLEARANCE_PROBE_FACTOR
-    retreat_cells = _retreat_cells(params, resolution)
-    depth_limit = retreat_cells * _ALTERNATE_DEPTH_FACTOR
-
-    sources = _cluster_boundary_cells(spec, discovered, candidate, width, size)
-    if not sources:
+    states = [
+        discovered.state_at_cell(column, row)
+        for row in range(spec.height)
+        for column in range(spec.width)
+    ]
+    column, row = spec.world_to_cell(robot_pose.x, robot_pose.y)
+    if not spec.contains(column, row):
         return []
+    start = _nearest_free(states, spec.index(column, row), width, size)
+    if start is None:
+        return []
+    reachable = bytearray(size)
+    parent = [0] * size
+    reachable[start] = 1
+    parent[start] = start
+    queue = deque((start,))
+    while queue:
+        index = queue.popleft()
+        for neighbour in _nhood4(index, width, size):
+            if states[neighbour] is not CellState.FREE or reachable[neighbour]:
+                continue
+            reachable[neighbour] = 1
+            parent[neighbour] = index
+            queue.append(neighbour)
 
-    parent, depth, root = _multi_source_free_bfs(
-        sources, discovered, width, size, depth_limit
-    )
-
-    # 뿌리(=boundary_free 셀)별로 가장 깊이 물러난 셀들만 체인 끝으로 쓴다.
-    # 얕은 셀은 그 체인의 부분열이라 _select_on_chain 이 같은 답을 낸다.
-    deepest: dict[int, int] = {}
-    for cell, hops in depth.items():
-        source = root[cell]
-        if hops > deepest.get(source, -1):
-            deepest[source] = hops
-
-    results: list[tuple[tuple[float, float], float, float]] = []
-    seen: set[int] = set()
-    for cell, hops in depth.items():
-        if hops == 0 or hops != deepest[root[cell]]:
-            continue
-        chain = _chain_from_parents(parent, cell)
-        picked, clearance = _select_on_chain(
+    expanded_params = replace(params, max_approaches=_MAX_ALTERNATES + len(exclude))
+    results = [
+        option
+        for option in viewpoint_approaches(
             discovered,
-            chain,
-            clearance_aware=True,
-            retreat_cells=retreat_cells,
-            required_clearance_m=required,
-            probe_limit_m=probe_limit,
+            candidate,
+            robot,
+            expanded_params,
+            yaw_rule,
+            robot_pose,
+            parent,
+            reachable,
         )
-        if picked is None or clearance is None:
-            continue
-        approach_index = chain[picked]
-        if approach_index in seen:
-            continue
-        approach_xy = _cell_centre(spec, approach_index)
-        if _is_excluded(approach_xy, exclude, resolution * 0.5):
-            continue
-        seen.add(approach_index)
-        boundary_xy = _cell_centre(spec, chain[0])
-        heading_xy = _cell_centre(spec, chain[min(2 * picked, len(chain) - 1)])
-        goal_yaw = _goal_yaw(yaw_rule, None, boundary_xy, approach_xy, heading_xy)
-        results.append((approach_xy, goal_yaw, clearance))
+        if not _is_excluded(option[0], exclude, resolution * 0.5)
+        and option[2] >= required
+        and option[2] <= probe_limit + 1e-9
+    ]
 
     # 여유가 큰 순. 안정 정렬이라 여유가 같으면 BFS 발견 순서를 유지한다.
     results.sort(key=lambda item: -item[2])
@@ -259,63 +259,62 @@ def viewpoint_approaches(
     robot: RobotSpec,
     params: FrontierParams,
     yaw_rule: GoalYawRule,
+    robot_pose: Pose,
+    robot_parent: Sequence[int],
+    reachable: Sequence[bool],
 ) -> list[tuple[tuple[float, float], float, float]]:
     """Operational v0.2.6 viewpoint policy without a clearance hard gate.
 
-    The first point is the existing robot-connected parent-chain approach.
-    Further points are derived from distinct boundary-adjacent FREE cells and
-    are kept only when they are spatially separated.  Clearance is recorded
-    for diagnostics but does not reject a candidate; Nav2 owns SE2 footprint
-    and kinematic feasibility.
-    """
-    results: list[tuple[tuple[float, float], float, float]] = []
-    if candidate.approach is not None and candidate.goal_yaw is not None:
-        results.append(
-            (
-                candidate.approach,
-                candidate.goal_yaw,
-                candidate.approach_clearance_m or 0.0,
-            )
-        )
-    if params.max_approaches <= 1:
-        return results
+    Every frontier boundary cell chooses its nearest robot-reachable FREE
+    neighbour and then retreats along the *robot-origin BFS parent chain*.
+    This mirrors ``FrontierSearch::buildApproachCandidates`` in the operational
+    overlay.  In particular it does not run a second frontier-origin BFS: that
+    older approximation silently dropped shallow leaf branches.
 
+    Clearance is recorded for diagnostics but does not reject a candidate;
+    Nav2 owns SE2 footprint and kinematic feasibility.
+    """
     spec = discovered.spec
     width = spec.width
     size = width * spec.height
-    sources = _cluster_boundary_cells(spec, discovered, candidate, width, size)
-    if candidate.boundary_free is not None:
-        column, row = spec.world_to_cell(*candidate.boundary_free)
-        if spec.contains(column, row):
-            sources.insert(0, spec.index(column, row))
-    if not sources:
-        return results
-
     retreat_cells = _retreat_cells(params, spec.resolution)
-    parent, depth, root = _multi_source_free_bfs(
-        sources, discovered, width, size, retreat_cells
-    )
-    deepest: dict[int, int] = {}
-    for cell, hops in depth.items():
-        source = root[cell]
-        if hops > deepest.get(source, -1):
-            deepest[source] = hops
-
     options: list[tuple[tuple[float, float], float, float, float]] = []
-    for cell, hops in depth.items():
-        if hops == 0 or hops != deepest[root[cell]]:
+    for column, row in candidate.cluster_cells:
+        boundary_index = spec.index(column, row)
+        adjacent_free: int | None = None
+        adjacent_distance = math.inf
+        for neighbour in _nhood8(boundary_index, width, size):
+            if not reachable[neighbour] or not _free_at(discovered, neighbour, width):
+                continue
+            point = _cell_centre(spec, neighbour)
+            distance = math.hypot(point[0] - robot_pose.x, point[1] - robot_pose.y)
+            if distance < adjacent_distance:
+                adjacent_free = neighbour
+                adjacent_distance = distance
+        if adjacent_free is None:
             continue
-        chain = _chain_from_parents(parent, cell)
-        index = min(retreat_cells, len(chain) - 1)
-        approach_index = chain[index]
+
+        # index 0 is the boundary-adjacent FREE cell; following robot_parent
+        # moves toward the robot, exactly like the operational C++ overlay.
+        chain = [adjacent_free]
+        current = adjacent_free
+        for _ in range(retreat_cells * _ALTERNATE_DEPTH_FACTOR):
+            parent_cell = robot_parent[current]
+            if parent_cell == current:
+                break
+            current = parent_cell
+            chain.append(current)
+        approach_step = min(retreat_cells, len(chain) - 1)
+        approach_index = chain[approach_step]
         approach_xy = _cell_centre(spec, approach_index)
-        if _is_excluded(
-            approach_xy, [item[0] for item in results], params.candidate_spacing_m
-        ):
+        if _is_excluded(approach_xy, [item[0] for item in options], params.candidate_spacing_m):
             continue
-        boundary_xy = _cell_centre(spec, chain[0])
+        boundary_xy = _cell_centre(spec, boundary_index)
+        heading_xy = _cell_centre(
+            spec, chain[min(2 * approach_step, len(chain) - 1)]
+        )
         yaw = _goal_yaw(
-            yaw_rule, None, boundary_xy, approach_xy, approach_xy
+            yaw_rule, robot_pose, boundary_xy, approach_xy, heading_xy
         )
         clearance = _clearance_m(
             discovered,
@@ -323,20 +322,20 @@ def viewpoint_approaches(
             approach_xy[1],
             robot.circumscribed_radius_m * _CLEARANCE_PROBE_FACTOR,
         )
-        robot_distance = (
-            math.hypot(
-                approach_xy[0] - candidate.approach[0],
-                approach_xy[1] - candidate.approach[1],
-            )
-            if candidate.approach is not None
-            else 0.0
+        robot_distance = math.hypot(
+            approach_xy[0] - robot_pose.x, approach_xy[1] - robot_pose.y
         )
         options.append((approach_xy, yaw, clearance, robot_distance))
 
-    options.sort(key=lambda item: item[3])
+    results: list[tuple[tuple[float, float], float, float]] = []
     while options and len(results) < params.max_approaches:
         if not results:
-            selected_index = 0
+            # C++ sorts only to select the first (nearest-to-robot) option.
+            # Expressing that choice directly avoids a misleading sort whose
+            # order is irrelevant to the later farthest-point selection.
+            selected_index = min(
+                range(len(options)), key=lambda index: options[index][3]
+            )
         else:
             selected_index = max(
                 range(len(options)),
@@ -675,6 +674,7 @@ def _goal_yaw(
 def _candidate_from_cluster(
     discovered: DiscoveredMap,
     parent: Sequence[int],
+    reachable: Sequence[bool],
     cluster: list[int],
     boundary: int,
     *,
@@ -817,7 +817,14 @@ def _candidate_from_cluster(
             candidate,
             approach_options=tuple(
                 viewpoint_approaches(
-                    discovered, candidate, robot, params, yaw_rule
+                    discovered,
+                    candidate,
+                    robot,
+                    params,
+                    yaw_rule,
+                    robot_pose,
+                    parent,
+                    reachable,
                 )
             ),
         )
@@ -825,7 +832,7 @@ def _candidate_from_cluster(
 
 
 # ---------------------------------------------------------------------------
-# alternate_approaches 의 조각들
+# 접근점 유도의 조각들
 # ---------------------------------------------------------------------------
 
 

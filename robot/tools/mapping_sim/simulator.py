@@ -597,6 +597,7 @@ def run(
                         robot,
                         profile.frontier,
                         profile.goal_yaw_rule,
+                        pose,
                         attempted,
                     )
                     if alternates:
