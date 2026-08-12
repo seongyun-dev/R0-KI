@@ -71,18 +71,19 @@ index 8799783..77ba69f 100644
  };
  }  // namespace explore
 diff --git a/explore/include/explore/frontier_search.h b/explore/include/explore/frontier_search.h
-index 0f8e610..48111b9 100644
+index 0f8e610..3aeba70 100644
 --- a/explore/include/explore/frontier_search.h
 +++ b/explore/include/explore/frontier_search.h
-@@ -16,6 +16,7 @@ struct Frontier {
+@@ -16,6 +16,8 @@ struct Frontier {
    geometry_msgs::msg::Point initial;
    geometry_msgs::msg::Point centroid;
    geometry_msgs::msg::Point middle;
 +  geometry_msgs::msg::Point approach;
++  geometry_msgs::msg::Point frontier_free;
    std::vector<geometry_msgs::msg::Point> points;
  };
 
-@@ -33,7 +34,8 @@ public:
+@@ -33,7 +35,8 @@ public:
     * @param costmap Reference to costmap data to search.
     */
    FrontierSearch(nav2_costmap_2d::Costmap2D* costmap, double potential_scale,
@@ -92,15 +93,16 @@ index 0f8e610..48111b9 100644
 
    /**
     * @brief Runs search implementation, outward from the start position
-@@ -53,6 +55,7 @@ protected:
+@@ -53,6 +56,8 @@ protected:
     * @return new frontier
     */
    Frontier buildNewFrontier(unsigned int initial_cell, unsigned int reference,
 +                            unsigned int approach_cell,
++                            unsigned int frontier_free_cell,
                              std::vector<bool>& frontier_flag);
 
    /**
-@@ -81,6 +84,7 @@ private:
+@@ -81,6 +86,7 @@ private:
    unsigned int size_x_, size_y_;
    double potential_scale_, gain_scale_;
    double min_frontier_size_;
@@ -109,7 +111,7 @@ index 0f8e610..48111b9 100644
  };
  }  // namespace frontier_exploration
 diff --git a/explore/src/explore.cpp b/explore/src/explore.cpp
-index d72fb18..d6fb7a1 100644
+index d72fb18..285a32a 100644
 --- a/explore/src/explore.cpp
 +++ b/explore/src/explore.cpp
 @@ -38,6 +38,7 @@
@@ -251,7 +253,7 @@ index d72fb18..d6fb7a1 100644
      makePlan();
      return;
    }
-@@ -292,29 +326,71 @@ void Explore::makePlan()
+@@ -292,29 +326,82 @@ void Explore::makePlan()
      resuming_ = false;
    }
 
@@ -267,8 +269,19 @@ index d72fb18..d6fb7a1 100644
 -  RCLCPP_DEBUG(logger_, "Sending goal to move base nav2");
 +  geometry_msgs::msg::PoseStamped target_pose;
 +  target_pose.pose.position = target_position;
-+  const double yaw = std::atan2(target_position.y - pose.position.y,
-+                                target_position.x - pose.position.x);
++  double heading_x = frontier->frontier_free.x - target_position.x;
++  double heading_y = frontier->frontier_free.y - target_position.y;
++  if (std::hypot(heading_x, heading_y) < 1e-6) {
++    heading_x = target_position.x - pose.position.x;
++    heading_y = target_position.y - pose.position.y;
++  }
++  const double yaw = std::atan2(heading_y, heading_x);
++  RCLCPP_INFO(logger_,
++              "Frontier goal robot=(%.2f, %.2f) approach=(%.2f, %.2f) "
++              "boundary_free=(%.2f, %.2f) yaw=%.1fdeg",
++              pose.position.x, pose.position.y, target_position.x,
++              target_position.y, frontier->frontier_free.x,
++              frontier->frontier_free.y, yaw * 57.29577951308232);
 +  target_pose.pose.orientation.z = std::sin(yaw * 0.5);
 +  target_pose.pose.orientation.w = std::cos(yaw * 0.5);
 +  target_pose.header.frame_id = costmap_client_.getGlobalFrameID();
@@ -333,7 +346,7 @@ index d72fb18..d6fb7a1 100644
          } else {
            active_goal_id_ = goal_handle->get_goal_id();
            RCLCPP_DEBUG(logger_, "Goal ACCEPTED, uuid: %s",
-@@ -324,8 +400,8 @@ void Explore::makePlan()
+@@ -324,8 +411,8 @@ void Explore::makePlan()
 
    send_goal_options.result_callback =
        [this,
@@ -344,7 +357,7 @@ index d72fb18..d6fb7a1 100644
        };
    move_base_client_->async_send_goal(goal, send_goal_options);
  }
-@@ -362,9 +438,12 @@ bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
+@@ -362,9 +449,12 @@ bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
    nav2_costmap_2d::Costmap2D* costmap2d = costmap_client_.getCostmap();
 
    // check if a goal is on the blacklist for goals that we're pursuing
@@ -360,7 +373,7 @@ index d72fb18..d6fb7a1 100644
 
      if (x_diff < tolerace * costmap2d->getResolution() &&
          y_diff < tolerace * costmap2d->getResolution())
-@@ -373,6 +452,42 @@ bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
+@@ -373,6 +463,42 @@ bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
    return false;
  }
 
@@ -403,7 +416,7 @@ index d72fb18..d6fb7a1 100644
  void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
                            const geometry_msgs::msg::Point& frontier_goal) {
    // discard stale callbacks from previously preempted goals
-@@ -393,14 +508,14 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
+@@ -393,14 +519,14 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
          RCLCPP_DEBUG(logger_, "Goal aborted with error_code=%d (%s) — blacklisting frontier",
                       result.result->error_code,
                       result.result->error_msg.c_str());
@@ -420,7 +433,7 @@ index d72fb18..d6fb7a1 100644
  #endif
        // If it was aborted probably because we've found another frontier goal,
        // so just return and don't make plan again
-@@ -439,6 +554,8 @@ void Explore::stop(bool finished_exploring)
+@@ -439,6 +565,8 @@ void Explore::stop(bool finished_exploring)
    RCLCPP_INFO(logger_, "Exploration stopped.");
 
    goal_active_ = false;
@@ -429,7 +442,7 @@ index d72fb18..d6fb7a1 100644
    // Only publish paused status if manually stopped (not finished exploring)
    if (!finished_exploring) {
      auto status_msg = explore_lite_msgs::msg::ExploreStatus();
-@@ -447,6 +564,7 @@ void Explore::stop(bool finished_exploring)
+@@ -447,6 +575,7 @@ void Explore::stop(bool finished_exploring)
    }
 
    move_base_client_->async_cancel_all_goals();
@@ -437,7 +450,7 @@ index d72fb18..d6fb7a1 100644
    exploring_timer_->cancel();
 
    if (return_to_init_ && finished_exploring) {
-@@ -456,6 +574,7 @@ void Explore::stop(bool finished_exploring)
+@@ -456,6 +585,7 @@ void Explore::stop(bool finished_exploring)
 
  void Explore::resume()
  {
@@ -446,7 +459,7 @@ index d72fb18..d6fb7a1 100644
    RCLCPP_INFO(logger_, "Exploration resuming.");
    auto status_msg = explore_lite_msgs::msg::ExploreStatus();
 diff --git a/explore/src/frontier_search.cpp b/explore/src/frontier_search.cpp
-index 6085fd8..1c53bd0 100644
+index 6085fd8..22b8aab 100644
 --- a/explore/src/frontier_search.cpp
 +++ b/explore/src/frontier_search.cpp
 @@ -14,11 +14,13 @@ using nav2_costmap_2d::NO_INFORMATION;
@@ -503,19 +516,20 @@ index 6085fd8..1c53bd0 100644
 +          approach = parent[approach];
 +        }
 +        Frontier new_frontier =
-+            buildNewFrontier(nbr, pos, approach, frontier_flag);
++            buildNewFrontier(nbr, pos, approach, idx, frontier_flag);
          if (new_frontier.size * costmap_->getResolution() >=
              min_frontier_size_) {
            frontier_list.push_back(new_frontier);
-@@ -97,6 +114,7 @@ FrontierSearch::searchFrom(geometry_msgs::msg::Point position)
+@@ -97,6 +114,8 @@ FrontierSearch::searchFrom(geometry_msgs::msg::Point position)
 
  Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
                                            unsigned int reference,
 +                                          unsigned int approach_cell,
++                                          unsigned int frontier_free_cell,
                                            std::vector<bool>& frontier_flag)
  {
    // initialize frontier structure
-@@ -111,6 +129,10 @@ Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
+@@ -111,6 +130,15 @@ Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
    costmap_->indexToCells(initial_cell, ix, iy);
    costmap_->mapToWorld(ix, iy, output.initial.x, output.initial.y);
 
@@ -523,10 +537,11 @@ index 6085fd8..1c53bd0 100644
 +  costmap_->indexToCells(approach_cell, ax, ay);
 +  costmap_->mapToWorld(ax, ay, output.approach.x, output.approach.y);
 +
++  unsigned int fx, fy;
++  costmap_->indexToCells(frontier_free_cell, fx, fy);
++  costmap_->mapToWorld(fx, fy, output.frontier_free.x,
++                       output.frontier_free.y);
++
    // push initial gridcell onto queue
    std::queue<unsigned int> bfs;
    bfs.push(initial_cell);
-warning: in the working copy of 'explore/include/explore/explore.h', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'explore/include/explore/frontier_search.h', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'explore/src/explore.cpp', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'explore/src/frontier_search.cpp', LF will be replaced by CRLF the next time Git touches it

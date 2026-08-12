@@ -150,18 +150,13 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
             "GridBased.motion_model_for_search": "REEDS_SHEPP",
             # 후진은 허용하되 불필요한 전후진 전환은 기본 수준으로 억제한다.
             # 순찰용 DUBIN 프로필과는 독립적인 매핑 전용 값이다.
-            # Keep reverse available for a car-like recovery, but make a
-            # forward solution clearly preferable in the new open field.
-            "GridBased.reverse_penalty": 3.0,
-            # Prefer long, continuous primitives.  These are deliberately
-            # moderate soft costs: mapping can still turn or change steering
-            # direction when geometry requires it.
-            "GridBased.change_penalty": 0.15,
-            "GridBased.non_straight_penalty": 1.4,
-            # Use the inflated potential field to select the open side of a
-            # passage rather than merely accepting the first collision-free
-            # path beside a wall.
-            "GridBased.cost_penalty": 2.5,
+            # Keep the verified Smac defaults.  Frontier goal yaw now shapes
+            # the final approach; larger global penalties made open-field
+            # routes longer and increased unnecessary reversing.
+            "GridBased.reverse_penalty": 2.0,
+            "GridBased.change_penalty": 0.0,
+            "GridBased.non_straight_penalty": 1.2,
+            "GridBased.cost_penalty": 2.0,
             # 재계획 사이에 장애물 확장을 재사용하는 최적화다. SLAM 이 지도를
             # 키우는 동안은 그 전제가 매초 깨지므로, 낡은 휴리스틱으로
             # 도달 가능한 목표를 포기한다.

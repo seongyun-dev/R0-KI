@@ -22,6 +22,8 @@ class ExploreOverlayContractTest(unittest.TestCase):
     def test_patch_contains_mapping_recovery_layers(self):
         for token in (
             "frontier.approach",
+            "frontier_free",
+            "boundary_free=",
             "ComputePathToPose",
             "frontier_retry_delay",
             "exploration_stalled",

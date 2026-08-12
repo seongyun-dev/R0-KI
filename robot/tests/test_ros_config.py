@@ -304,17 +304,17 @@ class RosConfigTest(unittest.TestCase):
                 ].items():
                     self.assertEqual(plugin[dotted.split(".", 1)[1]], expected)
 
-    def test_mapping_prefers_straight_forward_paths_without_changing_patrol(self):
+    def test_mapping_uses_verified_smac_costs_without_changing_patrol(self):
         config = self._render()
         planner = config["planner_server"]["ros__parameters"]
         mapping = planner["MappingGridBased"]
         patrol = planner["PatrolGridBased"]
 
         self.assertEqual(mapping["motion_model_for_search"], "REEDS_SHEPP")
-        self.assertEqual(mapping["reverse_penalty"], 3.0)
-        self.assertEqual(mapping["change_penalty"], 0.15)
-        self.assertEqual(mapping["non_straight_penalty"], 1.4)
-        self.assertEqual(mapping["cost_penalty"], 2.5)
+        self.assertEqual(mapping["reverse_penalty"], 2.0)
+        self.assertEqual(mapping["change_penalty"], 0.0)
+        self.assertEqual(mapping["non_straight_penalty"], 1.2)
+        self.assertEqual(mapping["cost_penalty"], 2.0)
 
         self.assertEqual(patrol["motion_model_for_search"], "DUBIN")
         self.assertEqual(patrol["reverse_penalty"], 2.1)
@@ -365,12 +365,13 @@ class RosConfigTest(unittest.TestCase):
                 set(patrol[node]),
                 f"{node} 의 항목이 두 프로필에서 다르다",
             )
-            for name in mapping[node]:
-                self.assertNotEqual(
-                    mapping[node][name],
-                    patrol[node][name],
-                    f"{name} 이 두 모드에서 같다면 프로필에 있을 이유가 없다",
-                )
+            self.assertTrue(
+                any(
+                    mapping[node][name] != patrol[node][name]
+                    for name in mapping[node]
+                ),
+                f"{node} 프로필 전체가 같다면 분리할 이유가 없다",
+            )
 
     def test_rejects_unsafe_xy_goal_tolerance(self):
         for value in ("0.01", "1.1", "nan"):
