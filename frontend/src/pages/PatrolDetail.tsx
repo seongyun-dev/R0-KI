@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import type { MapDetailResponse, ZoneCreateResponse } from '../api/contracts'
 import { mapApi, patrolsApi } from '../api/services'
 import { R0KiShell } from '../components/layout/R0KiShell'
@@ -9,7 +9,8 @@ import { useAuthStore } from '../features/auth/useAuthStore'
 import { ZoneDetail } from '../features/dashboard/ComplexMap'
 import { pinPath, zoneVar } from '../features/dashboard/mapStyle'
 import { eventStatusCode, eventStatusColor } from '../features/events/eventStatus'
-import type { Patrol, PatrolPoint, ZoneType } from '../types/domain'
+import type { Patrol, PatrolPoint, ProcessingStatus, ZoneType } from '../types/domain'
+import { EventDetailModal } from '../components/events/EventDetailModal'
 
 /* R0-Ki 순찰 상세 — 시안 R0Kipatrol 그대로.
    이동 경로 지도(구역 웨이포인트 동적 배치) + 순찰 지점 기록(타임라인) + AI 요약.
@@ -510,7 +511,7 @@ function TimelineRow({ point, onGo }: { point: PatrolPoint; onGo?: () => void })
 
 export default function PatrolDetail() {
   const { id } = useParams()
-  const navigate = useNavigate()
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const toast = useToast()
   const { data: patrol, isLoading, error, refetch } = usePatrol(id)
   const mapId = useAuthStore((state) => state.mapId)
@@ -518,6 +519,7 @@ export default function PatrolDetail() {
   const [mapDetail, setMapDetail] = useState<MapDetailResponse>()
   const [checkpointZones, setCheckpointZones] = useState<ZoneCreateResponse[]>([])
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
+  const [eventStatusOverrides, setEventStatusOverrides] = useState<Record<string, ProcessingStatus>>({})
 
   const handlePdfDownload = async () => {
     if (!id || isDownloadingPdf) return
@@ -586,7 +588,12 @@ export default function PatrolDetail() {
   }, [mapId, patrol?.mapUrl])
 
   // 시안은 최신순 (복귀가 맨 위)
-  const points = [...(patrol?.points ?? [])].sort((a, b) => timeMin(b.time) - timeMin(a.time))
+  const points = (patrol?.points ?? [])
+    .map((point) => {
+      const updatedStatus = point.eventId ? eventStatusOverrides[point.eventId] : undefined
+      return updatedStatus ? { ...point, status: updatedStatus } : point
+    })
+    .sort((a, b) => timeMin(b.time) - timeMin(a.time))
   const anomalies = points.filter((p) => p.eventId).length
 
   return (
@@ -686,7 +693,7 @@ export default function PatrolDetail() {
                       <TimelineRow
                         key={`${point.time}-${i}`}
                         point={point}
-                        onGo={point.eventId ? () => navigate(`/app/events/${point.eventId}`) : undefined}
+                        onGo={point.eventId != null ? () => setSelectedEventId(point.eventId!) : undefined}
                       />
                     ))
                   )}
@@ -704,6 +711,14 @@ export default function PatrolDetail() {
           </>
         )}
       </div>
+      <EventDetailModal
+        eventId={selectedEventId}
+        onClose={() => setSelectedEventId(null)}
+        onStatusChanged={(eventId, status) => {
+          setEventStatusOverrides((previous) => ({ ...previous, [eventId]: status }))
+          refetch()
+        }}
+      />
     </R0KiShell>
   )
 }
