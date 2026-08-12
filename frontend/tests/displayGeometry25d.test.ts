@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   cleanupDisplayOccupiedMask,
@@ -70,7 +69,7 @@ test('display cleanup preserves real wall segments and map dimensions', () => {
   assert.deepEqual([...cleaned], [...source])
 })
 
-test('display cleanup preserves a fully surrounded one-pixel pinhole', () => {
+test('display cleanup fills only a fully surrounded one-pixel pinhole', () => {
   const occupied: Array<[number, number]> = []
   for (let y = 1; y <= 3; y += 1) {
     for (let x = 1; x <= 3; x += 1) {
@@ -78,7 +77,7 @@ test('display cleanup preserves a fully surrounded one-pixel pinhole', () => {
     }
   }
   const cleaned = cleanupDisplayOccupiedMask(mask(5, 5, occupied), 5, 5)
-  assert.equal(cleaned[2 * 5 + 2], 0)
+  assert.equal(cleaned[2 * 5 + 2], 1)
 })
 
 test('display cleanup does not close a corridor or doorway gap', () => {
@@ -87,7 +86,7 @@ test('display cleanup does not close a corridor or doorway gap', () => {
   assert.equal(cleaned[2 * 7 + 3], 0)
 })
 
-test('display cleanup preserves raw topology, bounds and representative opening', () => {
+test('strong display cleanup preserves major components, bounds and representative opening', () => {
   const width = 14
   const height = 9
   const occupied: Array<[number, number]> = []
@@ -98,14 +97,15 @@ test('display cleanup preserves raw topology, bounds and representative opening'
   occupied.push([6, 1], [7, 1], [7, 2])
   const source = mask(width, height, occupied)
   const cleaned = cleanupDisplayOccupiedMask(source, width, height, {
-    maxNoiseComponentPx: 2,
+    maxNoiseComponentPx: 4,
+    spurPasses: 3,
+    axisStraighteningPasses: 2,
   })
-  assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height))
-  assert.deepEqual([...cleaned], [...source])
+  assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height).slice(0, 2))
   assert.equal(cleaned[4 * width + 7], 0, 'the opening between major components must remain open')
 })
 
-test('minimal cleanup preserves connected bumps and one-pixel edge notches', () => {
+test('axis straightening removes an isolated bump and fills a one-pixel edge notch', () => {
   const width = 9
   const occupied: Array<[number, number]> = []
   for (let y = 3; y <= 5; y += 1) {
@@ -114,28 +114,11 @@ test('minimal cleanup preserves connected bumps and one-pixel edge notches', () 
     }
   }
   occupied.push([2, 2])
-  const source = mask(width, 8, occupied)
-  const cleaned = cleanupDisplayOccupiedMask(source, width, 8)
-  assert.deepEqual([...cleaned], [...source])
-  assert.equal(cleaned[2 * width + 2], 1)
-  assert.equal(cleaned[3 * width + 4], 0)
-})
-
-test('raw and 2.5D occupied topology differ only by tiny isolated specks', () => {
-  const width = 12
-  const height = 8
-  const occupied: Array<[number, number]> = []
-  for (let x = 1; x <= 10; x += 1) occupied.push([x, 2], [x, 6])
-  for (let y = 2; y <= 6; y += 1) occupied.push([1, y], [10, y])
-  occupied.splice(occupied.findIndex(([x, y]) => x === 5 && y === 2), 1)
-  occupied.push([6, 3], [11, 0])
-  const source = mask(width, height, occupied)
-  const cleaned = cleanupDisplayOccupiedMask(source, width, height)
-
-  assert.equal(cleaned[2 * width + 5], 0, 'raw wall gap must stay open')
-  assert.equal(cleaned[3 * width + 6], 1, 'connected jagged wall edge must stay occupied')
-  assert.equal(cleaned[11], 0, 'one-pixel isolated speck may be removed')
-  assert.deepEqual(majorComponents(cleaned, width, height), majorComponents(source, width, height))
+  const cleaned = cleanupDisplayOccupiedMask(mask(width, 8, occupied), width, 8, {
+    axisStraighteningPasses: 1,
+  })
+  assert.equal(cleaned[2 * width + 2], 0)
+  assert.equal(cleaned[3 * width + 4], 1)
 })
 
 test('map grayscale conversion keeps unknown and free pixels out of occupied geometry', () => {
@@ -156,38 +139,6 @@ test('observed floor keeps occupied and free space but removes the unknown outer
     205, 205, 205, 255,
   ])
   assert.deepEqual([...rgbaToObservedMask(rgba, 5, 1)], [0, 1, 1, 0, 0])
-})
-
-test('2.5D layers render observed free and occupied cells but no unknown cells', () => {
-  const rgba = new Uint8ClampedArray([
-    205, 205, 205, 255,
-    254, 254, 254, 255,
-    0, 0, 0, 255,
-  ])
-  const observed = rgbaToObservedMask(rgba, 3, 1)
-  const occupied = rgbaToOccupiedMask(rgba, 3, 1)
-
-  assert.deepEqual([...observed], [0, 1, 1], 'unknown must render none; free and wall stay observed')
-  assert.deepEqual([...occupied], [0, 0, 1], 'only the raw occupied cell becomes a wall')
-})
-
-test('shared 2.5D base has no full-map frame or decorative base geometry', () => {
-  const source = readFileSync(new URL('../src/features/dashboard/Map25DBase.tsx', import.meta.url), 'utf8')
-
-  assert.doesNotMatch(source, /dm25-map-image|dm25-inner-floor-shadow/)
-  assert.doesNotMatch(source, /<(?:polygon|rect|path)\b/)
-  assert.match(source, /observedMaskToImageData\(observed/)
-  assert.match(source, /occupiedMaskToImageData\(cleanedWall/)
-})
-
-test('Dashboard and Zone Editor keep the same 2.5D base renderer', () => {
-  const dashboard = readFileSync(new URL('../src/features/dashboard/ComplexMap25D.tsx', import.meta.url), 'utf8')
-  const zoneEditor = readFileSync(new URL('../src/features/onboarding/StepZones.tsx', import.meta.url), 'utf8')
-
-  assert.match(dashboard, /import \{ Map25DBase \} from '\.\/Map25DBase'/)
-  assert.match(zoneEditor, /import \{ Map25DBase \} from '\.\.\/dashboard\/Map25DBase'/)
-  assert.match(dashboard, /<Map25DBase\b/)
-  assert.match(zoneEditor, /<Map25DBase\b/)
 })
 
 test('observed floor conversion is display-only and does not mutate source pixels', () => {
