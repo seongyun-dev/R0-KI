@@ -46,7 +46,9 @@ from tools.mapping_sim.simulator import (
     FailureLedger,
     SimSettings,
     StartPoseError,
+    clip_path_before_internal_unknown_bridge,
     path_crosses_unsafe_unknown as sim_crosses_unknown,
+    max_internal_unknown_run_m as sim_max_internal_unknown_run,
     run,
     unknown_path_length_m as sim_unknown_length,
     validate_start_pose,
@@ -60,6 +62,7 @@ V026 = profiles_mod.PROFILE_PROPOSED_CLEARANCE   # 제안(가설). 실제 v0.2.6
 V026_REAL = profiles_mod.PROFILE_V026
 V026_8C7A466 = profiles_mod.PROFILE_V026_8C7A466
 V026_VIEWPOINTS = profiles_mod.PROFILE_V026_VIEWPOINTS
+V026_VIEWPOINTS_SAFE = profiles_mod.PROFILE_V026_VIEWPOINTS_SAFE
 
 
 def _reveal_everything(ground_truth: GroundTruth) -> DiscoveredMap:
@@ -527,6 +530,70 @@ class FrontierTest(unittest.TestCase):
             selected_option[2],
             places=9,
             msg="대체 접근점을 선택한 뒤 첫 접근점 clearance가 남았다",
+        )
+
+    def test_internal_unknown_bridge_is_distinct_from_terminal_unknown(self):
+        def sample(x: float, state: CellState) -> PathSample:
+            return PathSample(
+                pose=Pose(x, 0.0, 0.0),
+                reverse=False,
+                cell_state=state,
+                inflation_cost=0,
+            )
+
+        def path(states: list[CellState]) -> PlannedPath:
+            samples = tuple(sample(index * 0.10, state) for index, state in enumerate(states))
+            return PlannedPath(
+                flavor=PlannerFlavor.APPROXIMATE,
+                samples=samples,
+                length_m=max(0, len(samples) - 1) * 0.10,
+                reverse_length_m=0.0,
+                direction_changes=0,
+                traversal_cost=0.0,
+                free_cells=sum(s is CellState.FREE for s in states),
+                unknown_cells=sum(s is CellState.UNKNOWN for s in states),
+                occupied_cells=0,
+                planning_time_sec=0.0,
+                iterations=1,
+            )
+
+        leading = path([
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.FREE,
+        ])
+        trailing = path([
+            CellState.FREE,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+        ])
+        bridge = path([
+            CellState.FREE,
+            CellState.FREE,
+            CellState.FREE,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.UNKNOWN,
+            CellState.FREE,
+        ])
+
+        self.assertEqual(sim_max_internal_unknown_run(leading), 0.0)
+        self.assertEqual(sim_max_internal_unknown_run(trailing), 0.0)
+        self.assertAlmostEqual(sim_max_internal_unknown_run(bridge), 0.4)
+        self.assertFalse(sim_crosses_unknown(leading, V026_VIEWPOINTS_SAFE.planner))
+        self.assertFalse(sim_crosses_unknown(trailing, V026_VIEWPOINTS_SAFE.planner))
+        self.assertTrue(sim_crosses_unknown(bridge, V026_VIEWPOINTS_SAFE.planner))
+
+        clipped = clip_path_before_internal_unknown_bridge(bridge, 0.30, 0.10)
+        self.assertIsNotNone(clipped)
+        self.assertLess(len(clipped.samples), len(bridge.samples))
+        self.assertTrue(
+            all(sample.cell_state is CellState.FREE for sample in clipped.samples)
         )
 
     def test_cost_uses_documented_formula(self):

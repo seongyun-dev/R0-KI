@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .contracts import (
     BlacklistMode,
     FrontierParams,
@@ -283,6 +285,28 @@ PROFILE_V026_VIEWPOINTS = Profile(
 )
 
 
+PROFILE_V026_VIEWPOINTS_SAFE = replace(
+    PROFILE_V026_VIEWPOINTS,
+    name="v0.2.6-viewpoints-safe",
+    provenance=ProfileProvenance(
+        tag="iot/feat/v0.2.6-frontier-viewpoints (candidate)",
+        commit="(pending)",
+        sources=(_EXPLORE_SOURCE, _ROSCFG_SOURCE, _PATCH_SOURCE),
+        notes=(
+            "v0.2.6-viewpoints와 동일한 다중 접근점",
+            "FREE 사이의 연속 UNKNOWN 지름길이 0.30 m를 넘을 때만 거부",
+            "시작·끝 UNKNOWN과 짧은 내부 지도 잡음은 허용",
+            "실행 BT는 주행 중 무검사 재계획과 costmap clear를 하지 않음",
+        ),
+    ),
+    planner=replace(
+        PROFILE_V026_VIEWPOINTS.planner,
+        max_internal_unknown_run_m=0.30,
+        unknown_bridge_standoff_m=0.10,
+    ),
+)
+
+
 # 이것은 **릴리스가 아니고 제안이다.** 2026-08-12 실측 진단에서 나온 수정안을 설정으로
 # 표현한 가설이며, 실제 v0.2.6 브랜치에는 이 내용이 들어 있지 않다 (clearance 기반
 # 접근점 grep 0건). 이름에 버전을 붙이지 않은 이유가 그것이다 -- 붙이면 실제 릴리스
@@ -365,6 +389,7 @@ BUILTIN_PROFILES: dict[str, Profile] = {
     PROFILE_V026_7C9CAEE.name: PROFILE_V026_7C9CAEE,
     PROFILE_V026_8C7A466.name: PROFILE_V026_8C7A466,
     PROFILE_V026_VIEWPOINTS.name: PROFILE_V026_VIEWPOINTS,
+    PROFILE_V026_VIEWPOINTS_SAFE.name: PROFILE_V026_VIEWPOINTS_SAFE,
     PROFILE_PROPOSED_CLEARANCE.name: PROFILE_PROPOSED_CLEARANCE,
     PROFILE_UPSTREAM_RETARGET.name: PROFILE_UPSTREAM_RETARGET,
 }

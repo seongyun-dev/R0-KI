@@ -279,6 +279,14 @@ class PlannerParams:
     # 하고(그렇지 않으면 모든 목표가 막힌다), 긴 미지 지름길은 막아야 한다.
     # None 이면 검사하지 않는다 (a3d7d62 이전 프로필).
     max_unknown_path_length_m: float | None = None
+    # 탐사 목표까지 가는 동안 UNKNOWN 을 잠깐 스치는 것은 허용한다. 다만
+    # 이미 본 FREE 공간 사이를 긴 UNKNOWN 구간으로 잇는 경로는 벽 너머의
+    # 떠 있는 자유 공간으로 가는 지름길일 가능성이 크다. None이면 검사하지
+    # 않는다. 시작/끝에 붙은 UNKNOWN 구간은 이 값의 대상이 아니다.
+    max_internal_unknown_run_m: float | None = None
+    # If set, approach only to the last known section before a long internal
+    # UNKNOWN bridge, observe again, and replan instead of excluding the goal.
+    unknown_bridge_standoff_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -491,6 +499,7 @@ class RunMetrics:
     plan_budget_exhausted: int = 0
     # 경로는 나왔으나 UNKNOWN 통과가 허용치를 넘어 거부된 횟수 (a3d7d62).
     plan_rejected_unknown: int = 0
+    paths_clipped_at_unknown_bridge: int = 0
     # 국소 FREE 성장으로 되살아난 실패 레코드 수.
     failures_reactivated: int = 0
     planner_flavor: str = PlannerFlavor.APPROXIMATE.value

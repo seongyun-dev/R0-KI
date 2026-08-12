@@ -305,6 +305,107 @@ def unknown_path_length_m(path: PlannedPath) -> float:
     return total
 
 
+def max_internal_unknown_run_m(path: PlannedPath) -> float:
+    """Return the longest UNKNOWN bridge between two known path sections.
+
+    A short UNKNOWN run at the beginning is expected while the robot footprint
+    sits inside the LiDAR minimum-range blind spot. A frontier may likewise
+    touch UNKNOWN at the path end. Neither is a shortcut. UNKNOWN followed by
+    known space *after* known space has already been traversed is different: it
+    means the planner left the observed component and re-entered a detached
+    FREE island. That is the map-13 wall-through failure signature.
+    """
+
+    longest = 0.0
+    current = 0.0
+    seen_known = False
+    previous = None
+    for sample in path.samples:
+        segment = 0.0
+        if previous is not None:
+            segment = math.hypot(
+                sample.pose.x - previous.x, sample.pose.y - previous.y
+            )
+        if sample.cell_state is CellState.UNKNOWN:
+            current += segment
+        else:
+            if seen_known and current > 0.0:
+                longest = max(longest, current)
+            current = 0.0
+            seen_known = True
+        previous = sample.pose
+    return longest
+
+
+def clip_path_before_internal_unknown_bridge(
+    path: PlannedPath, max_run_m: float, standoff_m: float
+) -> PlannedPath | None:
+    """Return a safe known-space prefix before a long bounded UNKNOWN run."""
+
+    samples = path.samples
+    seen_known = False
+    run_start: int | None = None
+    run_length = 0.0
+    previous = None
+    for index, sample in enumerate(samples):
+        segment = 0.0
+        if previous is not None:
+            segment = math.hypot(
+                sample.pose.x - previous.x, sample.pose.y - previous.y
+            )
+        if sample.cell_state is CellState.UNKNOWN:
+            if seen_known and run_start is None:
+                run_start = index
+                run_length = 0.0
+            if run_start is not None:
+                run_length += segment
+        else:
+            if run_start is not None and run_length > max_run_m:
+                keep_end = run_start - 1
+                remaining_standoff = max(0.0, standoff_m)
+                while keep_end > 0 and remaining_standoff > 0.0:
+                    a = samples[keep_end].pose
+                    b = samples[keep_end - 1].pose
+                    remaining_standoff -= math.hypot(a.x - b.x, a.y - b.y)
+                    keep_end -= 1
+                if keep_end <= 0:
+                    return None
+                kept = samples[: keep_end + 1]
+                segments = [
+                    math.hypot(
+                        kept[i].pose.x - kept[i - 1].pose.x,
+                        kept[i].pose.y - kept[i - 1].pose.y,
+                    )
+                    for i in range(1, len(kept))
+                ]
+                return replace(
+                    path,
+                    samples=kept,
+                    length_m=sum(segments),
+                    reverse_length_m=sum(
+                        distance
+                        for distance, sample in zip(segments, kept[1:])
+                        if sample.reverse
+                    ),
+                    direction_changes=sum(
+                        kept[i].reverse != kept[i - 1].reverse
+                        for i in range(1, len(kept))
+                    ),
+                    free_cells=sum(s.cell_state is CellState.FREE for s in kept),
+                    unknown_cells=sum(
+                        s.cell_state is CellState.UNKNOWN for s in kept
+                    ),
+                    occupied_cells=sum(
+                        s.cell_state is CellState.OCCUPIED for s in kept
+                    ),
+                )
+            run_start = None
+            run_length = 0.0
+            seen_known = True
+        previous = sample.pose
+    return path
+
+
 def path_crosses_unsafe_unknown(
     path: PlannedPath, params: PlannerParams
 ) -> bool:
@@ -317,9 +418,13 @@ def path_crosses_unsafe_unknown(
     if path.occupied_cells > 0:
         return True
     limit = params.max_unknown_path_length_m
-    if limit is None:
-        return False
-    return unknown_path_length_m(path) > limit
+    if limit is not None and unknown_path_length_m(path) > limit:
+        return True
+    internal_limit = params.max_internal_unknown_run_m
+    return (
+        internal_limit is not None
+        and max_internal_unknown_run_m(path) > internal_limit
+    )
 
 
 def validate_start_pose(
@@ -560,6 +665,19 @@ def run(
             path = planner.plan(
                 discovered, pose, goal, profile.planner, profile.inflation, robot
             )
+            if (
+                path is not None
+                and profile.planner.max_internal_unknown_run_m is not None
+                and profile.planner.unknown_bridge_standoff_m is not None
+            ):
+                clipped_path = clip_path_before_internal_unknown_bridge(
+                    path,
+                    profile.planner.max_internal_unknown_run_m,
+                    profile.planner.unknown_bridge_standoff_m,
+                )
+                if clipped_path is not None and clipped_path is not path:
+                    path = clipped_path
+                    metrics.paths_clipped_at_unknown_bridge += 1
             # a3d7d62: 경로가 나와도 UNKNOWN 통과가 허용치를 넘으면 거부한다.
             # 플래너는 allow_unknown 으로 탐사적으로 두고, 실행 가능한 경로인지는
             # 오버레이가 따로 판정하는 구조다.
