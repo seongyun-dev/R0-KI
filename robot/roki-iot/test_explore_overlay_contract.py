@@ -72,6 +72,7 @@ class ExploreOverlayContractTest(unittest.TestCase):
     def test_mapping_bt_has_one_bounded_retry_without_costmap_clear(self):
         self.assertIn('number_of_retries="1"', self.bt_text)
         self.assertIn('planner_id="MappingGridBased"', self.bt_text)
+        self.assertIn('controller_id="MappingFollowPath"', self.bt_text)
         self.assertIn('<Wait wait_duration="1.0"/>', self.bt_text)
         self.assertNotIn("<ClearEntireCostmap", self.bt_text)
         self.assertNotIn("<Spin", self.bt_text)
