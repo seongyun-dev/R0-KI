@@ -403,7 +403,9 @@ def build_mapping_motion_sink(
 
 
 def _build_mapping_nav2_bridge(
-    runtime: Any, mapping_runtime_holder: dict[str, Any]
+    runtime: Any,
+    mapping_runtime_holder: dict[str, Any],
+    mapping_motion_sink: Any | None = None,
 ) -> Any:
     """Subscribe to Nav2 ``cmd_vel`` so the frontier explorer can drive mapping.
 
@@ -423,7 +425,10 @@ def _build_mapping_nav2_bridge(
             "AUTONOMOUS_MAPPING_FIELD_CONFIG_MISSING: ROKI_WHEELBASE_M and "
             "ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG are required"
         )
-    sink = build_mapping_motion_sink(runtime, mapping_runtime_holder)
+    sink = mapping_motion_sink or build_mapping_motion_sink(
+        runtime,
+        mapping_runtime_holder,
+    )
     return RosNav2Bridge(
         settings=RosNav2BridgeSettings(
             ackermann=AckermannCommandSettings(
@@ -825,15 +830,11 @@ def _build_mapping_runtime(
     runtime_service: Any,
     state_store: Any,
     settings: Any,
+    mapping_motion_sink: Any | None = None,
 ) -> Any:
-    """Build a dormant gamepad mapper; the device opens only on START_MAPPING."""
+    """Build Mapping; optional manual input is created only when requested."""
 
     from aiot_robot.mapping_artifacts import MapExportSettings, SlamMapExporter
-    from control.manual_drive_controller import (
-        ManualDriveController,
-        ManualDriveSettings,
-    )
-    from integration.linux_gamepad_input import GamepadSettings, LinuxGamepadInput
     from integration.localization_mode import (
         DockPose,
         LocalizationModeController,
@@ -849,59 +850,93 @@ def _build_mapping_runtime(
     )
     from integration.slam_session_control import RosSlamSessionControl
 
-    drive_controller = ManualDriveController(
-        runtime=runtime,
-        state_store=state_store,
-        settings=ManualDriveSettings(
-            forward_target_pwm=int(os.getenv("ROKI_MAPPING_FORWARD_PWM", "45")),
-            reverse_target_pwm=int(os.getenv("ROKI_MAPPING_REVERSE_PWM", "45")),
-            drive_pulse_sec=float(os.getenv("ROKI_MAPPING_DRIVE_PULSE_SEC", "0.2")),
-            steering_center_deg=int(
-                os.getenv("ROKI_MAPPING_STEERING_CENTER_DEG", "80")
-            ),
-            steering_min_deg=int(os.getenv("ROKI_MAPPING_STEERING_MIN_DEG", "60")),
-            steering_max_deg=int(os.getenv("ROKI_MAPPING_STEERING_MAX_DEG", "100")),
-            steering_step_deg=int(os.getenv("ROKI_MAPPING_STEERING_STEP_DEG", "2")),
-            steering_pulse_sec=float(
-                os.getenv("ROKI_MAPPING_STEERING_PULSE_SEC", "0.2")
-            ),
-            # LiDAR obstacles are map input in this explicit manual mode. The
-            # operator and deadman switch own motion; runtime hardware safety
-            # and ESP32 watchdog remain enforced below this controller.
-            require_clear_path=False,
-        ),
-    )
-    gamepad_settings = GamepadSettings(
-        device_path=os.getenv("ROKI_MAPPING_GAMEPAD_DEVICE", "/dev/input/js0"),
-        steering_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_STEERING_AXIS", "0")),
-        throttle_axis=int(os.getenv("ROKI_MAPPING_GAMEPAD_THROTTLE_AXIS", "1")),
-        deadman_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON", "4")),
-        deadman_required=_environment_enabled(
-            "ROKI_MAPPING_GAMEPAD_DEADMAN_REQUIRED",
-            True,
-        ),
-        stop_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_STOP_BUTTON", "1")),
-        finish_button_a=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A", "6")),
-        finish_button_b=int(os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B", "7")),
-        deadzone=float(os.getenv("ROKI_MAPPING_GAMEPAD_DEADZONE", "0.35")),
-        finish_hold_sec=float(os.getenv("ROKI_MAPPING_FINISH_HOLD_SEC", "2.0")),
-        loop_interval_sec=float(os.getenv("ROKI_MAPPING_GAMEPAD_LOOP_SEC", "0.05")),
-        reconnect_interval_sec=float(
-            os.getenv("ROKI_MAPPING_GAMEPAD_RECONNECT_SEC", "1.0")
-        ),
-        input_lease_sec=float(
-            os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "0")
-        ),
-    )
+    drive_controller = None
+    gamepad_input = None
     holder: dict[str, Any] = {}
-    if _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", True):
+    if _environment_enabled("AIOT_MAPPING_GAMEPAD_ENABLED", False):
+        from control.manual_drive_controller import (
+            ManualDriveController,
+            ManualDriveSettings,
+        )
+        from integration.linux_gamepad_input import (
+            GamepadSettings,
+            LinuxGamepadInput,
+        )
+
+        drive_controller = ManualDriveController(
+            runtime=runtime,
+            state_store=state_store,
+            settings=ManualDriveSettings(
+                forward_target_pwm=int(
+                    os.getenv("ROKI_MAPPING_FORWARD_PWM", "45")
+                ),
+                reverse_target_pwm=int(
+                    os.getenv("ROKI_MAPPING_REVERSE_PWM", "45")
+                ),
+                drive_pulse_sec=float(
+                    os.getenv("ROKI_MAPPING_DRIVE_PULSE_SEC", "0.2")
+                ),
+                steering_center_deg=int(
+                    os.getenv("ROKI_MAPPING_STEERING_CENTER_DEG", "80")
+                ),
+                steering_min_deg=int(
+                    os.getenv("ROKI_MAPPING_STEERING_MIN_DEG", "60")
+                ),
+                steering_max_deg=int(
+                    os.getenv("ROKI_MAPPING_STEERING_MAX_DEG", "100")
+                ),
+                steering_step_deg=int(
+                    os.getenv("ROKI_MAPPING_STEERING_STEP_DEG", "2")
+                ),
+                steering_pulse_sec=float(
+                    os.getenv("ROKI_MAPPING_STEERING_PULSE_SEC", "0.2")
+                ),
+                # The manual path remains opt-in; lower hardware safety and
+                # firmware watchdog enforcement are unchanged.
+                require_clear_path=False,
+            ),
+        )
+        gamepad_settings = GamepadSettings(
+            device_path=os.getenv("ROKI_MAPPING_GAMEPAD_DEVICE", "/dev/input/js0"),
+            steering_axis=int(
+                os.getenv("ROKI_MAPPING_GAMEPAD_STEERING_AXIS", "0")
+            ),
+            throttle_axis=int(
+                os.getenv("ROKI_MAPPING_GAMEPAD_THROTTLE_AXIS", "1")
+            ),
+            deadman_button=int(
+                os.getenv("ROKI_MAPPING_GAMEPAD_DEADMAN_BUTTON", "4")
+            ),
+            deadman_required=_environment_enabled(
+                "ROKI_MAPPING_GAMEPAD_DEADMAN_REQUIRED",
+                True,
+            ),
+            stop_button=int(os.getenv("ROKI_MAPPING_GAMEPAD_STOP_BUTTON", "1")),
+            finish_button_a=int(
+                os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_A", "6")
+            ),
+            finish_button_b=int(
+                os.getenv("ROKI_MAPPING_GAMEPAD_FINISH_BUTTON_B", "7")
+            ),
+            deadzone=float(os.getenv("ROKI_MAPPING_GAMEPAD_DEADZONE", "0.35")),
+            finish_hold_sec=float(
+                os.getenv("ROKI_MAPPING_FINISH_HOLD_SEC", "2.0")
+            ),
+            loop_interval_sec=float(
+                os.getenv("ROKI_MAPPING_GAMEPAD_LOOP_SEC", "0.05")
+            ),
+            reconnect_interval_sec=float(
+                os.getenv("ROKI_MAPPING_GAMEPAD_RECONNECT_SEC", "1.0")
+            ),
+            input_lease_sec=float(
+                os.getenv("ROKI_MAPPING_GAMEPAD_INPUT_LEASE_SEC", "0")
+            ),
+        )
         gamepad_input = LinuxGamepadInput(
             drive_controller,
             settings=gamepad_settings,
             finish_callback=lambda: holder["mapping"].finish(),
         )
-    else:
-        gamepad_input = _NoOpMappingInput()
     # 매핑<->순찰 전환. 예전에는 env 파일에 모드를 적고 서비스를 재시작했다.
     # 이제 slam_toolbox 서비스 호출이라 프로세스가 살아 있는 채로 바뀐다.
     localization_transport = RosLocalizationModeTransport()
@@ -972,6 +1007,7 @@ def _build_mapping_runtime(
         ),
         localization=localization_controller,
         slam_session=slam_session,
+        motion_authorization=mapping_motion_sink,
         settings=MappingRuntimeSettings(
             backend_base_url=os.getenv(
                 "AIOT_BACKEND_BASE_URL", "https://i15e103.p.ssafy.io"
@@ -1108,7 +1144,11 @@ def create_integrated_application(
     # 있으면 그쪽 라우터가 위 싱크로 보내므로 구독자를 둘로 만들지 않는다 --
     # 둘이면 같은 cmd_vel 을 놓고 서로 정지시킨다.
     mapping_motion_bridge = (
-        _build_mapping_nav2_bridge(runtime, mapping_runtime_holder)
+        _build_mapping_nav2_bridge(
+            runtime,
+            mapping_runtime_holder,
+            mapping_sink_holder.get("sink"),
+        )
         if (
             navigation_driver is None
             and not manual_enabled
@@ -1150,6 +1190,7 @@ def create_integrated_application(
             runtime_service,
             state_store,
             settings,
+            mapping_sink_holder.get("sink"),
         )
     if mapping_runtime is not None:
         runtime_service.set_mapping_runtime(mapping_runtime)
