@@ -51,7 +51,8 @@ from tools.mapping_sim.worldmodel import DiscoveredMap, GroundTruth
 ROBOT = RobotSpec()
 V025 = profiles_mod.PROFILE_V025
 V022 = profiles_mod.PROFILE_V022
-V026 = profiles_mod.PROFILE_V026_CANDIDATE
+V026 = profiles_mod.PROFILE_PROPOSED_CLEARANCE   # 제안(가설). 실제 v0.2.6 아님
+V026_REAL = profiles_mod.PROFILE_V026
 
 
 def _reveal_everything(ground_truth: GroundTruth) -> DiscoveredMap:

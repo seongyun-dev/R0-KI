@@ -123,12 +123,23 @@ robot/patches/...frontier-recovery.patch     목표 yaw 규칙 변경 + frontier
 인플레이션 반경. 프로필을 그 두 축으로 구성한 것은 임의 선택이 아니라 diff 가
 그렇게 나왔기 때문입니다.
 
-| 프로필 | 태그 | 목표 yaw | 인플레이션 |
-|---|---|---|---|
-| `v0.2.2` | `iot-v0.2.2` (341b920) | `atan2(approach − robot)` | 0.25 m |
-| `v0.2.5` | `iot-v0.2.5` (af1478c) | `atan2(frontier_free − approach)` | 0.40 m |
-| `v0.2.6-candidate` | **태그 아님 · 가설** | 위와 같으나 기준선 2배 | 0.40 m |
-| `upstream-retarget` | **태그 아님 · 대조군** | v0.2.5 와 동일 | 0.40 m |
+| 프로필 | 출처 | 목표 yaw | 인플레이션 | 재시도 |
+|---|---|---|---|---|
+| `v0.2.2` | `iot-v0.2.2` (341b920) | `atan2(approach − robot)` | 0.25 m | 15 s |
+| `v0.2.5` | `iot-v0.2.5` (af1478c) | `atan2(frontier_free − approach)` | 0.40 m | 15 s |
+| `v0.2.6` | `iot/feat/v0.2.6-mapping-stability` (8c7a466) **브랜치, 태그 아님** | `atan2(approach − robot)` (v0.2.2 로 회귀) | 0.25 m (회귀) | **5 s** |
+| `proposed-clearance` | **릴리스 아님 · 제안** | 기준선 2배 | 0.40 m | 15 s |
+| `upstream-retarget` | **태그 아님 · 대조군** | v0.2.5 와 동일 | 0.40 m | 15 s |
+
+`v0.2.6` 은 v0.2.5 의 두 실험(경계 접선 yaw, 인플레이션 0.40)을 **모두 철회**하고
+재시도 간격을 줄인 릴리스입니다. 여기에 더해 시뮬레이터로는 표현되지 않는 변경이
+있습니다: `progress_timeout` 을 활성 목표에 매기도록 수정, `canceling_goal_` 로 취소
+종결을 기다림, `ExploreStatusMonitor` 가 `/explore/status` 를 구독, 매핑 BT 에서
+`ClearEntireCostmap` 제거. **clearance 기반 접근점 선택과 `frontier_failures_` 초기화는
+v0.2.6 에 없습니다.**
+
+`proposed-clearance` 는 제 진단에서 나온 제안이고 **실제 v0.2.6 브랜치에 없습니다.**
+이름에 버전을 붙이지 않은 이유가 그것입니다.
 
 `v0.2.6-candidate` 는 2026-08-12 젯슨 실측 진단에서 나온 수정안을 설정으로 표현한
 것입니다. 릴리스가 아닙니다. v0.2.5 기준에서 네 가지만 바꿉니다:

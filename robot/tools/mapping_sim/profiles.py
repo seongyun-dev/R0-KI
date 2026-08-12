@@ -151,21 +151,56 @@ PROFILE_V025 = Profile(
 )
 
 
-# v0.2.6 후보는 **아직 태그가 아니다.** 2026-08-12 실측 진단에서 나온 수정안을
-# 설정으로 표현한 것이고, 시뮬레이터로 비교하기 위한 가설이다. 실물 검증 전에는
-# 릴리스로 취급하지 말 것.
-PROFILE_V026_CANDIDATE = Profile(
-    name="v0.2.6-candidate",
+PROFILE_V026 = Profile(
+    name="v0.2.6",
     provenance=ProfileProvenance(
-        tag="(태그 없음 - 후보)",
-        commit="(미커밋 - 가설)",
+        tag="iot/feat/v0.2.6-mapping-stability (브랜치, 태그 아님)",
+        commit="8c7a466",
+        sources=(_EXPLORE_SOURCE, _ROSCFG_SOURCE, _TEMPLATE_SOURCE, _PATCH_SOURCE,
+                 "robot/roki-iot/integration/explore_supervisor.py"),
+        notes=(
+            "인플레이션 0.40 -> 0.25 로 되돌림 (MEASURED_INFLATION_RADIUS_M)",
+            "목표 yaw 가 v0.2.2 방식으로 되돌아감: atan2(approach - robot_pose)",
+            "frontier_free 제거 -- v0.2.5 의 경계 접선 규칙을 철회했다",
+            "frontier_retry_delay 15.0 -> 5.0",
+            "MODE_PROFILES 의 명시 핀 3개 제거 (수치는 템플릿 기본값과 동일)",
+            "progress_timeout 을 활성 목표(prev_goal_)에 매기도록 고침 -- 종전에는 "
+            "매 tick 재정렬된 1순위 후보에 벌점이 갔다",
+            "canceling_goal_ / replan_after_cancel_ 추가: 취소가 reachedGoal() 로 "
+            "종결된 뒤에만 다음 후보를 고른다",
+            "ExploreStatusMonitor 가 /explore/status 를 구독한다 (종전 구독자 0개)",
+            "clearance/footprint 기반 접근점 선택은 **없다** (grep 0건)",
+            "frontier_failures_.clear() 는 **여전히 없다** -- 세션 안에서 영구",
+        ),
+    ),
+    frontier=_shared_frontier(),
+    planner=_mapping_planner(),
+    retry=_shared_retry(retry_delay_sec=5.0),
+    inflation=InflationSpec(inflation_radius_m=0.25, cost_scaling_factor=3.0),
+    goal_yaw_rule=GoalYawRule.BEARING_FROM_ROBOT,
+    single_active_goal=True,
+    retarget_while_active=False,
+    await_cancel_before_new_goal=True,
+    retry_with_alternate_approach=False,
+)
+
+
+# 이것은 **릴리스가 아니고 제안이다.** 2026-08-12 실측 진단에서 나온 수정안을 설정으로
+# 표현한 가설이며, 실제 v0.2.6 브랜치에는 이 내용이 들어 있지 않다 (clearance 기반
+# 접근점 grep 0건). 이름에 버전을 붙이지 않은 이유가 그것이다 -- 붙이면 실제 릴리스
+# 동작으로 오해된다.
+PROFILE_PROPOSED_CLEARANCE = Profile(
+    name="proposed-clearance",
+    provenance=ProfileProvenance(
+        tag="(릴리스 아님 - 제안)",
+        commit="(미구현 - 가설)",
         sources=(
             "2026-08-12 젯슨 실측 (mappingSessionId=9, explore pid=37846)",
             _EXPLORE_SOURCE,
             _PATCH_SOURCE,
         ),
         notes=(
-            "v0.2.5 기준에서 세 가지만 바꾼다",
+            "v0.2.5 기준에서 네 가지만 바꾼다 (실제 v0.2.6 에는 없는 내용)",
             "1) 접근점을 clearance 로 고른다 (footprint 가 들어갈 수 있는 첫 셀)",
             "2) 사전검사 실패 시 다른 접근점으로 재시도한다",
             "3) 실패 병합을 체비셰프 0.25 m 상자 -> 유클리드 inscribed 0.135 m",
@@ -228,7 +263,8 @@ PROFILE_UPSTREAM_RETARGET = Profile(
 BUILTIN_PROFILES: dict[str, Profile] = {
     PROFILE_V022.name: PROFILE_V022,
     PROFILE_V025.name: PROFILE_V025,
-    PROFILE_V026_CANDIDATE.name: PROFILE_V026_CANDIDATE,
+    PROFILE_V026.name: PROFILE_V026,
+    PROFILE_PROPOSED_CLEARANCE.name: PROFILE_PROPOSED_CLEARANCE,
     PROFILE_UPSTREAM_RETARGET.name: PROFILE_UPSTREAM_RETARGET,
 }
 
