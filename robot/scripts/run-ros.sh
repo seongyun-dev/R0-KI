@@ -49,7 +49,9 @@ start_component ros2 run tf2_ros static_transform_publisher \
 # 그 리맵이 같은 이름 노드를 둘 만들어 ROS 그래프 조회를 어긋나게 했다
 # (2026-08-08 실측, rf2o.yaml 주석 참고).
 start_component ros2 run rf2o_laser_odometry rf2o_laser_odometry_node \
-  --ros-args --params-file "${robot_root}/config/ros/rf2o.yaml"
+  --ros-args --params-file "${robot_root}/config/ros/rf2o.yaml" \
+  --log-level CLaserOdometry2D:=warn \
+  --log-level CLaserOdometry2DNode:=error
 
 # 매핑과 순찰이 같은 노드 집합으로 돈다. 예전에는 여기서 launch 파일 자체를
 # 갈아 끼웠고, 그래서 모드를 바꾸려면 이 서비스를 재시작해야 했다. 그 재시작이
