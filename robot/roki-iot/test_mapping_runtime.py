@@ -72,6 +72,26 @@ class FakeGamepad:
         }
 
 
+class FakeMotionAuthorization:
+    def __init__(self) -> None:
+        self.releases: list[str] = []
+
+    def release_motion_authorization(self, reason: str) -> None:
+        self.releases.append(reason)
+
+
+class FakeExplore:
+    def __init__(self) -> None:
+        self.started: list[int] = []
+        self.stopped: list[str] = []
+
+    def start(self, mapping_session_id: int) -> None:
+        self.started.append(mapping_session_id)
+
+    def stop(self, reason: str) -> None:
+        self.stopped.append(reason)
+
+
 class FakeExporter:
     def __init__(self, artifact: MapArtifact) -> None:
         self.artifact = artifact
@@ -180,6 +200,54 @@ class MappingRuntimeTest(unittest.TestCase):
         self.assertTrue(self.runtime.active)
         self.assertEqual(self.drive.activated, [12])
         self.assertEqual(self.gamepad.started, 1)
+
+    def test_autonomous_mapping_start_and_finish_need_no_gamepad(self) -> None:
+        authorization = FakeMotionAuthorization()
+        explore = FakeExplore()
+        runtime = ManualMappingRuntime(
+            runtime_service=SimpleNamespace(mapping_readiness=lambda: (True, "READY")),
+            state_store=self.store,
+            map_exporter=self.exporter,
+            map_activator=self.activator,
+            settings=self.settings,
+            client_factory=lambda: self.client,
+            explore_supervisor=explore,
+            motion_authorization=authorization,
+        )
+        self.addCleanup(runtime.stop)
+
+        self.assertEqual(runtime.start(12, "command-12"), (True, "READY"))
+        self.assertEqual(explore.started, [12])
+        self.assertEqual(
+            runtime.motion_timeline_diagnostic_context()["mappingControlMode"],
+            "AUTONOMOUS",
+        )
+
+        self.assertTrue(runtime.finish())
+        self.assertTrue(runtime.wait_for_completion(1.0))
+        self.assertEqual(authorization.releases, ["MAPPING_FINISH"])
+        self.assertEqual(self.exporter.exported, [12])
+        self.assertEqual(len(self.client.uploads), 1)
+
+    def test_autonomous_abort_releases_authorization_without_gamepad(self) -> None:
+        authorization = FakeMotionAuthorization()
+        runtime = ManualMappingRuntime(
+            runtime_service=SimpleNamespace(mapping_readiness=lambda: (True, "READY")),
+            state_store=self.store,
+            map_exporter=self.exporter,
+            map_activator=self.activator,
+            settings=self.settings,
+            client_factory=lambda: self.client,
+            explore_supervisor=FakeExplore(),
+            motion_authorization=authorization,
+        )
+        self.addCleanup(runtime.stop)
+
+        self.assertEqual(runtime.start(12, "command-12"), (True, "READY"))
+        self.assertEqual(runtime.abort("SERIAL_CONNECTION_RESET"), "command-12")
+
+        self.assertEqual(authorization.releases, ["MAPPING_ABORT"])
+        self.assertFalse(runtime.motion_active)
 
     def test_motion_timeline_diagnostic_context_tracks_mapping_and_gamepad(self) -> None:
         idle = self.runtime.motion_timeline_diagnostic_context()
