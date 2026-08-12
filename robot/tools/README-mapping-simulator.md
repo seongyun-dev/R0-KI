@@ -54,7 +54,7 @@ obstacle/distance 휴리스틱, 경로 스무딩. 그래서 경로 길이가 실
 호스트에 시스템 Python 이 없으므로 프로젝트 venv 를 씁니다.
 
 ```bash
-C:/workspace/iot/.codex_tmp/iot-ci-venv/Scripts/python.exe robot/tools/mapping_replay_simulator.py --map C:/workspace/iot/artifacts/mapping-review-20260812/map-13-v1-cf6a97edfc6c/map.yaml --profiles v0.2.2,v0.2.5,v0.2.6-candidate --start-x 3.305 --start-y -0.935 --start-yaw-deg 0 --max-steps 400 --output C:/workspace/iot/artifacts/mapping-simulator/run-001
+C:/workspace/iot/.codex_tmp/iot-ci-venv/Scripts/python.exe robot/tools/mapping_replay_simulator.py --map C:/workspace/iot/artifacts/mapping-review-20260812/map-13-v1-cf6a97edfc6c/map.yaml --profiles v0.2.2,v0.2.5,v0.2.6 --start-x 3.305 --start-y -0.935 --start-yaw-deg 0 --max-steps 400 --output C:/workspace/iot/artifacts/mapping-simulator/run-001
 ```
 
 시작점이 지도 밖이거나 점유 셀이거나 footprint 가 들어가지 않으면 **실패하고 가능한
@@ -65,7 +65,7 @@ FREE 시작점 후보를 출력합니다.** 임의로 다른 곳에서 시작하
 
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
-| `--profiles` | `v0.2.2,v0.2.5` | `v0.2.2`, `v0.2.5`, `v0.2.6-candidate`, `upstream-retarget` |
+| `--profiles` | `v0.2.2,v0.2.5` | `v0.2.2`, `v0.2.5`, `v0.2.6`, `proposed-clearance`, `upstream-retarget` |
 | `--lidar-range` | `8.0` | 최대 거리 [m] |
 | `--lidar-angle-step-deg` | `1.0` | 빔 간격 |
 | `--lidar-noise` | `0.0` | 거리 노이즈 표준편차. **0 이면 완전 결정론적** |
@@ -80,7 +80,7 @@ cd robot && C:/workspace/iot/.codex_tmp/iot-ci-venv/Scripts/python.exe -m unitte
 ```
 
 인공 지도 8종(넓은 방 / 벽 분리 / 좁은 틈 / U자 / 좁은 복도 / 막다른 길 /
-바로 옆 프론티어 / 재발견 후 접근 가능)에 대해 38개 검사가 돕니다. 핵심 assertion:
+바로 옆 프론티어 / 재발견 후 접근 가능)에 대해 39개 검사가 돕니다. 핵심 assertion:
 
 - 점유 셀을 통과한 경로는 승인되지 않음
 - `allow_unknown=false` 에서 unknown 경로 거부
@@ -141,13 +141,18 @@ v0.2.6 에 없습니다.**
 `proposed-clearance` 는 제 진단에서 나온 제안이고 **실제 v0.2.6 브랜치에 없습니다.**
 이름에 버전을 붙이지 않은 이유가 그것입니다.
 
-`v0.2.6-candidate` 는 2026-08-12 젯슨 실측 진단에서 나온 수정안을 설정으로 표현한
-것입니다. 릴리스가 아닙니다. v0.2.5 기준에서 네 가지만 바꿉니다:
+`proposed-clearance` 가 v0.2.5 기준으로 바꾸는 네 가지:
 
 1. 접근점을 clearance 로 고른다 (footprint 가 들어갈 수 있는 첫 셀)
 2. 사전검사 실패 시 다른 접근점으로 재시도
 3. 실패 병합을 체비셰프 0.25 m 상자 → 유클리드 0.135 m
 4. 지도 개정 기반 soft blacklist
+
+**단, 실측 sweep 에서 ②③④ 는 한 번도 발동하지 않았습니다.** 5장 전부에서
+`frontier_retries = 0` 이라 `recordGoalFailure` 가 불리지 않았고, 그 셋은 실패가
+생겨야 동작하는 코드입니다. 즉 관측된 효과는 **①(clearance 기반 접근점) 하나로
+전부 설명됩니다.** ②③④ 는 이 sweep 으로 검증되지 않았으므로 근거 없이 함께
+넣지 마세요.
 
 `upstream-retarget` 은 패치가 제거한 upstream 동작(`same_goal && goal_active_`)의
 대조군입니다. 패치 주석이 "그 선점을 Humble 이 실제 ABORT 와 구별하지 못해 이전
