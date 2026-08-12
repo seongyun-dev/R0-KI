@@ -55,6 +55,7 @@ V025 = profiles_mod.PROFILE_V025
 V022 = profiles_mod.PROFILE_V022
 V026 = profiles_mod.PROFILE_PROPOSED_CLEARANCE   # 제안(가설). 실제 v0.2.6 아님
 V026_REAL = profiles_mod.PROFILE_V026
+V026_VIEWPOINTS = profiles_mod.PROFILE_V026_VIEWPOINTS
 
 
 def _reveal_everything(ground_truth: GroundTruth) -> DiscoveredMap:
@@ -345,6 +346,53 @@ class PlannerTest(unittest.TestCase):
 
 
 class FrontierTest(unittest.TestCase):
+    def test_viewpoint_profile_builds_bounded_distinct_free_approaches(self):
+        ground = synthetic.wide_room()
+        discovered = DiscoveredMap(ground.spec)
+        pose = Pose(*ground.spec.cell_to_world(10, 15), 0.0)
+        discovered.reveal(
+            ground.raycast(
+                pose, LidarSpec(max_range_m=1.2, angle_increment_deg=2.0)
+            )
+        )
+
+        candidates = frontier_mod.detect(
+            discovered,
+            pose,
+            V026_VIEWPOINTS.frontier,
+            ROBOT,
+            V026_VIEWPOINTS.goal_yaw_rule,
+        )
+        approaches = [
+            candidate.approach_options
+            for candidate in candidates
+            if candidate.approach_options
+        ]
+        self.assertTrue(approaches, "viewpoint 후보가 하나도 생성되지 않았습니다")
+        for options in approaches:
+            self.assertLessEqual(len(options), 3)
+            for index, (point, _, _) in enumerate(options):
+                column, row = discovered.spec.world_to_cell(*point)
+                self.assertIs(
+                    discovered.state_at_cell(column, row), CellState.FREE
+                )
+                for other, _, _ in options[:index]:
+                    self.assertGreaterEqual(
+                        math.hypot(point[0] - other[0], point[1] - other[1]),
+                        V026_VIEWPOINTS.frontier.candidate_spacing_m - 1e-9,
+                    )
+
+    def test_viewpoint_profile_preserves_permissive_unknown_planner(self):
+        self.assertEqual(V026_VIEWPOINTS.frontier.max_approaches, 3)
+        self.assertTrue(V026_VIEWPOINTS.planner.allow_unknown)
+        self.assertIsNone(
+            V026_VIEWPOINTS.planner.max_unknown_path_length_m,
+            "viewpoint 후보가 UNKNOWN hard gate를 되살리면 안 됩니다",
+        )
+        self.assertEqual(V026_VIEWPOINTS.retry.retry_delay_sec, 5.0)
+        self.assertEqual(V026_VIEWPOINTS.retry.max_reactivations, 1)
+        self.assertTrue(V026_VIEWPOINTS.retry_with_alternate_approach)
+
     def test_cost_uses_documented_formula(self):
         ground = synthetic.wide_room()
         discovered = DiscoveredMap(ground.spec)

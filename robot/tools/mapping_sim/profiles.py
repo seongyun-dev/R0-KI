@@ -47,6 +47,8 @@ def _shared_frontier(**overrides: object) -> FrontierParams:
         potential_scale=0.5,          # explore.params.yaml: potential_scale
         gain_scale=3.0,               # explore.params.yaml: gain_scale
         approach_distance_m=0.25,     # explore.params.yaml: frontier_approach_distance
+        max_approaches=1,
+        candidate_spacing_m=0.20,
         clearance_aware_approach=False,
         required_clearance_m=None,
     )
@@ -249,6 +251,42 @@ PROFILE_V026_8C7A466 = Profile(
 )
 
 
+PROFILE_V026_VIEWPOINTS = Profile(
+    name="v0.2.6-viewpoints",
+    provenance=ProfileProvenance(
+        tag="iot/feat/v0.2.6-frontier-viewpoints (candidate)",
+        commit="working-tree",
+        sources=(_EXPLORE_SOURCE, _ROSCFG_SOURCE, _PATCH_SOURCE),
+        notes=(
+            "8c7a466 base; frontier cluster당 최대 3개 robot-connected FREE 접근 자세",
+            "MappingGridBased가 순차 검사하고 첫 feasible 자세만 실행",
+            "접근 자세가 모두 실패한 뒤에만 frontier 실패 1회 기록",
+            "5초 cooldown; local FREE 증가 시 frontier별 최대 1회 재활성화",
+            "UNKNOWN 길이 hard gate와 clearance hard gate는 사용하지 않음",
+        ),
+    ),
+    frontier=_shared_frontier(
+        max_approaches=3,
+        candidate_spacing_m=0.20,
+    ),
+    planner=_mapping_planner(),
+    retry=_shared_retry(
+        retry_delay_sec=5.0,
+        merge_metric=MergeMetric.EUCLIDEAN,
+        blacklist_mode=BlacklistMode.LOCAL_FREE_GROWTH,
+        recheck_radius_m=0.50,
+        recheck_min_free_cells=8,
+        max_reactivations=1,
+    ),
+    inflation=InflationSpec(inflation_radius_m=0.25, cost_scaling_factor=3.0),
+    goal_yaw_rule=GoalYawRule.APPROACH_TO_BOUNDARY,
+    single_active_goal=True,
+    retarget_while_active=False,
+    await_cancel_before_new_goal=True,
+    retry_with_alternate_approach=True,
+)
+
+
 # 이것은 **릴리스가 아니고 제안이다.** 2026-08-12 실측 진단에서 나온 수정안을 설정으로
 # 표현한 가설이며, 실제 v0.2.6 브랜치에는 이 내용이 들어 있지 않다 (clearance 기반
 # 접근점 grep 0건). 이름에 버전을 붙이지 않은 이유가 그것이다 -- 붙이면 실제 릴리스
@@ -330,6 +368,7 @@ BUILTIN_PROFILES: dict[str, Profile] = {
     PROFILE_V026.name: PROFILE_V026,
     PROFILE_V026_7C9CAEE.name: PROFILE_V026_7C9CAEE,
     PROFILE_V026_8C7A466.name: PROFILE_V026_8C7A466,
+    PROFILE_V026_VIEWPOINTS.name: PROFILE_V026_VIEWPOINTS,
     PROFILE_PROPOSED_CLEARANCE.name: PROFILE_PROPOSED_CLEARANCE,
     PROFILE_UPSTREAM_RETARGET.name: PROFILE_UPSTREAM_RETARGET,
 }

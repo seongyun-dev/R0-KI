@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from dataclasses import replace
 from typing import Sequence
 
 from .contracts import (
@@ -250,6 +251,108 @@ def alternate_approaches(
     # 여유가 큰 순. 안정 정렬이라 여유가 같으면 BFS 발견 순서를 유지한다.
     results.sort(key=lambda item: -item[2])
     return results[:_MAX_ALTERNATES]
+
+
+def viewpoint_approaches(
+    discovered: DiscoveredMap,
+    candidate: FrontierCandidate,
+    robot: RobotSpec,
+    params: FrontierParams,
+    yaw_rule: GoalYawRule,
+) -> list[tuple[tuple[float, float], float, float]]:
+    """Operational v0.2.6 viewpoint policy without a clearance hard gate.
+
+    The first point is the existing robot-connected parent-chain approach.
+    Further points are derived from distinct boundary-adjacent FREE cells and
+    are kept only when they are spatially separated.  Clearance is recorded
+    for diagnostics but does not reject a candidate; Nav2 owns SE2 footprint
+    and kinematic feasibility.
+    """
+    results: list[tuple[tuple[float, float], float, float]] = []
+    if candidate.approach is not None and candidate.goal_yaw is not None:
+        results.append(
+            (
+                candidate.approach,
+                candidate.goal_yaw,
+                candidate.approach_clearance_m or 0.0,
+            )
+        )
+    if params.max_approaches <= 1:
+        return results
+
+    spec = discovered.spec
+    width = spec.width
+    size = width * spec.height
+    sources = _cluster_boundary_cells(spec, discovered, candidate, width, size)
+    if candidate.boundary_free is not None:
+        column, row = spec.world_to_cell(*candidate.boundary_free)
+        if spec.contains(column, row):
+            sources.insert(0, spec.index(column, row))
+    if not sources:
+        return results
+
+    retreat_cells = _retreat_cells(params, spec.resolution)
+    parent, depth, root = _multi_source_free_bfs(
+        sources, discovered, width, size, retreat_cells
+    )
+    deepest: dict[int, int] = {}
+    for cell, hops in depth.items():
+        source = root[cell]
+        if hops > deepest.get(source, -1):
+            deepest[source] = hops
+
+    options: list[tuple[tuple[float, float], float, float, float]] = []
+    for cell, hops in depth.items():
+        if hops == 0 or hops != deepest[root[cell]]:
+            continue
+        chain = _chain_from_parents(parent, cell)
+        index = min(retreat_cells, len(chain) - 1)
+        approach_index = chain[index]
+        approach_xy = _cell_centre(spec, approach_index)
+        if _is_excluded(
+            approach_xy, [item[0] for item in results], params.candidate_spacing_m
+        ):
+            continue
+        boundary_xy = _cell_centre(spec, chain[0])
+        yaw = _goal_yaw(
+            yaw_rule, None, boundary_xy, approach_xy, approach_xy
+        )
+        clearance = _clearance_m(
+            discovered,
+            approach_xy[0],
+            approach_xy[1],
+            robot.circumscribed_radius_m * _CLEARANCE_PROBE_FACTOR,
+        )
+        robot_distance = (
+            math.hypot(
+                approach_xy[0] - candidate.approach[0],
+                approach_xy[1] - candidate.approach[1],
+            )
+            if candidate.approach is not None
+            else 0.0
+        )
+        options.append((approach_xy, yaw, clearance, robot_distance))
+
+    options.sort(key=lambda item: item[3])
+    while options and len(results) < params.max_approaches:
+        if not results:
+            selected_index = 0
+        else:
+            selected_index = max(
+                range(len(options)),
+                key=lambda index: min(
+                    math.hypot(
+                        options[index][0][0] - chosen[0][0],
+                        options[index][0][1] - chosen[0][1],
+                    )
+                    for chosen in results
+                ),
+            )
+        point, yaw, clearance, _ = options.pop(selected_index)
+        if _is_excluded(point, [item[0] for item in results], params.candidate_spacing_m):
+            continue
+        results.append((point, yaw, clearance))
+    return results[: params.max_approaches]
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +728,12 @@ def _candidate_from_cluster(
             size_m=size_m,
             min_distance_m=min_distance_m,
             cost=cost,
+            failure_key=(
+                sum(column for column, _ in cells) / count * resolution
+                + spec.origin_x + resolution * 0.5,
+                sum(row for _, row in cells) / count * resolution
+                + spec.origin_y + resolution * 0.5,
+            ),
             boundary_free=boundary_xy,
             approach=None,
             goal_yaw=None,
@@ -664,6 +773,12 @@ def _candidate_from_cluster(
             size_m=size_m,
             min_distance_m=min_distance_m,
             cost=cost,
+            failure_key=(
+                sum(column for column, _ in cells) / count * resolution
+                + spec.origin_x + resolution * 0.5,
+                sum(row for _, row in cells) / count * resolution
+                + spec.origin_y + resolution * 0.5,
+            ),
             boundary_free=boundary_xy,
             approach=None,
             goal_yaw=None,
@@ -677,12 +792,18 @@ def _candidate_from_cluster(
 
     approach_xy = _cell_centre(spec, chain[picked])
     heading_xy = _cell_centre(spec, chain[min(2 * picked, len(chain) - 1)])
-    return FrontierCandidate(
+    candidate = FrontierCandidate(
         candidate_id=candidate_id,
         cluster_cells=cells,
         size_m=size_m,
         min_distance_m=min_distance_m,
         cost=cost,
+        failure_key=(
+            sum(column for column, _ in cells) / count * resolution
+            + spec.origin_x + resolution * 0.5,
+            sum(row for _, row in cells) / count * resolution
+            + spec.origin_y + resolution * 0.5,
+        ),
         boundary_free=boundary_xy,
         approach=approach_xy,
         goal_yaw=_goal_yaw(
@@ -691,6 +812,16 @@ def _candidate_from_cluster(
         approach_clearance_m=clearance,
         verdict=CandidateVerdict.NOT_EVALUATED,
     )
+    if params.max_approaches > 1:
+        return replace(
+            candidate,
+            approach_options=tuple(
+                viewpoint_approaches(
+                    discovered, candidate, robot, params, yaw_rule
+                )
+            ),
+        )
+    return candidate
 
 
 # ---------------------------------------------------------------------------

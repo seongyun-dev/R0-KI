@@ -249,6 +249,8 @@ class FrontierParams:
     potential_scale: float = 0.5
     gain_scale: float = 3.0
     approach_distance_m: float = 0.25
+    max_approaches: int = 1
+    candidate_spacing_m: float = 0.20
     # 접근점을 clearance 로 고를지 (v0.2.6 후보) 아니면 고정 홉수로 후퇴할지 (현행)
     clearance_aware_approach: bool = False
     # clearance_aware_approach 일 때 요구할 최소 여유. None 이면 inscribed 사용.
@@ -376,12 +378,14 @@ class FrontierCandidate:
     size_m: float
     min_distance_m: float
     cost: float
+    failure_key: tuple[float, float]
     # 경계에 맞닿은 FREE 셀 (v0.2.5 의 frontier_free)
     boundary_free: tuple[float, float] | None
     # 실제로 목표로 보낼 지점
     approach: tuple[float, float] | None
     goal_yaw: float | None
     approach_clearance_m: float | None
+    approach_options: tuple[tuple[tuple[float, float], float, float], ...] = ()
     verdict: CandidateVerdict = CandidateVerdict.NOT_EVALUATED
     reject_detail: str = ""
 

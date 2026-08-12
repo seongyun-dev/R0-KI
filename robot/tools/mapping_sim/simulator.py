@@ -277,6 +277,11 @@ class FailureLedger:
     def snapshot(self) -> list[FailureRecord]:
         return list(self._records)
 
+    def clear(self, x: float, y: float) -> None:
+        index = self._hit(x, y)
+        if index is not None:
+            self._records.pop(index)
+
 
 def unknown_path_length_m(path: PlannedPath) -> float:
     """경로가 UNKNOWN 칸을 통과하는 누적 길이.
@@ -369,13 +374,13 @@ def _classify(
                 replace(candidate, verdict=CandidateVerdict.NO_APPROACH_CELL)
             )
             continue
-        ax, ay = candidate.approach
-        if ledger.is_blacklisted(ax, ay):
+        fx, fy = candidate.failure_key
+        if ledger.is_blacklisted(fx, fy):
             judged.append(
                 replace(candidate, verdict=CandidateVerdict.BLACKLISTED)
             )
             continue
-        if ledger.is_cooling(ax, ay, now):
+        if ledger.is_cooling(fx, fy, now):
             judged.append(
                 replace(candidate, verdict=CandidateVerdict.COOLING_DOWN)
             )
@@ -537,8 +542,20 @@ def run(
 
         attempted: list[tuple[float, float]] = []
         path: PlannedPath | None = None
+        options = list(chosen.approach_options)
+        if not options:
+            options = [
+                (
+                    (goal.x, goal.y),
+                    goal.yaw,
+                    chosen.approach_clearance_m or 0.0,
+                )
+            ]
+        option_index = 0
         plan_started = time.monotonic()
         while True:
+            (option_x, option_y), option_yaw, _ = options[option_index]
+            goal = Pose(option_x, option_y, option_yaw)
             attempted.append((goal.x, goal.y))
             path = planner.plan(
                 discovered, pose, goal, profile.planner, profile.inflation, robot
@@ -569,24 +586,33 @@ def run(
                 reason = "path_unavailable"
             if timed_out and not unknown_reject:
                 metrics.plan_budget_exhausted += 1
-            failure = ledger.record(
-                goal.x, goal.y, reason, sim_time, discovered.revision, discovered
+            option_index += 1
+            if option_index < len(options):
+                continue
+            if profile.frontier.max_approaches <= 1:
+                if profile.retry_with_alternate_approach:
+                    alternates = frontier_mod.alternate_approaches(
+                        discovered,
+                        chosen,
+                        robot,
+                        profile.frontier,
+                        profile.goal_yaw_rule,
+                        attempted,
+                    )
+                    if alternates:
+                        options.extend(alternates)
+                        continue
+            failure_x, failure_y = chosen.failure_key
+            ledger.record(
+                failure_x,
+                failure_y,
+                "all_approaches_unreachable",
+                sim_time,
+                discovered.revision,
+                discovered,
             )
             metrics.frontier_retries += 1
-            if not profile.retry_with_alternate_approach:
-                break
-            alternates = frontier_mod.alternate_approaches(
-                discovered,
-                chosen,
-                robot,
-                profile.frontier,
-                profile.goal_yaw_rule,
-                attempted,
-            )
-            if not alternates:
-                break
-            (ax, ay), yaw, _clearance = alternates[0]
-            goal = Pose(ax, ay, yaw)
+            break
         metrics.compute_time_sec += time.monotonic() - plan_started
 
         candidates[pick] = replace(
@@ -661,6 +687,7 @@ def run(
                 f"{outcome.net_displacement_m:.3f} m (임계 "
                 f"{settings.motion_epsilon_m:.3f} m)"
             )
+        ledger.clear(*chosen.failure_key)
         record.goal_events.append((sim_time, "goal_finished"))
         record.discovered_ratio = _discovered_ratio(discovered, metrics)
         record.known_cells = discovered.known_cell_count()
