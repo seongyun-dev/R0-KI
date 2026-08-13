@@ -7,6 +7,7 @@ from aiot_robot.ai_adapter_core import (
     demo_vehicle_plate_collector,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
+    scope_vehicle_dedupe_to_patrol,
 )
 from aiot_robot.contracts import DetectionEvent
 import json
@@ -129,6 +130,85 @@ class AiAdapterCoreTest(unittest.TestCase):
         self.assertEqual(collector._delegate.calls, 3)
         self.assertEqual(result[0]["plate"], "254러1559")
         self.assertEqual(len(collector.all_plates()), 1)
+
+    def test_demo_collector_rearms_only_when_patrol_id_changes(self):
+        class ExistingCollector:
+            def update(self, detections, frame, frame_idx, camera=None):
+                del detections, frame, frame_idx, camera
+                return []
+
+            def all_plates(self):
+                return []
+
+        active_patrol = {"id": 101}
+        Collector = demo_vehicle_plate_collector(
+            ExistingCollector,
+            "254러1559",
+            patrol_id_provider=lambda: active_patrol["id"],
+        )
+        collector = Collector()
+        detection = self._licence()
+
+        for frame_idx in (1, 2):
+            self.assertEqual(
+                collector.update([detection], None, frame_idx, camera="A"), []
+            )
+        self.assertEqual(
+            len(collector.update([detection], None, 3, camera="A")), 1
+        )
+
+        # A duplicate ENABLE for the same patrol must not re-arm the event.
+        for frame_idx in (4, 5, 6):
+            self.assertEqual(
+                collector.update([detection], None, frame_idx, camera="A"), []
+            )
+
+        frame_idx = 7
+        for patrol_id in (102, 103, 104, 105):
+            active_patrol["id"] = patrol_id
+            for _ in range(2):
+                self.assertEqual(
+                    collector.update([detection], None, frame_idx, camera="A"), []
+                )
+                frame_idx += 1
+            next_patrol = collector.update(
+                [detection], None, frame_idx, camera="A"
+            )
+            frame_idx += 1
+            self.assertEqual(len(next_patrol), 1)
+            self.assertEqual(next_patrol[0]["plate"], "254러1559")
+            self.assertEqual(len(collector.all_plates()), 1)
+
+    def test_vehicle_dedupe_is_scoped_to_patrol_without_touching_other_events(self):
+        class Manager:
+            def __init__(self):
+                self.created = {
+                    ("vehicle_plate", "254러1559"),
+                    ("lying", 7, "A"),
+                }
+
+        manager = Manager()
+
+        self.assertTrue(scope_vehicle_dedupe_to_patrol(manager, 101))
+        self.assertNotIn(("vehicle_plate", "254러1559"), manager.created)
+        self.assertIn(("lying", 7, "A"), manager.created)
+
+        manager.created.add(("vehicle_plate", "254러1559"))
+        self.assertFalse(scope_vehicle_dedupe_to_patrol(manager, 101))
+        self.assertIn(("vehicle_plate", "254러1559"), manager.created)
+
+        self.assertTrue(scope_vehicle_dedupe_to_patrol(manager, 102))
+        self.assertNotIn(("vehicle_plate", "254러1559"), manager.created)
+        self.assertIn(("lying", 7, "A"), manager.created)
+
+    def test_vehicle_dedupe_does_not_rearm_without_active_patrol(self):
+        class Manager:
+            created = {("vehicle_plate", "254러1559")}
+
+        manager = Manager()
+
+        self.assertFalse(scope_vehicle_dedupe_to_patrol(manager, None))
+        self.assertIn(("vehicle_plate", "254러1559"), manager.created)
 
     def test_collapses_recycling_scene_into_one_union_bbox(self) -> None:
         events = [
