@@ -31,12 +31,13 @@ class CmdVelAdapterTest(unittest.TestCase):
         straight = self.adapter.convert(0.2, 0.0)
         self.assertEqual(straight.steering_deg, 80)
         self.assertGreaterEqual(straight.speed_pwm, 45)
+        self.assertEqual(self.adapter.convert(0.4, 0.0).speed_pwm, 55)
 
         left = self.adapter.convert(0.2, 2.0)
         right = self.adapter.convert(0.2, -2.0)
         self.assertEqual(left.steering_deg, 60)
         self.assertEqual(right.steering_deg, 100)
-        self.assertLessEqual(abs(left.speed_pwm), 51)
+        self.assertLessEqual(abs(left.speed_pwm), 55)
 
     def test_reverse_and_missing_calibration(self) -> None:
         reverse_left_yaw = self.adapter.convert(-0.2, 1.0)

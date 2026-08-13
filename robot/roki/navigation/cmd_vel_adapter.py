@@ -12,7 +12,7 @@ class AckermannCommandSettings:
     maximum_road_wheel_angle_deg: float | None
     maximum_linear_speed_mps: float = 0.4
     minimum_drive_pwm: int = 45
-    maximum_drive_pwm: int = 51
+    maximum_drive_pwm: int = 55
     steering_left_deg: int = 60
     steering_center_deg: int = 80
     steering_right_deg: int = 100
