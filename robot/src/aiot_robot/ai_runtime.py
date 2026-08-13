@@ -27,6 +27,7 @@ from std_msgs.msg import String
 from .ai_adapter_core import (
     build_detection_message,
     collapse_recycling_events_for_frame,
+    demo_vehicle_plate_collector,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
 )
@@ -374,6 +375,11 @@ def run_pipeline(
             )
 
         module.EventManager.create_events = create_events_with_recycling_cluster
+
+        module.PlateCollector = demo_vehicle_plate_collector(
+            module.PlateCollector,
+            os.getenv("AIOT_DEMO_FORCE_VEHICLE_PLATE"),
+        )
 
         original_dispatch_events = module.dispatch_events
 
