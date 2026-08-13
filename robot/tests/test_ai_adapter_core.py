@@ -1,8 +1,10 @@
 import unittest
 
 from aiot_robot.ai_adapter_core import (
+    DemoVehiclePlatePolicy,
     build_detection_message,
     collapse_recycling_events_for_frame,
+    demo_vehicle_plate_collector,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
 )
@@ -11,6 +13,123 @@ import json
 
 
 class AiAdapterCoreTest(unittest.TestCase):
+    @staticmethod
+    def _licence(track_id=7, bbox=None, confidence=0.8):
+        return {
+            "class_name": "licence",
+            "track_id": track_id,
+            "bbox": bbox or [10, 20, 110, 60],
+            "confidence": confidence,
+            "camera": "A",
+        }
+
+    def test_demo_plate_waits_for_stable_track_and_falls_back_after_ocr_failure(self):
+        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=3)
+        detection = self._licence()
+
+        self.assertEqual(policy.observe([detection], [], camera="A"), [])
+        self.assertEqual(policy.observe([detection], [], camera="A"), [])
+        records = policy.observe([detection], [], camera="A")
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["plate"], "254러1559")
+        self.assertEqual(records[0]["_demoOcrPlate"], "UNAVAILABLE")
+        self.assertEqual(records[0]["_demoSource"], "OCR_FALLBACK")
+
+    def test_demo_plate_overrides_successful_ocr_without_changing_context(self):
+        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=3)
+        detection = self._licence(bbox=[30, 40, 130, 80])
+        actual = {
+            "track_id": 7,
+            "plate": "254러1558",
+            "confidence": 0.91,
+            "bbox": [30, 40, 130, 80],
+            "camera": "A",
+        }
+
+        policy.observe([detection], [actual], camera="A")
+        policy.observe([detection], [], camera="A")
+        records = policy.observe([detection], [], camera="A")
+
+        self.assertEqual(records[0]["plate"], "254러1559")
+        self.assertEqual(records[0]["_demoOcrPlate"], "254러1558")
+        self.assertEqual(records[0]["_demoSource"], "OCR_OVERRIDE")
+        self.assertEqual(records[0]["track_id"], 7)
+        self.assertEqual(records[0]["bbox"], [30, 40, 130, 80])
+        self.assertEqual(records[0]["camera"], "A")
+
+    def test_demo_plate_requires_consecutive_frames(self):
+        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=3)
+        detection = self._licence()
+
+        policy.observe([detection], [], camera="A")
+        policy.observe([], [], camera="A")
+        policy.observe([detection], [], camera="A")
+        policy.observe([detection], [], camera="A")
+
+        self.assertEqual(policy.all_records(), [])
+
+    def test_demo_plate_emits_each_track_only_once(self):
+        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=2)
+        detection = self._licence()
+
+        policy.observe([detection], [], camera="A")
+        first = policy.observe([detection], [], camera="A")
+        repeated = policy.observe([detection], [], camera="A")
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(repeated, [])
+        self.assertEqual(len(policy.all_records()), 1)
+
+    def test_demo_plate_keeps_position_fields_outside_plate_policy(self):
+        context = {
+            "x": -1.25,
+            "y": 3.75,
+            "bbox": [10, 20, 110, 60],
+            "frameWidth": 640,
+        }
+        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=2)
+        detection = self._licence(bbox=context["bbox"])
+
+        policy.observe([detection], [], camera="A")
+        record = policy.observe([detection], [], camera="A")[0]
+
+        self.assertEqual(record["bbox"], context["bbox"])
+        self.assertEqual((context["x"], context["y"]), (-1.25, 3.75))
+        self.assertEqual(context["frameWidth"], 640)
+
+    def test_demo_off_returns_exact_original_collector_class(self):
+        class ExistingCollector:
+            pass
+
+        self.assertIs(demo_vehicle_plate_collector(ExistingCollector, None), ExistingCollector)
+        self.assertIs(demo_vehicle_plate_collector(ExistingCollector, ""), ExistingCollector)
+
+    def test_demo_collector_calls_ocr_on_every_frame_before_fallback(self):
+        class ExistingCollector:
+            def __init__(self):
+                self.calls = 0
+
+            def update(self, detections, frame, frame_idx, camera=None):
+                del detections, frame, frame_idx, camera
+                self.calls += 1
+                return []
+
+            def all_plates(self):
+                return []
+
+        Collector = demo_vehicle_plate_collector(ExistingCollector, "254러1559")
+        collector = Collector()
+        detection = self._licence()
+
+        self.assertEqual(collector.update([detection], None, 1, camera="A"), [])
+        self.assertEqual(collector.update([detection], None, 2, camera="A"), [])
+        result = collector.update([detection], None, 3, camera="A")
+
+        self.assertEqual(collector._delegate.calls, 3)
+        self.assertEqual(result[0]["plate"], "254러1559")
+        self.assertEqual(len(collector.all_plates()), 1)
+
     def test_collapses_recycling_scene_into_one_union_bbox(self) -> None:
         events = [
             {
