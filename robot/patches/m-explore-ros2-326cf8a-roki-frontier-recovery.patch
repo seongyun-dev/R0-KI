@@ -204,7 +204,7 @@ index 0f8e610..f07ded2 100644
  };
  }  // namespace frontier_exploration
 diff --git a/explore/src/explore.cpp b/explore/src/explore.cpp
-index d72fb18..1f67b6e 100644
+index d72fb18..1855fe3 100644
 --- a/explore/src/explore.cpp
 +++ b/explore/src/explore.cpp
 @@ -38,8 +38,11 @@
@@ -251,7 +251,7 @@ index d72fb18..1f67b6e 100644
 +  this->declare_parameter<float>("frontier_max_internal_unknown_run", 0.30);
 +  this->declare_parameter<float>("frontier_unknown_bridge_standoff", 0.10);
 +  this->declare_parameter<std::string>("frontier_planner_id", "MappingGridBased");
-+  this->declare_parameter<std::string>("frontier_controller_id", "FollowPath");
++  this->declare_parameter<std::string>("frontier_controller_id", "MappingFollowPath");
 +  this->declare_parameter<std::string>("frontier_goal_checker_id",
 +                                       "mapping_goal_checker");
  
@@ -388,18 +388,9 @@ index d72fb18..1f67b6e 100644
    auto frontiers = search_.searchFrom(pose.position);
 +  refreshFailuresFromMap(frontiers);
    RCLCPP_DEBUG(logger_, "found %lu frontiers", frontiers.size());
-+  if (frontiers.empty()) {
-+    RCLCPP_INFO(
-+        logger_, "MAPPING_DIAGNOSTIC event=EXPLORATION_COMPLETE");
-+    stop(false);
-+    auto status_msg = explore_lite_msgs::msg::ExploreStatus();
-+    status_msg.status = "exploration_complete";
-+    status_pub_->publish(status_msg);
-+    return;
-+  }
    for (size_t i = 0; i < frontiers.size(); ++i) {
      RCLCPP_DEBUG(logger_, "frontier %zd cost: %f", i, frontiers[i].cost);
-@@ -251,71 +339,300 @@ void Explore::makePlan()
+@@ -251,71 +339,299 @@ void Explore::makePlan()
      visualizeFrontiers(frontiers);
    }
  
@@ -458,9 +449,7 @@ index d72fb18..1f67b6e 100644
 +          return !f.approaches.empty() && !goalOnBlacklist(f);
 +        });
 +    if (has_retryable) {
-+      RCLCPP_WARN(
-+          logger_,
-+          "MAPPING_DIAGNOSTIC event=WAITING_FOR_FRONTIER_RETRY");
++      RCLCPP_WARN(logger_, "All frontier goals are cooling down; waiting before retry.");
 +      return;
 +    }
 +    publishStalled("frontier_retries_exhausted");
@@ -691,8 +680,6 @@ index d72fb18..1f67b6e 100644
 +  }
  
 +  executable_path->poses.resize(keep_end + 1);
-+  executable_path->poses.back().pose.orientation =
-+      path.poses[unsafe_run_start - 1].pose.orientation;
 +  *clipped = true;
 +  // Leading UNKNOWN can be the initial blind spot and trailing UNKNOWN is the
 +  // frontier edge. A bounded bridge is approached only through already known
@@ -734,6 +721,7 @@ index d72fb18..1f67b6e 100644
          if (!goal_handle) {
            RCLCPP_ERROR(logger_, "Goal was REJECTED by the action server");
            goal_active_ = false;
++          clipped_goal_active_ = false;
 +          recordFrontierFailure(frontier, "navigation_rejected");
 +          makePlan();
          } else {
@@ -741,7 +729,7 @@ index d72fb18..1f67b6e 100644
            active_goal_id_ = goal_handle->get_goal_id();
            RCLCPP_DEBUG(logger_, "Goal ACCEPTED, uuid: %s",
              rclcpp_action::to_string(active_goal_id_).c_str());
-@@ -324,10 +641,10 @@ void Explore::makePlan()
+@@ -324,10 +640,10 @@ void Explore::makePlan()
  
    send_goal_options.result_callback =
        [this,
@@ -755,7 +743,7 @@ index d72fb18..1f67b6e 100644
  }
  
  void Explore::returnToInitialPose()
-@@ -356,34 +673,166 @@ void Explore::returnToInitialPose()
+@@ -356,34 +672,166 @@ void Explore::returnToInitialPose()
        };
    move_base_client_->async_send_goal(goal, send_goal_options);
  }
@@ -869,13 +857,10 @@ index d72fb18..1f67b6e 100644
 +    it->local_free_cells =
 +        std::max(it->local_free_cells, frontier.local_free_cells);
 +  }
-+  const bool exhausted = it->attempts >= frontier_max_attempts_;
 +  RCLCPP_WARN(
 +      logger_,
-+      "MAPPING_DIAGNOSTIC event=%s reason=%s attempts=%u/%u "
-+      "cluster=(%.3f, %.3f) "
++      "Frontier failed reason=%s attempts=%u/%u cluster=(%.3f, %.3f) "
 +      "approaches=%zu local_free_cells=%u",
-+      exhausted ? "FRONTIER_RETRY_EXHAUSTED" : "NAVIGATION_FAILED",
 +      reason, it->attempts, frontier_max_attempts_, frontier.centroid.x,
 +      frontier.centroid.y, frontier.approaches.size(),
 +      frontier.local_free_cells);
@@ -895,9 +880,7 @@ index d72fb18..1f67b6e 100644
 +
 +void Explore::publishStalled(const char* reason)
 +{
-+  RCLCPP_ERROR(
-+      logger_, "MAPPING_DIAGNOSTIC event=EXPLORATION_STALLED reason=%s",
-+      reason);
++  RCLCPP_ERROR(logger_, "Exploration stalled reason=%s", reason);
 +  stop(false);
 +  auto status_msg = explore_lite_msgs::msg::ExploreStatus();
 +  status_msg.status = "exploration_stalled";
@@ -939,18 +922,18 @@ index d72fb18..1f67b6e 100644
        last_progress_ = this->now();
        prev_distance_ = 0;
        break;
-@@ -393,21 +842,20 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
+@@ -393,21 +841,20 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
          RCLCPP_DEBUG(logger_, "Goal aborted with error_code=%d (%s) — blacklisting frontier",
                       result.result->error_code,
                       result.result->error_msg.c_str());
 -        frontier_blacklist_.push_back(frontier_goal);
 +        recordFrontierFailure(frontier, "navigation_aborted");
        } else {
-         RCLCPP_DEBUG(logger_, "Goal aborted with error_code=0 ??likely a preemption, not blacklisting");
+         RCLCPP_DEBUG(logger_, "Goal aborted with error_code=0 — likely a preemption, not blacklisting");
        }
  #else
        // Humble: no error_code field, blacklist unconditionally on abort
-       RCLCPP_DEBUG(logger_, "Goal aborted ??blacklisting frontier");
+       RCLCPP_DEBUG(logger_, "Goal aborted — blacklisting frontier");
 -      frontier_blacklist_.push_back(frontier_goal);
 +      recordFrontierFailure(frontier, "navigation_aborted_humble");
  #endif
@@ -963,7 +946,7 @@ index d72fb18..1f67b6e 100644
        return;
      default:
        RCLCPP_WARN(logger_, "Unknown result code from move base nav2");
-@@ -439,6 +887,12 @@ void Explore::stop(bool finished_exploring)
+@@ -439,6 +886,12 @@ void Explore::stop(bool finished_exploring)
    RCLCPP_INFO(logger_, "Exploration stopped.");
  
    goal_active_ = false;
@@ -976,7 +959,7 @@ index d72fb18..1f67b6e 100644
    // Only publish paused status if manually stopped (not finished exploring)
    if (!finished_exploring) {
      auto status_msg = explore_lite_msgs::msg::ExploreStatus();
-@@ -447,6 +901,8 @@ void Explore::stop(bool finished_exploring)
+@@ -447,6 +900,8 @@ void Explore::stop(bool finished_exploring)
    }
  
    move_base_client_->async_cancel_all_goals();
@@ -985,7 +968,7 @@ index d72fb18..1f67b6e 100644
    exploring_timer_->cancel();
  
    if (return_to_init_ && finished_exploring) {
-@@ -456,6 +912,7 @@ void Explore::stop(bool finished_exploring)
+@@ -456,6 +911,7 @@ void Explore::stop(bool finished_exploring)
  
  void Explore::resume()
  {

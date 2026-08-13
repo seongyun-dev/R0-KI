@@ -88,7 +88,9 @@ class ExploreOverlayContractTest(unittest.TestCase):
         self.assertIn(
             "frontier_unknown_bridge_standoff: 0.10", self.params_text
         )
-        self.assertIn("frontier_controller_id: FollowPath", self.params_text)
+        self.assertIn(
+            "frontier_controller_id: MappingFollowPath", self.params_text
+        )
         self.assertIn(
             "frontier_goal_checker_id: mapping_goal_checker", self.params_text
         )

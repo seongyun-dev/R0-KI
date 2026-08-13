@@ -35,7 +35,10 @@
     frontier_max_internal_unknown_run: 0.30
     frontier_unknown_bridge_standoff: 0.10
     frontier_planner_id: MappingGridBased
-    frontier_controller_id: FollowPath
+    # v0.2.8 introduced the long-lookahead controller only for mapping. Direct
+    # FollowPath execution must select it too; otherwise this path would bypass
+    # the mapping-specific Ackermann tuning and silently use the patrol values.
+    frontier_controller_id: MappingFollowPath
     frontier_goal_checker_id: mapping_goal_checker
 
     # A transient planner/controller failure gets one delayed retry. Exhausted

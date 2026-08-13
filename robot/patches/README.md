@@ -28,9 +28,10 @@ The patch changes mapping only. Each frontier cluster gets up to three
 separated, robot-connected FREE viewpoints. `MappingGridBased` checks them in
 sequence, the first feasible viewpoint keeps the established robot-to-target yaw,
 and only exhaustion of all viewpoints consumes one retry for the cluster. The
-exact `ComputePathToPose` result is sent to Nav2's `FollowPath` action instead
-of asking `NavigateToPose` to create a different path and replan it while the
-robot is moving. A short UNKNOWN fringe at the robot or frontier is allowed,
+exact `ComputePathToPose` result is sent to Nav2's `FollowPath` action with the
+mapping-only `MappingFollowPath` controller instead of asking `NavigateToPose`
+to create a different path and replan it while the robot is moving. A short
+UNKNOWN fringe at the robot or frontier is allowed,
 but a known-to-known shortcut containing more than 0.30 m of UNKNOWN space is
 not crossed in one motion. The controller follows the known-space prefix,
 stops 0.10 m before the bridge, and lets the next LiDAR update re-evaluate it.
