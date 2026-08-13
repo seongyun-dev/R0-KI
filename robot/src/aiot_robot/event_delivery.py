@@ -19,7 +19,7 @@ from .vehicle_localization import project_front_vehicle
 BackendFactory = Callable[[], RobotBackendClient]
 DEFAULT_MIN_DETECTION_CONFIDENCE = 0.5
 _DIRECTIONAL_ENVIRONMENT_EVENT_TYPES = frozenset(
-    {"TRASH_DETECTED", "RECYCLING_AREA_FULL"}
+    {"TRASH_DETECTED", "RECYCLING_AREA_FULL", "EMERGENCY"}
 )
 
 
