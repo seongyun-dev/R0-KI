@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import math
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 
 _DETAIL_PATTERN = re.compile(
@@ -130,10 +130,20 @@ class DemoVehiclePlatePolicy:
     def all_records(self) -> list[dict[str, Any]]:
         return [dict(record) for record in self._records]
 
+    def reset(self) -> None:
+        """Forget demo-only observations when a different patrol starts."""
+
+        self._streaks.clear()
+        self._latest_ocr.clear()
+        self._emitted.clear()
+        self._records.clear()
+
 
 def demo_vehicle_plate_collector(
     original_collector: type,
     forced_plate: str | None,
+    *,
+    patrol_id_provider: Callable[[], int | None] | None = None,
 ) -> type:
     """Wrap the OCR collector only when the optional demo plate is non-empty."""
 
@@ -145,6 +155,14 @@ def demo_vehicle_plate_collector(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._delegate = original_collector(*args, **kwargs)
             self._policy = DemoVehiclePlatePolicy(plate)
+            self._patrol_id: int | None = None
+
+        def _reset_for_new_patrol(self) -> None:
+            patrol_id = patrol_id_provider() if patrol_id_provider is not None else None
+            if patrol_id is None or patrol_id == self._patrol_id:
+                return
+            self._policy.reset()
+            self._patrol_id = patrol_id
 
         def update(
             self,
@@ -153,6 +171,9 @@ def demo_vehicle_plate_collector(
             frame_idx: Any,
             camera: str | None = None,
         ) -> list[dict[str, Any]]:
+            # This runs on the inference thread, so policy state cannot race the
+            # ROS control callback that changes the active patrol ID.
+            self._reset_for_new_patrol()
             ocr_records = self._delegate.update(
                 detections, frame, frame_idx, camera=camera
             )
@@ -175,6 +196,31 @@ def demo_vehicle_plate_collector(
             return getattr(self._delegate, name)
 
     return DemoPlateCollector
+
+
+def scope_vehicle_dedupe_to_patrol(manager: Any, patrol_id: int | None) -> bool:
+    """Clear only vehicle-plate dedupe state when the patrol ID changes.
+
+    The external pipeline keeps one EventManager alive for the AI process. Its
+    vehicle key is based on the plate string, so a forced demo plate would
+    otherwise be suppressed in every later patrol. Duplicate ENABLE messages
+    for the same patrol deliberately do not clear the state again.
+    """
+
+    if patrol_id is None:
+        return False
+    if getattr(manager, "_aiot_vehicle_patrol_id", None) == patrol_id:
+        return False
+
+    created = getattr(manager, "created", None)
+    if isinstance(created, set):
+        created.difference_update(
+            key
+            for key in tuple(created)
+            if isinstance(key, tuple) and key and key[0] == "vehicle_plate"
+        )
+    manager._aiot_vehicle_patrol_id = patrol_id
+    return True
 
 
 def collapse_recycling_events_for_frame(
