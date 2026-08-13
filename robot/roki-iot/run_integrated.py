@@ -264,7 +264,7 @@ def _build_nav2_driver(
                 os.getenv("ROKI_MAXIMUM_LINEAR_SPEED_MPS", "0.4")
             ),
             minimum_drive_pwm=int(os.getenv("PATROL_DRIVE_SPEED_PWM", "45")),
-            maximum_drive_pwm=int(os.getenv("ROKI_MAXIMUM_DRIVE_PWM", "51")),
+            maximum_drive_pwm=int(os.getenv("ROKI_MAXIMUM_DRIVE_PWM", "55")),
             steering_left_deg=40,
             steering_center_deg=80,
             steering_right_deg=120,
@@ -438,7 +438,7 @@ def _build_mapping_nav2_bridge(
                     os.getenv("ROKI_MAXIMUM_LINEAR_SPEED_MPS", "0.4")
                 ),
                 minimum_drive_pwm=int(os.getenv("PATROL_DRIVE_SPEED_PWM", "45")),
-                maximum_drive_pwm=int(os.getenv("ROKI_MAXIMUM_DRIVE_PWM", "51")),
+                maximum_drive_pwm=int(os.getenv("ROKI_MAXIMUM_DRIVE_PWM", "55")),
                 steering_left_deg=40,
                 steering_center_deg=80,
                 steering_right_deg=120,

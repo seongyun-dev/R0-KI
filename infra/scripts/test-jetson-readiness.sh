@@ -71,6 +71,10 @@ assert_line '^ROKI_WHEELBASE_M=0.124$' \
   "${repository_root}/infra/jetson/ros.env.example"
 assert_line '^ROKI_MAXIMUM_ROAD_WHEEL_ANGLE_DEG=8.6$' \
   "${repository_root}/infra/jetson/ros.env.example"
+assert_line '^ROKI_MAXIMUM_DRIVE_PWM=55$' \
+  "${repository_root}/infra/jetson/ros.env.example"
+assert_line '^ROKI_MAXIMUM_DRIVE_PWM=55$' \
+  "${repository_root}/robot/config/robot.env.example"
 assert_line '^ROKI_INITIAL_POSE_X_M=$' \
   "${repository_root}/infra/jetson/ros.env.example"
 assert_line '^ROKI_INITIAL_POSE_Y_M=$' \
