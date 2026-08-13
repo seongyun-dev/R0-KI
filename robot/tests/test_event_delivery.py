@@ -63,6 +63,40 @@ class FakeBackend:
 
 
 class EventDeliveryTest(unittest.TestCase):
+    def test_emergency_uses_bbox_direction_and_lidar_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=90.0)
+            )
+            requested_angles = []
+            stopped_events = []
+            ranges = SimpleNamespace(
+                get_range_at_angle=lambda angle: requested_angles.append(angle) or 2.0
+            )
+            event = detection(
+                "emergency-ranged",
+                event_type="EMERGENCY",
+                bbox={"x": 270, "y": 100, "width": 100, "height": 100},
+                attributes={"riskLevel": "EMERGENCY", "frameWidth": 640},
+            )
+
+            DetectionRecorder(
+                outbox,
+                store,
+                vehicle_range_source=ranges,
+                camera_horizontal_fov_deg=60,
+                lidar_forward_center_angle_deg=90,
+                emergency_stop_sink=stopped_events.append,
+            )(event)
+            item = outbox.read(outbox.pending_paths()[0])
+
+            self.assertEqual(stopped_events, [event])
+            self.assertEqual(requested_angles, [90.0])
+            self.assertAlmostEqual(item["context"]["x"], 1.0, places=6)
+            self.assertAlmostEqual(item["context"]["y"], 4.0, places=6)
+            self.assertEqual(item["context"]["locationMethod"], "BBOX_LIDAR")
+
     def test_trash_uses_bbox_direction_and_lidar_range(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             outbox = DetectionOutbox(directory)
