@@ -30,6 +30,7 @@ from .ai_adapter_core import (
     demo_vehicle_plate_collector,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
+    scope_vehicle_dedupe_to_patrol,
 )
 from .ai_capture import CaptureSettings, configure_capture
 from .mjpeg_stream import MjpegStreamServer
@@ -247,6 +248,11 @@ class AiAdapterNode(Node):
     def detection_enabled(self) -> bool:
         return self._patrol_activation.enabled
 
+    @property
+    def active_patrol_id(self) -> int | None:
+        with self._lock:
+            return self._active_patrol_id
+
     def wait_for_detection_enabled(self, timeout: float) -> bool:
         return self._patrol_activation.wait(timeout)
 
@@ -345,6 +351,20 @@ def run_pipeline(
         sink = RosEventSink(node)
         module.RestEventClient = lambda: sink
 
+        forced_demo_plate = os.getenv("AIOT_DEMO_FORCE_VEHICLE_PLATE")
+        if str(forced_demo_plate or "").strip():
+            original_create_vehicle_records = module.EventManager.create_vehicle_records
+
+            def create_vehicle_records_for_patrol(
+                manager: Any,
+                *args: Any,
+                **kwargs: Any,
+            ) -> Any:
+                scope_vehicle_dedupe_to_patrol(manager, node.active_patrol_id)
+                return original_create_vehicle_records(manager, *args, **kwargs)
+
+            module.EventManager.create_vehicle_records = create_vehicle_records_for_patrol
+
         original_api_payload = module.EventManager.api_payload
 
         def api_payload_with_detection_context(event: dict[str, Any]) -> dict[str, Any]:
@@ -378,7 +398,8 @@ def run_pipeline(
 
         module.PlateCollector = demo_vehicle_plate_collector(
             module.PlateCollector,
-            os.getenv("AIOT_DEMO_FORCE_VEHICLE_PLATE"),
+            forced_demo_plate,
+            patrol_id_provider=lambda: node.active_patrol_id,
         )
 
         original_dispatch_events = module.dispatch_events
