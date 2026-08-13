@@ -46,8 +46,12 @@ if [ "$(id -u)" -eq 0 ]; then
 
   install -d -m 0755 -o root -g root \
     /opt/aiot/bin \
+    /etc/systemd/system/aiot-ai.service.d \
     /etc/systemd/system/aiot-ros.service.d \
     /etc/systemd/system/aiot-robot.service.d
+  install -m 0644 -o root -g root \
+    "${robot_root}/config/systemd/aiot-demo-vehicle-plate.conf" \
+    /etc/systemd/system/aiot-ai.service.d/30-demo-vehicle-plate.conf
   install -m 0644 -o root -g root \
     "${robot_root}/config/systemd/aiot-current-map.conf" \
     /etc/systemd/system/aiot-ros.service.d/20-current-map.conf

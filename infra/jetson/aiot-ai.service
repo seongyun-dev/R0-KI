@@ -15,7 +15,6 @@ WorkingDirectory=/home/e103/yolo-pipeline
 Environment=ROS_LOCALHOST_ONLY=1
 Environment=ROS_DOMAIN_ID=0
 Environment=PYTHONUNBUFFERED=1
-Environment=AIOT_DEMO_FORCE_VEHICLE_PLATE=254러1559
 EnvironmentFile=-/opt/aiot/secrets/ai.env
 RuntimeDirectory=aiot
 RuntimeDirectoryMode=0755
