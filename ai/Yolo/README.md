@@ -17,4 +17,4 @@ yolo/
 
 상세: [`docs/models.md`](docs/models.md)
 
-개인 브랜치 예: `ai/<이니셜>/yolo/<기능>` → 완료 후 `ai/yolo`에 병합.
+상위 개요: [../README.md](../README.md)

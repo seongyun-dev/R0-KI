@@ -1,76 +1,173 @@
-# AI 순찰 로봇 프론트엔드
+# Frontend — R0-Ki 관제 웹
 
-기존 디자인과 화면 구조를 유지하면서 백엔드 API 초안에 맞춘 통신 계층을 추가한 버전입니다.
+아파트 AI 순찰 로봇 **R0-Ki** 관리자용 웹앱입니다. React로 관제 대시보드·온보딩·통계를 제공하고, Backend REST/SSE와 연동합니다.
+
+루트 프로젝트 설명: [../README.md](../README.md)
+
+---
+
+## 기술 스택
+
+| 영역 | 선택 |
+| --- | --- |
+| UI | React 18, TypeScript |
+| 빌드 | Vite 8 |
+| 라우팅 | react-router-dom v6 |
+| 상태 | Zustand (`persist`) |
+| 스타일 | Tailwind CSS 3 + 커스텀 CSS |
+| 3D | Three.js, `@react-three/fiber`, `@react-three/drei` |
+| 차트 | Recharts |
+| PDF | jspdf + html2canvas |
+| 배포 | Dockerfile, nginx |
+
+---
 
 ## 실행
 
 ```bash
+cd frontend
 npm install
+cp .env.example .env   # 필요 시 수정
 npm run dev
 ```
 
-## 목업 / 실제 API 전환
+### 환경 변수 (이름만)
 
-`.env.example`을 `.env`로 복사한 뒤 값을 설정합니다.
+| 키 | 용도 |
+| --- | --- |
+| `VITE_API_BASE_URL` | Backend origin (예: `http://localhost:8080`) |
+| `VITE_DEFAULT_MAP_ID` | 로그인 응답에 mapId가 없을 때 개발용 기본값 |
+| `VITE_DEFAULT_ROBOT_ID` | 로그인 응답에 robotId가 없을 때 개발용 기본값 |
 
-```env
-VITE_API_BASE_URL=http://localhost:8080
-VITE_USE_MOCKS=true
-VITE_DEFAULT_MAP_ID=1
-VITE_DEFAULT_ROBOT_ID=1
-VITE_STATS_ENDPOINT=/api/statistics
-```
+실제 토큰·운영 URL은 `.env`에만 두고 Git에 커밋하지 않습니다.
 
-- `VITE_USE_MOCKS=true`: 기존 `src/mocks` 데이터를 사용합니다.
-- `VITE_USE_MOCKS=false`: 실제 백엔드 API를 호출합니다.
-- 로그인 응답에 `mapId`, `robotId`가 포함되면 환경변수보다 로그인 응답이 우선합니다.
-
-## 적용된 API
-
-| 기능 | API |
-|---|---|
-| 로그인 | `POST /api/auth/signin` |
-| 일반 회원가입 | `POST /api/auth/signup` |
-| 아파트 단지 검색 | `GET /api/auth/apartment-complexes?keyword=` |
-| 이벤트 목록/상세 | `GET /api/events`, `GET /api/events/{eventId}` |
-| 이벤트 처리 상태 | `PATCH /api/events/{eventId}/status` |
-| 순찰 목록/상세 | `GET /api/patrols`, `GET /api/patrols/{patrolId}` |
-| 순찰 이동 경로 | `GET /api/patrols/{patrolId}/path` |
-| 로봇 목록/상세 | `GET /api/robots`, `GET /api/robots/{robotId}` |
-| 로봇 등록/수정 | `POST /api/robots`, `PATCH /api/robots/{robotId}` |
-| 지도 모니터링 | `GET /api/map/{mapId}/monitoring?robotId={robotId}` |
-| 로봇 위치 SSE | `GET /api/robots/{robotId}/location/events` |
-| 통계 | `VITE_STATS_ENDPOINT`에 설정된 경로 |
-
-## 코드 구조
-
-```text
-src/api/contracts.ts   백엔드 요청/응답 DTO
-src/api/client.ts      URL, Bearer 토큰, 공통 에러, SSE 처리
-src/api/services.ts    기능별 API 함수
-src/api/mappers.ts     백엔드 DTO → 기존 화면 모델 변환
-src/features/**        페이지가 사용하는 조회/변경 훅
-src/config/env.ts      환경 설정
-```
-
-페이지와 CSS는 기존 디자인을 유지하고, 기능 훅 아래의 데이터 공급 계층만 교체했습니다.
-
-## 백엔드와 확정해야 하는 계약
-
-1. 로그인 응답의 사용자, `mapId`, `robotId` 제공 방식
-2. `resolution`, `originX`, `originY`, `width`, `height`를 포함한 SLAM 좌표 메타데이터
-3. 신규 긴급 이벤트 SSE 또는 WebSocket
-4. 통계 API 응답
-5. 이벤트 `detectionConfidence`, `locationLabel`, 처리 메모
-6. 로봇 모델, 담당 구역, 진단 부품, 누적 주행, 주간 가동률
-7. 목록 API의 페이지네이션 형식
-8. 날짜 ISO 8601 형식과 nullable 필드
-
-지도 메타데이터가 없을 때는 체크포인트 좌표 범위를 기준으로 임시 정규화합니다. 실제 운영에서는 정확한 SLAM 메타데이터를 내려주는 것이 필수입니다.
-
-## 검증
+### 검증
 
 ```bash
 npm run lint
 npm run build
+npm run test:map-coordinates
+npm run test:dashboard-25d
+npm run test:display-geometry-25d
 ```
+
+---
+
+## 코드 구조
+
+```text
+frontend/src/
+├── api/
+│   ├── client.ts          # fetch, envelope unwrap, SSE, blob
+│   ├── contracts.ts       # Backend DTO
+│   ├── services.ts        # auth / events / patrols / robots / map …
+│   └── mappers.ts         # DTO → 화면 domain
+├── config/env.ts
+├── features/              # 도메인 훅·UI
+│   ├── auth/
+│   ├── dashboard/         # 지도, SSE, MJPEG, 좌표
+│   ├── onboarding/
+│   └── stats/
+├── pages/                 # 라우트 페이지
+├── components/            # ui, layout(R0KiShell), robot(3D)
+├── types/domain.ts
+└── styles/
+```
+
+데이터 흐름: **페이지 → features 훅 → api/services → client → mappers → domain**.
+
+---
+
+## 주요 화면
+
+| 경로 | 역할 |
+| --- | --- |
+| `/` | 랜딩 또는 로그인 분기 |
+| `/login` | 로그인 |
+| `/signup/onboarding` | 계정·단지·로봇·맵핑·구역/웨이포인트 |
+| `/app` | 관제 대시보드 (지도 + 라이브캠 + 이벤트) |
+| `/app/map` | 지도 풀스크린 |
+| `/app/patrol`, `/app/patrol/:id` | 순찰 이력·상세 |
+| `/app/events`, `/app/events/:id` | 탐지 이벤트 |
+| `/app/robots` … | 로봇 CRUD·진단 |
+| `/app/residents` … | 입주민·차량 |
+| `/app/notifications` … | 알림 이력 |
+| `/app/stats` | 통계 차트 + AI 인사이트 (lazy) |
+
+라우트 정의: `src/router.tsx` (`RequireAuth` 가드).
+
+---
+
+## 핵심 로직
+
+### 1. 인증 SSE 클라이언트
+
+`src/api/client.ts`에서 `EventSource` 대신 `fetch` + `ReadableStream`으로 SSE를 파싱합니다. Bearer 토큰, `event:`/`data:` 라인, heartbeat 무시, `AbortController` 재연결을 처리합니다.
+
+구독 예:
+
+- 로봇 위치·상태: `useRobotLocations` → `/api/robots/.../location/events` 등
+- 긴급 이벤트: `useEmergencyAlert` → `/api/events/subscribe/emergency`
+- 일반(순찰 완료 등): `/api/events/subscribe/general`
+- 장애물: `/api/robots/obstacle-events`
+- 맵핑 세션: mapping session SSE
+
+### 2. SLAM 좌표 → 2.5D 지도
+
+Backend가 주는 `resolution`, `origin`, `width`, `height`로 월드 좌표를 그리드에 투영합니다.
+
+- `features/dashboard/mapCoordinates.ts`, `mapCoordinateMetadata.ts`
+- `ComplexMap25D.tsx`, `mapProjection25d.ts` — 아이소메트릭 벽·구역·경로
+- `displayGeometry25d.ts` — 점유 마스크 표시용 노이즈 정리
+
+관련 단위 테스트: `tests/mapCoordinates25d.test.ts` 등.
+
+### 3. MJPEG 라이브캠
+
+`useMjpegStream.ts`: 스트림 세션 토큰 → 바이너리에서 JPEG 마커 분리 → blob URL. 상태 `idle | connecting | live | failed` 및 재시도.
+
+### 4. AI 인사이트·통계
+
+- `useAnalyticsInsight.ts`: 주/월 인사이트 상태가 `PENDING`/`PROCESSING`이면 약 3초 폴링
+- Recharts: 추이·구역·처리·시간대 차트
+- `exportStatsPdf.ts`: 화면 캡처 후 PDF
+
+### 5. 온보딩·Nav2 계약
+
+맵핑 SSE 진행 → 구역/웨이포인트 드래그 편집. `navigationEditor.ts`에서 acceptance radius 등 Nav2 계약 범위를 검증합니다.
+
+### 6. 3D 로봇 UI
+
+- 랜딩·맵: `PatrolRobot`, `MapLiveScene`
+- 상세 진단: `RobotDiagnosticView` — 부위 앵커 투영 + CSS 지시선
+
+### 7. 인증 스토어
+
+`useAuthStore`: JWT `exp` 파싱, remember me(local/session), 계정별 `mapId`/`robotId` 컨텍스트.
+
+---
+
+## 주요 API 연동
+
+| 기능 | API |
+| --- | --- |
+| 로그인 / 나 | `POST /api/auth/signin`, `GET /api/auth/me` |
+| 회원가입·이메일 | `POST /api/auth/signup`, email send/verify |
+| 이벤트 | `GET /api/events`, `PATCH .../status`, SSE subscribe |
+| 순찰 | `POST /api/patrols`, stop, list, detail, PDF |
+| 로봇 | CRUD, location/obstacle SSE, stream session |
+| 지도·존·웨이포인트 | `/api/map/**` |
+| 맵핑 세션 | `/api/map/mapping-sessions` + SSE |
+| 통계 | `/api/analytics/events/*` |
+| 인사이트 | `/api/analytics/insights` |
+| 입주민 | `/api/residents` |
+
+공통: 응답 envelope `{ success, data }` unwrap, 목록의 `content|items|data` 흡수는 `client.ts` / `services.ts`에 있습니다.
+
+---
+
+## 추가 문서
+
+- [docs/screens.md](docs/screens.md) — 화면 목록
+- [docs/components.md](docs/components.md) — 컴포넌트
+- [docs/design-tokens.md](docs/design-tokens.md) — 디자인 토큰

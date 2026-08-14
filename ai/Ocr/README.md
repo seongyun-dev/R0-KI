@@ -16,4 +16,4 @@ ocr/
 
 상세: [`docs/models.md`](docs/models.md)
 
-개인 브랜치 예: `ai/<이니셜>/ocr/<기능>` → 완료 후 `ai/ocr`에 병합.
+상위 개요: [../README.md](../README.md)

@@ -1,4 +1,39 @@
-# Hanbakwi Robot runtime
+# Hanbakwi Robot runtime (IoT)
+
+Jetson Orin Nano에서 동작하는 R0-Ki 로봇 런타임입니다. ESP32 구동·ROS2 항법·MQTT 백엔드·AI 게이트를 하나의 통합 프로세스로 운영합니다.
+
+루트 프로젝트 설명: [../README.md](../README.md)
+
+## 프로젝트 요약
+
+| 항목 | 내용 |
+| --- | --- |
+| 보드 | Jetson Orin Nano |
+| MCU | ESP32 (USB 시리얼 JSON Lines, 단일 소유) |
+| 센서 | YDLIDAR, 엔코더, 배터리 ADC, 카메라 |
+| 미들웨어 | ROS 2 Humble — RF2O, SLAM Toolbox, Nav2 (Ackermann) |
+| 백엔드 연동 | MQTT `hanbakwi/v1/robots/{robotKey}/…` (command / pose / status / ack) |
+| 이벤트 | AI 탐지 → outbox → `POST /api/robot/events` 등 (로봇 토큰) |
+| 진입점 | `scripts/run.sh` → `roki-iot/run_integrated.py` |
+
+**포트폴리오 포인트**
+
+- composition root로 시리얼·MQTT·Nav2·AI readiness를 한 프로세스에 묶음
+- fail-closed 안전 (LiDAR/AI heartbeat, ESP32 워치독, ARM·속도 제한)
+- 순찰 FSM: navigation config/map 검증 → AI ENABLE → waypoints → STOP/ACK → IDLE
+- 맵핑: 게임패드 deadman + SLAM → Backend 지도 업로드
+- 탐지 bbox + 카메라 FOV + LiDAR로 맵 좌표 투영 후 idempotent outbox 전달
+
+자격증명·현장 `.env`·실측 토큰은 Git에 넣지 않습니다. 예시는 `config/robot.env.example`, `roki/.env.example`, `roki-iot/.env.example`만 참고하세요.
+
+하드웨어·펌웨어: [hardware/README.md](hardware/README.md)  
+Robot↔AI 계약: [docs/ai-ros-contract-v1.md](docs/ai-ros-contract-v1.md)  
+시리얼 계약: [roki/docs/COMMUNICATION_CONTRACT.md](roki/docs/COMMUNICATION_CONTRACT.md)  
+Jetson 서비스·OTA: [../infra/jetson/README.md](../infra/jetson/README.md)
+
+---
+
+## 현장·운영 문서
 
 Friday field-test checklist:
 [`docs/friday-field-test-runbook-2026-08-04.md`](docs/friday-field-test-runbook-2026-08-04.md)
