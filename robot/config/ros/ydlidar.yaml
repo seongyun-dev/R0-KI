@@ -14,7 +14,7 @@ ydlidar_ros2_driver_node:
     # This single-channel unit varies by one or two samples per revolution.
     # Fixed resolution makes the SDK drop those frames ("Real points > fixed
     # points"), which intermittently starves /scan and RF2O/Nav2.
-    fixed_resolution: true
+    fixed_resolution: false
     reversion: false
     # This unit reports bearings mirrored about its own zero. Verified 2026-08-07
     # with the robot boxed into a corner: the scan put the near wall 0.32 m to the

@@ -1,16 +1,187 @@
 import unittest
 
 from aiot_robot.ai_adapter_core import (
+    DemoVehiclePlatePolicy,
     build_detection_message,
     collapse_recycling_events_for_frame,
+    demo_vehicle_plate_collector,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
+    scope_vehicle_dedupe_to_patrol,
 )
 from aiot_robot.contracts import DetectionEvent
 import json
 
 
 class AiAdapterCoreTest(unittest.TestCase):
+    @staticmethod
+    def _licence(track_id=7, bbox=None, confidence=0.8):
+        return {
+            "class_name": "licence",
+            "track_id": track_id,
+            "bbox": bbox or [10, 20, 110, 60],
+            "confidence": confidence,
+            "camera": "A",
+        }
+
+    def test_demo_plate_emits_on_first_tracked_detection_after_ocr_failure(self):
+        policy = DemoVehiclePlatePolicy("254러1559")
+        detection = self._licence()
+
+        records = policy.observe([detection], [], camera="A")
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["plate"], "254러1559")
+        self.assertEqual(records[0]["_demoOcrPlate"], "UNAVAILABLE")
+        self.assertEqual(records[0]["_demoSource"], "OCR_FALLBACK")
+
+    def test_demo_plate_overrides_successful_ocr_without_changing_context(self):
+        policy = DemoVehiclePlatePolicy("254러1559")
+        detection = self._licence(bbox=[30, 40, 130, 80])
+        actual = {
+            "track_id": 7,
+            "plate": "254러1558",
+            "confidence": 0.91,
+            "bbox": [30, 40, 130, 80],
+            "camera": "A",
+        }
+
+        records = policy.observe([detection], [actual], camera="A")
+
+        self.assertEqual(records[0]["plate"], "254러1559")
+        self.assertEqual(records[0]["_demoOcrPlate"], "254러1558")
+        self.assertEqual(records[0]["_demoSource"], "OCR_OVERRIDE")
+        self.assertEqual(records[0]["track_id"], 7)
+        self.assertEqual(records[0]["bbox"], [30, 40, 130, 80])
+        self.assertEqual(records[0]["camera"], "A")
+
+    def test_demo_plate_emits_each_track_only_once(self):
+        policy = DemoVehiclePlatePolicy("254러1559")
+        detection = self._licence()
+
+        first = policy.observe([detection], [], camera="A")
+        repeated = policy.observe([detection], [], camera="A")
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(repeated, [])
+        self.assertEqual(len(policy.all_records()), 1)
+
+    def test_demo_plate_keeps_position_fields_outside_plate_policy(self):
+        context = {
+            "x": -1.25,
+            "y": 3.75,
+            "bbox": [10, 20, 110, 60],
+            "frameWidth": 640,
+        }
+        policy = DemoVehiclePlatePolicy("254러1559")
+        detection = self._licence(bbox=context["bbox"])
+
+        record = policy.observe([detection], [], camera="A")[0]
+
+        self.assertEqual(record["bbox"], context["bbox"])
+        self.assertEqual((context["x"], context["y"]), (-1.25, 3.75))
+        self.assertEqual(context["frameWidth"], 640)
+
+    def test_demo_off_returns_exact_original_collector_class(self):
+        class ExistingCollector:
+            pass
+
+        self.assertIs(demo_vehicle_plate_collector(ExistingCollector, None), ExistingCollector)
+        self.assertIs(demo_vehicle_plate_collector(ExistingCollector, ""), ExistingCollector)
+
+    def test_demo_collector_calls_ocr_before_first_detection_fallback(self):
+        class ExistingCollector:
+            def __init__(self):
+                self.calls = 0
+
+            def update(self, detections, frame, frame_idx, camera=None):
+                del detections, frame, frame_idx, camera
+                self.calls += 1
+                return []
+
+            def all_plates(self):
+                return []
+
+        Collector = demo_vehicle_plate_collector(ExistingCollector, "254러1559")
+        collector = Collector()
+        detection = self._licence()
+
+        result = collector.update([detection], None, 1, camera="A")
+
+        self.assertEqual(collector._delegate.calls, 1)
+        self.assertEqual(result[0]["plate"], "254러1559")
+        self.assertEqual(len(collector.all_plates()), 1)
+
+    def test_demo_collector_rearms_only_when_patrol_id_changes(self):
+        class ExistingCollector:
+            def update(self, detections, frame, frame_idx, camera=None):
+                del detections, frame, frame_idx, camera
+                return []
+
+            def all_plates(self):
+                return []
+
+        active_patrol = {"id": 101}
+        Collector = demo_vehicle_plate_collector(
+            ExistingCollector,
+            "254러1559",
+            patrol_id_provider=lambda: active_patrol["id"],
+        )
+        collector = Collector()
+        detection = self._licence()
+
+        self.assertEqual(
+            len(collector.update([detection], None, 1, camera="A")), 1
+        )
+
+        # A duplicate ENABLE for the same patrol must not re-arm the event.
+        for frame_idx in (2, 3, 4):
+            self.assertEqual(
+                collector.update([detection], None, frame_idx, camera="A"), []
+            )
+
+        frame_idx = 5
+        for patrol_id in (102, 103, 104, 105):
+            active_patrol["id"] = patrol_id
+            next_patrol = collector.update(
+                [detection], None, frame_idx, camera="A"
+            )
+            frame_idx += 1
+            self.assertEqual(len(next_patrol), 1)
+            self.assertEqual(next_patrol[0]["plate"], "254러1559")
+            self.assertEqual(len(collector.all_plates()), 1)
+
+    def test_vehicle_dedupe_is_scoped_to_patrol_without_touching_other_events(self):
+        class Manager:
+            def __init__(self):
+                self.created = {
+                    ("vehicle_plate", "254러1559"),
+                    ("lying", 7, "A"),
+                }
+
+        manager = Manager()
+
+        self.assertTrue(scope_vehicle_dedupe_to_patrol(manager, 101))
+        self.assertNotIn(("vehicle_plate", "254러1559"), manager.created)
+        self.assertIn(("lying", 7, "A"), manager.created)
+
+        manager.created.add(("vehicle_plate", "254러1559"))
+        self.assertFalse(scope_vehicle_dedupe_to_patrol(manager, 101))
+        self.assertIn(("vehicle_plate", "254러1559"), manager.created)
+
+        self.assertTrue(scope_vehicle_dedupe_to_patrol(manager, 102))
+        self.assertNotIn(("vehicle_plate", "254러1559"), manager.created)
+        self.assertIn(("lying", 7, "A"), manager.created)
+
+    def test_vehicle_dedupe_does_not_rearm_without_active_patrol(self):
+        class Manager:
+            created = {("vehicle_plate", "254러1559")}
+
+        manager = Manager()
+
+        self.assertFalse(scope_vehicle_dedupe_to_patrol(manager, None))
+        self.assertIn(("vehicle_plate", "254러1559"), manager.created)
+
     def test_collapses_recycling_scene_into_one_union_bbox(self) -> None:
         events = [
             {

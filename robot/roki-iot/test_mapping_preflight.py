@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import builtins
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -23,6 +26,79 @@ FIELD_ENV = {
 
 
 class MappingPreflightTest(unittest.TestCase):
+    def test_default_autonomous_builder_never_imports_manual_modules(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeTransport:
+            def start(self) -> None:
+                return
+
+        class FakeRuntime:
+            def __init__(self, **kwargs) -> None:
+                captured.update(kwargs)
+
+        def module(name: str, **attributes: object) -> ModuleType:
+            value = ModuleType(name)
+            for key, attribute in attributes.items():
+                setattr(value, key, attribute)
+            return value
+
+        fake_modules = {
+            "aiot_robot.mapping_artifacts": module(
+                "aiot_robot.mapping_artifacts",
+                MapExportSettings=lambda *args, **kwargs: SimpleNamespace(),
+                SlamMapExporter=lambda *args, **kwargs: SimpleNamespace(
+                    readiness=lambda: (True, "READY")
+                ),
+            ),
+            "integration.localization_mode": module(
+                "integration.localization_mode",
+                DockPose=lambda **kwargs: SimpleNamespace(**kwargs),
+                LocalizationModeController=lambda *args, **kwargs: SimpleNamespace(),
+                RosLocalizationModeTransport=FakeTransport,
+            ),
+            "integration.map_activation": module(
+                "integration.map_activation",
+                CurrentMapActivator=lambda *args, **kwargs: SimpleNamespace(),
+                MapActivationSettings=lambda *args, **kwargs: SimpleNamespace(),
+            ),
+            "integration.mapping_runtime": module(
+                "integration.mapping_runtime",
+                ManualMappingRuntime=FakeRuntime,
+                MappingRuntimeSettings=lambda *args, **kwargs: SimpleNamespace(),
+            ),
+            "integration.slam_session_control": module(
+                "integration.slam_session_control",
+                RosSlamSessionControl=lambda *args, **kwargs: SimpleNamespace(),
+            ),
+        }
+        original_import = builtins.__import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name in {
+                "control.manual_drive_controller",
+                "integration.linux_gamepad_input",
+            }:
+                raise AssertionError(f"manual module imported: {name}")
+            return original_import(name, *args, **kwargs)
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.dict(sys.modules, fake_modules),
+            patch("builtins.__import__", side_effect=guarded_import),
+        ):
+            run_integrated._build_mapping_runtime(
+                SimpleNamespace(),
+                SimpleNamespace(),
+                SimpleNamespace(),
+                SimpleNamespace(service_token_file="/tmp/token"),
+                SimpleNamespace(release_motion_authorization=lambda _reason: None),
+            )
+
+        self.assertIsNone(captured["drive_controller"])
+        self.assertIsNone(captured["gamepad_input"])
+        self.assertIsNotNone(captured["motion_authorization"])
+
     def test_patrol_localization_reseeds_from_first_route_segment(self) -> None:
         calls: dict[str, object] = {}
 

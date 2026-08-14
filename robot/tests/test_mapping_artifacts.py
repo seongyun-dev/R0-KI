@@ -286,7 +286,13 @@ class MappingArtifactsTest(unittest.TestCase):
             )
 
         exporter = SlamMapExporter(MapExportSettings(self.root), runner=runner)
-        with patch("aiot_robot.mapping_artifacts.shutil.which", return_value="ros2"):
+        with (
+            patch("aiot_robot.mapping_artifacts.shutil.which", return_value="ros2"),
+            patch(
+                "aiot_robot.mapping_artifacts.time.monotonic",
+                side_effect=(100.0, 100.0, 101.0),
+            ),
+        ):
             self.assertEqual(exporter.readiness(), (True, "READY"))
 
         self.assertEqual(len(calls), 2)

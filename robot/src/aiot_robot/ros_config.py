@@ -28,7 +28,11 @@ DEFAULT_NAV2_XY_GOAL_TOLERANCE_M = 0.20
 # 원인이었고, 그래서 사각 footprint 로 교체했다. 계산의 전제가 사라졌는데
 # 계산만 남아 있었다 -- 렌더된 0.38 은 곧바로 0.25 로 덮어써져 한 번도 쓰인
 # 적이 없다. 유도를 지우고 실측값을 그대로 둔다.
-MEASURED_INFLATION_RADIUS_M = 0.25
+# The new field is substantially wider and has few obstacles.  Give the
+# cost-aware Smac planner a broad, smooth potential field so it prefers open
+# space instead of tracing the edge of a wall.  This is a soft cost skirt; the
+# measured rectangular footprint above remains the source of collision truth.
+NAVIGATION_INFLATION_RADIUS_M = 0.40
 
 
 def missing_field_variables(environment: Mapping[str, str]) -> list[str]:
@@ -97,7 +101,7 @@ def build_nav2_values(environment: Mapping[str, str]) -> dict[str, str]:
             else native_path.as_posix()
         )
     return {
-        "INFLATION_RADIUS_M": _number(MEASURED_INFLATION_RADIUS_M),
+        "INFLATION_RADIUS_M": _number(NAVIGATION_INFLATION_RADIUS_M),
         "MINIMUM_TURNING_RADIUS_M": _number(minimum_turning_radius),
         "ANALYTIC_EXPANSION_MAX_LENGTH_M": _number(
             max(3.0, minimum_turning_radius * 5.0)
@@ -146,7 +150,13 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
             "GridBased.motion_model_for_search": "REEDS_SHEPP",
             # 후진은 허용하되 불필요한 전후진 전환은 기본 수준으로 억제한다.
             # 순찰용 DUBIN 프로필과는 독립적인 매핑 전용 값이다.
+            # Keep the verified Smac defaults.  Frontier goal yaw now shapes
+            # the final approach; larger global penalties made open-field
+            # routes longer and increased unnecessary reversing.
             "GridBased.reverse_penalty": 2.0,
+            "GridBased.change_penalty": 0.0,
+            "GridBased.non_straight_penalty": 1.2,
+            "GridBased.cost_penalty": 2.0,
             # 재계획 사이에 장애물 확장을 재사용하는 최적화다. SLAM 이 지도를
             # 키우는 동안은 그 전제가 매초 깨지므로, 낡은 휴리스틱으로
             # 도달 가능한 목표를 포기한다.
@@ -168,6 +178,12 @@ MODE_PROFILES: dict[str, dict[str, dict[str, object]]] = {
             # 여기서 후진하면 보내진 웨이포인트에서 멀어진다.
             "GridBased.motion_model_for_search": "DUBIN",
             "GridBased.reverse_penalty": 2.1,
+            # Patrol keeps its verified fixed-route tuning.  Listing the
+            # baseline values explicitly prevents mapping preferences from
+            # leaking into the independently preloaded patrol planner.
+            "GridBased.change_penalty": 0.0,
+            "GridBased.non_straight_penalty": 1.2,
+            "GridBased.cost_penalty": 2.0,
             # 지도가 고정되므로 확장 재사용이 성립한다.
             "GridBased.cache_obstacle_heuristic": True,
         },
@@ -287,7 +303,7 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
     # 회전반경과 복도 폭은 두 운행이 공유하는 물리 사실이라 같은 값이 맞다고
     # 보지만, 근거는 매핑 쪽에만 있다. 순찰 첫 완주 때 확인할 것.
     #
-    # 값 자체는 템플릿이 MEASURED_INFLATION_RADIUS_M 로 이미 받는다. 여기서
+    # 값 자체는 템플릿이 NAVIGATION_INFLATION_RADIUS_M 로 이미 받는다. 여기서
     # 다시 쓰지 않는다 -- 같은 값을 두 곳에서 정하면 언젠가 어긋난다.
 
     # 기동 시점의 모드는 매핑이다. 렌더된 파일이 그 값을 담아야, 생애주기
@@ -359,6 +375,19 @@ def apply_slam_shape(rendered: str, environment: Mapping[str, str]) -> str:
     # the two together. The adapter already signs the drive PWM from linear.x, so
     # a negative command reaches the chassis as reverse.
     follow_path["allow_reversing"] = True
+
+    # Candidate B: isolate the Ackermann lookahead experiment from Patrol.
+    # The measured 8.6 degree road-wheel limit and 0.124 m wheelbase give a
+    # minimum turning radius of about 0.82 m. Candidate A's shared 0.45/0.50 m
+    # lookahead can therefore put the carrot inside the tightest physical arc.
+    # Clone the fully rendered common controller only for Mapping; Patrol keeps
+    # selecting the existing FollowPath instance without any changed value.
+    mapping_follow_path = deepcopy(follow_path)
+    mapping_follow_path["min_lookahead_dist"] = 0.85
+    mapping_follow_path["lookahead_dist"] = 0.90
+    mapping_follow_path["max_lookahead_dist"] = 1.00
+    controller["controller_plugins"] = ["FollowPath", "MappingFollowPath"]
+    controller["MappingFollowPath"] = mapping_follow_path
 
     bt = config["bt_navigator"]["ros__parameters"]
     mapping_bt = environment.get("ROKI_NAV2_MAPPING_BT_XML", "").strip()

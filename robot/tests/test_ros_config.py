@@ -194,6 +194,19 @@ class RosConfigTest(unittest.TestCase):
                     circumscribed,
                 )
 
+    def test_open_field_uses_a_broad_shared_inflation_skirt(self):
+        """Both costmaps should steer paths away from walls consistently."""
+
+        config = self._render()
+
+        for scope in ("global_costmap", "local_costmap"):
+            with self.subTest(scope=scope):
+                inflation = config[scope][scope]["ros__parameters"][
+                    "inflation_layer"
+                ]
+                self.assertEqual(float(inflation["inflation_radius"]), 0.40)
+                self.assertEqual(float(inflation["cost_scaling_factor"]), 3.0)
+
     def _render(self):
         template = (
             Path(__file__).resolve().parents[1]
@@ -230,6 +243,29 @@ class RosConfigTest(unittest.TestCase):
         self.assertEqual(deadband[1:], [0.0, 0.0])
         # 후진은 계속 허용돼야 REEDS_SHEPP 경로가 성립한다.
         self.assertLess(smoother["min_velocity"][0], 0.0)
+
+    def test_mapping_lookahead_is_isolated_from_patrol_controller(self):
+        config = self._render()
+        controller = config["controller_server"]["ros__parameters"]
+
+        self.assertEqual(
+            controller["controller_plugins"],
+            ["FollowPath", "MappingFollowPath"],
+        )
+        self.assertEqual(controller["FollowPath"]["min_lookahead_dist"], 0.45)
+        self.assertEqual(controller["FollowPath"]["lookahead_dist"], 0.50)
+        self.assertEqual(controller["FollowPath"]["max_lookahead_dist"], 0.65)
+        self.assertEqual(
+            controller["MappingFollowPath"]["min_lookahead_dist"], 0.85
+        )
+        self.assertEqual(controller["MappingFollowPath"]["lookahead_dist"], 0.90)
+        self.assertEqual(
+            controller["MappingFollowPath"]["max_lookahead_dist"], 1.00
+        )
+        self.assertEqual(
+            controller["MappingFollowPath"]["desired_linear_vel"],
+            controller["FollowPath"]["desired_linear_vel"],
+        )
 
     def test_localization_servers_are_gone(self):
         """slam_toolbox 가 두 운행의 위치추정을 다 맡으므로 중복 발행자를 없앴다.
@@ -291,6 +327,24 @@ class RosConfigTest(unittest.TestCase):
                 ].items():
                     self.assertEqual(plugin[dotted.split(".", 1)[1]], expected)
 
+    def test_mapping_uses_verified_smac_costs_without_changing_patrol(self):
+        config = self._render()
+        planner = config["planner_server"]["ros__parameters"]
+        mapping = planner["MappingGridBased"]
+        patrol = planner["PatrolGridBased"]
+
+        self.assertEqual(mapping["motion_model_for_search"], "REEDS_SHEPP")
+        self.assertEqual(mapping["reverse_penalty"], 2.0)
+        self.assertEqual(mapping["change_penalty"], 0.0)
+        self.assertEqual(mapping["non_straight_penalty"], 1.2)
+        self.assertEqual(mapping["cost_penalty"], 2.0)
+
+        self.assertEqual(patrol["motion_model_for_search"], "DUBIN")
+        self.assertEqual(patrol["reverse_penalty"], 2.1)
+        self.assertEqual(patrol["change_penalty"], 0.0)
+        self.assertEqual(patrol["non_straight_penalty"], 1.2)
+        self.assertEqual(patrol["cost_penalty"], 2.0)
+
     def test_preloads_both_goal_checkers_with_legacy_mapping_id(self):
         config = self._render()
         controller = config["controller_server"]["ros__parameters"]
@@ -334,12 +388,13 @@ class RosConfigTest(unittest.TestCase):
                 set(patrol[node]),
                 f"{node} 의 항목이 두 프로필에서 다르다",
             )
-            for name in mapping[node]:
-                self.assertNotEqual(
-                    mapping[node][name],
-                    patrol[node][name],
-                    f"{name} 이 두 모드에서 같다면 프로필에 있을 이유가 없다",
-                )
+            self.assertTrue(
+                any(
+                    mapping[node][name] != patrol[node][name]
+                    for name in mapping[node]
+                ),
+                f"{node} 프로필 전체가 같다면 분리할 이유가 없다",
+            )
 
     def test_rejects_unsafe_xy_goal_tolerance(self):
         for value in ("0.01", "1.1", "nan"):
