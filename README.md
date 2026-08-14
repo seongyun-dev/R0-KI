@@ -1,478 +1,196 @@
-# 프로젝트 협업 가이드
+# R0-Ki (한바퀴) — AI 순찰 로봇 관제 플랫폼
 
-이 문서는 팀의 **Jira 운영**, **GitLab 브랜치 전략**, **Commit / Merge Request 규칙**, **CI/CD 흐름**을 정리한 공통 가이드입니다.
+아파트 단지를 자율 순찰하는 로봇과, 관리자가 실시간으로 관제·대응하는 웹 플랫폼입니다.
 
-## 핵심 작업 흐름
+로봇이 LiDAR·카메라로 단지를 돌며 이상 상황을 탐지하면, 관제 화면·알림·통계 인사이트로 이어집니다. Frontend / Backend / IoT(Robot) / AI 네 파트가 하나의 운영 루프로 연결됩니다.
 
-모든 개발은 아래 순서로 진행합니다.
-
-```text
-Jira Story 생성
-    ↓
-Story Point / Sprint / 담당자 설정
-    ↓
-Jira에서 Create Branch
-    ↓
-feat 브랜치에서 개발
-    ↓
-Commit & Push
-    ↓
-Merge Request
-    ↓
-Code Review / CI 확인
-    ↓
-파트 dev Merge
-    ↓
-Jira Done
-```
-
-안정화 이후에는 다음 순서로 상위 브랜치에 반영합니다.
-
-```text
-feat
-  ↓
-파트 dev
-  ↓
-파트 master
-  ↓
-develop
-  ↓
-master
-```
-
----
-
-# 1. Jira 사용 규칙
-
-## Issue 구조
-
-```text
-Epic
- └── Story
-      └── Task (필요한 경우)
-```
-
-- **Epic**: 큰 기능 단위
-- **Story**: 실제 구현할 기능 단위
-- **Task**: Story 내부 작업을 별도로 관리할 때만 사용
-
-### Epic 예시
-
-```text
-자율 순찰 주행
-이벤트 및 알림 관리
-통합 관제 대시보드
-서비스 공통 기반 및 인증
-```
-
-### Story 제목 형식
-
-```text
-[파트] 기능명
-```
-
-예시:
-
-```text
-[BE] 이벤트 저장 API
-[FE] 로그인 화면
-[AI] 사람 탐지
-[IoT] LiDAR 기반 2D 지도 생성
-```
-
----
-
-## Sprint 시작 시
-
-1. Story 생성
-2. Story Point 설정
-3. 현재 Sprint에 등록
-4. 담당자 지정
-5. Jira에서 Create Branch
-
-### Story Point
-
-| Point | 기준 |
-| ---: | --- |
-| 1 | 매우 쉬움 |
-| 2 | 쉬움 |
-| 3 | 보통 |
-| 5 | 어려움 |
-| 8 | 매우 어려움 — Story 분리 권장 |
-
-Story Point는 **작업량, 복잡도, 불확실성**을 함께 고려합니다.
-
-Story 하나당 담당자 1명을 원칙으로 합니다.
-
----
-
-## Jira 상태
-
-```text
-To Do
-  ↓
-In Progress
-  ↓
-Code Review
-  ↓
-Done
-```
-
-| 상태 | 변경 시점 |
+| 구분 | 내용 |
 | --- | --- |
-| `To Do` | Story 생성 |
-| `In Progress` | 개발 시작 |
-| `Code Review` | Merge Request 생성 |
-| `Done` | Merge 완료 |
+| 제품명 | R0-Ki (관제 UI) |
+| 서버 | oneloop (Spring Boot) |
+| 로봇 런타임 | Hanbakwi / Jetson 통합 프로세스 |
+| MQTT 네임스페이스 | `hanbakwi/v1/robots/{robotKey}/…` |
 
 ---
 
----
+## 주요 기능
+
+- **실시간 관제**: 로봇 위치·상태 SSE, MJPEG 라이브 카메라, 긴급/장애물 알림
+- **순찰·맵핑**: Nav2 웨이포인트 순찰, 게임패드 SLAM 맵핑 → 지도·구역·경로 온보딩
+- **탐지 이벤트**: 사람·쓰레기·재활용 구역·차량(번호판) 탐지 → 증거 이미지·처리 상태
+- **입주민 알림**: 등록 차량·연락처 기반 SMS 통지
+- **통계·AI 인사이트**: 이벤트 집계 차트 + 주/월 LLM 리포트, 순찰 AI 요약·PDF
 
 ---
 
-# 2. GitLab 브랜치 전략
+## 시스템 아키텍처
 
-## 브랜치 구조
+```mermaid
+flowchart LR
+  subgraph client [Frontend]
+    FE[R0-Ki Web]
+  end
+  subgraph server [Backend oneloop]
+    REST[REST API]
+    SSE[SSE]
+    MQTT_BE[MQTT Bridge]
+    GMS[GMS LLM]
+    SMS[SMS]
+  end
+  subgraph edge [Jetson Robot]
+    IOT[roki-iot Runtime]
+    ESP[ESP32]
+    NAV[ROS2 Nav2 SLAM]
+    AIRT[AI Runtime]
+  end
 
-```text
-master
-│
-└── develop
-    │
-    ├── frontend/master
-    │   └── frontend/dev
-    │       └── feat/E103-xxx-기능명
-    │
-    ├── backend/master
-    │   └── backend/dev
-    │       └── feat/E103-xxx-기능명
-    │
-    ├── ai/master
-    │   └── ai/dev
-    │       └── feat/E103-xxx-기능명
-    │
-    └── iot/master
-        └── iot/dev
-            └── feat/E103-xxx-기능명
+  FE <-->|JWT REST| REST
+  FE <-->|SSE| SSE
+  FE -->|MJPEG stream| IOT
+  REST --> MQTT_BE
+  MQTT_BE <-->|command pose status ack| IOT
+  IOT -->|serial| ESP
+  IOT --> NAV
+  AIRT -->|ROS detections| IOT
+  IOT -->|robot token REST events| REST
+  REST --> GMS
+  REST --> SMS
+  SSE --> FE
+```
+
+### 순찰 E2E (요약)
+
+```mermaid
+sequenceDiagram
+  participant FE as Frontend
+  participant BE as Backend
+  participant Robot as Jetson Runtime
+  participant AI as AI Pipeline
+
+  FE->>BE: START_PATROL
+  BE->>Robot: MQTT START_PATROL
+  Robot->>AI: ENABLE
+  Robot->>Robot: Nav2 waypoints
+  Robot-->>BE: MQTT pose status
+  BE-->>FE: SSE location
+  AI-->>Robot: detections
+  Robot->>BE: REST events
+  BE-->>FE: SSE emergency general
+  FE->>BE: STOP_PATROL
+  BE->>Robot: MQTT STOP_PATROL
+  BE->>BE: PatrolCompleted AI summary
 ```
 
 ---
 
-## 브랜치 역할
+## 기술 스택 요약
 
-### `feat/*`
-
-실제 기능 개발 브랜치입니다.
-
-형식:
-
-```text
-feat/{Jira번호}-{기능명}
-```
-
-예시:
-
-```text
-feat/E103-101-회원가입API
-feat/E103-115-로그인화면
-feat/E103-130-사람탐지
-feat/E103-142-LiDAR2D지도
-```
-
-브랜치는 **Jira의 Create Branch 기능으로 생성하는 것을 원칙**으로 합니다.
-
----
-
-### 파트 `dev`
-
-파트의 기능 개발 결과를 모으는 브랜치입니다.
-
-```text
-frontend/dev
-backend/dev
-ai/dev
-iot/dev
-```
-
-- Feature 브랜치 통합
-- 기능 검증
-- CI 실행
-- 실제 서버 배포는 하지 않음
-
----
-
-### 파트 `master`
-
-파트별 안정 버전을 관리합니다.
-
-```text
-frontend/master
-backend/master
-ai/master
-iot/master
-```
-
-- 파트 내부 테스트 완료
-- CI 통과
-- Code Review 완료
-- 최소 1명 Approve 후 Merge
-
----
-
-### `develop`
-
-모든 파트의 안정 버전을 합치는 **전체 통합 브랜치**입니다.
-
-```text
-frontend/master ─┐
-backend/master  ──┤
-ai/master       ──┼──> develop
-iot/master      ──┘
-```
-
-전체 통합 테스트를 진행합니다.
-
----
-
-### `master`
-
-최종 발표 및 배포 버전입니다.
-
-- 전체 통합 완료
-- 발표 가능한 상태
-- 안정성이 검증된 버전만 반영
-
----
-
----
-
----
-
-# 3. Commit 메시지 규칙
-
-| Prefix | 용도 |
+| 파트 | 핵심 기술 |
 | --- | --- |
-| `feat` | 기능 추가 |
-| `fix` | 버그 수정 |
-| `docs` | 문서 수정 |
-| `style` | 코드 스타일 수정 |
-| `refactor` | 코드 구조 개선 |
-| `test` | 테스트 코드 |
-| `chore` | 빌드 및 설정 변경 |
+| Frontend | React 18, TypeScript, Vite, Zustand, Tailwind, R3F/Three.js, Recharts |
+| Backend | Spring Boot 4.1, Java 21, JPA, Flyway, MySQL, MQTT, SSE, JWT |
+| IoT | Jetson Orin Nano, ESP32, YDLIDAR, ROS 2 Humble, Nav2, SLAM Toolbox, MQTT |
+| AI | YOLO26n, PaddleOCR, TensorRT/ONNX(엣지), GMS Chat Completions(서버) |
 
-예시:
+---
+
+## Frontend
+
+관제 웹앱입니다. 대시보드에서 지도·라이브캠·이벤트를 한 화면에서 보고, 온보딩으로 로봇·맵·경로를 구성합니다.
+
+**강조 포인트**
+
+- Bearer 인증이 포함된 **커스텀 SSE** 스트림 파서 (`fetch` + `ReadableStream`)
+- SLAM 월드 좌표 → 그리드 → **아이소메트릭 2.5D** 단지 지도
+- 브라우저에서 **MJPEG** 바이너리 파싱·재연결 상태 머신
+- AI 인사이트 `PENDING|PROCESSING` **폴링** + 마크다운 리포트·PDF 내보내기
+- Three.js 기반 로봇 모델·진단 뷰, 온보딩 구역/웨이포인트 편집
+
+상세·실행·API 표: [frontend/README.md](frontend/README.md)
+
+---
+
+## Backend
+
+아파트·로봇·순찰·이벤트·통계를 관리하는 API 서버(`oneloop`)입니다. 관리자 JWT와 로봇 서비스 토큰을 분리하고, MQTT 텔레메트리를 SSE로 관제에 전달합니다.
+
+**강조 포인트**
+
+- **이원 인증**: 관리자 JWT / 로봇 토큰 (`ROLE_ROBOT`)
+- MQTT `pose`·`status`·`command/ack` ↔ 도메인 이벤트 ↔ **SSE**
+- 트랜잭션 **AFTER_COMMIT** + 전용 `@Async` 워커: AI 인사이트, 순찰 요약, SMS
+- 탐지 이벤트 생성·불법주차(차량) 판정·증거 업로드
+- Flyway 마이그레이션, OpenAPI(Swagger)
+
+상세·패키지·플로우: [backend/README.md](backend/README.md)
+
+---
+
+## IoT (Robot)
+
+Jetson에서 동작하는 로봇 런타임입니다. ESP32 시리얼·ROS2 항법·MQTT 백엔드 연동·AI 게이트를 한 프로세스로 묶습니다.
+
+**강조 포인트**
+
+- `run_integrated.py` **composition root** (시리얼 단일 소유)
+- **Fail-closed** 안전: LiDAR/AI heartbeat, ESP32 워치독, 속도·ARM 제한
+- 순찰 FSM: config/map 검증 → AI ENABLE → Nav2 → DESTINATION STOP → ACK
+- 맵핑: 게임패드 deadman + SLAM Toolbox → 지도 업로드
+- AI 탐지 → 좌표 투영 → outbox → Backend REST
+
+상세·운영·계약: [robot/README.md](robot/README.md)
+
+---
+
+## AI
+
+엣지 비전(탐지·OCR)과 서버 LLM(요약·인사이트) 두 축입니다. 엣지 추론 결과는 Robot이 REST로만 Backend에 전달하고, LLM은 Backend가 집계 표/JSON으로 호출합니다.
+
+**강조 포인트**
+
+- **YOLO26n** 8클래스 탐지 (사람·쓰레기·통·번호판 등)
+- **PaddleOCR** 번호판 인식 (라인 완전일치 기준 검증 Acc 약 0.93 — 상세는 하위 문서)
+- Robot↔AI **ROS 계약** (`/ai/control`, `/ai/status`, `/ai/detections`)
+- 차량은 엣지에서 미확정 → Backend가 주차·등록 차량 판정
+- GMS 기반 순찰 요약·주/월 인사이트 (RAG 없음, 표/JSON 입력)
+
+상세·모델 지표: [ai/README.md](ai/README.md)
+
+---
+
+## 저장소 구조
 
 ```text
-feat: 회원가입 API 구현
-fix: 로그인 오류 수정
-docs: README 수정
-refactor: 인증 로직 개선
-```
-
-가능하면 하나의 Commit에는 하나의 목적만 담습니다.
-
----
-
----
-
----
-
-# 4. Merge Request 규칙
-
-모든 병합은 **Merge Request를 통해 진행**합니다.
-
-```text
-개발 완료
-    ↓
-Commit & Push
-    ↓
-Merge Request
-    ↓
-Code Review
-    ↓
-Approve
-    ↓
-Merge
-```
-
-공통 규칙:
-
-- 보호 브랜치에 직접 Push하지 않습니다.
-- Merge 전에 CI 결과를 확인합니다.
-- 파트 `master` Merge에는 최소 1명의 Approve가 필요합니다.
-- 리뷰 없이 직접 Merge하지 않습니다.
-- Merge 완료 후 Jira Story를 `Done`으로 변경합니다.
-
----
-
----
-
----
-
-# 5. 브랜치 보호 규칙
-
-다음 브랜치는 직접 Push하지 않습니다.
-
-```text
-master
-develop
-
-frontend/master
-frontend/dev
-
-backend/master
-backend/dev
-
-ai/master
-ai/dev
-
-iot/master
-iot/dev
-```
-
-모든 변경은 Merge Request로 반영합니다.
-
----
-
----
-
----
-
-# 6. CI / CD 규칙
-
-## `feat` → 파트 `dev`
-
-**CI만 수행합니다.**
-
-- 빌드 확인
-- 테스트 실행
-- 실행 가능 여부 확인
-- 서버 배포 없음
-
----
-
-## 파트 `dev` → 파트 `master`
-
-안정화된 코드를 반영합니다.
-
-기준:
-
-- 기능 개발 완료
-- 파트 내부 테스트 완료
-- CI 통과
-- Code Review 완료
-- 최소 1명 Approve
-
-CD가 적용된 파트는 파트 `master` Merge 후 자동 배포합니다.
-
----
-
-## `develop` → `master`
-
-전체 기능이 완료되고 통합 테스트까지 끝났을 때만 Merge합니다.
-
-`master`는 최종 발표 및 배포 기준 브랜치로 사용합니다.
-
----
-
-## 현재 CI / CD 적용 범위
-
-현재 자동 CI / CD 적용:
-
-```text
-Frontend
-Backend
-```
-
-AI는 추후 적용 예정입니다.
-
-AI 파트의 모델, 코드, 설정 파일은 GitLab에서 함께 관리합니다.
-
-IoT는 장비 및 실행 환경에 맞춰 별도로 배포합니다.
-
----
-
----
-
----
-
-# 7. Git 기본 사용 방법
-
-```bash
-git fetch
-
-git switch backend/dev
-git pull
-
-# Jira에서 브랜치 생성 권장
-# 수동 생성 시
-git switch -c feat/E103-123-로그인
-
-git status
-
-git add .
-git commit -m "feat: 로그인 기능 구현"
-
-git push -u origin feat/E103-123-로그인
-```
-
-이후 GitLab에서 다음 방향으로 Merge Request를 생성합니다.
-
-```text
-feat/E103-123-로그인
-        ↓
-backend/dev
-```
-
-자주 사용하는 명령어:
-
-```bash
-git fetch
-git pull
-git status
-git branch
-git switch 브랜치명
-git add .
-git commit -m "메시지"
-git push
-git log --oneline
+S15P11E103/
+├── frontend/          # R0-Ki 관제 웹
+├── backend/           # oneloop API 서버
+├── robot/             # Jetson IoT 런타임·하드웨어·ROS 설정
+├── ai/                # YOLO·OCR 산출물·문서 (엣지 파이프라인은 Jetson)
+├── infra/             # 배포·Jetson 서비스·OTA 관련
+├── exec/              # 실행/산출물 보조
+└── docs/              # 설계·분석·협업 가이드
+    └── collaboration.md
 ```
 
 ---
 
----
+## 로컬 실행 개요
+
+시크릿·실서버 주소·토큰은 저장소에 넣지 않습니다. 각 파트의 `.env.example`을 복사해 로컬에서만 채웁니다.
+
+| 파트 | 시작점 | 참고 |
+| --- | --- | --- |
+| Frontend | `frontend/` → `npm install` → `npm run dev` | [frontend/README.md](frontend/README.md), `frontend/.env.example` |
+| Backend | `backend/` → Gradle Boot 실행 | [backend/README.md](backend/README.md), 로컬 DB·설정은 예시 파일만 사용 |
+| IoT | Jetson + `robot/scripts/run.sh` | [robot/README.md](robot/README.md), env는 Git 제외 |
+| AI | 엣지: Jetson AI 서비스 / 서버 LLM: Backend GMS 설정 | [ai/README.md](ai/README.md) |
+
+인프라·Jetson 서비스: [infra/README.md](infra/README.md), [infra/jetson/README.md](infra/jetson/README.md)
 
 ---
 
-# 8. 팀 공통 규칙
+## 협업 가이드
 
-1. 모든 개발은 Jira Story 생성 후 시작합니다.
-2. Story 제목은 `[파트] 기능명` 형식을 사용합니다.
-3. Story Point, Sprint, 담당자를 지정합니다.
-4. 브랜치는 Jira의 Create Branch 기능으로 생성합니다.
-5. 기능 개발은 `feat/*` 브랜치에서 진행합니다.
-6. 보호 브랜치에는 직접 Push하지 않습니다.
-7. 모든 병합은 Merge Request로 진행합니다.
-8. Merge Request 생성 후 Code Review를 진행합니다.
-9. 파트 `master` Merge에는 최소 1명의 Approve가 필요합니다.
-10. Merge 완료 후 Jira Story를 `Done`으로 변경합니다.
-11. 최종 발표 및 배포 버전은 `master`에서 관리합니다.
+Jira, GitLab 브랜치, Commit/MR, CI/CD 규칙은 아래 문서를 따릅니다.
 
----
-
-## 한눈에 보기
-
-```text
-Jira Story
-    ↓
-feat/E103-xxx
-    ↓
-파트 dev          # 기능 통합 / CI
-    ↓
-파트 master       # 파트 안정 버전 / CD
-    ↓
-develop           # 전체 통합
-    ↓
-master            # 최종 발표 / 배포
-```
+→ [docs/collaboration.md](docs/collaboration.md)
