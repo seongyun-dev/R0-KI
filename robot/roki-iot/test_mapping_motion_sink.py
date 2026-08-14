@@ -4,6 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from integration.mapping_motion_sink import MappingMotionSink
+from mission.mission_controller import MissionController
 
 
 class FakeMission:
@@ -56,18 +57,55 @@ class MappingMotionSinkTest(unittest.TestCase):
         self.assertEqual(self.mission.started, [])
         self.assertEqual(self.mission.stops, 1)
 
-    def test_zero_speed_stops_and_keeps_the_nav2_reason(self) -> None:
+    def test_temporary_zero_preserves_authorization_and_can_resume(self) -> None:
         self.sink(command(46))
         self.sink(command(0, reason="OBSTACLE"))
-        self.assertEqual(self.mission.stops, 1)
-        self.assertEqual(self.reasons, ["OBSTACLE"])
+        self.sink(command(47, 82))
+
+        self.assertEqual(self.mission.started, [(46, 80), (0, 80), (47, 82)])
+        self.assertEqual(self.mission.stops, 0)
+        self.assertEqual(self.reasons, [])
+        self.assertTrue(self.sink.driving)
+
+    def test_frontier_transition_zero_does_not_release_motion(self) -> None:
+        self.sink(command(46))
+        self.sink(command(0, reason="MAPPING_NAV2_STOP"))
+
+        self.assertEqual(self.mission.started[-1], (0, 80))
+        self.assertEqual(self.mission.stops, 0)
         self.assertFalse(self.sink.driving)
 
-    def test_failed_stop_is_reported_and_reraised(self) -> None:
+    def test_temporary_zero_keeps_the_real_mission_generation(self) -> None:
+        mission = MissionController(steering_center_deg=80)
+        sink = MappingMotionSink(
+            SimpleNamespace(mission=mission),
+            lambda: self.mapping,
+        )
+
+        sink(command(46, 79))
+        generation = mission.snapshot().generation
+        sink(command(0, 80, "MAPPING_NAV2_STOP"))
+        sink(command(47, 81))
+
+        snapshot = mission.snapshot()
+        self.assertTrue(snapshot.patrol_active)
+        self.assertEqual(snapshot.generation, generation)
+        self.assertEqual(snapshot.command.speed, 47)
+
+    def test_explicit_lifecycle_release_stops_and_keeps_reason(self) -> None:
+        self.sink(command(46))
+        self.sink.release_motion_authorization("STOP_MAPPING")
+
+        self.assertEqual(self.mission.stops, 1)
+        self.assertEqual(self.reasons, ["STOP_MAPPING"])
+        self.assertFalse(self.sink.driving)
+
+    def test_failed_explicit_release_is_reported_and_reraised(self) -> None:
+        self.sink(command(46))
         self.mission.stop_error = RuntimeError("serial down")
         with self.assertRaises(RuntimeError):
-            self.sink(command(0))
-        self.assertEqual(self.reasons, ["MAPPING_NAV2_STOP_STOP_FAILED"])
+            self.sink.release_motion_authorization("STOP_MAPPING")
+        self.assertEqual(self.reasons, ["STOP_MAPPING_STOP_FAILED"])
         self.assertFalse(self.sink.driving)
 
     def test_repeated_stops_report_once(self) -> None:

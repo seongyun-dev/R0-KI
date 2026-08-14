@@ -4,6 +4,7 @@ set -euo pipefail
 robot_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ros_setup="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 slam_reset_setup="${AIOT_SLAM_TOOLBOX_RESET_SETUP_FILE:-/home/e103/slam-toolbox-2610-reset-backport-ws/install/setup.bash}"
+explore_setup="${AIOT_EXPLORE_SETUP_FILE:-${robot_root}/ros-overlay/install/setup.bash}"
 
 if [ ! -r "${ros_setup}" ]; then
   echo "ROS 2 setup is missing: ${ros_setup}" >&2
@@ -19,6 +20,18 @@ set +u
 source "${ros_setup}"
 # shellcheck disable=SC1090
 source "${slam_reset_setup}"
+# ExploreStatusMonitor imports the release-local explore_lite_msgs interface.
+# Manual Mapping never starts explore_lite and does not require this overlay.
+case "${AIOT_MAPPING_AUTONOMOUS:-true}" in
+1|true|TRUE|yes|YES|on|ON)
+  if [ ! -r "${explore_setup}" ]; then
+    echo "explore_lite setup is missing: ${explore_setup}" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  source "${explore_setup}"
+  ;;
+esac
 set -u
 
 python_bin="${robot_root}/.venv/bin/python"

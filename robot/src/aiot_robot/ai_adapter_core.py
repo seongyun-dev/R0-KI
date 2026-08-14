@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import math
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 
 _DETAIL_PATTERN = re.compile(
@@ -29,6 +29,185 @@ _PIPELINE_CONTEXT_FIELDS = {
     "_detectionCount": "detectionCount",
 }
 _RECYCLING_CLASS_NAMES = frozenset({"bin_overflow", "bag_outside"})
+
+
+class DemoVehiclePlatePolicy:
+    """Emit one forced plate for each newly observed licence track."""
+
+    def __init__(self, forced_plate: str) -> None:
+        plate = str(forced_plate).strip()
+        if not plate:
+            raise ValueError("forced demo plate must not be empty")
+        self.forced_plate = plate
+        self._latest_ocr: dict[tuple[str, int], dict[str, Any]] = {}
+        self._emitted: set[tuple[str, int]] = set()
+        self._records: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _track_id(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            track_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return track_id if track_id >= 0 else None
+
+    @staticmethod
+    def _confidence(item: Mapping[str, Any]) -> float:
+        try:
+            value = float(item.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+
+    def observe(
+        self,
+        detections: Sequence[Mapping[str, Any]],
+        ocr_records: Sequence[Mapping[str, Any]],
+        *,
+        camera: str | None,
+    ) -> list[dict[str, Any]]:
+        """Return at most one demo vehicle record per camera/track pair."""
+
+        camera_key = str(camera or "")
+        for record in ocr_records:
+            track_id = self._track_id(record.get("track_id"))
+            if track_id is not None:
+                self._latest_ocr[(camera_key, track_id)] = dict(record)
+
+        current: dict[tuple[str, int], Mapping[str, Any]] = {}
+        for detection in detections:
+            if detection.get("class_name") != "licence":
+                continue
+            track_id = self._track_id(detection.get("track_id"))
+            if track_id is None:
+                continue
+            key = (camera_key, track_id)
+            previous = current.get(key)
+            if previous is None or self._confidence(detection) > self._confidence(previous):
+                current[key] = detection
+
+        emitted: list[dict[str, Any]] = []
+        for key, detection in current.items():
+            if key in self._emitted:
+                continue
+
+            ocr_record = self._latest_ocr.get(key)
+            ocr_plate = str((ocr_record or {}).get("plate") or "").strip()
+            bbox = (ocr_record or {}).get("bbox")
+            if bbox is None:
+                bbox = detection.get("bbox")
+            confidence_source = ocr_record if ocr_record is not None else detection
+            record = {
+                "track_id": key[1],
+                "plate": self.forced_plate,
+                "confidence": self._confidence(confidence_source),
+                "bbox": list(bbox) if bbox is not None else None,
+                "camera": camera if camera is not None else detection.get("camera"),
+                "_demoOcrPlate": ocr_plate or "UNAVAILABLE",
+                "_demoSource": "OCR_OVERRIDE" if ocr_plate else "OCR_FALLBACK",
+            }
+            emitted.append(record)
+            self._records.append(
+                {key: value for key, value in record.items() if not key.startswith("_demo")}
+            )
+            self._emitted.add(key)
+        return emitted
+
+    def all_records(self) -> list[dict[str, Any]]:
+        return [dict(record) for record in self._records]
+
+    def reset(self) -> None:
+        """Forget demo-only observations when a different patrol starts."""
+
+        self._latest_ocr.clear()
+        self._emitted.clear()
+        self._records.clear()
+
+
+def demo_vehicle_plate_collector(
+    original_collector: type,
+    forced_plate: str | None,
+    *,
+    patrol_id_provider: Callable[[], int | None] | None = None,
+) -> type:
+    """Wrap the OCR collector only when the optional demo plate is non-empty."""
+
+    plate = str(forced_plate or "").strip()
+    if not plate:
+        return original_collector
+
+    class DemoPlateCollector:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self._delegate = original_collector(*args, **kwargs)
+            self._policy = DemoVehiclePlatePolicy(plate)
+            self._patrol_id: int | None = None
+
+        def _reset_for_new_patrol(self) -> None:
+            patrol_id = patrol_id_provider() if patrol_id_provider is not None else None
+            if patrol_id is None or patrol_id == self._patrol_id:
+                return
+            self._policy.reset()
+            self._patrol_id = patrol_id
+
+        def update(
+            self,
+            detections: Any,
+            frame: Any,
+            frame_idx: Any,
+            camera: str | None = None,
+        ) -> list[dict[str, Any]]:
+            # This runs on the inference thread, so policy state cannot race the
+            # ROS control callback that changes the active patrol ID.
+            self._reset_for_new_patrol()
+            ocr_records = self._delegate.update(
+                detections, frame, frame_idx, camera=camera
+            )
+            records = self._policy.observe(detections, ocr_records, camera=camera)
+            for record in records:
+                print(
+                    "[DEMO_VEHICLE] "
+                    f"trackId={record['track_id']} detected=true "
+                    f"ocrPlate={record.pop('_demoOcrPlate')} "
+                    f"finalPlate={record['plate']} "
+                    f"source={record.pop('_demoSource')}",
+                    flush=True,
+                )
+            return records
+
+        def all_plates(self) -> list[dict[str, Any]]:
+            return self._policy.all_records()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._delegate, name)
+
+    return DemoPlateCollector
+
+
+def scope_vehicle_dedupe_to_patrol(manager: Any, patrol_id: int | None) -> bool:
+    """Clear only vehicle-plate dedupe state when the patrol ID changes.
+
+    The external pipeline keeps one EventManager alive for the AI process. Its
+    vehicle key is based on the plate string, so a forced demo plate would
+    otherwise be suppressed in every later patrol. Duplicate ENABLE messages
+    for the same patrol deliberately do not clear the state again.
+    """
+
+    if patrol_id is None:
+        return False
+    if getattr(manager, "_aiot_vehicle_patrol_id", None) == patrol_id:
+        return False
+
+    created = getattr(manager, "created", None)
+    if isinstance(created, set):
+        created.difference_update(
+            key
+            for key in tuple(created)
+            if isinstance(key, tuple) and key and key[0] == "vehicle_plate"
+        )
+    manager._aiot_vehicle_patrol_id = patrol_id
+    return True
 
 
 def collapse_recycling_events_for_frame(

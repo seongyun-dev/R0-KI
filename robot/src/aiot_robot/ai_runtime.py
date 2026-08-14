@@ -27,8 +27,10 @@ from std_msgs.msg import String
 from .ai_adapter_core import (
     build_detection_message,
     collapse_recycling_events_for_frame,
+    demo_vehicle_plate_collector,
     detection_context_from_pipeline_payload,
     preserve_pipeline_detection_context,
+    scope_vehicle_dedupe_to_patrol,
 )
 from .ai_capture import CaptureSettings, configure_capture
 from .mjpeg_stream import MjpegStreamServer
@@ -42,7 +44,6 @@ class AiAdapterNode(Node):
         self._evidence_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._active_patrol_id: int | None = None
-        self._recycling_published_patrol_id: int | None = None
         self._state = "STARTING"
         self._camera_ready = False
         self._engine_ready = False
@@ -161,17 +162,6 @@ class AiAdapterNode(Node):
         source = Path(image_path)
         if not source.is_file():
             return
-        recycling_reserved = False
-        if payload.get("eventType") == "RECYCLING_AREA_FULL":
-            with self._lock:
-                if self._recycling_published_patrol_id == patrol_id:
-                    self.get_logger().info(
-                        "Suppressed duplicate recycling-area event "
-                        f"patrolId={patrol_id}"
-                    )
-                    return
-                self._recycling_published_patrol_id = patrol_id
-                recycling_reserved = True
         event_id = uuid4().hex
         evidence = self._evidence_root / f"{event_id}{source.suffix or '.jpg'}"
         try:
@@ -189,20 +179,12 @@ class AiAdapterNode(Node):
                 track_id=context.get("trackId"),
             )
         except (OSError, ValueError) as exc:
-            if recycling_reserved:
-                with self._lock:
-                    if self._recycling_published_patrol_id == patrol_id:
-                        self._recycling_published_patrol_id = None
             self.get_logger().warning(f"Dropped unsupported AI event: {exc}")
             return
         try:
             if source.resolve() != evidence.resolve():
                 shutil.copy2(source, evidence)
         except OSError as exc:
-            if recycling_reserved:
-                with self._lock:
-                    if self._recycling_published_patrol_id == patrol_id:
-                        self._recycling_published_patrol_id = None
             self.get_logger().warning(f"Failed to preserve AI evidence: {exc}")
             return
         message = String()
@@ -226,15 +208,12 @@ class AiAdapterNode(Node):
                 ):
                     raise ValueError("ENABLE requires patrolId")
                 with self._lock:
-                    if self._active_patrol_id != patrol_id:
-                        self._recycling_published_patrol_id = None
                     self._active_patrol_id = patrol_id
                 self._patrol_activation.enable()
             elif command == "DISABLE":
                 self._patrol_activation.disable()
                 with self._lock:
                     self._active_patrol_id = None
-                    self._recycling_published_patrol_id = None
             else:
                 raise ValueError("unsupported control command")
         except (ValueError, json.JSONDecodeError) as exc:
@@ -245,6 +224,11 @@ class AiAdapterNode(Node):
     @property
     def detection_enabled(self) -> bool:
         return self._patrol_activation.enabled
+
+    @property
+    def active_patrol_id(self) -> int | None:
+        with self._lock:
+            return self._active_patrol_id
 
     def wait_for_detection_enabled(self, timeout: float) -> bool:
         return self._patrol_activation.wait(timeout)
@@ -344,6 +328,20 @@ def run_pipeline(
         sink = RosEventSink(node)
         module.RestEventClient = lambda: sink
 
+        forced_demo_plate = os.getenv("AIOT_DEMO_FORCE_VEHICLE_PLATE")
+        if str(forced_demo_plate or "").strip():
+            original_create_vehicle_records = module.EventManager.create_vehicle_records
+
+            def create_vehicle_records_for_patrol(
+                manager: Any,
+                *args: Any,
+                **kwargs: Any,
+            ) -> Any:
+                scope_vehicle_dedupe_to_patrol(manager, node.active_patrol_id)
+                return original_create_vehicle_records(manager, *args, **kwargs)
+
+            module.EventManager.create_vehicle_records = create_vehicle_records_for_patrol
+
         original_api_payload = module.EventManager.api_payload
 
         def api_payload_with_detection_context(event: dict[str, Any]) -> dict[str, Any]:
@@ -374,6 +372,12 @@ def run_pipeline(
             )
 
         module.EventManager.create_events = create_events_with_recycling_cluster
+
+        module.PlateCollector = demo_vehicle_plate_collector(
+            module.PlateCollector,
+            forced_demo_plate,
+            patrol_id_provider=lambda: node.active_patrol_id,
+        )
 
         original_dispatch_events = module.dispatch_events
 
