@@ -45,7 +45,7 @@ assert_line '^ExecStartPre=.*/robot/scripts/run.sh --check$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
 assert_line '^Environment=PYTHONUNBUFFERED=1$' \
   "${repository_root}/infra/jetson/aiot-robot.service"
-grep -q 'fixed_resolution: true' \
+grep -q 'fixed_resolution: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
 grep -q 'support_motor_dtr: false' \
   "${repository_root}/robot/config/ros/ydlidar.yaml"
