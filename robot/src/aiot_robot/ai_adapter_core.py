@@ -32,17 +32,13 @@ _RECYCLING_CLASS_NAMES = frozenset({"bin_overflow", "bag_outside"})
 
 
 class DemoVehiclePlatePolicy:
-    """Emit one forced plate after a tracked licence persists for three frames."""
+    """Emit one forced plate for each newly observed licence track."""
 
-    def __init__(self, forced_plate: str, *, stable_frames: int = 3) -> None:
+    def __init__(self, forced_plate: str) -> None:
         plate = str(forced_plate).strip()
         if not plate:
             raise ValueError("forced demo plate must not be empty")
-        if stable_frames < 2:
-            raise ValueError("stable_frames must be at least 2")
         self.forced_plate = plate
-        self.stable_frames = int(stable_frames)
-        self._streaks: dict[tuple[str, int], int] = {}
         self._latest_ocr: dict[tuple[str, int], dict[str, Any]] = {}
         self._emitted: set[tuple[str, int]] = set()
         self._records: list[dict[str, Any]] = []
@@ -92,16 +88,9 @@ class DemoVehiclePlatePolicy:
             if previous is None or self._confidence(detection) > self._confidence(previous):
                 current[key] = detection
 
-        for key in list(self._streaks):
-            if key[0] == camera_key and key not in current:
-                self._streaks.pop(key, None)
-
         emitted: list[dict[str, Any]] = []
         for key, detection in current.items():
             if key in self._emitted:
-                continue
-            self._streaks[key] = self._streaks.get(key, 0) + 1
-            if self._streaks[key] < self.stable_frames:
                 continue
 
             ocr_record = self._latest_ocr.get(key)
@@ -124,7 +113,6 @@ class DemoVehiclePlatePolicy:
                 {key: value for key, value in record.items() if not key.startswith("_demo")}
             )
             self._emitted.add(key)
-            self._streaks.pop(key, None)
         return emitted
 
     def all_records(self) -> list[dict[str, Any]]:
@@ -133,7 +121,6 @@ class DemoVehiclePlatePolicy:
     def reset(self) -> None:
         """Forget demo-only observations when a different patrol starts."""
 
-        self._streaks.clear()
         self._latest_ocr.clear()
         self._emitted.clear()
         self._records.clear()
@@ -181,7 +168,7 @@ def demo_vehicle_plate_collector(
             for record in records:
                 print(
                     "[DEMO_VEHICLE] "
-                    f"trackId={record['track_id']} stable=true "
+                    f"trackId={record['track_id']} detected=true "
                     f"ocrPlate={record.pop('_demoOcrPlate')} "
                     f"finalPlate={record['plate']} "
                     f"source={record.pop('_demoSource')}",

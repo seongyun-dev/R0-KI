@@ -24,12 +24,10 @@ class AiAdapterCoreTest(unittest.TestCase):
             "camera": "A",
         }
 
-    def test_demo_plate_waits_for_stable_track_and_falls_back_after_ocr_failure(self):
-        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=3)
+    def test_demo_plate_emits_on_first_tracked_detection_after_ocr_failure(self):
+        policy = DemoVehiclePlatePolicy("254러1559")
         detection = self._licence()
 
-        self.assertEqual(policy.observe([detection], [], camera="A"), [])
-        self.assertEqual(policy.observe([detection], [], camera="A"), [])
         records = policy.observe([detection], [], camera="A")
 
         self.assertEqual(len(records), 1)
@@ -38,7 +36,7 @@ class AiAdapterCoreTest(unittest.TestCase):
         self.assertEqual(records[0]["_demoSource"], "OCR_FALLBACK")
 
     def test_demo_plate_overrides_successful_ocr_without_changing_context(self):
-        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=3)
+        policy = DemoVehiclePlatePolicy("254러1559")
         detection = self._licence(bbox=[30, 40, 130, 80])
         actual = {
             "track_id": 7,
@@ -48,9 +46,7 @@ class AiAdapterCoreTest(unittest.TestCase):
             "camera": "A",
         }
 
-        policy.observe([detection], [actual], camera="A")
-        policy.observe([detection], [], camera="A")
-        records = policy.observe([detection], [], camera="A")
+        records = policy.observe([detection], [actual], camera="A")
 
         self.assertEqual(records[0]["plate"], "254러1559")
         self.assertEqual(records[0]["_demoOcrPlate"], "254러1558")
@@ -59,22 +55,10 @@ class AiAdapterCoreTest(unittest.TestCase):
         self.assertEqual(records[0]["bbox"], [30, 40, 130, 80])
         self.assertEqual(records[0]["camera"], "A")
 
-    def test_demo_plate_requires_consecutive_frames(self):
-        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=3)
-        detection = self._licence()
-
-        policy.observe([detection], [], camera="A")
-        policy.observe([], [], camera="A")
-        policy.observe([detection], [], camera="A")
-        policy.observe([detection], [], camera="A")
-
-        self.assertEqual(policy.all_records(), [])
-
     def test_demo_plate_emits_each_track_only_once(self):
-        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=2)
+        policy = DemoVehiclePlatePolicy("254러1559")
         detection = self._licence()
 
-        policy.observe([detection], [], camera="A")
         first = policy.observe([detection], [], camera="A")
         repeated = policy.observe([detection], [], camera="A")
 
@@ -89,10 +73,9 @@ class AiAdapterCoreTest(unittest.TestCase):
             "bbox": [10, 20, 110, 60],
             "frameWidth": 640,
         }
-        policy = DemoVehiclePlatePolicy("254러1559", stable_frames=2)
+        policy = DemoVehiclePlatePolicy("254러1559")
         detection = self._licence(bbox=context["bbox"])
 
-        policy.observe([detection], [], camera="A")
         record = policy.observe([detection], [], camera="A")[0]
 
         self.assertEqual(record["bbox"], context["bbox"])
@@ -106,7 +89,7 @@ class AiAdapterCoreTest(unittest.TestCase):
         self.assertIs(demo_vehicle_plate_collector(ExistingCollector, None), ExistingCollector)
         self.assertIs(demo_vehicle_plate_collector(ExistingCollector, ""), ExistingCollector)
 
-    def test_demo_collector_calls_ocr_on_every_frame_before_fallback(self):
+    def test_demo_collector_calls_ocr_before_first_detection_fallback(self):
         class ExistingCollector:
             def __init__(self):
                 self.calls = 0
@@ -123,11 +106,9 @@ class AiAdapterCoreTest(unittest.TestCase):
         collector = Collector()
         detection = self._licence()
 
-        self.assertEqual(collector.update([detection], None, 1, camera="A"), [])
-        self.assertEqual(collector.update([detection], None, 2, camera="A"), [])
-        result = collector.update([detection], None, 3, camera="A")
+        result = collector.update([detection], None, 1, camera="A")
 
-        self.assertEqual(collector._delegate.calls, 3)
+        self.assertEqual(collector._delegate.calls, 1)
         self.assertEqual(result[0]["plate"], "254러1559")
         self.assertEqual(len(collector.all_plates()), 1)
 
@@ -149,28 +130,19 @@ class AiAdapterCoreTest(unittest.TestCase):
         collector = Collector()
         detection = self._licence()
 
-        for frame_idx in (1, 2):
-            self.assertEqual(
-                collector.update([detection], None, frame_idx, camera="A"), []
-            )
         self.assertEqual(
-            len(collector.update([detection], None, 3, camera="A")), 1
+            len(collector.update([detection], None, 1, camera="A")), 1
         )
 
         # A duplicate ENABLE for the same patrol must not re-arm the event.
-        for frame_idx in (4, 5, 6):
+        for frame_idx in (2, 3, 4):
             self.assertEqual(
                 collector.update([detection], None, frame_idx, camera="A"), []
             )
 
-        frame_idx = 7
+        frame_idx = 5
         for patrol_id in (102, 103, 104, 105):
             active_patrol["id"] = patrol_id
-            for _ in range(2):
-                self.assertEqual(
-                    collector.update([detection], None, frame_idx, camera="A"), []
-                )
-                frame_idx += 1
             next_patrol = collector.update(
                 [detection], None, frame_idx, camera="A"
             )
