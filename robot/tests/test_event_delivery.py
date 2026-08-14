@@ -192,6 +192,37 @@ class EventDeliveryTest(unittest.TestCase):
                 {"recycling-first", "recycling-next-patrol"},
             )
 
+    def test_low_confidence_recycling_does_not_consume_patrol_dedupe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DetectionOutbox(directory)
+            store = SimpleNamespace(
+                get_pose=lambda: SimpleNamespace(x=1.0, y=2.0, heading=0.0)
+            )
+            recorder = DetectionRecorder(outbox, store, minimum_confidence=0.5)
+
+            recorder(
+                detection(
+                    "recycling-low",
+                    event_type="RECYCLING_AREA_FULL",
+                    patrol_id=15,
+                    confidence=0.49,
+                )
+            )
+            recorder(
+                detection(
+                    "recycling-accepted",
+                    event_type="RECYCLING_AREA_FULL",
+                    patrol_id=15,
+                    confidence=0.8,
+                )
+            )
+
+            self.assertEqual(outbox.pending_count(), 1)
+            self.assertEqual(
+                outbox.read(outbox.pending_paths()[0])["eventId"],
+                "recycling-accepted",
+            )
+
     def test_recorder_drops_detection_below_confidence_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             outbox = DetectionOutbox(directory)
