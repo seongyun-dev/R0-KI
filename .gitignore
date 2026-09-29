@@ -433,3 +433,4 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/intellij+all,python,java,visualstudiocode,react,jupyternotebooks,windows,linux
+ai/Yolo/data_preprocessing/outlier_preprocessing.ipynb
